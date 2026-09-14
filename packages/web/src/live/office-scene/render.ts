@@ -2,7 +2,7 @@ import { canvasFont } from '../canvasFont';
 import type { WorkingHours } from '@musterd/protocol';
 import type { Appearance } from './appearance';
 import { drawCharacter } from './character';
-import { depth, FLOOR, KX, KY, nearDepth, project, THICK, WALL_H, type Fit, type Pt } from './iso';
+import { depth, FLOOR, KX, KY, project, THICK, WALL_H, type Fit, type Pt } from './iso';
 import { STRIDE, type PetState } from './pet';
 import { RECEPTIONIST_WAKE_S, type ReceptionistState } from './receptionist';
 import {
@@ -4112,7 +4112,7 @@ export function renderScene(
   const nook = nookItems(ctx, fit, fx?.fridgeOpen ?? false);
   nook.rug();
   items.push(...nook.items);
-  items.push({ d: nearDepth(MEETING.lx, MEETING.ly, MEETING.w, MEETING.d), fn: () => meetingTable(ctx, fit) });
+  items.push({ d: depth(MEETING.lx, MEETING.ly), fn: () => meetingTable(ctx, fit) });
   for (const c of MEETING.chairs) {
     const cx = MEETING.lx + c.dx;
     const cy = MEETING.ly + c.dy;
@@ -4127,7 +4127,7 @@ export function renderScene(
 
   // The bench's shared counter, once — its seats' gear rides per-slot below.
   // 300 long: the widest footprint on the floor, so the centre-vs-edge error is largest here.
-  items.push({ d: nearDepth(BENCH.lx, BENCH.ly, BENCH.long, BENCH.deep), fn: () => benchCounter(ctx, fit) });
+  items.push({ d: depth(BENCH.lx, BENCH.ly), fn: () => benchCounter(ctx, fit) });
 
   // Desks whose lamp is switched on: a real sitter's desk, after dark. Filled from the same three facts
   // `drawWorkstation` uses to draw the lit shade (a node, not a bench seat, not an offline owner's kept
@@ -4160,15 +4160,23 @@ export function renderScene(
     if (slot.kind === 'bench') {
       // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
-      items.push({ d: nearDepth(BENCH.lx, BENCH.ly, BENCH.long, BENCH.deep) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t, seatedWorking) });
+      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t, seatedWorking) });
     } else {
       if (node && !deskOwned && env.lampsOn) litLamps.add(slot.id);
-      const deskSN = slot.dir === 'S' || slot.dir === 'N'; // S/N desks run their long axis along x
       items.push({
-        // Near corner, not centre: a desk is 100×68, so its centre sits 84 logical units behind the
-        // edge the viewer sees, and a member standing plainly in FRONT of that edge still keyed lower
-        // than the desk and painted behind it (nick, 2026-09-14). See `nearDepth`.
-        d: nearDepth(slot.lx, slot.ly, deskSN ? DESK_W : DESK_D, deskSN ? DESK_D : DESK_W),
+        /* CENTRE, not the near corner. #1394 moved this to `nearDepth` to stop a member standing in
+           front of a desk painting behind it. That reasoning was incomplete: a desk facing N or W puts
+           its CHAIR on the near side, so its own seated member legitimately keys HIGHER than the desk
+           centre and paints in front of it. Pushing the slab 84 units forward beat them, and a sitter
+           at such a desk lost their head and torso into it — not merely their legs, which is the only
+           part a desk is supposed to take (nick, on the broadcast, 2026-09-14).
+
+           A single scalar key per item cannot say both "in front of this desk's front edge" and
+           "behind its back edge" — the passer-by and the sitter want opposite answers out of the same
+           comparison. The fix is to split the desk into front and back items, the way the chair
+           already splits into base and back, not to pick a different constant. Reverted here; the
+           split is lane 01M2GP6CZ1's neighbour, not a hotfix. */
+        d: depth(slot.lx, slot.ly),
         fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
       });
     }
@@ -4254,15 +4262,11 @@ export function renderScene(
     // hands disappear into the desk and the typing is invisible. Skipped while a beat has dropped the
     // hands into the lap — lap arms painted over the slab would float on the desk.
     if (seated && !handsInLap(pose.gesture, pose.gestureT)) {
-      const sSN = slot.dir === 'S' || slot.dir === 'N';
       items.push({
-        /* MUST track the desk slab's own key, not `depth(slot)`. When the slab moved to `nearDepth`
-           (#1394) this stayed on the centre key and went 84 units BEHIND its own desk — so the desk
-           painted over the forearms that are supposed to rest on it, and a seated member lost their
-           arms and part of their torso into the slab (nick, watching the broadcast, 2026-09-14). The
-           whole point of this second item is "above the slab": derive it from where the slab sorts,
-           or the two drift apart exactly like this. */
-        d: nearDepth(slot.lx, slot.ly, sSN ? DESK_W : DESK_D, sSN ? DESK_D : DESK_W) + 0.05,
+        /* Tracks the slab's key — both are `depth(slot)` again after the #1394 revert. They stay one
+           expression apart by a constant on purpose: when the slab moved and this did not, the desk
+           painted over the forearms that rest on it (#1397). */
+        d: depth(slot.lx, slot.ly) + 0.05,
         fn: () => drawActor(ctx, fit, pose, node, t, true, mug),
       });
     }
