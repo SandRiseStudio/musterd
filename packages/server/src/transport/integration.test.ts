@@ -6235,6 +6235,99 @@ describe('two-stage close (ADR 169)', () => {
     expect(merged[0].detail.authorized_by).toBe('nick');
   });
 
+  // Lane 01M2GR0434 (stanley, 2026-09-14): a merge attestation could not be CLEARED through any
+  // exposed path — `updateLane` honours `merged: null`, but `UpdateLaneSchema.merged` was
+  // `.optional()` without `.nullable()`, so the wire rejected the clear (measured: 400 "merged:
+  // Expected object, received null") and a lane that acquired a wrong stamp kept it for good.
+  it('the owner (or an admin) clears a wrong attestation with merged: null; a counterpart may not (ADR 305 amendment 2)', async () => {
+    const { nickTok, ada, gee } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'wrong stamp', branch: 'ada/wrong-stamp', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    const stamped = await patchLane(laneId, { merged: { pr: 1, sha: 'aaaa0001' } }, ada);
+    expect(stamped.json.lane.merged).toEqual({ pr: 1, sha: 'aaaa0001' });
+    // A counterpart's clear is a replacement-with-nothing of the worker's stamp — ADR 305's rule.
+    const byCounterpart = await patchLane(laneId, { merged: null }, gee);
+    expect(byCounterpart.status).toBe(403);
+    expect(byCounterpart.json.error.code).toBe('forbidden');
+    const byOwner = await patchLane(laneId, { merged: null }, ada);
+    expect(byOwner.status).toBe(200);
+    expect(byOwner.json.lane.merged).toBeNull();
+    // The clear is a recorded transition, so a replicating peer folds it (changes.merged.to null).
+    const updated = (await auditRows(nickTok, 'lane.updated')).filter(
+      (r: any) => r.detail.lane === laneId && r.detail.fields.includes('merged'),
+    );
+    // Newest first, as `auditRows` returns them: the clear is the latest merged change.
+    expect(updated.some((r: any) => r.detail.changes.merged.to === null)).toBe(true);
+    // An admin may clear too: the row is the team's record, and the owner may be gone.
+    const again = await patchLane(laneId, { merged: { pr: 1, sha: 'aaaa0001' } }, ada);
+    expect(again.status).toBe(200);
+    const byAdmin = await patchLane(laneId, { merged: null }, nickTok);
+    expect(byAdmin.status).toBe(200);
+    expect(byAdmin.json.lane.merged).toBeNull();
+  });
+
+  // The guard that would have caught 01M2GBGA03: delta closed their lane from the VM with stanley's
+  // PR 1376 / 23ae48bb — ancestor-verified, because the SHA IS on main — and nothing asked whether
+  // that SHA already attested a different seat's lane. Measured on the live db 2026-09-14: 657
+  // distinct attested SHAs, 10 on two lanes, nine of them the same owner's twin lanes closed by one
+  // PR (legitimate, and must stay so) and the tenth this defect. So the rule is cross-OWNER.
+  it("a SHA that already attests a DIFFERENT seat's lane is refused naming that lane; a seat's own twin lanes may share one PR", async () => {
+    const { nickTok, ada, gee } = await setup();
+    const first = await post(
+      '/teams/dawn/lanes',
+      { title: "ada's landed work", branch: 'ada/landed', claim: true },
+      ada,
+    );
+    const firstId = first.json.lane.id as string;
+    const submitted = await patchLane(
+      firstId,
+      { state: 'ready_for_review', merged: { pr: 1376, sha: '23ae48bb', authorized_by: 'nick' } },
+      ada,
+    );
+    expect(submitted.status).toBe(200);
+
+    // gee's lane, closed with ada's merge: refused, and the refusal names the lane that owns it.
+    const other = await post(
+      '/teams/dawn/lanes',
+      { title: "gee's unrelated lane", branch: 'gee/unrelated', claim: true },
+      gee,
+    );
+    const otherId = other.json.lane.id as string;
+    const wrong = await patchLane(
+      otherId,
+      { state: 'done', merged: { pr: 1376, sha: '23ae48bb', authorized_by: 'nick' } },
+      gee,
+    );
+    expect(wrong.status).toBe(409);
+    expect(wrong.json.error.code).toBe('conflict');
+    expect(wrong.json.error.message).toContain(firstId);
+    expect(wrong.json.error.message).toContain('ada');
+    const untouched = await get(`/teams/dawn/lanes`, nickTok);
+    expect(
+      (untouched.json.lanes as { id: string; state: string; merged: unknown }[]).find(
+        (l) => l.id === otherId,
+      ),
+    ).toMatchObject({ state: 'claimed', merged: null });
+
+    // ada's own second lane, landed by the same PR: allowed — one PR may close two of one seat's lanes.
+    const twin = await post(
+      '/teams/dawn/lanes',
+      { title: "ada's twin, same PR", branch: 'ada/landed', claim: true },
+      ada,
+    );
+    const twinDone = await patchLane(
+      twin.json.lane.id as string,
+      { state: 'done', merged: { pr: 1376, sha: '23ae48bb', authorized_by: 'nick' } },
+      ada,
+    );
+    expect(twinDone.status).toBe(200);
+    expect(twinDone.json.lane.merged).toMatchObject({ sha: '23ae48bb' });
+  });
+
   /**
    * ADR 202 — the verdict moves the lane it judges. Before this, an `accept` answering an acceptance
    * ask wrote telemetry and left the lane sitting in awaiting_acceptance; the acceptor had to

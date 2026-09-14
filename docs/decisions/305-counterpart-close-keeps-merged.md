@@ -72,6 +72,40 @@ flags"; the shipped `lane_resolve` description said the opposite. It now says wh
 Falsify: a non-owner `lane_resolve {pr, sha, authorized_by}` on a never-submitted lane that closes
 with `merged` null.
 
+## Amendment 2 — a verb for NONE, and whose SHA it is (2026-09-14, lane `01M2GR04348JNWDAKJGSMJQZJS`)
+
+**Observed.** delta's lane `01M2GBGA03` was closed at 18:25:16Z from the VM with stanley's PR 1376 /
+`23ae48bb` — the attestation of stanley's twin lane `01M2GB4WZP`, which was still awaiting
+acceptance. The seat's own `lane_resolve` did it: the SHA is on `origin/main`, so the ancestor check
+passed, and nothing asked whose merge it was. delta published the correction an hour later and the
+row never moved, because **a merge attestation could not be cleared through any exposed path**:
+`updateLane` honours `merged: null`, but `UpdateLaneSchema.merged` was `.optional()` without
+`.nullable()`, `lane_update` and `musterd lane update` exposed no `merged` at all, and the live
+daemon answered `PATCH {"merged": null}` with `400 merged: Expected object, received null`
+(stanley, 20:00Z). This ADR's strip/establish rules decide *which* attestation a lane ends up with;
+there was no verb for none.
+
+**Amended, two rules, both in `decideLanePatch` so the hub's arbitration and the local path agree:**
+
+1. **`merged: null` clears.** The wire accepts it (`.nullable()`), `lane_update {merged: null}` and
+   `musterd lane update --clear-merged` send it, and the clear is a `lane.updated` row with
+   `changes.merged.to: null`, so a peer folds it. **Owner or admin only** — a counterpart's clear is
+   refused `forbidden`, for the reason the strip rule exists: a counterpart neither replaces nor
+   removes the worker's stamp.
+2. **A SHA that already attests a different seat's lane is refused** (`conflict`, naming that lane
+   and its owner) on any patch carrying `merged.sha`. A squash SHA lands one branch. The same seat's
+   twin lanes may share one PR — measured on the live db 2026-09-14: 657 distinct attested SHAs, 10
+   on two lanes, nine of them one owner's twins closed by one PR, the tenth this defect — so the
+   rule is cross-owner, not cross-lane.
+
+Not amended: `lane_resolve`'s ancestor check stays what it is. It answers "did this land on main",
+which is the question it was built for; "is it *this* lane's landing" is rule 2's question and is
+answered where the other lanes are visible, on the daemon.
+
+Falsify: on a daemon past this amendment, `PATCH {merged: null}` from the owner returns 200 with
+`merged: null`; from a non-owner, 403; and a `lane_resolve` naming a SHA another seat's lane carries
+returns 409 naming that lane.
+
 ## Observability & Evaluation
 
 **Traces.** No new audit action. `lane.closed` + `git.pr_merged` keep their shapes. After this,
