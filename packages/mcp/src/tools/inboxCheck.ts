@@ -198,16 +198,29 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         // be the silent retirement the design rejected: the reader may be mid-draft, and would
         // neither know to stop nor get the chance to disagree with what landed. Rendered per act
         // rather than as a summary line so it sits with the question it retires.
-        const dischargedBy = new Map((fetched.discharged ?? []).map((d) => [d.id, d.by]));
+        // Doorbell clause 7 widened this from "someone else answered" to three shapes, and only
+        // one of them has a seat to name: (ii) the lane closed with nobody answering at all, and
+        // (iv) this seat was already shown an act that has no answering move. Rendering "answered
+        // by" for those would invent an answerer; rendering nothing would be the silent retirement
+        // above, one shape further out. So the trace carries the REASON.
+        const standDown = new Map((fetched.discharged ?? []).map((d) => [d.id, d] as const));
+        const reasonOf = (d: { by?: string; reason?: string }) =>
+          d.reason === 'lane_closed'
+            ? 'the lane closed'
+            : d.reason === 'read'
+              ? 'you have already been shown this'
+              : d.by
+                ? `answered by ${d.by}`
+                : 'answered';
         const line = (m: Envelope) => {
-          const by = dischargedBy.get(m.id);
+          const stand = standDown.get(m.id);
           // A turn says which room it is in, on its own line. Without this the reader has an opaque
           // `thread` and no reason to look further — the room block below is what it looks at.
           const topic = m.thread ? context.topics.get(m.thread) : undefined;
           return (
             formatMessage(m) +
             (topic ? `\n  ↳ in huddle ${topic}` : '') +
-            (by ? `\n  ↳ answered by ${by} — you no longer owe this` : '')
+            (stand ? `\n  ↳ ${reasonOf(stand)} — you no longer owe this` : '')
           );
         };
 
@@ -254,7 +267,15 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
               ...(m.thread && context.topics.has(m.thread)
                 ? { huddle_topic: context.topics.get(m.thread) }
                 : {}),
-              ...(dischargedBy.has(m.id) ? { discharged_by: dischargedBy.get(m.id) } : {}),
+              ...(standDown.has(m.id)
+                ? {
+                    // `discharged_by` stays the seat and ONLY the seat, so a structured reader that
+                    // keyed on it never starts seeing a sentence in that field; the new shapes say
+                    // why in `discharged_reason` instead.
+                    ...(standDown.get(m.id)!.by ? { discharged_by: standDown.get(m.id)!.by } : {}),
+                    discharged_reason: standDown.get(m.id)!.reason ?? 'answered',
+                  }
+                : {}),
             })),
             ...(context.rooms.length > 0 ? { huddles: context.rooms.map(roomStructured) } : {}),
           },

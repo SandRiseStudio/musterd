@@ -268,5 +268,6 @@
   "**Members really do clip the furniture, and `walkable()` cannot tell you that** (2026-09-14, measured; falsify: re-run `floorSamples()` and count `inside` on moving members). `walkable` inflates every footprint by `BODY_R` (14) because it answers a PLANNING question — may a path route here, given a body has width. Use it as a collision test and it over-reports by exactly the inflation: the first measurement came back 1696/3200 samples \"blocked\" and meant nothing. `insideSolid(lx,ly)` (nav.ts) is the pad-0 collision question, measurement only.": "defect",
   "- ~~**An arbitrated close never entered the log** (2026-09-14; falsify: close a lane from a joiner": "defect",
   "## The whole-workspace suite on the laptop takes the live daemon down with it (2026-09-14; falsify: sample `curl -m 5 localhost:4849/health` every 5s during a root `pnpm exec vitest run` — if every probe answers under 100ms, this is wrong)": "defect",
-  "(2026-09-14 — falsify: none needed, process-table reading, but the trap": "other"
+  "(2026-09-14 — falsify: none needed, process-table reading, but the trap": "other",
+  "## The bell went quiet and the number beside it did not — clause 7 reached the model's surface, not the human's (2026-09-14; falsify: a `lane_review` ask whose lane is `done` must be absent from BOTH `musterd inbox --interrupt-check` and the `⚑ N acts waiting` count)": "defect"
 }

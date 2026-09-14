@@ -181,7 +181,12 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   }
   // ADR 254: the stand-down trace, so an eligible-set act someone else already answered says so
   // instead of sitting there looking owed. Absent on an older daemon ⇒ an empty map ⇒ prior render.
-  const discharged = new Map((res.discharged ?? []).map((d) => [d.id, d.by]));
+  const discharged = new Map(
+    (res.discharged ?? []).map((d) => [
+      d.id,
+      { ...(d.by ? { by: d.by } : {}), ...(d.reason ? { reason: d.reason } : {}) },
+    ]),
+  );
   process.stdout.write('\n' + renderInbox(messages, kindOf, { cursorTs, discharged }) + '\n');
 
   // Advance the read cursor to the NEWEST UNREAD we actually displayed — never past an unshown unread

@@ -5640,13 +5640,20 @@ export async function handleHttp(
             (m.act === 'steer' ||
               (m.meta as { urgent?: unknown } | null | undefined)?.['urgent'] === true),
         );
+        // Captured BEFORE the write below: the read that renders an act for the first time must
+        // still COUNT it (a seat that has never seen the act cannot have been shown it), so the
+        // clause 7(iv) discharge in `discharged` lands from the NEXT read on. Same set, read once.
+        const shownBeforeThisRead =
+          renderable.length === 0
+            ? new Set<string>()
+            : listRenderedActs(
+                ctx.db,
+                team.id,
+                member.name,
+                renderable.map((m) => m.id),
+              );
         if (renderable.length > 0) {
-          const already = listRenderedActs(
-            ctx.db,
-            team.id,
-            member.name,
-            renderable.map((m) => m.id),
-          );
+          const already = shownBeforeThisRead;
           for (const m of renderable) {
             if (already.has(m.id)) continue;
             appendAudit(ctx.db, team.id, {
@@ -5717,7 +5724,56 @@ export async function handleHttp(
                     GROUP BY ref`,
                 )
                 .all(team.id, ...owed)
-                .map((r) => ({ id: r.ref, by: r.by }));
+                .map((r) => ({ id: r.ref, by: r.by, reason: 'answered' as const }));
+
+        // Doorbell contract clause 7, shapes (ii) and (iv), on the OTHER surface. #1383 taught the
+        // interrupt line to drop these in `listInterruptCandidates`; the human-facing count is
+        // folded CLIENT-side (`openActionNeeded` over `dischargedIds`), so it never saw them.
+        // Measured 2026-09-14 on the laptop daemon carrying abc462cb: an acceptance ask whose lane
+        // was `done` left `musterd inbox --interrupt-check` silent and `musterd inbox --waiting`
+        // still counting it. A bell that is quiet while the number beside it is wrong is the same
+        // defect clause 7 named, pointed at the human instead of the model.
+        //
+        // Each entry carries its own `reason` and only (iii) carries `by`: (ii) and (iv) have no
+        // answering seat — the lane closed, or the seat was shown the act — and borrowing `by`
+        // would invent an answerer.
+
+        // (ii) An acceptance ask whose lane has LEFT awaiting_acceptance. An UNKNOWN lane keeps
+        // ringing: dropping on absence would silence a real obligation, the one direction this
+        // must never err (same rule, same reason, as listInterruptCandidates).
+        const laneOfAsk = new Map<string, string>();
+        for (const m of messages) {
+          if (m.act !== 'ask') continue;
+          const review = (m.meta as Record<string, unknown> | null)?.['lane_review'] as
+            | { lane?: unknown }
+            | undefined;
+          if (review && typeof review.lane === 'string') laneOfAsk.set(m.id, review.lane);
+        }
+        const laneClosed: { id: string; reason: 'lane_closed' }[] = [];
+        if (laneOfAsk.size > 0) {
+          const laneIds = [...new Set(laneOfAsk.values())];
+          const states = new Map(
+            ctx.db
+              .prepare<unknown[], { id: string; state: string }>(
+                `SELECT id, state FROM lanes WHERE team_id = ? AND id IN (${laneIds
+                  .map(() => '?')
+                  .join(',')})`,
+              )
+              .all(team.id, ...laneIds)
+              .map((l) => [l.id, l.state] as const),
+          );
+          for (const [askId, laneId] of laneOfAsk) {
+            const state = states.get(laneId);
+            if (state !== undefined && !isAwaitingAcceptance(state)) {
+              laneClosed.push({ id: askId, reason: 'lane_closed' });
+            }
+          }
+        }
+
+        // (iv) A steer or urgent act this seat had already been SHOWN before this read — the set
+        // `shownBeforeThisRead` captured above, so the first read counts the act and every read
+        // after it discharges it.
+        const readAlready = [...shownBeforeThisRead].map((id) => ({ id, reason: 'read' as const }));
 
         // `total` is the full inbox size (visibility-scoped) so a bounded client can show "N of total".
         return sendJson(res, 200, {
@@ -5726,7 +5782,7 @@ export async function handleHttp(
           total: countInbox(ctx.db, member),
           deferred,
           answered,
-          discharged,
+          discharged: [...discharged, ...laneClosed, ...readAlready],
           ...(truncated ? { truncated: true } : {}),
           ...(unreadRemaining > 0 ? { unread_remaining: unreadRemaining } : {}),
         });
