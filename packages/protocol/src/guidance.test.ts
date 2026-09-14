@@ -99,6 +99,22 @@ describe('orient tier 1 owns addressed work (ADR 326 amendment 2026-08-27 UTC)',
     expect(skill).toMatch(/act:'accept', reply_to:<the request act id>/);
     expect(skill).toMatch(/two\n?\s*seats review the same thing/);
   });
+
+  // Lane 01M2GQFJXG (stanley, 2026-09-14): the announce clause above was written for the
+  // eligible-set `request_help`, and step 3 prescribed it for "an acceptance or review request"
+  // too. A lane_review ask is directed to ONE seat and its `accept` IS the verdict (ADR 202), so
+  // following the skill closed ryder's lane on the announcement, before a line of the diff was
+  // read. The skill has to say which acts the announcement is for, and what an accept does on the
+  // other kind.
+  it('does not prescribe accept as the announcement on a lane_review ask — there accept is the verdict', () => {
+    const skill = renderOrientSkill();
+    expect(skill).toMatch(/lane_review/);
+    expect(skill).toMatch(/accept.*IS the verdict|IS the verdict/);
+    // The announce clause is scoped to the acts that carry an eligible set, never to a review ask.
+    const announce = skill.slice(skill.indexOf('Announce before you start'));
+    expect(announce).toMatch(/eligible/);
+    expect(announce).not.toMatch(/review request.*Announce/s);
+  });
 });
 
 describe('version-bump discipline (ADR 085)', () => {
@@ -129,6 +145,7 @@ describe('version-bump discipline (ADR 085)', () => {
     21: 'f3ee0a5d2a4808b7', // − the `lane_ready` / `musterd lane ready` alias line: both deprecated aliases (and team_memory_search) removed after their one-epoch retention (surface survey #1245, item 2)
     20: '199e0096a14dec89', // orient tier 1 = everything ADDRESSED to the seat: a routed acceptance/review request is done, not asked about, and announced with accept+reply_to so it discharges for co-addressees (ADR 326 amendment 2026-08-27 UTC)
     22: '70084e92e29476ed', // the skill catches up with four surfaces that moved under it (lane 01M1VD1CQV): `done` records submit-vs-unconfirmed and says which; `--wait` (blocks) vs `--waiting` (returns) named as the twins they are; team_availability + the goal tools get their tool form; and a "when you were woken" playbook for team_wake_context, which had a name in the reference and no prose in the body
+    23: '414d3a6cbc654871', // orient step 3 scopes the announce clause to eligible-set acts and says a lane_review ask's accept IS the verdict (ADR 202) — announcing with accept closed ryder's lane before review (lane 01M2GQFJXG, 2026-09-14)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

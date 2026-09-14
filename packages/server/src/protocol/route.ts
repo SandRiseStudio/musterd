@@ -44,6 +44,12 @@ export interface RouteResult {
    *  warning that the sender holds several and the daemon would not guess. Absent for every other
    *  act, and for a handoff whose sender holds no live lane (the legal lane-less case). */
   handoff_lane?: { lane: string; branch: string | null; source: 'derived' } | { warning: string };
+  /** ADR 202 — the lane this accept/decline MOVED, when it answered a `lane_review` ask: `done` on
+   *  an accept, `active` on a decline. Absent when the act moved nothing (a plain answer, an
+   *  escalation to the human stage, a superseded ask). Reported on the ack so the sender learns
+   *  they gave a verdict at the moment they gave it (lane 01M2GQFJXG, 2026-09-14: a reviewer sent
+   *  `accept` as "taking this review" and found out afterwards that the lane was already closed). */
+  lane_verdict?: { lane: string; state: 'done' | 'active' };
 }
 
 /**
@@ -85,6 +91,7 @@ function routeEnvelopeInner(
   // dogfood team named no lane). Derived HERE, on the one validate→persist→deliver path, so WS and
   // HTTP and every client above them get it from one implementation. Explicit meta always wins.
   let handoffLane: RouteResult['handoff_lane'];
+  let laneVerdict: RouteResult['lane_verdict'];
   /** ADR 243: which evidence answered — audited, never on the wire. */
   let handoffBasis: HandoffLaneBasis | undefined;
   if (env.act === 'handoff' && !(env.meta as { lane_handoff?: unknown } | null)?.lane_handoff) {
@@ -364,7 +371,8 @@ function routeEnvelopeInner(
     // demanded, and that human's verdict is the one that closes.
     if ((env.act === 'accept' || env.act === 'decline') && typeof ref === 'string') {
       try {
-        if (!escalatedToHuman) applyAcceptanceVerdict(ctx, team, sender, ref, env.act, env.body);
+        if (!escalatedToHuman)
+          laneVerdict = applyAcceptanceVerdict(ctx, team, sender, ref, env.act, env.body);
       } catch (err) {
         log.warn({ msg: 'acceptance_verdict_failed', err: String(err) });
       }
@@ -475,7 +483,13 @@ function routeEnvelopeInner(
       },
     });
   }
-  return { message, recipients, delivered, ...(handoffLane ? { handoff_lane: handoffLane } : {}) };
+  return {
+    message,
+    recipients,
+    delivered,
+    ...(handoffLane ? { handoff_lane: handoffLane } : {}),
+    ...(laneVerdict ? { lane_verdict: laneVerdict } : {}),
+  };
 }
 
 /**
@@ -824,6 +838,10 @@ function fireGatedHumanAsk(
  *   verified-ness cannot come out differently depending on which door the verdict came through.
  *   An owner who accepts their own lane records `verified: false` by that same derivation — the
  *   honesty is structural, not a check I have to remember to write here.
+ *
+ * Returns the move it made — lane and new state — or `undefined` when it made none, so the ack can
+ * say so (lane 01M2GQFJXG): an accept that closes a lane must not look, to its sender, like an
+ * accept that merely answered a message.
  */
 function applyAcceptanceVerdict(
   ctx: Ctx,
@@ -832,7 +850,7 @@ function applyAcceptanceVerdict(
   repliedToId: string,
   act: 'accept' | 'decline',
   body: string,
-): void {
+): RouteResult['lane_verdict'] {
   const replied = ctx.db
     .prepare<
       [string, string],
@@ -902,7 +920,6 @@ function applyAcceptanceVerdict(
       },
     });
   }
-
   // The board-shape change the team sees, composed by the daemon (ADR 102) exactly as the PATCH
   // path composes it — same body, same meta, so a reader of the stream cannot tell which surface
   // the verdict arrived on, because it does not matter.
@@ -930,6 +947,7 @@ function applyAcceptanceVerdict(
       meta: note.meta,
     }),
   );
+  return { lane: lane.id, state: act === 'accept' ? 'done' : 'active' };
 }
 
 /**

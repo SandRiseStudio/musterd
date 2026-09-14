@@ -3793,10 +3793,13 @@ export async function handleHttp(
             ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
           });
         }
+        // ADR 202's `lane_verdict` rides the same way (lane 01M2GQFJXG): the sender of an accept
+        // that closed a lane is told so on the spot, never left to discover it from the board.
         return sendJson(res, 201, {
           ack,
           ...(hint ? { delivery_hint: hint } : {}),
           ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
+          ...(result.lane_verdict ? { lane_verdict: result.lane_verdict } : {}),
         });
       }
 

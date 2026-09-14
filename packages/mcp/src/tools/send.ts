@@ -243,6 +243,17 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
             : ` Lane ${handoffLane.lane} attached (your only live lane` +
               `${handoffLane.branch ? `, branch ${handoffLane.branch}` : ''}) — ` +
               `re-send with meta.lane_handoff.lane if this handoff was about something else.`;
+        // The verdict's consequence (ADR 202; lane 01M2GQFJXG): an accept answering a lane_review
+        // ask CLOSED a lane, and a decline sent one back. Said on the spot, in the reply to the act
+        // that did it — a reviewer who meant "taking this review" learns now, not from the board.
+        const laneVerdict = ackBody?.lane_verdict;
+        const verdictGuidance = !laneVerdict
+          ? ''
+          : laneVerdict.state === 'done'
+            ? ` Lane ${laneVerdict.lane} → done: this accept WAS the acceptance verdict (ADR 202), ` +
+              `not an announcement. If you had not reviewed yet, say so — a decline on the same ` +
+              `ask will not reopen it; lane_update {state:'active'} does.`
+            : ` Lane ${laneVerdict.lane} → active: this decline sent the work back to its owner.`;
         // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
         const text =
@@ -250,7 +261,8 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
             ? `sent ask to ${toLabel} (id=${envelope.id}). ${askGuidance}`
             : `sent ${args.act} to ${toLabel} (id=${envelope.id})`) +
           hintGuidance +
-          handoffGuidance;
+          handoffGuidance +
+          verdictGuidance;
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {
@@ -266,6 +278,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
               : {}),
             ...(hint ? { delivery_hint: hint } : {}),
             ...(handoffLane ? { handoff_lane: handoffLane } : {}),
+            ...(laneVerdict ? { lane_verdict: laneVerdict } : {}),
           },
         };
       } catch (err) {

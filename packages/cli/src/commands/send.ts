@@ -228,9 +228,12 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     // (mirrors the MCP structured `ask_contract`) without a second round-trip to the tier table.
     // Prefer the daemon-derived contract (carries `unblocker_reachable`, ADR 153); the pure local
     // contract stands when an older daemon omits it.
-    const payload = askTier
-      ? { ...envelope, ask_contract: ackBody?.ask_contract ?? askContract(askTier) }
-      : envelope;
+    const payload = {
+      ...(askTier
+        ? { ...envelope, ask_contract: ackBody?.ask_contract ?? askContract(askTier) }
+        : envelope),
+      ...(ackBody?.lane_verdict ? { lane_verdict: ackBody.lane_verdict } : {}),
+    };
     process.stdout.write(JSON.stringify(payload) + '\n');
     return 0;
   }
@@ -248,6 +251,17 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(
       theme.dim(askContractText(envelope.id, askTier, ackBody?.ask_contract?.unblocker_reachable)) +
         '\n',
+    );
+  // ADR 202's consequence, at parity with the MCP reply (lane 01M2GQFJXG): an accept that answered
+  // a lane_review ask closed the lane — the sender is told here, not left to find it on the board.
+  const verdict = ackBody?.lane_verdict;
+  if (verdict)
+    process.stdout.write(
+      theme.dim(
+        verdict.state === 'done'
+          ? `lane ${verdict.lane} → done: this accept was the acceptance verdict (ADR 202), not an announcement.`
+          : `lane ${verdict.lane} → active: this decline sent the work back to its owner.`,
+      ) + '\n',
     );
   return 0;
 }
