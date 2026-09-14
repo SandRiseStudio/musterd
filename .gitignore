@@ -54,19 +54,27 @@ coverage/
 .grok/skills/
 .grok/commands/
 
-# musterd-provisioned Cursor guidance (ADR 085) — the skill rule + slash commands `musterd init` writes
-# for Cursor, the counterpart to the `.claude/` skill/commands above. Surgical (only musterd's stamped
-# files) rather than the whole dirs, because `.cursor/plans/` and any project-authored rules are committed.
+# musterd-provisioned Cursor guidance (ADR 085) — the skill rules + slash commands `musterd init`
+# writes for Cursor, the counterpart to the `.claude/` skill/commands above. Surgical (only musterd's
+# stamped files) rather than the whole dirs, because `.cursor/plans/` and any project-authored rules
+# are committed.
+#
+# A GLOB, not an enumeration. This was two named lines until 2026-09-14, and `musterd-orient.mdc`
+# (written by `harnesses/cursor.ts` as `orientSkillPath`) arrived without one — so every
+# Cursor-provisioned worktree carried it as untracked drift. The block below already predicted this
+# failure for the role bridges; it is the same one, and musterd's OWN rules are all `musterd-*`, so
+# the glob covers every future one without anybody remembering a line.
 .cursor/rules/musterd.mdc
-.cursor/rules/musterd-label-session.mdc
+.cursor/rules/musterd-*.mdc
 .cursor/commands/musterd-*.md
 # ADR 299 role-skill bridges: `musterd wire` writes one per role a seat holds, as
 # `.cursor/rules/<role>.mdc` — per-workspace pointers at the canonical `.agents/skills/<role>/`,
 # same class as the two rules above. Enumerated because the filename is the ROLE name, so no glob
 # covers the set and these bridges carry no `musterd:content` stamp to match on either. Adding a
 # role skill therefore means adding a line here, which will be forgotten. The durable fix is to
-# name them `musterd-<role>.mdc` so `.cursor/rules/musterd-*.mdc` covers every future one — that
-# is a change to the provisioning writer, not to this file (lane 01M0K5ANE1).
+# name them `musterd-<role>.mdc` — and as of 2026-09-14 the glob that would cover them is above, so
+# only the writer half is outstanding: rename the bridges and this enumeration goes away with them
+# (lane 01M0K5ANE1).
 .cursor/rules/product-communications.mdc
 # `musterd wire` writes these per-workspace; they are machine-local, not project config.
 .cursor/hooks.json
