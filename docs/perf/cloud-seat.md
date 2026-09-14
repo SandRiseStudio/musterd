@@ -711,6 +711,63 @@ binding in either direction: a dead lease looks live, and the value it would com
 moving target. What does the rotating was not measured here and should not be guessed (falsify: a
 session whose `session_lease` is byte-identical from turn 1 to wrap-up).
 
+**Trial 4 (2026-09-14 21:27Z) is four for four, and it closes the one gap left in trial 3's
+control.** Session `d7524e97`, `started_at` 1789421269706 (21:27:49.706Z), work order on the same
+lane. Same course a fourth time: the deaf line rode the first three tool results (two `ToolSearch`
+calls and a `Read` of seat memory, none of them a musterd call), the fourth call was `team_join`
+**alone in its own turn**, it answered "You are now the live occupant of this seat… The server
+authenticated this occupancy" rather than "Already joined", and no tool result since has carried
+it. Four trials, four non-no-op joins, four repairs.
+
+**The positive control is now unconfounded, and trial 3's wording above oversold the ambiguity in
+its own favour.** Trial 3 reported that stanley's `steer` `01M2GSCEHM` "began riding every tool
+result" within a minute of the join, which reads as though the act arrived at that moment — the one
+alternative explanation a control has to exclude. The timestamps exclude it. That act was raised at
+20:22:52.216Z, so it already predated trial 3's session by 4m12s, and by this session it had been
+pending **64m57s and across a session boundary**, unchanged and undelivered. In this trial the same
+stale act was *withheld* from all three pre-join tool results, which carried the deaf line instead,
+and rode the first post-join result and every one after it. The stimulus was constant across the
+join; the join is the only variable (falsify: a pending directed act that rides a tool result on a
+deaf seat, before any join).
+
+**And the binding records three local signs of a claim, all of them worthless to the seat.** Beyond
+the `session_lease` (`msls__gr-…`) written before turn 1 and the `attested_at` at +216 ms, the v12
+binding also carries **`claim_attempted_at`, stamped +78 ms** — a field the earlier trials did not
+read. So the seat can see that a claim was attempted, that an attestation was recorded, and a lease
+string to go with them, and its very next interrupt check is still refused. This is the sharpest
+form of the trial-2 finding: *no local record the handover writes distinguishes a live Presence from
+a dead one.* (`tool_allowlist` was `[]` again — fourth consecutive session on the v12 image, so
+reading 1 below holds.)
+
+**Trial 3's lease-rotation reading does not replicate here, and its falsifier is the reason we can
+say so.** Trial 3 saw `session_lease` change value mid-session with no `team_join` in between and
+offered "a session whose `session_lease` is byte-identical from turn 1 to wrap-up" as the test. In
+this session the binding *was* rewritten — key order reordered and `model_observed.observed_at`
+bumped to 21:33:05.873Z, +5m16s after `started_at` — and the lease came through that rewrite
+**byte-identical** (`msls__gr-xYmeNIQ-TxEql-u4AocQrBgUZjeg` before and after). So a binding rewrite
+does not by itself rotate the lease, and whatever moved it in trial 3 is narrower than "some other
+writer rotates it mid-session". That weakens the rotation claim to *it can move, not it does move*;
+what has not changed is the part that matters, since the byte-stable lease here was refused just as
+the rotating one was.
+
+**The scope is wider than a wake, and the widening is stanley's, measured on a seat that never
+woke.** In insight `01M2GTZPT9` (2026-09-14 20:50Z) stanley reports a laptop session live for about
+an hour whose musterd MCP transport dropped mid-session while the daemon stayed healthy throughout:
+the deaf line then rode every call, `team_join` answered "You are now the live occupant" — not
+"Already joined" — and the line stopped. No actuator, no work order, no VM, no fresh session. Two
+more seats hit the neighbouring half within the same hour: dolly at 21:25Z (the adapter dropped
+`CONNECT_TIMEOUT` on claude-code and the tools went deferred-and-gone, forcing a fall back to the
+CLI channel) and ghost across 20:22–21:00Z (after their MCP server was killed, a CLI `claim` minted
+only a one-shot lease, the probe stayed deaf on both rails, and the durable repair was a harness
+`team_join`). Those three are their own reports, not measurements of mine. Taken with the four
+trials here they move the condition off *arrival* entirely: **a seat whose musterd MCP transport has
+just been established has no live Presence until a non-no-op `team_join`** — a wake is merely the
+common case, because a wake always establishes a fresh transport. Read that against clause 8's
+"granted is not callable": a re-established transport silently revokes *callability* (ryder, and
+stanley's first half) and silently revokes *Presence* (this), and musterd shows neither — the grant
+and the roster row both still look right (falsify: a seat that reconnects a dropped MCP transport
+and whose first interrupt check is honoured with no join).
+
 This still matters for the brief, eight days on. The wake brief says "orient via
 `team_wake_context` (then `team_next`) and begin" — a seat that follows it exactly never calls
 `team_join`, because it was *just woken* and has every reason to believe it is already on the team.
