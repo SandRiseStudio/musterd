@@ -6,8 +6,9 @@
 > claude-code (izzo, recorder), opencode (ghost), codex (big-body), native musterd (ryder, two
 > sessions). delta, a woken cloud seat outside the room, closed one unmeasured row and supplied a
 > falsifier. Every claim below carries the date it was measured and the seat that measured it; the
-> per-harness table is the record, the reworded clauses are the proposal. Nothing here is decided
-> until an ADR cites it.
+> per-harness table is the record, the reworded clauses are the proposal. Clause 8 was added after
+> the huddle closed, from measurements made the same day. Clause 7 landed as ADR 088 amendment 3.
+> Nothing else here is decided until an ADR cites it.
 
 ## The question
 
@@ -187,6 +188,32 @@ seat's own accept/decline/resolve (#1361, shipped); (ii) the referenced lane lea
 by the addressee, for any act with no answering move** — steer, status_update, plain message.
 Falsifiers for (ii)/(iii) are ryder's; for (iv), delta's. Both live on c8e89dd8.
 
+**(8) Callable, not merely granted — clause 1's unwritten sibling (added 2026-09-14, after the
+huddle closed).** Clause 1 is the bell reaching the model; this is the model being able to
+**answer**. In Claude Code the musterd tools arrive **deferred**: only their names are in the
+prompt, and a `ToolSearch` round-trip must fetch each schema before any `mcp__musterd__*` call
+succeeds — and after an MCP server drops and reconnects mid-session, every schema has to be fetched
+again, with no permission change and nothing on the roster or in the doctor to show for it. A seat
+can hold a live lease (3), take a probe that lands in context (1), read a one-line notice (6), and
+still be unable to `team_send` without a `ToolSearch` it does not know to make: three clauses green,
+seat functionally mute. Unlike a permission refusal, deferral raises no error.
+
+Measured three times the same day, none of them on the path it was first attributed to: stanley on
+the woken cloud seat (16:35Z, first written as a cloud-seat property); ryder in an interactive
+laptop session, including the re-fetch after an MCP reconnect (18:43Z); izzo, this seat, whose first
+act of the session was a `ToolSearch` for the inbox tools before it could orient. Falsify: a session
+whose first `mcp__musterd__*` call succeeds with no preceding `ToolSearch`. Record: `docs/perf/cloud-seat.md`
+finding 18a and `docs/wiki/cloud-seat-from-inside.md` (stanley, #1386).
+
+Proposed wording: *the probe must reach the model **and** the tools it names must be callable when
+the model reads it; a harness with a tool-deferral path satisfies neither by grant alone, and a
+reconnect can revoke callability without revoking the grant.* Per-harness row, like clause 1's:
+claude-code defers and re-defers on reconnect (measured); cursor, grok, opencode, codex unmeasured;
+native exempt (the bridge owns the tool table — nothing is deferred because nothing is discovered).
+The woken-seat case is the sharpest: the actuator spawns with `--allowedTools mcp__musterd`, so the
+wake brief's own instruction ("orient via `team_wake_context`") is one `ToolSearch` away from
+working, and every boundary before that is guaranteed deaf (clause 3, delta).
+
 ## What is open, and who carries it
 
 - **Lane `01M2GBPX2S` (izzo, high):** the opencode lease refused after `reap_offline` + `ws_close`
@@ -205,6 +232,10 @@ Falsifiers for (ii)/(iii) are ryder's; for (iv), delta's. Both live on c8e89dd8.
   deaf notice rather than a turn — a canary is needed.
 - **Grok and codex doctors** need the clause-4 text comparison and epoch that claude-code and
   cursor already have.
+- **Clause 8 has no lane.** Two halves: the harness rows (cursor, grok, opencode, codex — does a
+  granted musterd tool need a discovery step before it is callable, and does a reconnect revoke
+  it?), and whether the daemon can see callability at all — today it sees the grant and nothing
+  after it. The wake brief could at least name the `ToolSearch` it needs.
 
 ## What this does not decide
 
