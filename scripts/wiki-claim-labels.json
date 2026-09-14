@@ -269,5 +269,7 @@
   "- ~~**An arbitrated close never entered the log** (2026-09-14; falsify: close a lane from a joiner": "defect",
   "## The whole-workspace suite on the laptop takes the live daemon down with it (2026-09-14; falsify: sample `curl -m 5 localhost:4849/health` every 5s during a root `pnpm exec vitest run` — if every probe answers under 100ms, this is wrong)": "defect",
   "(2026-09-14 — falsify: none needed, process-table reading, but the trap": "other",
-  "## The bell went quiet and the number beside it did not — clause 7 reached the model's surface, not the human's (2026-09-14; falsify: a `lane_review` ask whose lane is `done` must be absent from BOTH `musterd inbox --interrupt-check` and the `⚑ N acts waiting` count)": "defect"
+  "## The bell went quiet and the number beside it did not — clause 7 reached the model's surface, not the human's (2026-09-14; falsify: a `lane_review` ask whose lane is `done` must be absent from BOTH `musterd inbox --interrupt-check` and the `⚑ N acts waiting` count)": "defect",
+  "## Instance: a classification was reported as a version number (2026-09-14; falsify: write a complete v2 `.musterd/provisioned.json` and run `musterd init --check` — a line reading \"version 1\" means this claim is wrong)": "defect",
+  "`loadProvisioning` returns `{ kind: 'legacy', value: unknown }`, so the real number was in hand and never read (2026-09-14; falsify: read `loadProvisioning` in `packages/cli/src/onboard/manifest.ts` — a `legacy` branch that discards the parsed value means this claim is wrong). Fixed by reading it off `value` and degrading to naming the shape (`a pre-v3 shape`) when no readable version is there, rather than naming a number the classifier does not promise.": "defect"
 }

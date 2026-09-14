@@ -518,8 +518,20 @@ export async function inspectProvisioning(
   // Selection drift (ADR 281): the v2 manifest is the record of the desired harness set.
   const provisioning = loadProvisioning(cwd);
   if (provisioning.kind === 'legacy') {
+    // Say the version this file ACTUALLY carries, read off the value `loadProvisioning` already
+    // hands back. `legacy` is a CLASSIFICATION, not a version — its predicate accepts both the v2
+    // shape and the v1 one — so a hardcoded number is a promise the classifier does not make. It
+    // was hardcoded to 1, and ryder's v2 worktree was told it was version 1 (2026-09-14, found by
+    // running the prescription rather than reading it). The "single-harness era" gloss went with
+    // it: true of v1, false of v2. Same shape as `recorded-not-routed` — the surface asserting a
+    // value it had modelled instead of the one it had just read.
+    const version = (provisioning.value as { version?: unknown } | null)?.version;
+    const named =
+      typeof version === 'number'
+        ? `version ${version}${version === 1 ? ' (single-harness era)' : ''}`
+        : 'a pre-v3 shape';
     drift.push(
-      "this folder's provisioning manifest is version 1 (single-harness era) — run `musterd " +
+      `this folder's provisioning manifest is ${named} — run \`musterd ` +
         'harness configure` to choose and convert the harness set; until then `musterd wire` exits 6.',
     );
   } else if (provisioning.kind === 'invalid') {
