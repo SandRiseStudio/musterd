@@ -46,7 +46,7 @@ Observed against Grok 1.0.13 docs on this machine. Parity target is Claude Code 
 | Model attestation | `summary.json` `current_model_id` + hook `sessionId` | same files |
 | Session capture | `$GROK_HOME/sessions/<encoded-cwd>/<id>/summary.json` | same |
 | Config entry scope | per-folder `.grok/config.toml` | same |
-| Hook drift detection | `inspectGrokHookDrift` populates `hookDrift` | same |
+| Hook drift detection | `inspectGrokHookDrift` populates `hookDrift`. ~~marker presence only (2026-09-02)~~ HOLDS 2026-09-14: exact command-text + `FEATURE_EPOCH` two-way (ADR 168). A same-marker discarded-stdout PreToolUse is STALE; a newer epoch blames the checkout (falsify: a same-marker interrupt hook that discards stdout passing `inspectGrokHookDrift`) | same |
 
 Where a Claude Code column says "same", the feature is harness-level and the driver does not change
 it — the driver-sensitive rows are labeling (needs a sidebar or a tty) and capture (paths differ by

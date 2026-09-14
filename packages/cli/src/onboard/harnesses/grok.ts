@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { FEATURE_EPOCH } from '@musterd/protocol';
 import { grokCandidates } from '../../grokBin.js';
 import { isDeclined } from '../declined.js';
 import {
@@ -77,9 +78,23 @@ function writeText(path: string, body: string): void {
   writeFileSync(path, body.endsWith('\n') ? body : `${body}\n`, 'utf8');
 }
 
+/** The `eN` generation tag written into a musterd hook's marker comment (ADR 168). */
+function epochTag(epoch: number): string {
+  return `e${String(epoch)}`;
+}
+
+/**
+ * The generation stamped on an installed hook command, or `0` for an unstamped one. Unstamped is
+ * legal and means "written before this inspector compared text" — the oldest possible generation.
+ */
+function hookEpochOf(command: string): number {
+  const m = /#\s*musterd-[a-z-]+\s+e(\d+)\b/.exec(command);
+  return m?.[1] ? Number(m[1]) : 0;
+}
+
 function cmd(inner: string, marker: string, discardStdout: boolean): string {
   const redir = discardStdout ? ' >/dev/null 2>&1' : ' 2>/dev/null';
-  return `command -v musterd >/dev/null 2>&1 && musterd ${inner}${redir} || true # ${marker}`;
+  return `command -v musterd >/dev/null 2>&1 && musterd ${inner}${redir} || true # ${marker} ${epochTag(FEATURE_EPOCH)}`;
 }
 
 /**
@@ -93,7 +108,7 @@ export const GROK_INTERRUPT_PRE_WRAP =
 export function grokInterruptPreCommand(): string {
   return (
     'command -v musterd >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && ' +
-    `musterd inbox --interrupt-check 2>/dev/null | node -e '${GROK_INTERRUPT_PRE_WRAP}' || true # ${INTERRUPT_MARKER}`
+    `musterd inbox --interrupt-check 2>/dev/null | node -e '${GROK_INTERRUPT_PRE_WRAP}' || true # ${INTERRUPT_MARKER} ${epochTag(FEATURE_EPOCH)}`
   );
 }
 
@@ -115,7 +130,7 @@ export const GROK_INTERRUPT_STOP_SCRIPT = [
 export function grokInterruptStopCommand(): string {
   return (
     'command -v musterd >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && ' +
-    `node -e '${GROK_INTERRUPT_STOP_SCRIPT}' || true # ${STOP_MARKER}`
+    `node -e '${GROK_INTERRUPT_STOP_SCRIPT}' || true # ${STOP_MARKER} ${epochTag(FEATURE_EPOCH)}`
   );
 }
 
@@ -148,6 +163,20 @@ function upsertJsonHook(
   if (!file) return `could not parse ${path} — left untouched`;
   file.hooks ??= {};
   const list = file.hooks[event] ?? [];
+  const present = list.filter((g) => g.hooks.some((h) => h.command.includes(marker)));
+  const installedEpoch = Math.max(
+    0,
+    ...present.flatMap((g) => g.hooks.map((h) => hookEpochOf(h.command))),
+  );
+  const ours = hookEpochOf(command);
+  if (installedEpoch > ours) {
+    return (
+      `refused to rewrite the Grok ${event} hook in ${path}: it was written by a NEWER musterd ` +
+      `(epoch ${String(installedEpoch)}), and this build is epoch ${String(ours)} — installing it here ` +
+      'would downgrade the hook (ADR 168). The hook was left untouched. Update ' +
+      'this checkout (`git pull` + `pnpm build`) and re-run.'
+    );
+  }
   const kept = list.filter((g) => !g.hooks.some((h) => h.command.includes(marker)));
   kept.push({
     ...(matcher ? { matcher } : {}),
@@ -274,11 +303,35 @@ export function inspectGrokHookDrift(cwd: string): string[] {
   if (!file) return [];
   const drift: string[] = [];
   for (const spec of LOCAL_HOOKS) {
-    if (!spec.missing) continue;
     if (isDeclined(cwd, `${GROK_PREFIX}:${spec.event}`)) continue;
     const groups = file.hooks?.[spec.event] ?? [];
-    const present = groups.some((g) => g.hooks.some((h) => h.command.includes(spec.marker)));
-    if (!present) drift.push(spec.missing);
+    const installed = groups
+      .flatMap((g) => g.hooks.map((h) => h.command))
+      .find((c) => c.includes(spec.marker));
+    if (installed === undefined) {
+      // ADR 332: only the MISSING branch consults the tombstone. A STALE hook is still installed.
+      if (spec.missing) drift.push(spec.missing);
+      continue;
+    }
+    // Present — but presence was never the question (ADR 168). Compare against what THIS build writes.
+    if (installed !== spec.command) {
+      const theirs = hookEpochOf(installed);
+      if (theirs > FEATURE_EPOCH) {
+        drift.push(
+          `the Grok ${spec.event} hook \`${spec.marker}\` in .grok/hooks/musterd.json was written ` +
+            `by a NEWER musterd (epoch ${String(theirs)}) than this checkout (epoch ${String(FEATURE_EPOCH)}). ` +
+            'The hook is fine — this checkout is behind. Update it (`git pull` + `pnpm build`); do NOT run ' +
+            '`musterd init` here, which would downgrade the hook (ADR 168).',
+        );
+      } else {
+        drift.push(
+          `the Grok ${spec.event} hook \`${spec.marker}\` in .grok/hooks/musterd.json was ` +
+            'written by a different musterd build and no longer matches this one — it is present but ' +
+            'STALE, which no presence check can see (ADR 168). Run `musterd init --refresh-hooks` ' +
+            'here to rewrite it.',
+        );
+      }
+    }
   }
   const leftoverPost = (file.hooks?.['PostToolUse'] ?? []).some((g) =>
     g.hooks.some((h) => h.command.includes(INTERRUPT_MARKER)),
