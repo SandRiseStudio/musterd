@@ -50,6 +50,28 @@ and CLI descriptions tell a counterpart to omit the flags.
 - Merge-keys and refuse-loudly were the rejected alternatives: overlay would still let a sent key
   clobber; refuse would 400 today's MCP/CLI.
 
+## Amendment 1 — strip only what stands (2026-09-14, lane `01M1VHGVBWYM4S73D68SJ5BG7D`)
+
+The decision presumed a stage-one stamp exists. On a lane the worker never submitted — stanley told
+delta to skip `lane_submit` and closed `01M1VEMAKX` (#1370, `d2a0f0fe`) as a non-owner with the
+flags the tool told him to pass — the unconditional strip discarded the only attestation anyone
+would ever offer: the row closed `done` with `merged` null and `git.pr_merged` carrying nothing but
+the lane id (measured by delta 2026-09-06, re-read from the row 2026-09-14). The Consequences'
+remedy, a worker `lane_submit` repeat, is unavailable on a terminal lane, so the loss was permanent,
+and ADR 300's instrument read the lane unattested forever — the ADR 294 harm this ADR was written
+to prevent, arriving through this ADR.
+
+**Amended:** the counterpart strip applies only when `before.merged` is non-null. A counterpart may
+**establish** an attestation on a lane that has none; it may not **replace** one that stands. Every
+case the Problem cites had a standing stamp and is unchanged. The `git.pr_merged` row then carries
+the closer's flags with `attested_by` the closer — true, since the worker attested nothing.
+
+The Decision's last line also claimed "the MCP and CLI descriptions tell a counterpart to omit the
+flags"; the shipped `lane_resolve` description said the opposite. It now says which case is which.
+
+Falsify: a non-owner `lane_resolve {pr, sha, authorized_by}` on a never-submitted lane that closes
+with `merged` null.
+
 ## Observability & Evaluation
 
 **Traces.** No new audit action. `lane.closed` + `git.pr_merged` keep their shapes. After this,

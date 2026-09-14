@@ -330,12 +330,20 @@ export function decideLanePatch(
       );
     }
   }
+  // ADR 305 amendment 1 (lane 01M1VHGVBW, 2026-09-14): strip only when there is something to
+  // protect. The rule guards the WORKER's stage-one stamp from an acceptor's partial overlay — and
+  // it presumed a stamp exists. On a lane the worker never submitted, the same line discarded the
+  // only attestation anyone would ever offer: 01M1VEMAKX / #1370 closed `done` with `merged` null
+  // and `git.pr_merged` carrying nothing but the lane id, and ADR 305's own remedy (a worker
+  // `lane_submit` repeat) is unavailable on a terminal lane. A counterpart may ESTABLISH an
+  // attestation on a lane that has none; it may not REPLACE one that stands.
   const counterpartTerminal =
     body.state !== undefined &&
     LANE_TERMINAL_STATES.has(body.state) &&
     !LANE_TERMINAL_STATES.has(before.state) &&
     before.owner_seat !== null &&
-    member.name !== before.owner_seat;
+    member.name !== before.owner_seat &&
+    before.merged !== null;
   // ADR 348 amendment 2 (lane 01M1VF8166, 2026-09-06): a patch that carries no attestation must
   // not downgrade one that stands. The MCP tool sends `merged: { verification }` on every submit,
   // and a re-route by name (`lane_submit {id, acceptor}`) carries no SHA, so its verification is
