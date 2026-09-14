@@ -63,7 +63,7 @@ point, and the table is wrong without it.
 | claude-code | holds | `PostToolUse` stdout → `PostToolUse:<Tool> hook additional context`, after **native and MCP** calls alike | izzo native 2026-09-14; delta MCP (`team_join`, `team_inbox_check`, `lane_board`, `team_send`, `lane_update`) 2026-09-14 |
 | opencode | holds at native boundaries only | ADR 392 plugin `tool.execute.after` fence. Zero fences across ~15 MCP calls in the same window native fences arrived | ghost, 2026-09-14 |
 | codex | **fails** | `PostToolUse` runs `musterd codex-hook post-tool-use --stdin`; `observeModel` writes `model_observed` and never calls `--interrupt-check`. ADR 249's "existing low-cost interrupt check" is not in the implementation | big-body, 2026-09-14, from `.codex/hooks.json` and source |
-| native | **not shipped** | there is no hook because there is nothing to bridge — the loop owns the message array and every tool result. `EngineRunSpec` is output-only (`onTurn`, no inbound counterpart). One function in `nativeBridge` — append the composed line to the next tool result when raised — and the seam is guaranteed model-reaching, provable from the daemon side via the `wake_turns` capture rows | ryder, 2026-09-14, `native.ts` / `nativeBridge.ts` / `engine.ts` on c8e89dd8 |
+| native | **holds** (shipped 2026-09-14, lane 01M2GNYGEY) | `bridgeTools` asks `MusterdClient.interruptCheck()` after every bridged tool call and `appendInterrupt` appends the daemon-composed line to that tool result. Delivery is provable from the daemon side: the line is in the turn's `wake_turns` capture row | ryder, 2026-09-14, `nativeBridge.ts` / `nativeInterrupt.test.ts`. **Not** the `onBeforeTurn` push this row originally proposed: `BetaToolRunner.pushMessages` sets the runner's private `#mutated`, and the iterator appends the assistant message only `if (!this.#mutated)` — injecting from inside the `for await` body drops the turn the model just took and no tool then runs (@anthropic-ai/sdk 0.116.0, pinned as a regression fixture) |
 
 Six harnesses, four different seams, two with none. **"Every tool boundary" holds nowhere** and
 would pass two configurations that never reached a model (grok's 2026-09-02 PostToolUse hook;
@@ -120,9 +120,10 @@ handlers preserved, removal marker-exact. **Exempt** for native: nothing install
 
 ### (6) The one-line notice headlined by class
 
-Holds wherever (1) delivers: cursor, grok, claude-code, opencode measured it this session. Codex and
-native: **blocked on (1)** — the daemon composes the headline; the harness cannot deliver it. Native
-holds it **at wake only**: `spec.order.composed_line` is the whole prompt the loop starts with.
+Holds wherever (1) delivers: cursor, grok, claude-code, opencode measured it this session. Codex:
+**blocked on (1)** — the daemon composes the headline; the harness cannot deliver it. Native held it
+**at wake only** (`spec.order.composed_line` is the whole prompt the loop starts with) until its
+clause-1 seam shipped; mid-loop it now emits the daemon's line verbatim, never a locally composed one.
 
 And it is where the room found the contract's missing clause, because a notice can be perfectly
 formed, perfectly delivered, and **wrong** — see (7).
@@ -225,9 +226,11 @@ working, and every boundary before that is guaranteed deaf (clause 3, delta).
   addressee's own reply. ryder's ask and delta's steer are the regression fixtures.
 - **Codex has no interrupt seam** and ADR 249 says it does. Someone owns making the document match
   the code or the code match the document.
-- **Native's seam is one function away** (`onBeforeTurn` on the engine seam plus one bridge call);
-  ryder offered to take it as a lane. Once shipped, native is the reference row: the only harness
-  that can prove delivery from the daemon side.
+- ~~**Native's seam is one function away**~~ **Shipped** (ryder, lane 01M2GNYGEY, 2026-09-14) — in
+  the bridge rather than on the engine seam, for the runner reason recorded in the clause-1 row.
+  Native is now the reference row: the only harness that can prove delivery from the daemon side.
+  Still owed: a live arm. Every claim above is from unit tests; no woken native seat has yet
+  received a raised act through it.
 - **Opencode's idle rail is unmeasured** (`session.idle` never fired); the first idle may ring a
   deaf notice rather than a turn — a canary is needed.
 - **Grok and codex doctors** need the clause-4 text comparison and epoch that claude-code and
