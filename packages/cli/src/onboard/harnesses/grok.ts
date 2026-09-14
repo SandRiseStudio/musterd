@@ -171,7 +171,7 @@ function upsertJsonHook(
   const ours = hookEpochOf(command);
   if (installedEpoch > ours) {
     return (
-      `refused to rewrite the Grok ${event} hook in ${path}: it was written by a NEWER musterd ` +
+      `refused to rewrite the Grok ${event} hook \`${marker}\` in ${path}: it was written by a NEWER musterd ` +
       `(epoch ${String(installedEpoch)}), and this build is epoch ${String(ours)} — installing it here ` +
       'would downgrade the hook (ADR 168). The hook was left untouched. Update ' +
       'this checkout (`git pull` + `pnpm build`) and re-run.'
@@ -303,14 +303,16 @@ export function inspectGrokHookDrift(cwd: string): string[] {
   if (!file) return [];
   const drift: string[] = [];
   for (const spec of LOCAL_HOOKS) {
-    if (isDeclined(cwd, `${GROK_PREFIX}:${spec.event}`)) continue;
     const groups = file.hooks?.[spec.event] ?? [];
     const installed = groups
       .flatMap((g) => g.hooks.map((h) => h.command))
       .find((c) => c.includes(spec.marker));
     if (installed === undefined) {
-      // ADR 332: only the MISSING branch consults the tombstone. A STALE hook is still installed.
-      if (spec.missing) drift.push(spec.missing);
+      // ADR 332, same as claude-code: only the MISSING branch consults the tombstone.
+      // A STALE hook is still installed, and refusing a surface was never a licence to leave a wrong one.
+      if (spec.missing && !isDeclined(cwd, `${GROK_PREFIX}:${spec.event}`)) {
+        drift.push(spec.missing);
+      }
       continue;
     }
     // Present — but presence was never the question (ADR 168). Compare against what THIS build writes.
