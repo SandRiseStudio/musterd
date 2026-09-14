@@ -630,6 +630,130 @@ multi-wake lane into repeated cold starts**: once past 256 KiB every subsequent 
 re-reads the lane, and spends its budget re-orienting — ~$3.80 across four wakes for one docs commit
 that was never made from the VM.
 
+### 18c. The rest of what delta measured from inside the VM (2026-09-14 19:28Z, measured by delta)
+
+**Read [18b](#18b) first — it is delta's own writeup of the deaf-arrival finding and it is the
+better record of it.** This section carries the three *other* readings from the same session, which
+delta reported as status acts and which #1396 does not cover, plus one correction to 18a that they
+make necessary.
+
+**1. 18a's finding 2 gains its cause.** The wake brief lands in `.musterd/pending/` and is **cleared
+before turn 1** — that directory's mtime is 19:24, one minute before the session marker, and it is
+empty. `team_wake_context` carries no timeout field. So "a seat can name the *kind* of its doorbell
+and not its *budget*" is not a gap in the packet's design so much as a race: the budget is written
+where the seat cannot reach it in time (2026-09-14 19:28Z, delta; falsify: a woken session that
+reads its own bounds out of `.musterd/pending/` on turn 1).
+
+**2. The allow-list is empty and the tools arrive anyway.** `tool_allowlist` in
+`.musterd/binding.json` is literally `[]`, and the musterd tools are present regardless — #1371's
+artifact read from *inside*, where 18a could only read it from the host. They arrive **deferred**,
+names only, `ToolSearch` first: 18a's finding 1 confirmed from the far end of the same wire.
+
+**3. `host.log` does not exist on the machine at all.** 18a recorded fix 3 as "confirmed, but only
+from outside", with the seat's `tail` refused by the working-directory scope. The truth is stronger
+than a refusal: `find` over the worktree finds nothing, `/data/home/.musterd/host.log` resolves to
+*File does not exist*, and `~/.musterd/` is outside the harness sandbox. The file is **host-side
+only**, so no amount of scope-widening inside the VM would ever surface it. #1376's "attested from
+outside" stands unchanged, and delta declined to work around it (2026-09-14 19:28Z, delta; falsify:
+a `host.log` readable from any path reachable by the seat user on the VM).
+
+### 18a correction — the falsifier's other half never ran
+
+Finding 18a reads as though the whole experiment completed. It did not, and delta's first session
+report said so in a paragraph that never reached this document: **`seat.sh`'s allow-list merge is
+still there.** `deploy/cloud-seat/seat.sh:149-157` still runs the additive node merge and its output
+is live at `.claude/settings.local.json:37`. So the 16:35Z wake carried *both* grants — the image's
+own `--allowedTools mcp__musterd` and the merged one. `residency.woke` on a work order is confirmed;
+**"with the `seat.sh` merge gone" is not measured.**
+
+The merge is provably redundant on `c8e89dd8` — `argTail()` passes the flag unconditionally and
+`permissions.ts:87` carries `mcp__musterd` in the ADR 261 floor — so either alone suffices and
+`seat.sh:148`'s own stated removal condition is met. The clean falsifier is one step: delete
+`seat.sh:143-157`, redeploy, re-wake.
+
+**An image-version tell worth keeping, cheaper than a doctor run.** A work order is always
+seat-policy, and pre-#1371 code omitted `--allowedTools` under seat-policy. So a work-order run that
+*has* the flag in its argv proves the VM is post-#1371 — readable from `ps` alone, with no build, no
+test, and no log access (delta, session `4ea78dcf`).
+
+### A merge attestation cannot be cleared through any exposed path
+
+Measured 2026-09-14 20:00Z by stanley, while trying to repair lane `01M2GBGA03` (falsify: any
+supported call that sets a lane's `merged` back to null).
+
+`updateLane` in `store/lanes.ts` honours `patch.merged === null` and writes `merged_json: null` —
+the store can do it. Nothing can ask it to: `lane_update` (MCP) and `musterd lane update` (CLI)
+expose no `merged` field at all, and `UpdateLaneSchema` types it `.optional()` without
+`.nullable()`, so the wire rejects the clear before policy is ever consulted.
+
+    PATCH /teams/revive/lanes/01M2GBGA03…  {"merged": null}
+    → 400 {"error":{"code":"bad_request","message":"merged: Expected object, received null"}}
+
+ADR 305's strip/establish rules decide *which* attestation a lane ends up with; there is no verb for
+**none**. So a lane that acquires the wrong one keeps it. `01M2GBGA03` spent part of today `done`
+carrying `pr 1376 / 23ae48bb` — the attestation of stanley's twin lane `01M2GB4WZP` — and was
+returned to `active` here, but still carries that PR. Tracked as lane `01M2GR0434`.
+
+## 2026-09-14 — the two pre-registered two-machine experiments, run (lane `01M1T3H3RB`)
+
+README §Verify item 4 named three pre-registered experiments. ADR 365's was witnessed on 09-04. The
+other two were written before a second machine existed and had never been run as their own
+falsifiers. They were run here against the laptop (hub, node `01M14X9J4Y…`) and delta's Fly VM
+(joiner, node `01M1NB5B7J…`, host `850e40a4499168`), both live, 20:15-20:30Z.
+
+| # | experiment | result | evidence |
+| --- | --- | --- | --- |
+| 366-a | a note saved on the VM is readable on the hub, 1:1 within one tick | **PASS on 1:1, FAIL on the bound** | 7 `continuity.memory_saved` saved on the VM, 7 folded to the hub. Latency 22.9 / 33.5 / 53.2 / 56.6 / 58.9 / 72.7 / 82.1 s against `SYNC_PULL_INTERVAL_MS = 60_000` — five inside one tick, two outside, max 1.37 ticks |
+| 366-b | the inbox cursor never swallows — zero re-read, zero skipped | **FAIL** | delta's cursor frozen at 2026-09-04 22:50:17Z — **9.9 days** — across 22 `team_inbox_check` calls on 6 days. 746 unread on the VM, 1305 behind on the hub |
+| 371-1 | a tool-call batch recorded on the VM is counted by the hub | **PASS** | 75 `record.tool_calls` rows folded from the VM node; 133 calls counted for delta on the hub. ADR 371's census baseline ("a joiner's tool calls read as zero on the hub") no longer holds |
+| 371-2 | a seed thread entry written on the VM appears in the hub's seed | **UNRUN** | zero seed-thread payloads have ever crossed from the VM node. The event has never occurred there |
+| 371-3 | an incident report from the VM contributes to the hub's clustering count | **UNRUN** | zero incident payloads from the VM node. Same reason |
+
+The substrate is real: 2220 rows have folded from the VM node, `ledger` 1710, `presence` 386,
+`record` 75, `continuity` 7, `lane` 5. 371-2 and 371-3 are unrun because the *events* have never
+happened on the joiner, not because replication dropped them — they need a write only a seat on that
+machine can originate, and are handed to delta rather than faked from the hub.
+
+### 366-b is not a federation defect, and that is the finding
+
+The pre-registered falsifier reads: *any act A had read appearing unread on B is the ts-cursor defect
+surviving federation and reopens the lane.* It fires — but the cause is not federation, and the
+experiment would have missed that had it only compared the two machines.
+
+**The cursor is frozen on the hub's own seats too** (2026-09-14 20:28Z; falsify: a seat whose unread
+exceeds its `team_inbox_check` limit and whose `inbox_cursors.updated_at` advances anyway):
+
+| seat | machine | cursor last moved | frozen for | unread behind |
+| --- | --- | --- | --- | --- |
+| stanley | laptop (hub) | 09-14 18:51:42Z | 101.7 min | 207 |
+| delta | Fly VM (joiner) | 09-04 22:50:17Z | 9.9 days | 1305 |
+
+stanley is a single-machine seat on the hub that called `team_inbox_check` six times in the frozen
+window. So the two-machine framing was a red herring; delta is simply the extreme case.
+
+**The mechanism is one line** in `planInboxCheck` (`packages/mcp/src/tools/inboxCheck.ts`):
+
+    advanceTo: elided > 0 || shown.length === 0 ? null : shown[shown.length - 1]!.id
+
+If *anything* is elided the cursor does not advance **at all** — not partially, not to the furthest
+row rendered. And `elided = ordered.length - shown.length + unreachable`. So a seat whose unread
+exceeds its limit elides on every check, never advances, and therefore stays above the limit
+forever. **The state is self-sustaining: once a seat is more than `limit` behind, it can never drain
+by checking its inbox.** delta has been in it for 9.9 days and 22 checks.
+
+This is deliberate, and the code says so: *"when the view cannot be complete, the cursor holds… The
+failure mode becomes seeing something twice, which costs a moment, instead of never seeing it, which
+costs the work. The caller names `limit` as the way out, so a backlog still drains in one call."*
+The reasoning is right and the escape hatch is real. What is missing is that **nothing tells the
+seat to use it.** `team_inbox_check` reports `elided_unread` as a number, not as an instruction, and
+no orientation path raises the limit when the number is non-zero. A seat reads "60 elided", reads
+its 50, and moves on — having advanced nothing.
+
+Worth separating from ADR 366's own claim: the *replication* half of decision 5 works. One
+`continuity.cursor_advanced` event did cross from the VM, on 2026-09-04 22:51Z, carrying a message
+id exactly as the ADR specifies. It has not crossed since because there has been nothing to
+replicate — the cursor never moved again on either side.
+
 ## 2026-09-14 — what the cloud seat costs per day
 
 Lane `01M1T3HA9T` asked for the figure the 09-04 open-items list left as "the Fly dashboard figure
