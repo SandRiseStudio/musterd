@@ -69,6 +69,26 @@ ADR 389's four-arm falsifier lives in `packages/cli/src/guardian/falsifier.test.
 
 `guardian.sampled` is written to the **guardian log, not the audit** — on every tick that reached the sample, promoted or not. ADR 389 said "audit"; the audit is a POST to the daemon, which is unreachable at exactly the moment a sample is taken, so a row written there would exist only for the samples that did NOT matter. The eval that decides arming reads the log (falsify: `grep guardian.sampled ~/.musterd/guardian/*.log` after any clean-exit-unreachable tick). The read is pre-registered as a one-week watch, `docs/watches/2026-09-05-adr-389-sampled-read.md` (revisit 2026-09-12, floor 5 rows) — thirty days was the 2026-09-04 figure and nick cut it the next day; the disarm needs one row, so more days only delay it. Read 2026-09-14: VOID on volume — ONE row in the window, because #1308 dropped the stall rate to about one every two days, so a week could not reach its own floor; the successor `docs/watches/2026-09-14-adr-389-sampled-read-successor.md` takes thirty days at the same floor (revisit 2026-10-14). All four rows to date are `wedged: true, frame: ???` (V8 JIT, no symbol) followed by `stall_recovered` inside four minutes with no restart — the disarm shape, recorded not read (falsify: a fifth row of the same shape inside the successor's window disarms the class).
 
+## `daemon_starved` — six pages in one afternoon were the machine, not the daemon (2026-09-14; falsify: on a laptop at load > 2× cores with the daemon unreachable, the guardian must now record `guardian.observed {class: daemon_starved}` and page nobody — a `daemon_wedged` page under that load means this is wrong)
+
+Measured 2026-09-14 (lane `01M2GTB0RA`, izzo): the guardian raised `daemon_wedged`/`daemon_down`
+six times between 20:02Z and 21:23Z. Every query behind the endpoints it was serving (`/next`,
+`/lanes`, `/inbox`) ran in milliseconds on the live db read-only; live handler times were 3–30× that
+because the laptop sat at a load average of 16–29 on 8 cores — other seats' `tsc` (150% CPU) and
+vitest forks, opencode, the daemon itself — with nine sessions polling `/next` and `/inbox` on every
+turn and every statusline refresh. A single-threaded daemon whose every db call is synchronous
+cannot get a slot inside the probe's bound under that load, and its stack sample — whatever frame
+it names (`Statement::JS_all`, `LibuvStreamWrap::OnUvRead`, `???`) — is what a busy healthy daemon
+looks like. Each page cleared by the next autorefresh bounce, which merely happened to arrive.
+
+What changed: the tick reads the 1-minute load average against the core count; over
+`STARVED_LOAD_PER_CORE` (2×) the persisted-unreachable shape classifies `daemon_starved` at
+`observe` — recorded, never a page, because a human cannot fix load by reading about it. The
+daemon's LaunchAgent now carries `ProcessType Interactive` and `Nice -5` so seat tooling yields to
+it, and the statusline and orient nudge read `/next/summary` (three bounded queries) instead of the
+whole brief. The demand side is still the seats': no root `vitest run`, `tsc` or builds on this
+laptop while sessions are live (running-the-gates.md).
+
 ## Traps
 
 - Recency is the hard rule: classification only trusts boot-gated reads (`/health.booted_at`). A probe that greps a raw log tail pages someone for an incident that ended a week ago (observed 2026-07-20 during the ADR 152 work; falsify: feed the tick an old err.log with a fresh mtime and watch `errLinesSinceBoot` — the mtime gate admits it, the boot gate in the daemon's own `booted_at` bounds it).

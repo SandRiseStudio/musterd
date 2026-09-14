@@ -4127,6 +4127,11 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(spine).toMatchObject({ wave: 'later', epoch: 1 });
     const next = await get('/teams/dawn/next', nickTok);
     expect(next.json.next_goal?.id).toBe('client');
+    // Lane 01M2GTB0RA: the per-turn summary agrees with the brief it replaces on the hot path.
+    const summary = await get('/teams/dawn/next/summary', nickTok);
+    expect(summary.status).toBe(200);
+    expect(summary.json.carrying).toBe(next.json.in_flight.length);
+    expect(summary.json.incidents).toEqual(next.json.incidents.map((i: any) => i.lane));
 
     // Teeth #2 — targeted invalidation: stan (the stale lane's owner) got a directed stale_plan wake.
     const inbox = await get('/teams/dawn/inbox?unread=1', stanTok);

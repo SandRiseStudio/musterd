@@ -188,7 +188,7 @@ import {
   touchNode,
   unbindSeat,
 } from '../store/nodes.js';
-import { deriveNext } from '../store/orientation.js';
+import { deriveNext, deriveNextSummary } from '../store/orientation.js';
 import {
   attach,
   clearOrphanPresence,
@@ -4481,6 +4481,13 @@ export async function handleHttp(
           l.state === 'done' ? annotateClose(l, verdicts.get(l.id)) : l,
         );
         return sendJson(res, 200, { lanes: annotated, warnings });
+      }
+
+      // The brief's per-turn numbers (lane 01M2GTB0RA): what the statusline and the orient nudge
+      // actually read, from three bounded queries — never the whole brief on every turn.
+      if (method === 'GET' && rest === '/next/summary') {
+        const { team, member } = authTouch(ctx, slug, req);
+        return sendJson(res, 200, deriveNextSummary(ctx.db, team.id, team.slug, member.name));
       }
 
       // The orientation brief (ADR 049/084) — derived floor over the daemon's own lane/act state.

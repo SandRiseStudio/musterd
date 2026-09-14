@@ -18,6 +18,16 @@ export const GUARDIAN_CLASSES = [
    * than by a reviewer remembering it. Ships at `alert`, like `daemon_down`.
    */
   'daemon_wedged',
+  /**
+   * Alive, unreachable, and the MACHINE is the reason (lane 01M2GTB0RA, 2026-09-14): the load
+   * average is well past the core count, so a single-threaded daemon whose every db call is
+   * synchronous cannot get a slot inside the probe's bound. Six pages in one afternoon were this —
+   * other seats' tsc and vitest, opencode, the daemon itself — each cleared by the next autorefresh
+   * bounce, none a block. The stack sample cannot separate starved from blocked (a busy sync daemon
+   * is always inside some frame); the load average can. Ships at `observe`: a human cannot fix
+   * load by being paged about it, and the page was training seats to clear real ones on sight.
+   */
+  'daemon_starved',
   'schema_drift',
   'wrong_db',
   'error_rate',

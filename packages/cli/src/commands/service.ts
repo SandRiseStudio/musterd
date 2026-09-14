@@ -7,7 +7,7 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir, platform as osPlatform } from 'node:os';
+import { cpus, homedir, loadavg, platform as osPlatform } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { makeEnvelope } from '@musterd/protocol';
 import { ulid } from 'ulid';
@@ -2077,6 +2077,8 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
            * timeout alone — `Runner` takes no options.
            */
           sampleStack: async (pid, seconds) => runSampleTool(pid, seconds),
+          // Lane 01M2GTB0RA: the one signal that separates a starved daemon from a blocked one.
+          loadAverage: () => ({ one: loadavg()[0] ?? 0, cores: Math.max(1, cpus().length) }),
           expected: { dbPath: join(home, 'musterd.db'), schema: null },
           daemonErrLogPath: join(home, 'daemon.err.log'),
           publisherBuildLogPath: join(home, 'live', 'build.log'),
