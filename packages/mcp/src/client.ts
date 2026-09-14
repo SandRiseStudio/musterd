@@ -758,7 +758,17 @@ export class MusterdClient {
    * ignore the value keep today's meaning, because every other path either resolves occupied or
    * rejects.
    */
-  join(timeoutMs?: number, opts?: { parkOnPending?: boolean }): Promise<JoinOutcome> {
+  join(
+    timeoutMs?: number,
+    opts?: { parkOnPending?: boolean; reoccupy?: boolean },
+  ): Promise<JoinOutcome> {
+    // `reoccupy` is an EXPLICIT re-occupy (lane 01M2GP25R3): the caller has reason to believe this
+    // Presence is dead server-side — a daemon bounce, a reaped presence, an MCP transport drop —
+    // and `joinedFlag` is in-process state that cannot see any of those. Answering from it is what
+    // made `team_join` a no-op on exactly the path the deaf line prescribes it for. Clearing the
+    // flag here is the same move the lease-refusal recovery in `request()` already makes, for the
+    // same reason; it is never set speculatively, only when a caller asks to re-occupy.
+    if (opts?.reoccupy === true) this.joinedFlag = false;
     if (this.joinedFlag) return Promise.resolve<JoinOutcome>('occupied');
     if (!this.config.agent_key && !this.config.seatCredential) {
       return Promise.reject(

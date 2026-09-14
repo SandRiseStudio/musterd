@@ -297,10 +297,35 @@ const HOOK_SEAMS: Record<string, (line: string) => string | null> = {
   'claude-code': formatClaudeCodeInterrupt,
 };
 
+/**
+ * Harnesses whose musterd tools arrive DEFERRED — names in the prompt, schemas fetched on demand —
+ * so a tool is granted without being callable (doorbell contract clause 8).
+ *
+ * This decides one thing only: whether the deaf line must name the schema round trip. The repair is
+ * the same everywhere (`team_join`, the only thing that holds a Presence); on these harnesses it is
+ * not *reachable* until the model has re-fetched the schema, so naming it alone prescribes a call
+ * the model cannot make — the same failure this line already refuses for `musterd claim`.
+ *
+ * Measured 2026-09-14 (lane 01M2GP25R3): stanley, laptop, 20:50Z — the MCP server dropped
+ * mid-session while the daemon stayed healthy, and on reconnect all 29 musterd tools came back
+ * deferred; the seat stayed deaf until the model ran `ToolSearch` and then `team_join` by hand.
+ * ryder reproduced the deferral half in an ordinary session the same day, and izzo independently on
+ * every daemon bounce. Cursor's equivalent (`GetDynamicTools`) is a deferral path too but its
+ * transport does not recover in-session at all (`docs/wiki/cursor-agent-live-doorbell-eval.md`
+ * Check 5), so it is deliberately NOT listed here: naming a round trip that cannot help would be
+ * the same mistake in the other direction. Add a harness here only with a measurement behind it.
+ */
+const DEFERRED_TOOL_HARNESSES: Record<string, string> = {
+  'claude-code': 'ToolSearch',
+};
+
 async function interruptCheck(parsed: Parsed): Promise<number> {
   // Which harness's hook is running us, if any: decides whether a raised line (or the deaf line) is
   // printed bare or wrapped in that harness's injection JSON. Unknown value → bare, never a throw.
-  const hookSeam = HOOK_SEAMS[flagStr(parsed.flags, 'hook') ?? ''];
+  const hookFlag = flagStr(parsed.flags, 'hook') ?? '';
+  const hookSeam = HOOK_SEAMS[hookFlag];
+  // The discovery verb this harness makes the model call before a named tool is callable, if any.
+  const discoveryVerb = DEFERRED_TOOL_HARNESSES[hookFlag];
   const emit = (line: string): void => {
     const out = hookSeam ? hookSeam(line) : line;
     if (out !== null) process.stdout.write(out + '\n');
@@ -356,10 +381,21 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
       // naming none: it spends a turn and returns the seat to the same silence.
       // Through the same seam as a raised line: on Claude Code a bare deaf line went to the debug log
       // too, so the one sentence #1317 bought was never read by the model it was written for.
+      //
+      // Clause 8 (lane 01M2GP25R3): on a harness whose tools arrive deferred, `team_join` is itself
+      // not callable until its schema is fetched — so the line names the round trip IN ORDER. Left
+      // implicit, this sentence prescribes a repair the reader cannot perform, which is the exact
+      // failure it already refuses for `musterd claim`; the model then burns the turn discovering
+      // the round trip for itself, which is what stanley measured on 2026-09-14.
+      const reJoin =
+        discoveryVerb !== undefined
+          ? `re-fetch the schema first (${discoveryVerb} select:mcp__musterd__team_join), then ` +
+            `call team_join`
+          : `re-join from your harness adapter (team_join)`;
       emit(
         `musterd: the interrupt line is deaf — this seat's session lease is dead, so every ` +
           `interrupt check is being refused. ` +
-          `it needs a live Presence: re-join from your harness adapter (team_join). ` +
+          `it needs a live Presence: ${reJoin}. ` +
           `\`musterd claim${seat !== undefined ? ' ' + seat : ''}\` mints a lease that dies with ` +
           `the command, and \`--detach\` writes none.`,
       );
