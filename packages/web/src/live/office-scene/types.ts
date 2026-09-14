@@ -226,6 +226,25 @@ export interface OfficeHandle {
    * and whether this browser played it. Two visible viewers of the same team over the same interval
    * must agree on everything but `played`. Capped at the last 200 entries. */
   ambientLog: () => AmbientLogEntry[];
+  /**
+   * Where every posed member is standing right now, in logical floor coordinates, plus whether the
+   * nav grid calls that spot walkable.
+   *
+   * A measurement affordance, and it exists because the question "do members walk through the
+   * furniture?" had two candidate answers that look identical on screen — a painter that sorts a
+   * member behind a desk they are standing in front of, and a walker whose path genuinely crosses a
+   * solid footprint. Only one of those is a nav bug, and the two want opposite fixes, so guessing
+   * costs a session (nick, 2026-09-14). Read from CDP the way `ambientLog` is.
+   */
+  floorSamples: () => {
+    name: string;
+    lx: number;
+    ly: number;
+    /** The PLANNING test: footprints inflated by a body radius. False near furniture, not only in it. */
+    walkable: boolean;
+    /** The COLLISION test: the footprint as drawn, pad 0. This is the one that means "clipping". */
+    inside: boolean;
+  }[];
 }
 
 /** @see OfficeHandle.ambientLog */

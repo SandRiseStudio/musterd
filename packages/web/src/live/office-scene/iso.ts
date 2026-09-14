@@ -48,6 +48,30 @@ export function depth(lx: number, ly: number): number {
 }
 
 /**
+ * The painter's depth key for a piece of furniture with a FOOTPRINT, taken at its near corner rather
+ * than its centre.
+ *
+ * One scalar key per item is the whole painter, and for a person it is honest — a body is about as
+ * wide as it is deep, so its centre is its position. For a 120-wide desk it is a lie: the centre sits
+ * (w + d) / 2 behind the edge the viewer actually sees, so a member standing in FRONT of that edge
+ * still keys lower than the desk and paints behind it. That is the "members walk through the
+ * furniture" nick reported on 2026-09-14, and it is worst on the biggest footprints — desks, the
+ * bench counter, the meeting table — because that is where centre is furthest from edge.
+ *
+ * Keying the near corner makes the comparison the one the eye is making: is the member in front of
+ * this thing's front edge, or behind it? Both answers then come out right, and the seated case is
+ * unchanged in meaning — a member at the chair behind a desk still keys lower than the desk's front
+ * edge, so the slab still paints over their legs, which is what a desk does to your legs.
+ *
+ * Use it for anything whose footprint is large enough for the error to show. Small items (plants,
+ * chairs, a printer) are near enough square that centre and edge agree within a pixel; they stay on
+ * `depth` so their keys keep meaning exactly what they always did.
+ */
+export function nearDepth(lx: number, ly: number, w: number, d: number): number {
+  return lx + ly + (w + d) / 2;
+}
+
+/**
  * Fit the *whole scene* into a panel: centre it and pick the largest scale that leaves a small margin.
  * The projected box is width 2·FLOOR·KX; its height is the full vertical extent — the back walls rising
  * above the diamond (`SCENE_RISE`), the diamond itself (2·FLOOR·KY), and the slab + contact shadow below

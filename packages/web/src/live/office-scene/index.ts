@@ -14,6 +14,7 @@ import { memberInk } from '../format';
 import { platesOpenMode, stillMode } from '../stillMode';
 import { surfaceGlyph } from '../surfaceGlyph';
 import { createActors, deskNeighbourPairs, type Actors } from './actors';
+import { insideSolid, walkable } from './nav';
 import { helpWalks } from './mapping';
 import {
   ambientFrameBudgetMs,
@@ -1892,6 +1893,14 @@ export function mountOffice(
     emit,
     stats: () => ({ ticks, draws, since }),
     ambientLog: () => [...ambientLog],
+    floorSamples: () =>
+      [...actors.poses()].map(([name, p]) => ({
+        name,
+        lx: p.lx,
+        ly: p.ly,
+        walkable: walkable(p.lx, p.ly),
+        inside: insideSolid(p.lx, p.ly),
+      })),
     setSuspended: (on: boolean) => {
       // A stream never parks (ADR 157). The broadcast route has no collapse control, so this only ever
       // fires from a host surface that shouldn't be able to freeze the outgoing frame anyway.

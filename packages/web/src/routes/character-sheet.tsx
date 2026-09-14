@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
 import { canvasFont, preloadCanvasFont } from '../live/canvasFont';
 import { memberColor } from '../live/format';
+import type { CarryKind } from '../live/office-scene/types';
 
 /**
  * `/character-sheet` — the character turnaround. A design fixture, like `/office-preview`: it renders the
@@ -65,6 +66,25 @@ function CharacterSheet() {
       canvas.style.height = `${H}px`;
       const ctx = canvas.getContext('2d')!;
 
+      /*
+       * `?carry=laptop|box|plate|bottle|mug|phone` — DRAW THE SHEET WITH SOMETHING IN HAND.
+       *
+       * This sheet exists to put every body at every facing under 4x scrutiny, and it hardcoded
+       * `carry: null`, so the one class of defect that is ABOUT facing was the one class it could not
+       * show. That cost a real bug: the carried laptop painted after the body's own depth sort, so a
+       * member walking away from the camera showed the laptop through their own back, and the tool
+       * used to review bodies could not draw the frame that proves it (nick, 2026-09-14).
+       *
+       * Value, not presence, because there are six things to carry — unlike `?reduced` on
+       * /office-preview, which is one room or the other. Inert and null unless asked for, so the
+       * sheet's empty-handed day job is unchanged.
+       */
+      const carry = (() => {
+        const v = new URLSearchParams(window.location.search).get('carry');
+        const kinds = ['laptop', 'box', 'plate', 'bottle', 'mug', 'phone'];
+        return v && kinds.includes(v) ? (v as CarryKind) : null;
+      })();
+
       const t0 = performance.now();
       const frame = () => {
         if (stop) return;
@@ -72,6 +92,15 @@ function CharacterSheet() {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.fillStyle = '#e4a96b';
         ctx.fillRect(0, 0, W, H);
+        // The carry as ONE sheet caption, not a per-cell label suffix: CELL is only wide enough for
+        // `name · kind · dir · mode`, and appending to each cell ran the text into its neighbour's.
+        // A screenshot of this sheet still has to say what it is showing, so it says it once.
+        if (carry) {
+          ctx.fillStyle = 'rgba(30,20,10,.72)';
+          ctx.font = canvasFont(12, '--font-mono', 400);
+          ctx.textAlign = 'left';
+          ctx.fillText(`carrying · ${carry}`, 10, 20);
+        }
 
         // A big "fit" so one logical unit is ~1.6px — the character reads at roughly 4× office size.
         const fit = { ox: 0, oy: 0, scale: 1.55 };
@@ -122,7 +151,7 @@ function CharacterSheet() {
               run: false,
               t,
               typing: mode.sit ? typingBurst(seed, t) : 0,
-              carry: null,
+              carry,
               help: false,
               gesture: 0,
               gestureT: 0,
@@ -138,7 +167,7 @@ function CharacterSheet() {
               skel,
               size: 1,
               alpha: 1,
-              carry: null,
+              carry,
               t,
               seed,
             });
