@@ -1,4 +1,10 @@
-import { compareGoals, isAwaitingAcceptance, type Lane, type NextBrief } from '@musterd/protocol';
+import {
+  compareGoals,
+  isAwaitingAcceptance,
+  type Lane,
+  type NextBrief,
+  type NextSummary,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { handoffNamedLaneOutOfPlay, handoffNamesNoLane } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
@@ -79,6 +85,48 @@ interface HandoffRow {
   body: string;
   meta: string | null;
   ts: number;
+}
+
+/**
+ * The brief's three per-turn numbers from three bounded queries (lane 01M2GTB0RA). Must agree with
+ * `deriveNext` on the same db — pinned by orientation.test.ts — without listing every lane, reading
+ * every close verdict, scanning handoffs, or deriving goals, which is what the brief does and what
+ * nine sessions were paying for on every turn.
+ */
+export function deriveNextSummary(
+  db: Database,
+  teamId: string,
+  _teamSlug: string,
+  member: string,
+): NextSummary {
+  const carrying = db
+    .prepare<[string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM lanes
+        WHERE team_id = ? AND owner_seat = ?
+          AND state IN ('claimed', 'active', 'blocked', 'awaiting_acceptance', 'ready_for_review')`,
+    )
+    .get(teamId, member)!.n;
+  const incidents = db
+    .prepare<[string], { id: string }>(
+      `SELECT id FROM lanes WHERE team_id = ? AND kind = 'incident'
+          AND state NOT IN ('done', 'abandoned') ORDER BY created_at`,
+    )
+    .all(teamId)
+    .map((r) => r.id);
+  const owed = db
+    .prepare<[string, string, string], { lane: string; ts: number }>(
+      `SELECT l.id AS lane, m.ts AS ts
+         FROM messages m
+         JOIN members mt ON mt.id = m.to_member
+         JOIN lanes l ON l.team_id = m.team_id
+                     AND l.id = json_extract(m.meta, '$.lane_review.lane')
+        WHERE m.team_id = ? AND m.act = 'ask' AND mt.name = ?
+          AND l.state IN ('awaiting_acceptance', 'ready_for_review')
+          AND (l.owner_seat IS NULL OR l.owner_seat != ?)
+        ORDER BY m.ts ASC, m.id ASC`,
+    )
+    .all(teamId, member, member);
+  return { member, carrying, incidents, owed };
 }
 
 export function deriveNext(

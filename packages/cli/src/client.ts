@@ -18,6 +18,7 @@ import {
   SeedListSchema,
   SeedResultSchema,
   NextBriefSchema,
+  NextSummarySchema,
   PROTOCOL_VERSION,
   ReportSchema,
   resolveAttestedModel,
@@ -73,6 +74,7 @@ import {
   type MemberSummary,
   type MemoryEnvelope,
   type NextBrief,
+  type NextSummary,
   type OpenLane,
   type RefusedCode,
   type Report,
@@ -857,6 +859,16 @@ export class HttpClient {
     const json = await this.request('GET', `/teams/${slug}/next`);
     const parsed = NextBriefSchema.safeParse(json);
     if (!parsed.success) throw new CliError('next response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /** The brief's per-turn numbers (lane 01M2GTB0RA) — `GET /teams/:slug/next/summary`. Three bounded
+   *  queries, for the statusline and the orient nudge; the full brief stays `next()`. */
+  async nextSummary(slug: string): Promise<NextSummary> {
+    const json = await this.request('GET', `/teams/${slug}/next/summary`);
+    const parsed = NextSummarySchema.safeParse(json);
+    if (!parsed.success)
+      throw new CliError('next/summary response did not match the protocol schema', 1);
     return parsed.data;
   }
 

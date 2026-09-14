@@ -31,6 +31,15 @@ describe('buildPlist env', () => {
     expect(xml.match(/<key>EnvironmentVariables<\/key>/g)).toHaveLength(1);
   });
 
+  // Lane 01M2GTB0RA: the daemon was starved six times in one afternoon by seat tooling (tsc,
+  // vitest) on the same laptop. launchd can rank it above that work: ProcessType Interactive and
+  // a negative Nice. The daemon's plist carries both; the other agents keep the default posture.
+  it('ranks the daemon above seat tooling: ProcessType Interactive and Nice -5', () => {
+    const xml = buildPlist(base);
+    expect(xml).toMatch(/<key>ProcessType<\/key>\s*<string>Interactive<\/string>/);
+    expect(xml).toMatch(/<key>Nice<\/key>\s*<integer>-5<\/integer>/);
+  });
+
   it('emits no env keys beyond PATH when none are given (unchanged plist shape)', () => {
     expect(buildPlist(base)).toBe(buildPlist({ ...base, env: {} }));
   });

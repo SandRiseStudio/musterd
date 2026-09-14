@@ -54,6 +54,8 @@ export interface SignalDeps {
   readSince: (path: string, epochMs: number) => Promise<string[]>;
   /** mtime of `path` in epoch ms, null when absent. */
   statMtime: (path: string) => Promise<number | null>;
+  /** The machine's 1-minute load average and core count (lane 01M2GTB0RA); absent = no reader wired. */
+  loadAverage?: () => { one: number; cores: number };
   /** What THIS build expects — drift is measured against the probe's own code. `schema: null`
    *  skips the drift check (the CLI has no compiled-in schema constant to compare against yet). */
   expected: { dbPath: string; schema: number | null };
@@ -249,6 +251,7 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
     ...(probe !== undefined ? { healthProbe: probe } : {}),
     handover,
     ...(stack !== undefined ? { stack } : {}),
+    ...(d.loadAverage !== undefined ? { load: d.loadAverage() } : {}),
     launchd,
     publisherLog: { freshFailure },
     errLinesSinceBoot: errLines.length,

@@ -5,7 +5,7 @@ import { recordBlockedReport } from './incidents.js';
 import { openLane, updateLane } from './lanes.js';
 import { addMember, getMemberByName } from './members.js';
 import { insertMessage } from './messages.js';
-import { WHY_BARE_MAX_AGE_MS, deriveNext } from './orientation.js';
+import { WHY_BARE_MAX_AGE_MS, deriveNext, deriveNextSummary } from './orientation.js';
 import { captureRepoSeed, createSeedFromRelay } from './seeds.js';
 import { createTeam } from './teams.js';
 
@@ -35,6 +35,28 @@ describe('deriveNext — the orientation brief (ADR 049/084)', () => {
     expect(brief.shipped.map((l) => l.id)).toEqual([shipped.id]);
     expect(brief.up_next.map((l) => l.id)).toEqual([open.id]);
     expect(brief.why).toBeNull();
+  });
+
+  // Lane 01M2GTB0RA: the statusline and the per-turn orient nudge called /next — the whole brief,
+  // 0.5 s on the live db and 1.8 s under load — nine sessions at a time, for three numbers. The
+  // summary is those numbers from three bounded queries, and must agree with the brief.
+  it('deriveNextSummary agrees with the brief on carrying, incidents and owed, from bounded queries', () => {
+    const { db, team } = seed();
+    const active = openLane(db, team.id, 'revive', 'stanley', { title: 'spine', claim: true });
+    updateLane(db, team.id, active.id, 'revive', { state: 'active' });
+    const shipped = openLane(db, team.id, 'revive', 'stanley', { title: 'done one', claim: true });
+    updateLane(db, team.id, shipped.id, 'revive', { state: 'done' });
+    const incident = openLane(db, team.id, 'revive', 'nick', {
+      title: 'incident: daemon_down',
+      kind: 'incident',
+    });
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    const summary = deriveNextSummary(db, team.id, 'revive', 'stanley');
+    expect(summary.carrying).toBe(brief.in_flight.length);
+    expect(summary.carrying).toBe(1);
+    expect(summary.incidents).toEqual(brief.incidents.map((i) => i.lane));
+    expect(summary.incidents).toEqual([incident.id]);
+    expect(summary.owed).toEqual(brief.owed_reviews.map((r) => ({ lane: r.lane.id, ts: r.ts })));
   });
 
   it('surfaces the latest handoff to me or @team as the why, with its goal_id', () => {

@@ -22,17 +22,12 @@ describe('defaultStatuslineFetcher against a stub daemon', () => {
   let seen: { path: string; query: string; noTouch: string | undefined }[];
   let inboxBody: Record<string, unknown>;
 
+  // Lane 01M2GTB0RA: the fetchers read `/next/summary`, not the brief.
   const brief = (): Record<string, unknown> => ({
     member: 'dolly',
-    in_flight: [],
-    shipped: [],
-    up_next: [],
-    owed_reviews: [],
+    carrying: 0,
     incidents: [],
-    why: null,
-    next_goal: null,
-    goals: [],
-    review_debt: [],
+    owed: [],
   });
 
   beforeEach(async () => {
@@ -74,7 +69,7 @@ describe('defaultStatuslineFetcher against a stub daemon', () => {
   it('renders a quiet seat and asks for exactly two presence-neutral reads', async () => {
     expect(await emitSessionStatusline(dir)).toBe(`${SEAT_CHIP} dolly · revive · lane: none`);
     // Two, not three: the orientation's memory-envelope call is dropped (the chip has no headline).
-    expect(seen.map((s) => s.path)).toEqual(['/teams/revive/inbox', '/teams/revive/next']);
+    expect(seen.map((s) => s.path)).toEqual(['/teams/revive/inbox', '/teams/revive/next/summary']);
     // The required fix from the first review — a redraw must never fake liveness (ADR 057/241).
     expect(seen.every((s) => s.noTouch === '1')).toBe(true);
     expect(seen[0]?.query).toContain('limit=');
