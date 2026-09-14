@@ -798,7 +798,7 @@ describe('HTTP API', () => {
       await answer(t['cy'], 'cy', 'ans-a', 'el-a');
 
       const inbox = await get('/teams/dawn/inbox', t['bo']);
-      expect(inbox.json.discharged).toContainEqual({ id: 'el-a', by: 'cy' });
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-a', by: 'cy', reason: 'answered' });
     });
 
     it('a decline discharges it too — "not me" is an answer', async () => {
@@ -807,7 +807,7 @@ describe('HTTP API', () => {
       await answer(t['cy'], 'cy', 'ans-b', 'el-b', 'decline');
 
       const inbox = await get('/teams/dawn/inbox', t['bo']);
-      expect(inbox.json.discharged).toContainEqual({ id: 'el-b', by: 'cy' });
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-b', by: 'cy', reason: 'answered' });
     });
 
     it('the discharging act is invisible to bo in the timeline — this is why it needs its own read', async () => {
@@ -820,7 +820,7 @@ describe('HTTP API', () => {
       const timeline = await get('/teams/dawn/messages', t['bo']);
       expect(timeline.json.messages.map((m: { id: string }) => m.id)).not.toContain('ans-c');
       const inbox = await get('/teams/dawn/inbox', t['bo']);
-      expect(inbox.json.discharged).toContainEqual({ id: 'el-c', by: 'cy' });
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-c', by: 'cy', reason: 'answered' });
     });
 
     it('reports the FIRST answer when two land', async () => {
@@ -831,7 +831,7 @@ describe('HTTP API', () => {
 
       const inbox = await get('/teams/dawn/inbox', t['bo']);
       const rows = inbox.json.discharged.filter((d: { id: string }) => d.id === 'el-d');
-      expect(rows).toEqual([{ id: 'el-d', by: 'cy' }]);
+      expect(rows).toEqual([{ id: 'el-d', by: 'cy', reason: 'answered' }]);
     });
 
     it('says nothing to a seat outside the set — it never owed the act', async () => {

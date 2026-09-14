@@ -617,6 +617,8 @@ describe('team_inbox_check handler', () => {
       expect(text(r)).toContain('answered by izzo');
       expect(text(r)).toContain('no longer owe');
       expect((r.structuredContent as any).messages[0].discharged_by).toBe('izzo');
+      // A pre-clause-7 daemon sends no `reason`; the entry still reads as the answer it is.
+      expect((r.structuredContent as any).messages[0].discharged_reason).toBe('answered');
     });
 
     it('stays silent on an act nobody has answered', async () => {
@@ -629,6 +631,48 @@ describe('team_inbox_check handler', () => {
       const r = await handler({ unread_only: true, limit: 50 });
       expect(text(r)).not.toContain('answered by');
       expect((r.structuredContent as any).messages[0].discharged_by).toBeUndefined();
+    });
+
+    /**
+     * Doorbell clause 7 shapes (ii) and (iv). Neither has an answerer. Saying "answered by" would
+     * name a teammate who did nothing; saying nothing would retire the act silently, which is the
+     * defect ADR 254 rejected for shape (iii). The trace says WHY.
+     */
+    it('names the lane closing, and never invents an answerer', async () => {
+      const handler = capture(
+        registerInboxCheck,
+        inboxClient({
+          fetchInbox: (async () => ({
+            messages: [asked],
+            cursor: null,
+            discharged: [{ id: 'el-1', reason: 'lane_closed' }],
+          })) as any,
+        }),
+      );
+      const r = await handler({ unread_only: true, limit: 50 });
+      expect(text(r)).toContain('the lane closed');
+      expect(text(r)).toContain('no longer owe');
+      expect(text(r)).not.toContain('answered by');
+      const m = (r.structuredContent as any).messages[0];
+      expect(m.discharged_reason).toBe('lane_closed');
+      expect(m.discharged_by).toBeUndefined();
+    });
+
+    it('names the read for an act with no answering move', async () => {
+      const handler = capture(
+        registerInboxCheck,
+        inboxClient({
+          fetchInbox: (async () => ({
+            messages: [asked],
+            cursor: null,
+            discharged: [{ id: 'el-1', reason: 'read' }],
+          })) as any,
+        }),
+      );
+      const r = await handler({ unread_only: true, limit: 50 });
+      expect(text(r)).toContain('already been shown');
+      expect(text(r)).not.toContain('answered by');
+      expect((r.structuredContent as any).messages[0].discharged_reason).toBe('read');
     });
 
     it('degrades quietly against an older daemon that sends no trace', async () => {

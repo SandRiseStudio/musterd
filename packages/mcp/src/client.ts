@@ -472,7 +472,10 @@ export class MusterdClient {
      *  Server-computed for the same reason as `answered`, and more so: the discharging reply is a DM
      *  to the asker, so a second eligible seat is not a party to it and cannot see it at any price.
      *  Absent from an older daemon; callers degrade to showing the act as still owed. */
-    discharged?: { id: string; by: string }[];
+    /** Doorbell clause 7: why an act is no longer owed. Only `answered` carries `by` — the lane
+     *  closing and the seat having been shown the act have no answerer to name. `reason` is absent
+     *  on a pre-clause-7 daemon. */
+    discharged?: { id: string; by?: string; reason?: 'answered' | 'lane_closed' | 'read' }[];
     /** Unread this reply could not carry. Non-zero means the read cursor must not move past what
      *  was rendered — see `planInboxCheck`. Absent from an older daemon ⇒ nothing was cut. */
     unread_remaining?: number;
