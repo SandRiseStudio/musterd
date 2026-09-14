@@ -422,12 +422,16 @@ export function pendingInterrupts(
   // is pure over envelopes (no `Database`), so it cannot call the ledger's `actAnswered`. It does not
   // need one — the discharging act is an envelope in the very list being scanned.
   const discharged = new Set<string>();
+  // Clause 7(iv) of the doorbell contract: a steer has no accept/decline — the addressee's reply
+  // IS the answer, whatever act it rides on. Only `me`'s own replies count here; an obligation is
+  // still discharged only by an accept/decline (any sender), as before.
+  const answeredByMe = new Set<string>();
   for (const m of messages) {
     if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
-    if (m.act === 'accept' || m.act === 'decline') {
-      const ref = (m.meta as { in_reply_to?: unknown } | null | undefined)?.['in_reply_to'];
-      if (typeof ref === 'string') discharged.add(ref);
-    }
+    const ref = (m.meta as { in_reply_to?: unknown } | null | undefined)?.['in_reply_to'];
+    if (typeof ref !== 'string') continue;
+    if (m.act === 'accept' || m.act === 'decline') discharged.add(ref);
+    if (m.from === me) answeredByMe.add(ref);
   }
   const isUrgent = (m: Envelope) =>
     (m.meta as { urgent?: unknown } | null | undefined)?.['urgent'] === true;
@@ -554,7 +558,9 @@ export function pendingInterrupts(
         !(isObligation(m) && discharged.has(m.id)) &&
         // Newest steer wins: any steer that isn't the single winner is superseded — it neither
         // interrupts nor counts (a ts tie is broken by id, so no two steers survive together).
-        (m.act !== 'steer' || m.id === winningSteerId),
+        // A winner this seat already replied to is discharged (clause 7(iv)) — and because the
+        // winner is chosen over the whole set first, the superseded steers under it do not rise.
+        (m.act !== 'steer' || (m.id === winningSteerId && !answeredByMe.has(m.id))),
     )
     .sort((a, b) => b.ts - a.ts);
 }

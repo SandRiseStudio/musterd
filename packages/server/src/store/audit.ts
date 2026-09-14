@@ -81,6 +81,14 @@ export type AuditAction =
   // two-word state. Deduped to one row per seat per REFUSAL_WINDOW_MS, because the probe fires at
   // every tool boundary and a deaf seat would otherwise write a row a second.
   | 'interrupt.refused'
+  // Doorbell contract clause 7 (docs/design/daemon-doorbell-contract.md): an interrupt-class act
+  // with NO answering move — a `steer`, an urgent message — was RENDERED to its addressee by an
+  // inbox read. That is its discharge: the ADR 287 watermark may hold behind it forever (an
+  // elided backlog pins the cursor), and a steer perfectly delivered and ringing at every boundary
+  // after it was read and acted on teaches the model to ignore the bell (delta, stanley's steer
+  // 01M2GC25MN, ~20 boundaries across two sessions, 2026-09-14). One row per (recipient, act);
+  // `detail = { act, act_kind }`, never the body.
+  | 'inbox.rendered'
   // ADR 093: a seat wrote or cleared its private memory blob. `detail` carried sizes only
   // (`size_bytes`, `headline_len`) — never the headline or body text (the no-secrets hard rule 5).
   // SUPERSEDED by the `continuity.*` verbs below (ADR 366, 2026-09-03): no new rows are written
@@ -557,6 +565,31 @@ export function appendAudit(db: Database, teamId: string, entry: AuditEntry): vo
     appendAuditRequired(db, teamId, entry);
   } catch (err) {
     log.warn({ msg: 'audit_append_failed', action: entry.action, err: String(err) });
+  }
+}
+
+/**
+ * Which of `actIds` have an `inbox.rendered` row for `target` — the acts this seat has already been
+ * shown by an inbox read (clause 7(iv)). One query for the whole set; empty in, empty out.
+ */
+export function listRenderedActs(
+  db: Database,
+  teamId: string,
+  target: string,
+  actIds: string[],
+): Set<string> {
+  if (actIds.length === 0) return new Set();
+  try {
+    const rows = db
+      .prepare<unknown[], { act: string }>(
+        `SELECT DISTINCT json_extract(detail, '$.act') AS act FROM audit
+          WHERE team_id = ? AND action = 'inbox.rendered' AND target = ?
+            AND json_extract(detail, '$.act') IN (${actIds.map(() => '?').join(',')})`,
+      )
+      .all(teamId, target, ...actIds);
+    return new Set(rows.map((r) => r.act));
+  } catch {
+    return new Set();
   }
 }
 

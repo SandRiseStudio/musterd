@@ -1,4 +1,6 @@
+import { isAwaitingAcceptance } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { listRenderedActs } from './audit.js';
 import type { MessageRow } from './rows.js';
 
 /**
@@ -34,11 +36,11 @@ import type { MessageRow } from './rows.js';
  */
 export function listInterruptCandidates(
   db: Database,
-  member: { id: string; team_id: string },
+  member: { id: string; team_id: string; name: string },
   /** `cursorTs` is the cursor row's `created_at` (see `cursors.ts`) — the window is in receipt order. */
   opts: { cursorTs?: number } = {},
 ): MessageRow[] {
-  const rows = db
+  const windowRows = db
     .prepare<unknown[], MessageRow>(
       `SELECT * FROM messages
         WHERE team_id = ?
@@ -64,18 +66,27 @@ export function listInterruptCandidates(
     )
     .all(member.team_id, member.id, member.id, opts.cursorTs ?? 0);
 
+  // Doorbell contract clause 7 (docs/design/daemon-doorbell-contract.md): six clauses governed
+  // DELIVERY and none governed DISCHARGE, and the fold is pure over what it is handed — so the
+  // shapes that discharge an act from outside the seat's window are this function's to fetch or
+  // to drop. Three live falsifiers on c8e89dd8, 2026-09-14, one per shape below.
+  const rows = dischargeOutsideTheWindow(db, member, windowRows);
+
   // Own suppress acts never survive the filters above: `from_member != me` drops them, and an
   // accept/decline is a DM to the asker so `to_member = me` would not have kept it either.
   // pendingInterrupts can only discharge what it is handed (meta.in_reply_to / resolve.thread),
   // so without this fetch a self-answered obligation keeps ringing the live rail. Same shape as
   // the huddle "mine" fetch below — the fold needs the author's own rows, which the inbox omits.
+  // Any own act carrying `in_reply_to` rides along too: a steer has no accept/decline, so the
+  // addressee's reply — whatever act it rides on — is what discharges it (clause 7(iv)).
   const mineSuppress = db
     .prepare<unknown[], MessageRow>(
       `SELECT * FROM messages
         WHERE team_id = ?
           AND from_member = ?
           AND created_at > ?
-          AND act IN ('resolve','accept','decline')`,
+          AND (act IN ('resolve','accept','decline')
+               OR json_extract(meta, '$.in_reply_to') IS NOT NULL)`,
     )
     .all(member.team_id, member.id, opts.cursorTs ?? 0);
 
@@ -119,6 +130,111 @@ export function listInterruptCandidates(
 
   const byId = new Map<string, MessageRow>();
   for (const r of [...mineSuppress, ...roots, ...mine, ...rows]) byId.set(r.id, r);
+  return [...byId.values()].sort((a, b) =>
+    a.created_at === b.created_at ? (a.id < b.id ? -1 : 1) : a.created_at - b.created_at,
+  );
+}
+
+/**
+ * Clause 7's discharge shapes that live OUTSIDE the seat's inbox window. Each is a fact the fold
+ * cannot see from the rows it is handed, so it is settled here, once, in SQL:
+ *
+ *  (ii)  a routed acceptance whose lane has LEFT awaiting_acceptance is moot — nobody answered
+ *        the ask, the lane simply closed (ryder: ask 01M1N2DDRY on lane 01M1MM1Y, done since
+ *        2026-09-04, rang at every boundary of two sessions for eight days);
+ *  (iii) an eligible-set act a CO-ADDRESSEE already answered — the accept is a DM to the asker,
+ *        so `to_member = me OR team` never carries it; fetched by ref and handed to the fold,
+ *        which already discharges by `in_reply_to`;
+ *  (iv)  a steer (or urgent act) this seat has already been SHOWN by an inbox read — the
+ *        `inbox.rendered` row GET /inbox writes — is discharged, and the superseded steers under
+ *        the newest one are dropped with it so none rises in its place (delta: stanley's steer
+ *        01M2GC25MN rang ~20 boundaries after it was read and acted on).
+ *
+ * Every query here is keyed on ids already in hand and skipped when there are none, so the common
+ * case — a window with no obligation, no eligible set and no steer — costs nothing extra.
+ */
+function dischargeOutsideTheWindow(
+  db: Database,
+  member: { id: string; team_id: string; name: string },
+  rows: MessageRow[],
+): MessageRow[] {
+  const metaOf = (r: MessageRow): Record<string, unknown> => {
+    if (!r.meta) return {};
+    try {
+      return JSON.parse(r.meta) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  };
+  let out = rows;
+
+  // (ii) obligations on lanes no longer awaiting acceptance.
+  const laneOf = new Map<string, string>();
+  for (const r of rows) {
+    if (r.act !== 'ask') continue;
+    const review = metaOf(r)['lane_review'] as { lane?: unknown } | undefined;
+    if (review && typeof review.lane === 'string') laneOf.set(r.id, review.lane);
+  }
+  if (laneOf.size > 0) {
+    const laneIds = [...new Set(laneOf.values())];
+    const states = new Map(
+      db
+        .prepare<unknown[], { id: string; state: string }>(
+          `SELECT id, state FROM lanes WHERE team_id = ? AND id IN (${laneIds.map(() => '?').join(',')})`,
+        )
+        .all(member.team_id, ...laneIds)
+        .map((l) => [l.id, l.state]),
+    );
+    out = out.filter((r) => {
+      const lane = laneOf.get(r.id);
+      if (lane === undefined) return true;
+      const state = states.get(lane);
+      // An unknown lane (replicated ask, local lane not yet folded) keeps ringing: dropping on
+      // absence would silence a real obligation, which is the one direction this must never err.
+      return state === undefined || isAwaitingAcceptance(state);
+    });
+  }
+
+  // (iii) eligible-set acts a co-addressee answered — fetch the answer by ref.
+  const shared = out.filter((r) => metaOf(r)['eligible'] != null).map((r) => r.id);
+  const answers =
+    shared.length === 0
+      ? []
+      : db
+          .prepare<unknown[], MessageRow>(
+            `SELECT * FROM messages
+              WHERE team_id = ?
+                AND act IN ('accept','decline')
+                AND json_extract(meta, '$.in_reply_to') IN (${shared.map(() => '?').join(',')})`,
+          )
+          .all(member.team_id, ...shared);
+
+  // (iv) steers and urgent acts this seat was already shown.
+  const shown = out.filter((r) => r.act === 'steer' || metaOf(r)['urgent'] === true);
+  if (shown.length > 0) {
+    const rendered = listRenderedActs(
+      db,
+      member.team_id,
+      member.name,
+      shown.map((r) => r.id),
+    );
+    if (rendered.size > 0) {
+      // Newest by the fold's own key — the envelope `ts`, id-desc on a tie (ADR 103) — never
+      // `created_at`, which is receipt order and ties across a burst.
+      const steers = shown
+        .filter((r) => r.act === 'steer')
+        .sort((a, b) => (a.ts === b.ts ? (a.id < b.id ? 1 : -1) : b.ts - a.ts));
+      // The newest steer is the only one the fold would ever raise (ADR 103); if it has been
+      // shown, every steer goes — an older one rising in its place would be a superseded
+      // direction ringing as if it were current.
+      const dropAllSteers = steers.length > 0 && rendered.has(steers[0]!.id);
+      out = out.filter((r) => !(r.act === 'steer' ? dropAllSteers : rendered.has(r.id)));
+    }
+  }
+
+  if (answers.length === 0) return out;
+  const byId = new Map<string, MessageRow>();
+  for (const r of [...answers, ...out]) byId.set(r.id, r);
   return [...byId.values()].sort((a, b) =>
     a.created_at === b.created_at ? (a.id < b.id ? -1 : 1) : a.created_at - b.created_at,
   );

@@ -2,7 +2,9 @@ import { makeEnvelope } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
+import { appendAudit } from './audit.js';
 import { rowsToEnvelopes } from './hydrate.js';
+import { openLane } from './lanes.js';
 import { listInterruptCandidates } from './interruptCandidates.js';
 import { addMember } from './members.js';
 import { insertMessage, listInbox, pendingInterrupts } from './messages.js';
@@ -202,5 +204,65 @@ describe('listInterruptCandidates', () => {
     const raised = viaCandidates(db, team, ada, true);
     expect(raised).not.toContain('oblig-no');
     expect(raised).not.toContain('oblig-thread');
+  });
+
+  // Doorbell contract clause 7 (docs/design/daemon-doorbell-contract.md): six clauses governed
+  // delivery and none governed discharge. Three live falsifiers on c8e89dd8, 2026-09-14 — an act
+  // that is perfectly delivered and rings forever teaches the model to ignore the bell.
+
+  it('clause 7(ii): a routed acceptance whose lane has left awaiting_acceptance stops ringing — nobody answered it, the lane simply closed', () => {
+    const { db, team, nick, ada } = seed();
+    // ryder's fixture: ask 01M1N2DDRY for lane 01M1MM1Y, self-closed by its owner on 2026-09-04 with
+    // no accept naming the ask; it rang at every tool boundary of two sessions for eight days.
+    const lane = openLane(db, team.id, team.slug, 'nick', { title: 'office hue' });
+    db.prepare("UPDATE lanes SET state = 'awaiting_acceptance' WHERE id = ?").run(lane.id);
+    say(db, team, nick, ada, 'ask', 'oblig-live', {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+    });
+    expect(viaCandidates(db, team, ada, true)).toContain('oblig-live');
+
+    db.prepare("UPDATE lanes SET state = 'done' WHERE id = ?").run(lane.id);
+    expect(viaCandidates(db, team, ada, true)).not.toContain('oblig-live');
+  });
+
+  it("clause 7(iii): a co-addressee's accept discharges an eligible-set act — the accept is a DM to the asker, outside this seat's window", () => {
+    const { db, team, nick, ada, bob } = seed();
+    say(db, team, nick, null, 'request_help', 'help-shared', {
+      meta: { urgent: true, urgent_reason: 'r', eligible: ['Ada', 'bob'] },
+    });
+    expect(viaCandidates(db, team, ada, true)).toContain('help-shared');
+    // bob answers. The corpus above sends his accept to the team, but a real accept with reply_to is
+    // a DM to the asker (nick): Ada's window is `to_member = Ada OR team` and `from_member != Ada`,
+    // so the act that stands her down never reaches her fold without a fetch by ref.
+    say(db, team, bob, nick, 'accept', 'acc-bob', { meta: { in_reply_to: 'help-shared' } });
+    expect(viaCandidates(db, team, ada, true)).not.toContain('help-shared');
+  });
+
+  it('clause 7(iv): a steer this seat replied to is discharged — a steer has no accept/decline, the reply is the answer', () => {
+    const { db, team, nick, ada } = seed();
+    // delta's fixture: stanley's steer 01M2GC25MN rang ~20 boundaries after delta read it, acted on
+    // it, and replied on it with reply_to — because only accept/decline fed `discharged`.
+    say(db, team, nick, ada, 'steer', 'steer-1');
+    expect(viaCandidates(db, team, ada, true)).toContain('steer-1');
+    say(db, team, ada, nick, 'message', 'reply-1', { meta: { in_reply_to: 'steer-1' } });
+    expect(viaCandidates(db, team, ada, true)).not.toContain('steer-1');
+  });
+
+  it('clause 7(iv): a steer this seat has been shown in an inbox read is discharged, and the superseded steers under it do not rise in its place', () => {
+    const { db, team, nick, ada } = seed();
+    say(db, team, nick, ada, 'steer', 'steer-old');
+    say(db, team, nick, ada, 'steer', 'steer-new');
+    expect(viaCandidates(db, team, ada, true)).toEqual(['steer-new']);
+    // GET /inbox rendered it to Ada (the watermark cursor may still hold behind it, ADR 287).
+    appendAudit(db, team.id, {
+      actor: ada.name,
+      action: 'inbox.rendered',
+      target: ada.name,
+      result: 'allow',
+      detail: { act: 'steer-new', act_kind: 'steer' },
+    });
+    const raised = viaCandidates(db, team, ada, true);
+    expect(raised).not.toContain('steer-new');
+    expect(raised).not.toContain('steer-old');
   });
 });
