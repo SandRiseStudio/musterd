@@ -92,7 +92,8 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
         return textResult(`Can't join: ${(err as Error).message}`);
       }
       try {
-        const result = await claimAndJoin(client, config, target, waitMs);
+        // Explicit join = verify against the server (lane 01M2GP25R3). See claimAndJoin.
+        const result = await claimAndJoin(client, config, target, waitMs, { verify: true });
         if (result.pending) {
           const req = result.pending.requestId;
           const decide = req
