@@ -3465,8 +3465,8 @@ function deskDock(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: numbe
    * object to the eye: the thing you watched walk through the door is the thing that lands here, and
    * that promise breaks the moment one of them is resized alone.
    */
-  const w = sn ? 24 : 5;
-  const d = sn ? 5 : 24;
+  const w = sn ? DOCK_LAPTOP_W : 5;
+  const d = sn ? 5 : DOCK_LAPTOP_W;
   const hL = 17;
   box(ctx, fit, mx, my, w, d, hL, LAPTOP_SILVER, up + 3);
   const g = project(mx, my, fit);
@@ -3638,7 +3638,19 @@ const LAMP_ACROSS = 42;
  * see render.test.ts, which walks every facing against the widest setup on the floor.
  */
 const DOCK_ALONG = 26;
-const DOCK_ACROSS = 40;
+/* 40 → 38. The dock sits outboard, and `|dockAcross| + DOCK_HALF_ACROSS` must stay within the slab's
+   half-width (DESK_W / 2 = 50) or the cradle hangs off the desk edge. When the docked laptop grew from
+   20 to 24 across (#1394) that sum went to 52 and the stands started reading as though they were in
+   front of the monitors, out over nothing (nick, on the broadcast, 2026-09-14). 38 + 12 = 50 exactly. */
+const DOCK_ACROSS = 38;
+
+/** The docked slab's width across the shoulders — the ONE place it is written.
+ *
+ *  `DOCK_HALF_ACROSS` below is derived from it rather than restated, because the pair already drifted
+ *  once: the constant said "20 across" in a comment while `deskDock` drew 24, so every test that
+ *  reasoned about clearance was reasoning about a laptop that is not on the floor. A number used by
+ *  both the painter and the invariant has to have a single home. */
+const DOCK_LAPTOP_W = 24;
 
 /** Where the monitor sits along the desk — the back of the slab, `at(Df / 2 - 12, 0)`. */
 export const MONITOR_ALONG = DESK_D / 2 - 12;
@@ -3648,9 +3660,10 @@ export const MONITOR_ALONG = DESK_D / 2 - 12;
 export const WIDEST_PANEL_HALF = 35;
 
 /** Half the dock's footprint across the shoulders. The LAPTOP is the widest piece, not the cradle
- *  under it — 20 across against the cradle's 17, because the slab stands with its broad face to the
- *  room. Getting this wrong understates the overlap by the exact amount that matters. */
-export const DOCK_HALF_ACROSS = 10;
+ *  under it — `DOCK_LAPTOP_W` against the cradle's 21, because the slab stands with its broad face to
+ *  the room. Getting this wrong understates the overlap by the exact amount that matters, which is
+ *  precisely what happened when the slab was widened and this stayed at 10. */
+export const DOCK_HALF_ACROSS = DOCK_LAPTOP_W / 2;
 
 /** The dock's across for a given facing: outboard, and on the side whose sort term SUBTRACTS. */
 export function dockAcross(dir: Dir): number {
