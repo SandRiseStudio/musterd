@@ -589,6 +589,46 @@ describe('ADR 361 — release, handoff and close on a joiner are decided by the 
     ).toBe(0); // the hub emitted nothing of its own
   });
 
+  it("a close on the joiner is decided by the hub: the answer says done, the hub's log carries lane.closed naming the joiner, and every read on the joiner agrees after the fold (delta, 01M2GBGA03)", async () => {
+    const laneId = await claimedOnJoiner('d');
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { state: 'done', merged: { pr: 1, sha: 'abc', authorized_by: 'nick' } },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(200);
+    // (1) the resolve's own echo is the decision, not the stale local row.
+    expect(res.json.lane).toMatchObject({ id: laneId, owner_seat: 'nick', state: 'done' });
+    expect(res.json.lane.resolved_at).not.toBeNull();
+    expect(res.json.closed).toMatchObject({ verified: false, reason: 'self_close' });
+    expect(getLane(hub.db, hubTeam().id, laneId, 'bravo')).toMatchObject({ state: 'done' });
+    // The terminal transition is recorded once, on the hub, as the seat, naming the joiner —
+    // the same shape a release takes. Without it nothing ever folds the close back.
+    const closed = laneAudit(hub.db, laneId, 'lane.closed');
+    expect(closed).toHaveLength(1);
+    expect(closed[0]!.actor).toBe('nick');
+    expect(JSON.parse(closed[0]!.detail)).toMatchObject({
+      node: joinerNode(),
+      state: 'done',
+      closed_by: 'nick',
+      verified: false,
+      reason: 'self_close',
+    });
+    expect(
+      laneAudit(joiner.db, laneId, 'lane.closed').filter((r) => r.origin_node === joinerNode()),
+    ).toHaveLength(0);
+    // The origin speaks: one `[lane] resolved` act, minted on the joiner as nick.
+    expect(actsOn(joiner.db, joinerTeam().id, 'lane_resolve', laneId)).toBe(1);
+    // (2)/(3): the board and the wake context read this row — after the fold it says done.
+    await hubToJoiner();
+    expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')).toMatchObject({
+      owner_seat: 'nick',
+      state: 'done',
+    });
+    expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')!.resolved_at).not.toBeNull();
+  });
+
   it('a terminal close while the hub is unreachable refuses hub_unreachable and moves nothing', async () => {
     const laneId = await claimedOnJoiner('c');
     await hub.close();
