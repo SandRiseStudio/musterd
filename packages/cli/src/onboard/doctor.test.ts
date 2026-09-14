@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CliError } from '../errors.js';
 import type { DetectResult } from './harness.js';
 
 // Hoisted mock state: the harnesses the doctor inspects + the primer classification + the folder
@@ -15,6 +16,8 @@ const h = vi.hoisted(() => ({
   spec: null as { surface?: string } | null,
   roster: { members: [] as any[] },
   rosterThrows: false,
+  interruptCheck: { raised: false } as { raised: boolean; line?: string },
+  interruptCheckThrows: null as unknown,
   agentKeys: {} as Record<string, string>,
   knownIdentities: [] as { team: string; name: string; key: string; surface: string }[],
 }));
@@ -52,7 +55,15 @@ vi.mock('../client.js', () => ({
       if (h.rosterThrows) throw new Error('unreachable');
       return h.roster;
     }
+    async interruptCheck() {
+      if (h.interruptCheckThrows) throw h.interruptCheckThrows;
+      return h.interruptCheck;
+    }
   },
+  // Pure predicate — mirrored from the real module so the dead-lease tests exercise the real
+  // refusal shape (code + message), not the mock's opinion of it.
+  isSessionLeaseRefusal: (error: { code: string; message: string }) =>
+    error.code === 'unauthorized' && /agent session lease/i.test(error.message),
 }));
 
 const { buildSkewNotes, footprintNotes, inspectProvisioning, runSessionProbe } =
@@ -908,6 +919,91 @@ describe('inspectProvisioning — model attestation (ADR 120)', () => {
     expect(report.notes).toContainEqual(
       expect.stringContaining('MCP model declaration is unknown'),
     );
+  });
+});
+
+/**
+ * The dead hook lease (lane 01M2H0GHMK): the folder binding carries a session lease the daemon
+ * refuses, while the seat holds a live adapter Presence here — the interrupt line is deaf and
+ * every other surface reads healthy. The doctor is the second channel that names it.
+ *
+ * Red-first: the first version of the note's repair named `musterd claim`, which mints a lease
+ * that dies with the command — the exact un-prescription the deaf line refuses to give. The
+ * tests pin the adapter rejoin instead.
+ */
+describe('inspectProvisioning — the dead hook lease (lane 01M2H0GHMK)', () => {
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'none';
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      surface: 'cli',
+      claim: { mode: 'seat', name: 'Ada' },
+      seat_credential: 'msac_x',
+      session_lease: 'msls_dead',
+    };
+    h.roster = { members: [] };
+    h.rosterThrows = false;
+    h.interruptCheck = { raised: false };
+    h.interruptCheckThrows = null;
+    process.env['MUSTERD_WORKSPACE'] = 'repo@main';
+  });
+  afterEach(() => {
+    delete process.env['MUSTERD_WORKSPACE'];
+  });
+
+  function adaLive() {
+    h.roster = {
+      members: [{ name: 'Ada', presences: [{ status: 'online', workspace: 'repo@main' }] }],
+    };
+  }
+
+  function leaseRefusal() {
+    return new CliError('invalid, expired, or revoked agent session lease', 1, 'unauthorized');
+  }
+
+  it('notes (never drift) when the folder lease is refused but the seat is live here', async () => {
+    adaLive();
+    h.interruptCheckThrows = leaseRefusal();
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+    expect(r.notes).toContainEqual(expect.stringContaining('session lease is dead'));
+    expect(r.notes).toContainEqual(expect.stringContaining('team_join'));
+  });
+
+  it('is silent when the lease still answers, raised or not', async () => {
+    adaLive();
+    h.interruptCheck = { raised: true, line: 'someone took a turn' };
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent with no live Presence here — an offline seat owes no bell', async () => {
+    h.interruptCheckThrows = leaseRefusal();
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent with no lease on disk — ambient and CLI-human steady state stays quiet', async () => {
+    adaLive();
+    (h.binding as Record<string, unknown>)['session_lease'] = undefined;
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent when the server is unreachable — never invents drift', async () => {
+    adaLive();
+    h.rosterThrows = true;
+    const r = await inspectProvisioning('/x');
+    expect(r.notes).toEqual([]);
+  });
+
+  it('is silent on a refusal that is not a lease refusal — a bad credential is nobody’s hook problem', async () => {
+    adaLive();
+    h.interruptCheckThrows = new CliError('forbidden', 1, 'forbidden');
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
   });
 });
 
