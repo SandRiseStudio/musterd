@@ -56,6 +56,18 @@ export interface EngineRunSpec {
   onTurn?: ((turn: EngineTurn) => void) | undefined;
 }
 
+/**
+ * The seam is deliberately output-only, and the doorbell contract's clause 1 does NOT change that.
+ *
+ * A raised act reaches the native loop's model through the **tool result** (`appendInterrupt` in
+ * `backends/nativeBridge.ts`), not through an inbound `onBeforeTurn` on this interface. Two reasons,
+ * both recorded there: the tool boundary is the same place every hooked harness delivers at, and the
+ * message-push alternative is unsafe against the shipping runner (pushing mid-iteration drops the
+ * assistant turn — `@anthropic-ai/sdk` 0.116.0, pinned by `nativeInterrupt.test.ts`). Keeping the
+ * injection in the bridge also keeps it where it belongs: the engine still knows nothing about
+ * musterd, and a second provider inherits the doorbell for free.
+ */
+
 export interface EngineRunResult {
   turns: number;
   end: EngineEndReason;

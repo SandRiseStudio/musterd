@@ -43,10 +43,41 @@ export function contentToText(content: unknown): string {
     .join('\n');
 }
 
+/**
+ * The native row's interrupt seam (doorbell contract clause 1, `docs/design/daemon-doorbell-contract.md`).
+ * Asked once per tool boundary; returns the daemon-composed one-line notice, or null for silence.
+ * Never throws — a probe that rides every tool call must not fail the call it rides on.
+ */
+export type InterruptProbe = () => Promise<string | null>;
+
+/**
+ * Where a raised act enters model context on the native row: appended to the **tool result**, which
+ * is the same boundary every hooked harness delivers at (claude-code PostToolUse stdout, cursor's
+ * system_reminder, opencode's plugin fence) and the only place on this row where delivery is
+ * guaranteed rather than probable.
+ *
+ * It is deliberately NOT an `onBeforeTurn` message push, which is the shape the contract sketched.
+ * `BetaToolRunner.pushMessages` routes through `setMessagesParams`, which sets the runner's private
+ * `#mutated` flag; the iterator reads that flag after the yield and **skips appending the assistant
+ * message** when it is set. So pushing a user message from inside the `for await` body silently
+ * drops the turn the model just took, and the tool response is then computed against our injected
+ * message instead of the assistant's `tool_use` — no tool runs, and the loop re-requests without the
+ * assistant turn. Measured against @anthropic-ai/sdk 0.116.0 (`BetaToolRunner.mjs`, the
+ * `if (!this.#mutated)` branch); `nativeInterrupt.test.ts` pins it as a regression fixture.
+ *
+ * A tool result is plain text, so appending here cannot make the conversation malformed, and the
+ * daemon can prove delivery from its own side: the line is in the `wake_turns` capture row.
+ */
+export function appendInterrupt(text: string, line: string | null): string {
+  if (!line) return text;
+  return text ? `${text}\n\n${line}` : line;
+}
+
 /** Bridge every rendered tool 1:1 into the engine's shape. Generic over any MCP server on
- *  purpose — the mapping carries no musterd knowledge. */
+ *  purpose — the mapping carries no musterd knowledge; the probe is passed in for the same reason. */
 export async function bridgeTools(
   client: Pick<BridgeClient, 'listTools' | 'callTool'>,
+  probe?: InterruptProbe,
 ): Promise<EngineTool[]> {
   const { tools } = await client.listTools();
   return tools.map((t) => ({
@@ -58,7 +89,10 @@ export async function bridgeTools(
         name: t.name,
         arguments: (input ?? {}) as Record<string, unknown>,
       });
-      return contentToText(result.content);
+      const text = contentToText(result.content);
+      // Best-effort and silent: a throwing probe leaves the tool result exactly as it was.
+      const line = probe ? await probe().catch(() => null) : null;
+      return appendInterrupt(text, line);
     },
   }));
 }
@@ -126,7 +160,11 @@ export async function openNativeBridge(config: McpConfig): Promise<NativeBridge>
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const harness = new Client({ name: 'musterd-native', version: '0.0.0' });
   await Promise.all([mcp.connect(serverTransport), harness.connect(clientTransport)]);
-  const tools = await bridgeTools(harness);
+  // The doorbell (clause 1): the same object that holds the Presence asks the daemon whether an act
+  // is raised, and the answer rides out on the tool result. `interruptCheck` is silent until the
+  // first tool call has autojoined (`holdsSeat` is false before it), which is exactly right — an
+  // occupancy that does not exist yet has no inbox to interrupt.
+  const tools = await bridgeTools(harness, () => musterd.interruptCheck());
   return {
     tools,
     close: async () => {

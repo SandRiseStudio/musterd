@@ -650,6 +650,35 @@ export class MusterdClient {
     return this.request('POST', `/teams/${this.config.team}/availability`, body);
   }
 
+  /**
+   * The mid-loop interrupt probe (ADR 088) — the read half of the doorbell's clause 1, for adapters
+   * that ARE the harness rather than being hooked into one (the native row, ADR 251).
+   *
+   * Silent-or-one-line by contract: `{raised:false}` is the common path and costs one indexed read
+   * on the daemon. The line is daemon-composed from structured fields, never a message body — this
+   * text rides into model context uninspected, so composing it here would be an injection surface.
+   *
+   * Returns null rather than throwing, on every failure: a probe that rides every tool boundary
+   * must never fail the tool call it rides on. Unlike the CLI's one-shot probe, a refused lease here
+   * is repaired by `request()`'s single re-join — this object IS the Presence writer, so the
+   * permanent-deafness failure the CLI has to print a line about cannot occur (doorbell clause 3).
+   */
+  async interruptCheck(): Promise<string | null> {
+    if (!this.holdsSeat) return null;
+    try {
+      const res = (await this.request(
+        'GET',
+        `/teams/${this.config.team}/inbox/interrupt-check`,
+      )) as {
+        raised?: boolean;
+        line?: string;
+      };
+      return res.raised && res.line ? res.line : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** The insight report (ADR 050/084) — one server-side projection. */
   report(): Promise<Report> {
     return this.request('GET', `/teams/${this.config.team}/report`);
