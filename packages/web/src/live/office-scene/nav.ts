@@ -47,10 +47,18 @@ interface Rect {
   y0: number;
   x1: number;
   y1: number;
+  /** What this footprint is, for measurement read-outs only — the grid never reads it. */
+  tag?: string;
 }
 
-function rect(lx: number, ly: number, w: number, d: number, pad = BODY_R): Rect {
-  return { x0: lx - w / 2 - pad, y0: ly - d / 2 - pad, x1: lx + w / 2 + pad, y1: ly + d / 2 + pad };
+function rect(lx: number, ly: number, w: number, d: number, pad = BODY_R, tag?: string): Rect {
+  return {
+    x0: lx - w / 2 - pad,
+    y0: ly - d / 2 - pad,
+    x1: lx + w / 2 + pad,
+    y1: ly + d / 2 + pad,
+    ...(tag ? { tag } : {}),
+  };
 }
 
 /** Every solid footprint on the floor — mirrors what render.ts draws (rugs excluded: walkable). */
@@ -61,44 +69,44 @@ function solidRects(): Rect[] {
       // One counter segment per seat — sized to the drawn counter (BENCH.deep), not to DESK_D: the
       // grid must match the picture, and a 68-deep blocker under a 30-deep counter would make
       // walkers skirt furniture that is not there.
-      out.push(rect(slot.lx, slot.ly, BENCH.long / BENCH.seats, BENCH.deep));
+      out.push(rect(slot.lx, slot.ly, BENCH.long / BENCH.seats, BENCH.deep, BODY_R, `bench-seat-${slot.id}`));
     } else {
       const sn = slot.dir === 'S' || slot.dir === 'N';
-      out.push(rect(slot.lx, slot.ly, sn ? DESK_W : DESK_D, sn ? DESK_D : DESK_W));
+      out.push(rect(slot.lx, slot.ly, sn ? DESK_W : DESK_D, sn ? DESK_D : DESK_W, BODY_R, `desk-${slot.id}`));
     }
     const f = FWD[slot.dir];
     // the task chair sits behind the desk; pad it lightly so its own seat spot stays reachable
-    out.push(rect(slot.lx - f[0] * CHAIR_OFF, slot.ly - f[1] * CHAIR_OFF, CHAIR_SIZE, CHAIR_SIZE, 4));
+    out.push(rect(slot.lx - f[0] * CHAIR_OFF, slot.ly - f[1] * CHAIR_OFF, CHAIR_SIZE, CHAIR_SIZE, 4, `chair-${slot.id}`));
   }
   const L = LOUNGE;
-  out.push(rect(NOOK.lx + L.fridge.dx, NOOK.ly + L.fridge.dy, L.fridge.w, L.fridge.d));
-  out.push(rect(NOOK.lx + L.counter.dx, NOOK.ly + L.counter.dy, L.counter.w, L.counter.d));
-  out.push(rect(NOOK.lx + L.cooler.dx, NOOK.ly + L.cooler.dy, L.cooler.w, L.cooler.d));
-  out.push(rect(NOOK.lx + L.couch.dx, NOOK.ly + L.couch.dy, L.couch.len, L.couch.dep));
-  out.push(rect(NOOK.lx + L.table.dx, NOOK.ly + L.table.dy, L.table.w, L.table.d));
-  out.push(rect(MEETING.lx, MEETING.ly, MEETING.w, MEETING.d));
+  out.push(rect(NOOK.lx + L.fridge.dx, NOOK.ly + L.fridge.dy, L.fridge.w, L.fridge.d, BODY_R, 'fridge'));
+  out.push(rect(NOOK.lx + L.counter.dx, NOOK.ly + L.counter.dy, L.counter.w, L.counter.d, BODY_R, 'nook-counter'));
+  out.push(rect(NOOK.lx + L.cooler.dx, NOOK.ly + L.cooler.dy, L.cooler.w, L.cooler.d, BODY_R, 'cooler'));
+  out.push(rect(NOOK.lx + L.couch.dx, NOOK.ly + L.couch.dy, L.couch.len, L.couch.dep, BODY_R, 'couch'));
+  out.push(rect(NOOK.lx + L.table.dx, NOOK.ly + L.table.dy, L.table.w, L.table.d, BODY_R, 'nook-table'));
+  out.push(rect(MEETING.lx, MEETING.ly, MEETING.w, MEETING.d, BODY_R, 'meeting-table'));
   for (const c of MEETING.chairs) {
-    out.push(rect(MEETING.lx + c.dx, MEETING.ly + c.dy, MEETING.chairSize, MEETING.chairSize, 4));
+    out.push(rect(MEETING.lx + c.dx, MEETING.ly + c.dy, MEETING.chairSize, MEETING.chairSize, 4, 'meeting-chair'));
   }
   // Reception's waiting chair. Padded like the other chairs so its own seat spot stays reachable —
   // a chair that blocks its own approach is a seat nobody can walk to.
-  out.push(rect(RECEPTION.chair.lx, RECEPTION.chair.ly, WAIT_CHAIR, WAIT_CHAIR, 4));
-  out.push(rect(RECEPTION.endTable.lx, RECEPTION.endTable.ly, END_TABLE, END_TABLE));
-  out.push(rect(RECEPTION.plant.lx, RECEPTION.plant.ly, 26, 26));
-  out.push(rect(PRINTER.lx, PRINTER.ly, PRINTER.w, PRINTER.d));
+  out.push(rect(RECEPTION.chair.lx, RECEPTION.chair.ly, WAIT_CHAIR, WAIT_CHAIR, 4, 'wait-chair'));
+  out.push(rect(RECEPTION.endTable.lx, RECEPTION.endTable.ly, END_TABLE, END_TABLE, BODY_R, 'end-table'));
+  out.push(rect(RECEPTION.plant.lx, RECEPTION.plant.ly, 26, 26, BODY_R, 'reception-plant'));
+  out.push(rect(PRINTER.lx, PRINTER.ly, PRINTER.w, PRINTER.d, BODY_R, 'printer'));
   // The front desk blocks like the bookshelves do — a counter you can walk through is a rug.
-  out.push(rect(FRONT_DESK.lx, FRONT_DESK.ly, FRONT_DESK.long, FRONT_DESK.deep));
-  for (const p of PLANTS) out.push(rect(p.lx, p.ly, 26, 26));
+  out.push(rect(FRONT_DESK.lx, FRONT_DESK.ly, FRONT_DESK.long, FRONT_DESK.deep, BODY_R, 'front-desk'));
+  for (const p of PLANTS) out.push(rect(p.lx, p.ly, 26, 26, BODY_R, 'plant'));
   for (const s of BOOKSHELVES) {
     const sn = s.dir === 'S' || s.dir === 'N';
     // Per-shelf footprint — the units are no longer one repeated box, and a blocker sized off the
     // old shared constants would let people walk through the wide ones.
-    out.push(rect(s.lx, s.ly, sn ? s.long : s.deep, sn ? s.deep : s.long));
+    out.push(rect(s.lx, s.ly, sn ? s.long : s.deep, sn ? s.deep : s.long, BODY_R, 'bookshelf'));
   }
   // entrance door posts (the doorway between them stays open) — the door runs along the back-left wall,
   // so the posts straddle it in ly with the plane set back in −lx.
-  out.push(rect(ENTRANCE.lx - 42, ENTRANCE.ly - 44, 10, 10, 6));
-  out.push(rect(ENTRANCE.lx - 42, ENTRANCE.ly + 44, 10, 10, 6));
+  out.push(rect(ENTRANCE.lx - 42, ENTRANCE.ly - 44, 10, 10, 6, 'door-post'));
+  out.push(rect(ENTRANCE.lx - 42, ENTRANCE.ly + 44, 10, 10, 6, 'door-post'));
   return out;
 }
 
@@ -130,11 +138,31 @@ function grid(): Uint8Array {
  * in the scene routes on it.
  */
 export function insideSolid(lx: number, ly: number): boolean {
+  return solidHit(lx, ly) !== null;
+}
+
+/**
+ * Which drawn footprint this point is inside, and how far past its edge — measurement only.
+ *
+ * `inset` is the distance to the nearest edge of that footprint, and it is the discriminator the
+ * clipping question needs: a walker brushing an edge reads a small inset, a path routed straight
+ * across a desk reads a large one. `tag` says whose furniture it is, which separates "the last leg
+ * into my own seat" (expected — findPath tolerates blocked endpoints by design) from "cut the corner
+ * across someone else's desk" (not expected).
+ */
+export function solidHit(lx: number, ly: number): { tag: string; inset: number } | null {
+  let best: { tag: string; inset: number } | null = null;
   for (const r of solidRects()) {
     // solidRects() bakes BODY_R in; take it back out to recover the drawn footprint.
-    if (lx >= r.x0 + BODY_R && lx <= r.x1 - BODY_R && ly >= r.y0 + BODY_R && ly <= r.y1 - BODY_R) return true;
+    const x0 = r.x0 + BODY_R;
+    const y0 = r.y0 + BODY_R;
+    const x1 = r.x1 - BODY_R;
+    const y1 = r.y1 - BODY_R;
+    if (lx < x0 || lx > x1 || ly < y0 || ly > y1) continue;
+    const inset = Math.min(lx - x0, x1 - lx, ly - y0, y1 - ly);
+    if (!best || inset > best.inset) best = { tag: r.tag ?? 'untagged', inset };
   }
-  return false;
+  return best;
 }
 
 /** Is this logical point walkable (inside the floor, not inside a solid footprint)? */

@@ -14,7 +14,7 @@ import { memberInk } from '../format';
 import { platesOpenMode, stillMode } from '../stillMode';
 import { surfaceGlyph } from '../surfaceGlyph';
 import { createActors, deskNeighbourPairs, type Actors } from './actors';
-import { insideSolid, walkable } from './nav';
+import { solidHit, walkable } from './nav';
 import { helpWalks } from './mapping';
 import {
   ambientFrameBudgetMs,
@@ -1899,7 +1899,8 @@ export function mountOffice(
         lx: p.lx,
         ly: p.ly,
         walkable: walkable(p.lx, p.ly),
-        inside: insideSolid(p.lx, p.ly),
+        hit: solidHit(p.lx, p.ly),
+        sit: p.sit,
       })),
     setSuspended: (on: boolean) => {
       // A stream never parks (ADR 157). The broadcast route has no collapse control, so this only ever

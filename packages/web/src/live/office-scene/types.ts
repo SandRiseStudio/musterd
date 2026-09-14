@@ -242,8 +242,16 @@ export interface OfficeHandle {
     ly: number;
     /** The PLANNING test: footprints inflated by a body radius. False near furniture, not only in it. */
     walkable: boolean;
-    /** The COLLISION test: the footprint as drawn, pad 0. This is the one that means "clipping". */
-    inside: boolean;
+    /**
+     * The COLLISION test: which footprint as DRAWN (pad 0) this member is inside, or null. `inset` is
+     * how far past its nearest edge — a walker brushing an edge reads small, a path straight across a
+     * desk reads large — and `tag` says whose furniture it is.
+     */
+    hit: { tag: string; inset: number } | null;
+    /** The sit blend, 0 standing … 1 seated. A member easing into a chair is inside their own desk
+     *  legitimately, and still moving — so clipping has to be split on this or the sit-down is
+     *  counted as walking through the table. */
+    sit: number;
   }[];
 }
 
