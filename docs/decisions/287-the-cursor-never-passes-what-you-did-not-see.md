@@ -75,13 +75,13 @@ board two ADRs before it reached the brief.
    far the cursor may move — so the two can never disagree.
 2. **Newest-first is preserved.** A seat that checks once a turn must not be handed the stalest 50
    and told the urgent ask is behind them. Relevance ordering is not the defect and is not changed.
-3. ~~**When the view cannot be complete, the cursor does not move at all.**~~ AMENDED 2026-09-14
-   (lane 01M2GT874Y, see Amendment 1 below): the cursor advances over the **contiguous rendered
-   prefix**, and the oldest unread are rendered as bounded one-line digest entries so that prefix is
-   never empty. The failure mode is still seeing a message twice, which costs a moment, instead of
-   never seeing it, which costs the work. That is the same trade the CLI made, and the same one ADR
-   173 makes for abstention: the cheap error is preferred to the expensive one, deliberately and in
-   one direction.
+3. **When the view cannot be complete, the cursor does not move at all.** The failure mode becomes
+   seeing a message twice, which costs a moment, instead of never seeing it, which costs the work.
+   That is the same trade the CLI made, and the same one ADR 173 makes for abstention: the cheap
+   error is preferred to the expensive one, deliberately and in one direction. _(Amended
+   2026-09-14: held entirely, this was a treadmill — a seat past its limit never advanced. The
+   cursor now walks the contiguous rendered prefix, with the oldest unread rendered as bounded
+   digest lines so that prefix is never empty; see Amendment 1, lane 01M2GT874Y.)_
 4. **The elision is stated, and stated first.** The reply leads with the count of unread it could not
    show, says plainly that nothing was marked read, and names the exact `limit` that would drain the
    backlog in one more call. An elision the reader is not told about is the same defect one layer up
