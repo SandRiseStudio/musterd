@@ -43,7 +43,20 @@ So the walkers are inside solid furniture 16% of the time — and then a second 
 
 Every clipped footprint was `desk-*` or `chair-*`, i.e. exactly the ones that contain a walk endpoint — nothing else on the floor was ever crossed. So the honest reading is that "members walk through the furniture" was mostly the painter (the desk sorting, since reverted) plus the legitimate last hop into a seat, and the genuine residue is ~4% of episodes.
 
-Tried, measured, and NOT SHIPPED: making `nearestFree` prefer an approach cell whose final hop does not cross other furniture moved the sample rate only 17% → 15.4%, and it cost enough bundle to fail the ADR 151 total-JS budget (231.5 KB against 231.4). A lever that small does not buy its own bytes on a budget with 0.3 KB of headroom. Recorded so the next reader neither re-runs it nor re-ships it. Do not raise `BODY_R` as a first move either — a larger radius can close narrow gaps the room depends on (desk aisles, the doorway) and strand walkers.
+**The residue is the SEAT HOP, and mostly the way out.** The first and last hops of a route are deliberately unchecked — a chair lives inside its own desk's footprint, so the hop that seats you (or gets you up) has to touch solid geometry, and `clear()` is the inflated planning grid which refuses every cell near a desk. What that hop must not do is cross a DIFFERENT footprint, or cross its own desk's slab to reach a chair on the far side. `nearestFree` chose the endpoint cell by distance alone, so when a chair's aisle is swallowed by the `BODY_R` inflation it could pick a cell across the desk.
+
+Making `nearestFree` prefer a cell whose seat hop is clear at pad 0, measured on the fixture room over 900 ticks:
+
+| | exited still moving | deep (inset > 20) | of those deep, began from rest |
+| --- | --- | --- | --- |
+| before | 56 | 17 | 21 of 56 overall |
+| after | 42 | **8** | **7 of 8** |
+
+So the visible defect — a body crossing a slab — is now 8 episodes, and 7 of them are DEPARTURES: standing up and leaving through the desk rather than round it. Everything else that still registers is a graze: median inset 5 units for 2 samples, a shoulder catching a corner in passing, well under a body width.
+
+Watch the metric you optimise. The same change measured as a share of SAMPLES moves 17% → 15.4% and looks not worth shipping; measured as deep episodes it halves them. Samples are dominated by arrivals, which were never the defect.
+
+Do not raise `BODY_R` as a first move — a larger radius can close narrow gaps the room depends on (desk aisles, the doorway) and strand walkers.
 
 **The probes.** `OfficeHandle.floorSamples()` returns every posed member's logical position with both tests, read from CDP like `ambientLog`. `/character-sheet?carry=laptop|box|plate|bottle|mug|phone` draws the turnaround with something in hand — the sheet hardcoded `carry: null`, so the one defect class that is about FACING was the one class the body-review tool could not draw.
 

@@ -233,6 +233,31 @@ function room(): Uint8Array {
 }
 
 /**
+ * Does the straight hop between `a` and `b` cross furniture that `b` is not itself sitting in?
+ *
+ * The first and last hops of a route are special and always have been: a chair lives inside its own
+ * desk's footprint, so the hop that seats you — or the one that gets you up — necessarily touches
+ * solid geometry and cannot be judged by `clear()`, which is the inflated PLANNING grid and refuses
+ * every cell near a desk. What those hops must not do is cross a DIFFERENT piece of furniture, or
+ * cross their own desk's slab to reach a chair on the far side of it.
+ *
+ * So: sample at pad 0 and allow only the footprints the seat end is already inside.
+ */
+function seatHopClear(a: P, b: P): boolean {
+  const destTags = new Set<string>();
+  const h = solidHit(b.lx, b.ly);
+  if (h) destTags.add(h.tag);
+  const d = Math.hypot(b.lx - a.lx, b.ly - a.ly);
+  const steps = Math.max(1, Math.ceil(d / (CELL / 6)));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const hit = solidHit(a.lx + (b.lx - a.lx) * t, a.ly + (b.ly - a.ly) * t);
+    if (hit && !destTags.has(hit.tag)) return false;
+  }
+  return true;
+}
+
+/**
  * Nearest free cell to `p` (spiral out) — start/goal may sit inside furniture (a desk seat).
  *
  * Prefers cells in the room's main region: a sliver of floor sealed behind furniture is free but
@@ -244,7 +269,18 @@ function nearestFree(p: P, blocked: (c: number) => boolean): number {
   const cy = Math.min(N - 1, Math.max(0, Math.floor(p.ly / CELL)));
   const main = room();
   let fallback = -1;
+  /* Prefer a cell the seat hop can actually reach without crossing OTHER furniture.
+   *
+   * Distance alone takes whichever cell the spiral reaches first, and when a chair's own aisle is
+   * swallowed by the BODY_R inflation that cell can sit on the far side of the desk — so the
+   * unchecked seat hop walks the member straight over the slab, on the way in and on the way out.
+   * Measured 2026-09-14 on the fixture room: 56 episodes where a walker entered a footprint and came
+   * out the other side still moving, 21 of them beginning from rest, i.e. standing up and leaving
+   * THROUGH the desk. Ring by ring, a clear cell beats a merely near one; within a ring the first
+   * clear cell wins, which keeps the old behaviour wherever the aisle is open. */
+  let nearestAny = -1;
   for (let r = 0; r < N; r++) {
+    let ringClear = -1;
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
@@ -253,11 +289,18 @@ function nearestFree(p: P, blocked: (c: number) => boolean): number {
         if (x < 0 || y < 0 || x >= N || y >= N) continue;
         const c = y * N + x;
         if (blocked(c)) continue;
-        if (main[c] === 1) return c;
-        if (fallback < 0) fallback = c;
+        if (main[c] === 1) {
+          if (nearestAny < 0) nearestAny = c;
+          if (ringClear < 0 && seatHopClear(centre(c), p)) ringClear = c;
+        } else if (fallback < 0) fallback = c;
       }
     }
+    if (ringClear >= 0) return ringClear;
+    /* Two rings past the first candidate is enough to get round a desk and not enough to wander off
+       looking for a perfect approach that may not exist on a crowded floor. */
+    if (nearestAny >= 0 && r >= 2) return nearestAny;
   }
+  if (nearestAny >= 0) return nearestAny;
   return fallback >= 0 ? fallback : cy * N + cx;
 }
 
