@@ -525,6 +525,16 @@ export async function inspectProvisioning(
     // running the prescription rather than reading it). The "single-harness era" gloss went with
     // it: true of v1, false of v2. Same shape as `recorded-not-routed` — the surface asserting a
     // value it had modelled instead of the one it had just read.
+    //
+    // The `'a pre-v3 shape'` arm below is UNREACHABLE today, and is kept only as defence. Both
+    // schemas the legacy predicate accepts pin the version to a numeric literal — v2's
+    // `z.literal(2)` and v1's `z.literal(1)` — so `kind === 'legacy'` already implies a readable
+    // number, and a file with a mangled version fails both and classifies `invalid` instead,
+    // taking the branch below. Do not read this arm as a covered degrade path: no test exercises
+    // it, because no input reaches it (measured 2026-09-14, izzo's nit on #1413). The test that
+    // claimed to cover it was in fact exercising the `invalid` branch and asserting nothing —
+    // `docs/wiki/double-gated-tests.md`. If a future frozen shape is ever admitted to the legacy
+    // predicate WITHOUT a literal version, this arm becomes live and wants a test that day.
     const version = (provisioning.value as { version?: unknown } | null)?.version;
     const named =
       typeof version === 'number'
