@@ -367,11 +367,7 @@ export const cursor: Harness = {
     } catch {
       /* non-fatal — MCP wiring is what matters; hooks are the observation seam */
     }
-    // Doorbell contract clause 8 (docs/design/daemon-doorbell-contract.md): Cursor exposes MCP
-    // servers as dynamic namespaces requiring GetDynamicTools discovery before CallDynamicTool.
-    // If the stdio transport breaks mid-session, Cursor does not reconnect in-conversation;
-    // CallDynamicTool fails with 'Not connected' while the schema catalog remains cached.
-    // Full recovery requires window reload.
+    // Doorbell contract clause 8: Cursor tool callability across reconnects evaluated in docs/wiki/cursor-agent-live-doorbell-eval.md (Check 5).
     return {
       target: path,
       activation:

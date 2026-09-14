@@ -1,18 +1,19 @@
 # Cursor-agent live-doorbell eval
 
-Evaluating live-doorbell delivery into a live `cursor-agent` transcript in seconds without identityless injects — measured 2026-09-03 on `cursor-agent` 2026.09.02-c22c1a3 against wanderer's request (lane `01M1MFD7PW9TM5JNHWW2J1PC9J`).
+Evaluating live-doorbell delivery into a live `cursor-agent` transcript in seconds without identityless injects — measured 2026-09-03 on `cursor-agent` 2026.09.02-c22c1a3 against wanderer's request (lane `01M1MFD7PW9TM5JNHWW2J1PC9J`), expanded 2026-09-14 for Clause 8 tool callability (lane `01M2GP2Z9044NZH9GS0R14576D`).
 
 ## Why this page exists
 
-Wanderer asked schmidt (request_help `01M1MC25KRF0077NT630JHTQ3V`) to evaluate how to get a doorbell into a LIVE `cursor-agent` CLI transcript in seconds (model sees it), mirroring Grok lane `01M1MC0M6M8RWV6RQFRPASNVQD`.
+Wanderer asked schmidt (request_help `01M1MC25KRF0077NT630JHTQ3V`) to evaluate how to get a doorbell into a LIVE `cursor-agent` CLI transcript in seconds (model sees it), mirroring Grok lane `01M1MC0M6M8RWV6RQFRPASNVQD`. On 2026-09-14, the inquiry expanded under lane `01M2GP2Z9044NZH9GS0R14576D` to evaluate Doorbell Contract Clause 8: tool callability and dynamic MCP discovery across reconnects.
 
-The inquiry spans four checks:
+The inquiry spans five checks:
 1. Documented peer inject (analogous to Claude Code Desktop's `ccd_session_mgmt` `send_message`).
 2. Reach of `PostToolUse` vs `afterShellExecution` / `afterMCPExecution` interrupt stdout (does it reach the model or only the terminal?).
 3. Stop-hook or equivalent that can feed a composed line and continue the turn with loop guards.
 4. Idle-at-prompt coverage without writing transcripts or TTY stdin.
+5. Tool callability & dynamic discovery across reconnects (Clause 8: callable, not merely granted).
 
-## Findings summary (2026-09-03)
+## Findings summary (2026-09-03, updated 2026-09-14)
 
 | Check | Capability / Seam | Measured verdict | Model reach |
 | --- | --- | --- | --- |
