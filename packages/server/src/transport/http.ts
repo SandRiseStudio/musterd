@@ -105,6 +105,7 @@ import {
   appendAudit,
   appendLaneEventRequired,
   hasInterruptRaised,
+  listRenderedActs,
   hasRecentInterruptRefusal,
   laneOwnerHistory,
   listAudit,
@@ -5601,6 +5602,39 @@ export async function handleHttp(
           until: d.until,
           raised: raised.has(d.target),
         }));
+
+        // Doorbell contract clause 7(iv): rendering a steer or an urgent act to its addressee IS
+        // its discharge — an act with no answering move has nothing else that could be. The ADR
+        // 287 watermark cannot record this (an elided backlog pins the cursor behind the act
+        // forever), so it is one audit row per (recipient, act), written here and read by
+        // `listInterruptCandidates`. Interrupt-check itself never writes it: the one-line notice
+        // is not a read. Steers and urgent acts are rare, so the dedupe read is near-free.
+        const renderable = messages.filter(
+          (m) =>
+            m.from !== member.name &&
+            m.to.kind === 'member' &&
+            m.to.name === member.name &&
+            (m.act === 'steer' ||
+              (m.meta as { urgent?: unknown } | null | undefined)?.['urgent'] === true),
+        );
+        if (renderable.length > 0) {
+          const already = listRenderedActs(
+            ctx.db,
+            team.id,
+            member.name,
+            renderable.map((m) => m.id),
+          );
+          for (const m of renderable) {
+            if (already.has(m.id)) continue;
+            appendAudit(ctx.db, team.id, {
+              actor: member.name,
+              action: 'inbox.rendered',
+              target: member.name,
+              result: 'allow',
+              detail: { act: m.id, act_kind: m.act },
+            });
+          }
+        }
 
         // Which of my asks I have already answered — same reason the deferral fold reads the team
         // timeline rather than the inbox, and off the SAME scan, so it costs no extra query.

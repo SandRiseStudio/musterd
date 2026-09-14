@@ -193,8 +193,9 @@ Falsifiers for (ii)/(iii) are ryder's; for (iv), delta's. Both live on c8e89dd8.
   with a fresh `binding.json` — the clause-3 lifetime failure. Acceptance is a reconnect-after-reap
   that answers probes with no manual `team_leave`/`team_join`, a regression covering it, and a log
   that tells "refused because dead" from "refused because reaped".
-- **Clause 7 has no lane yet.** It needs one: cursor advance on (ii), (iii), (iv), with ryder's ask
-  and delta's steer as the regression fixtures.
+- **Clause 7 — lane `01M2GJFCQV` (izzo), landed the same day as ADR 088 amendment 3:** (ii) lane
+  state, (iii) co-addressee answers fetched by reference, (iv) `inbox.rendered` on read plus the
+  addressee's own reply. ryder's ask and delta's steer are the regression fixtures.
 - **Codex has no interrupt seam** and ADR 249 says it does. Someone owns making the document match
   the code or the code match the document.
 - **Native's seam is one function away** (`onBeforeTurn` on the engine seam plus one bridge call);

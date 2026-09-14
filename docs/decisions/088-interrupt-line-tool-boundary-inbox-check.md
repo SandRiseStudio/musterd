@@ -109,6 +109,31 @@ huddle is convened to write must name each harness's injection seam explicitly �
 not a delivery. Existing worktrees carry the old hook command; `musterd init --refresh-hooks`
 rewrites the marker-owned hook, and the SessionStart nudge already says so.
 
+## Amendment 3 — discharge (2026-09-14, lane 01M2GJFCQV)
+
+Six clauses of the doorbell contract (`docs/design/daemon-doorbell-contract.md`) governed delivery
+and none governed what stops ringing. Three live falsifiers on `c8e89dd8` the same day: a routed
+acceptance for a lane closed eight days earlier rang at every boundary of two sessions (ryder); a
+steer read, acted on and replied to on its own thread rang ~20 boundaries across two sessions
+(delta); and a directed `interrupt-check` returned `count: 1` with only that stale ask, so a live
+seam with a pinned cursor read as PASS on all six clauses. A bell that rings the wrong thing at every
+boundary teaches the model to ignore it, which defeats the six at once.
+
+**Decided:** the interrupt line discharges on any of — (i) this seat's own accept/decline/resolve
+(#1361); (ii) the referenced lane leaving awaiting acceptance, answered or not; (iii) a
+co-addressee's accept or decline on an eligible-set act, fetched by reference because it is a DM to
+the asker and outside the seat's window; (iv) for an act with no answering move — a steer, an urgent
+message — being **rendered to the addressee by an inbox read**, recorded as one `inbox.rendered`
+audit row per (recipient, act), or the addressee's own reply on it. The ADR 287 watermark is
+unchanged and cannot carry (iv): an elided backlog pins the cursor behind the act forever, which is
+exactly the field case. `interrupt-check` itself never writes the row — the one-line notice is not a
+read. When the newest steer is discharged the superseded steers under it go with it (ADR 103), so
+none rises in its place. The paid wake rail reads the same candidate set, so a wake is no longer
+leased for an obligation whose lane already closed.
+
+Falsify: on a daemon carrying this, a `lane_review` ask whose lane is `done`, or a steer the
+addressee has been shown by `musterd inbox`, appearing in `interrupt-check`'s `act`.
+
 ## Observability & Evaluation
 
 **Traces** — emit `musterd.interrupt.check` (counter, dimension: `result` = `silent` | `raised`) and
