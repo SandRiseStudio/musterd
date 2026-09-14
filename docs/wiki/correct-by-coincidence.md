@@ -36,6 +36,16 @@ The proxy holds because `openDb(p)` opens exactly `p`. So outside injection the 
 
 Fixed in [#953](https://github.com/SandRiseStudio/musterd/pull/953) by reconciling once where the handle is chosen, so all three readers are honest by construction rather than by three edits that can drift apart.
 
+## Instance: a classification was reported as a version number (2026-09-14; falsify: write a complete v2 `.musterd/provisioned.json` and run `musterd init --check` — a line reading "version 1" means this claim is wrong)
+
+`inspectProvisioning` fires its legacy-manifest line on `provisioning.kind === 'legacy'` and then states the version in prose: *"this folder's provisioning manifest is version 1 (single-harness era)"*. But `legacy` is a **classification**, not a version — `loadProvisioning`'s predicate accepts `WorktreeProvisioningV2Schema` **or** `ProvisionManifestSchema`, so it covers v1 and v2 alike. The number was a proxy for the classification, and it agreed with the truth for exactly as long as v1 was the only legacy shape in the world.
+
+ryder measured the disagreement on 2026-09-14 by running the doctor's own prescription rather than reading it: a worktree whose `provisioned.json` read `"version": 2` was told it was version 1, and `harness configure --select claude-code --yes` then converted it to 3. The prescription was right and it worked — the only wrong thing was the one number in the sentence describing the file, which a reader who opens the file to check finds contradicted by the artifact. The "single-harness era" gloss went the same way: true of v1, false of v2, and asserted of both.
+
+`loadProvisioning` returns `{ kind: 'legacy', value: unknown }`, so the real number was in hand and never read (2026-09-14; falsify: read `loadProvisioning` in `packages/cli/src/onboard/manifest.ts` — a `legacy` branch that discards the parsed value means this claim is wrong). Fixed by reading it off `value` and degrading to naming the shape (`a pre-v3 shape`) when no readable version is there, rather than naming a number the classifier does not promise.
+
+Why it survived: the line had **no test at all**, in either direction. Not a fixture that could not construct the failure ([below](#why-it-survived-the-fixture-could-not-construct-the-failure-2026-08-20-falsify-grep--rn-ts-datenow--i-packages-in-history-before-f60bae3f-and-find-a-suite-that-seeds-a-ts-collision--one-would-mean-the-case-was-expressible-and-simply-untested)) — no fixture. The regression that now covers it asserts v1 and v2 separately and asserts that both get the same prescription, because the prescription is the part the classification actually licenses.
+
 ## Why it survived: the fixture could not construct the failure (2026-08-20; falsify: `grep -rn "ts: Date.now() + i" packages/` in history before `f60bae3f` and find a suite that seeds a `ts` collision — one would mean the case was expressible and simply untested)
 
 Every fixture in the inbox family seeded `ts: Date.now() + i` — strictly increasing. A tie was **unconstructible**, so no run of those suites was evidence about tie behaviour, and 4600 green tests said nothing at all about the property ADR 290 is named for.
