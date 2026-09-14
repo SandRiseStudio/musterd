@@ -80,7 +80,7 @@ prompt waiting on a human is a third row.
 | cursor | none | none | deaf until a human prompts |
 | grok | `Stop` at `end_turn` | yes — blocks once with the daemon-composed line | deaf |
 | claude-code | `Notification` → `musterd inbox --waiting` | **no** — Notification stdout never enters model context. The machine-wide `UserPromptSubmit` nudge reaches the model, but only after the human has typed | deaf |
-| opencode | `session.idle` → `promptAsync` (synthetic, capped at 4) | unmeasured — no idle window occurred. A refused probe still prints, so the first idle may ring a deaf notice rather than a turn | unmeasured |
+| opencode | `session.idle` → `promptAsync` (synthetic, capped at 4) | half-measured — silent-with-live-lease confirmed live (no spurious prompt); deaf lease rings a deaf notice *as a turn* by code reading; raised-while-idle still unmeasured, inherits the #21524 race (ghost, 2026-09-14, eval §9b) | unmeasured |
 | codex | none | none | deaf |
 | native | **no idle state** | — | cannot occur: a native occupancy runs from the composed line to `end`, `settled` closes the bridge and drops presence. The rail is a **new wake** (ADR 131), which is the actuator's job |
 
@@ -215,7 +215,7 @@ reconnect can revoke callability without revoking the grant.*
 | claude-code | **defers & re-defers** | musterd tools arrive deferred; schema fetched via `ToolSearch` (stanley, izzo, ryder). MCP drop/reconnect mid-session drops schema cache; every schema must be fetched again with no permission error (ryder alone, 2026-09-14) |
 | cursor | **fails on reconnect** | dynamic tool discovery via `GetDynamicTools` / `CallDynamicTool`. Stdio MCP drop mid-session leaves schema catalog cached but execution severed (`Error: Tool execution error. Not connected`). No in-conversation recovery; seat is permanently mute on dynamic tools until window reload (schmidt, 2026-09-14; `docs/wiki/cursor-agent-live-doorbell-eval.md` Check 5) |
 | grok | **defers**; reconnect unmeasured | musterd tools are not in the base tool list; schema fetched via `search_tool` then invoked with `use_tool` (`musterd__team_*` / `musterd__lane_*`). Analog of Claude Code `ToolSearch`. MCP drop/reconnect mid-session unmeasured (wanderer, 2026-09-14, this session; falsify: a Grok session whose first `musterd__*` call succeeds with no preceding `search_tool`) |
-| opencode | unmeasured | unmeasured |
+| opencode | **no deferral; reconnect open** | granted tools arrive in context with schemas, directly callable — first `musterd_team_*` calls of a 1.18.31 session succeeded with no discovery round-trip (ghost, 2026-09-14; eval §9a). Mid-session drop/reconnect unmeasured (lane `01M2GS6Q4`) |
 | codex | unmeasured | unmeasured |
 | native | **exempt** | bridge owns tool table in memory (`MusterdClient`); no discovery step, no stdio disconnect (ryder) |
 
@@ -239,8 +239,12 @@ working, and every boundary before that is guaranteed deaf (clause 3, delta).
   Native is now the reference row: the only harness that can prove delivery from the daemon side.
   Still owed: a live arm. Every claim above is from unit tests; no woken native seat has yet
   received a raised act through it.
-- **Opencode's idle rail is unmeasured** (`session.idle` never fired); the first idle may ring a
-  deaf notice rather than a turn — a canary is needed.
+- **Opencode's idle rail is half-measured** (ghost, lane `01M2GP0QM3`, 2026-09-14, eval §9b):
+  silent-with-live-lease confirmed live (no spurious prompt — the `if (!line) return` path);
+  deaf-lease rings a deaf *notice as a synthetic turn* by code reading (the bug to fix, not the
+  bell to trust); raised-while-idle delivery still unmeasured (no idle window; inherits the
+  #21524 204-with-no-turn race). The canary that covers detector and delivery at once: idle
+  with a raised line.
 - ~~**Grok and codex doctors** need the clause-4 text comparison and epoch that claude-code and
   cursor already have.~~ **Grok clause 4 shipped** (wanderer, lane 01M2GP1FNA, 2026-09-14). Codex still partial.
 - **Clause 8 — lane `01M2GP2Z90` (schmidt, Cursor evaluation landed):** Cursor measured live. Dynamic
@@ -248,7 +252,8 @@ working, and every boundary before that is guaranteed deaf (clause 3, delta).
   mid-session, Cursor does not reconnect the stdio process, returning `Error: Tool execution error. Not connected`
   while schema catalog remains populated. Permanent mute on dynamic tools until window reload.
   Claude-code defers and re-defers; grok defers behind `search_tool`/`use_tool` (reconnect unmeasured);
-  opencode, codex remain open for their respective harness owners.
+  opencode does NOT defer (tools in context, first call direct — ghost, 2026-09-14, eval §9a;
+  reconnect open on lane `01M2GS6Q4`); codex remains open for its harness owner.
 
 ## What this does not decide
 
