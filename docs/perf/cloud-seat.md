@@ -628,6 +628,90 @@ multi-wake lane into repeated cold starts**: once past 256 KiB every subsequent 
 re-reads the lane, and spends its budget re-orienting — ~$3.80 across four wakes for one docs commit
 that was never made from the VM.
 
+### 18b. The same questions answered from *inside* the VM (2026-09-14 19:28Z, measured by delta)
+
+Finding 18a was attested from the laptop: the seat was the *subject* of the diagnosis. delta, woken
+on v12 (session `c9f545d5`, started 19:24:36Z, worktree `/data/musterd-delta`), answered the same
+three questions from the other side of the wire. Two of 18a's claims are now independent, and the
+third hardens from "refused" to "absent".
+
+**1. The wake was a work order, and the budget is written where the seat cannot reach it.**
+`team_wake_context` returned `{"wake":{"kind":"work_order","lane_id":"01M2GBGA03…"},"objective":
+{"action":"continue_lane"},"delivery":{"requirement":"portable","intended":"fresh"}}` — so #1371
+holds on the redeployed image and a work-order wake does reach a joiner seat. The timeout is still
+unreadable from inside, and delta named the mechanism rather than the symptom: **the brief lands in
+`.musterd/pending/` and is cleared before turn 1.** That directory's mtime is 19:24, one minute
+before the session marker, and it is empty. `team_wake_context` carries no timeout field. This is
+18a's finding 2 confirmed from inside, *with its cause* (2026-09-14 19:28Z, delta; falsify: a woken
+session that reads its own bounds out of `.musterd/pending/` on turn 1).
+
+**2. The tools arrive, the allow-list is empty, and they arrive deferred.** `tool_allowlist` in
+`.musterd/binding.json` is literally `[]` and the musterd tools are present anyway — #1371's artifact
+read from inside, where 18a could only read it from the host. They arrive **deferred**, names only,
+`ToolSearch` first. That is 18a's finding 1 confirmed from the far end of the same wire.
+
+**3. `host.log` does not exist on the machine at all.** 18a recorded fix 3 as "confirmed, but only
+from outside", with the seat's `tail` refused by the working-directory scope. It is stronger than a
+refusal: `find` over the worktree finds nothing, `/data/home/.musterd/host.log` resolves to *File
+does not exist*, and `~/.musterd/` is outside the harness sandbox. The file is **host-side only**, so
+no amount of scope-widening inside the VM would ever surface it. #1376's "attested from outside"
+stands unchanged, and delta explicitly declined to work around it (2026-09-14 19:28Z, delta;
+falsify: a `host.log` readable from any path reachable by the seat user on the VM).
+
+**4. A work-order wake arrives deaf — new, and outside the brief.** delta's session Presence/session
+lease was **dead on arrival**: every interrupt check was refused, and the `SessionStart` hook said so
+on each of the first two tool calls. `binding.json` already carried a `session_lease` string
+(`msls_hmmp…`, mtime 19:24), so **a lease existed on disk while the server refused it**. The ring
+stopped only after `team_join` from the MCP adapter. So the wake actuator mints a session without a
+live Presence: *the seat it wakes cannot hear the doorbell until it re-joins, and nothing in the
+brief tells it to.*
+
+This one reproduces off the VM. Three seats hit the identical condition on the laptop within the
+same hour — stanley and izzo at session start on 2026-09-14, both cleared by `team_join` from the
+adapter, and delta on the VM. It is adjacent to the clause-8 lane (`01M2GP25R3`) but is its own
+half: clause 8 is *a granted tool is not yet a callable tool*; this is **a minted session is not yet
+a live Presence**. Both are the same shape — musterd can see that it provisioned something and
+cannot see whether the thing it provisioned works.
+
+**5. The half the lane asked for was never measured, and 18a does not say so.** delta's first report
+(session `4ea78dcf`, the one 18a is built from) closes with a finding that did not reach this
+document: **`seat.sh`'s allow-list merge is still there.** `deploy/cloud-seat/seat.sh:149-157` still
+runs the additive node merge and its output is live at `.claude/settings.local.json:37`. So the
+16:35Z wake carried *both* grants — the image's own `--allowedTools mcp__musterd` and the merged
+one. `residency.woke` on a work order is confirmed; **"with the `seat.sh` merge gone" is not**, and
+finding 18a reads as though the whole falsifier ran. The merge is provably redundant on `c8e89dd8`
+(`argTail()` passes the flag unconditionally, and `permissions.ts:87` carries `mcp__musterd` in the
+ADR 261 floor), so either alone suffices and `seat.sh:148`'s own stated removal condition is met.
+The clean falsifier is one step: delete `seat.sh:143-157`, redeploy, re-wake.
+
+**An image-version tell worth keeping, cheaper than a doctor run.** A work order is always
+seat-policy, and pre-#1371 code omitted `--allowedTools` under seat-policy. So a work-order run that
+*has* the flag in its argv proves the VM is post-#1371 — readable from `ps` alone, with no build, no
+test, and no log access (delta, session `4ea78dcf`).
+
+**Provenance note, and a defect found in the writing.** These readings were reported by delta as
+status acts and were never written up from the VM. Lane `01M2GBGA03` was closed `done` at 18:25Z —
+an hour *before* the 19:28Z readings existed — carrying `pr 1376 / 23ae48bb`, which is the merge
+attestation of stanley's twin lane `01M2GB4WZP`. Two lanes held one attestation; the lane that
+earned it was still `awaiting_acceptance` while the lane that did not was closed. delta flagged the
+mis-attribution themselves, in the same status act, and the row never moved.
+
+**A merge attestation cannot be cleared through any exposed path** (2026-09-14 20:00Z, stanley;
+falsify: any supported call that sets a lane's `merged` back to null). `updateLane` in
+`store/lanes.ts` honours `patch.merged === null` and writes `merged_json: null` — the store can do
+it. Nothing can ask it to: `lane_update` (MCP) and `musterd lane update` (CLI) expose no `merged`
+field at all, and `UpdateLaneSchema` types it `.optional()` without `.nullable()`, so the wire
+rejects the clear before policy ever sees it. Measured directly against the daemon:
+
+    PATCH /teams/revive/lanes/01M2GBGA03…  {"merged": null}
+    → 400 {"error":{"code":"bad_request","message":"merged: Expected object, received null"}}
+
+So a lane that acquires the wrong attestation keeps it. The row was returned to `active` here —
+matching delta's own correction — but it still carries stanley's PR, and will until the schema
+admits a clear. That is lane `01M2GR0434`'s problem, not this section's; it is recorded here because
+the next person to read these findings will see the bad row next to them and should know it is
+known.
+
 ## 2026-09-14 — what the cloud seat costs per day
 
 Lane `01M1T3HA9T` asked for the figure the 09-04 open-items list left as "the Fly dashboard figure
