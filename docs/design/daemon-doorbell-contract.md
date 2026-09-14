@@ -109,7 +109,7 @@ harness that holds it by construction shows the clause was written around one im
 | claude-code | **holds — the reference** | `inspectClaudeHookDrift` compares installed command **text** against what this build would write, for every local hook (ADR 168: presence is explicitly not the question). The two machine-wide hooks carry `FEATURE_EPOCH` with a **two-way verdict**: older → run `musterd init --refresh-hooks`; **newer than this checkout** → the hook is fine, the checkout is behind, do **not** run init or every folder on the machine is downgraded. Fired live this session ("provisioning is behind what this build writes", ADR 171) |
 | cursor | holds | `inspectCursorHookDrift` (#1350) detects missing/stale `--interrupt` command text |
 | opencode | holds | marker-owned plugin; doctor names missing or STALE |
-| grok | partial | `inspectGrokHookDrift` names missing markers and a leftover PostToolUse; does not compare command text; no generation stamp. A stale PreToolUse that still carries `musterd-grok-interrupt` but discards stdout passes (wanderer) |
+| grok | **holds** | `inspectGrokHookDrift` compares installed command **text** against what this build would write and stamps `FEATURE_EPOCH` with the two-way verdict (ADR 168). A same-marker PreToolUse that discards stdout is STALE; a newer epoch blames the checkout and forbids init. Leftover PostToolUse still named. (wanderer, 2026-09-14, lane 01M2GP1FNA) |
 | codex | partial | required event/subcommand plus static marker v2, including the git-common-dir copy — but `healthy()` is substring checks, no full-text comparison, no epoch. A same-marker stale command passes (big-body) |
 | native | **exempt** | `nativeMcpConfig` sends `epoch: FEATURE_EPOCH`, `markerGeneration: 'native'` from the build that runs the loop (`nativeBridge.ts:93,103`). Nothing is installed, so nothing can drift and nothing can be doctored. Real drift for native is host build vs daemon build, which no `inspect*` looks at (ryder) |
 
@@ -214,7 +214,7 @@ reconnect can revoke callability without revoking the grant.*
 | --- | --- | --- |
 | claude-code | **defers & re-defers** | musterd tools arrive deferred; schema fetched via `ToolSearch`. MCP drop/reconnect mid-session drops schema cache; every schema must be fetched again with no permission error (stanley, ryder, izzo, 2026-09-14) |
 | cursor | **fails on reconnect** | dynamic tool discovery via `GetDynamicTools` / `CallDynamicTool`. Stdio MCP drop mid-session leaves schema catalog cached but execution severed (`Error: Tool execution error. Not connected`). No in-conversation recovery; seat is permanently mute on dynamic tools until window reload (schmidt, 2026-09-14; `docs/wiki/cursor-agent-live-doorbell-eval.md` Check 5) |
-| grok | unmeasured | unmeasured |
+| grok | **defers**; reconnect unmeasured | musterd tools are not in the base tool list; schema fetched via `search_tool` then invoked with `use_tool` (`musterd__team_*` / `musterd__lane_*`). Analog of Claude Code `ToolSearch`. MCP drop/reconnect mid-session unmeasured (wanderer, 2026-09-14, this session; falsify: a Grok session whose first `musterd__*` call succeeds with no preceding `search_tool`) |
 | opencode | unmeasured | unmeasured |
 | codex | unmeasured | unmeasured |
 | native | **exempt** | bridge owns tool table in memory (`MusterdClient`); no discovery step, no stdio disconnect (ryder) |
@@ -241,13 +241,14 @@ working, and every boundary before that is guaranteed deaf (clause 3, delta).
   received a raised act through it.
 - **Opencode's idle rail is unmeasured** (`session.idle` never fired); the first idle may ring a
   deaf notice rather than a turn — a canary is needed.
-- **Grok and codex doctors** need the clause-4 text comparison and epoch that claude-code and
-  cursor already have.
+- ~~**Grok and codex doctors** need the clause-4 text comparison and epoch that claude-code and
+  cursor already have.~~ **Grok clause 4 shipped** (wanderer, lane 01M2GP1FNA, 2026-09-14). Codex still partial.
 - **Clause 8 — lane `01M2GP2Z90` (schmidt, Cursor evaluation landed):** Cursor measured live. Dynamic
   tools require `GetDynamicTools` discovery before `CallDynamicTool`; on MCP stdio drop/reconnect
   mid-session, Cursor does not reconnect the stdio process, returning `Error: Tool execution error. Not connected`
   while schema catalog remains populated. Permanent mute on dynamic tools until window reload.
-  Claude-code defers and re-defers; grok, opencode, codex remain open for their respective harness owners.
+  Claude-code defers and re-defers; grok defers behind `search_tool`/`use_tool` (reconnect unmeasured);
+  opencode, codex remain open for their respective harness owners.
 
 ## What this does not decide
 

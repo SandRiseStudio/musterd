@@ -136,6 +136,45 @@ describe('grok interrupt injection (ADR 370)', () => {
     const drift = inspectGrokHookDrift(cwd);
     expect(drift.some((d) => d.includes('leftover') && d.includes('PostToolUse'))).toBe(true);
   });
+
+  it('a same-marker PreToolUse that discards stdout is STALE, not healthy (clause 4)', async () => {
+    // The contract's grok row: inspectGrokHookDrift named missing markers and a leftover
+    // PostToolUse; a stale PreToolUse that still carries musterd-grok-interrupt but discards
+    // stdout passed. Presence was never the question (ADR 168).
+    await grok.configure(buildEntry(binding), binding);
+    const file = readHooks();
+    const groups = file.hooks['PreToolUse'] ?? [];
+    const interrupt = groups.find((g) => g.hooks.some((h) => h.command.includes(INTERRUPT_MARKER)));
+    expect(interrupt).toBeDefined();
+    interrupt!.hooks[0]!.command = `command -v musterd >/dev/null 2>&1 && musterd inbox --interrupt-check >/dev/null 2>&1 || true # ${INTERRUPT_MARKER}`;
+    writeFileSync(hooksPath(), JSON.stringify(file));
+    const drift = inspectGrokHookDrift(cwd);
+    expect(drift.some((d) => d.includes('STALE') && d.includes(INTERRUPT_MARKER))).toBe(true);
+    expect(drift.some((d) => d.includes('musterd init --refresh-hooks'))).toBe(true);
+    expect(drift.some((d) => d.includes('PreToolUse interrupt is missing'))).toBe(false);
+  });
+
+  it('a freshly installed fleet reports ZERO command-text drift', async () => {
+    await grok.configure(buildEntry(binding), binding);
+    expect(inspectGrokHookDrift(cwd).filter((d) => d.includes('STALE'))).toEqual([]);
+    grok.refreshHooks!.run(cwd);
+    expect(inspectGrokHookDrift(cwd).filter((d) => d.includes('STALE'))).toEqual([]);
+  });
+
+  it('a NEWER-epoch hook blames the checkout and forbids init', async () => {
+    await grok.configure(buildEntry(binding), binding);
+    const file = readHooks();
+    const groups = file.hooks['PreToolUse'] ?? [];
+    const interrupt = groups.find((g) => g.hooks.some((h) => h.command.includes(INTERRUPT_MARKER)));
+    interrupt!.hooks[0]!.command =
+      `command -v musterd >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && ` +
+      `musterd inbox --interrupt-check 2>/dev/null | node -e 'void 0' || true # ${INTERRUPT_MARKER} e999`;
+    writeFileSync(hooksPath(), JSON.stringify(file));
+    const drift = inspectGrokHookDrift(cwd);
+    expect(drift.some((d) => d.includes('this checkout is behind'))).toBe(true);
+    expect(drift.some((d) => d.includes('do NOT run'))).toBe(true);
+    expect(drift.some((d) => d.includes('present but STALE'))).toBe(false);
+  });
 });
 
 function runNode(script: string, stdin: string, env?: NodeJS.ProcessEnv) {
