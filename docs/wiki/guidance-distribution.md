@@ -38,6 +38,33 @@ The repair works and always did: run against a v3-manifest fixture stamped v18, 
 
 Every test in the `inspectProvisioning — guidance drift` block wrote a **v1** manifest, so the suite exercised the only manifest version the check could still see. The surface was fully covered and completely dead — see [correct by coincidence](correct-by-coincidence.md). A check whose gate is a schema version needs at least one test per version that exists in the field, and the fixture is where that gets decided.
 
+## Guidance ships inside the CLI binary, so the question is really "how does this machine get a new CLI" (2026-09-06; falsify: on a packaged install, `musterd init --check` — a line naming the guidance version as a ceiling means this landed; a bare `✓ provisioning is coherent` with no version line means it did not)
+
+The section above fixed the doctor's blindness on this laptop. delta measured the same silence one machine over, on the cloud seat `/data/musterd-delta`, and the cause is different enough to be its own rule.
+
+The steer that page produced said: *wait for autorefresh's `bounced the daemon on <sha>` line naming a sha at or past the merge, then refresh.* **On the cloud VM that signal is unsatisfiable** — autorefresh never reaches that daemon, which runs the image sha ([cloud seat from inside](cloud-seat-from-inside.md)). There is no bounce to wait for. The CLI there moves only when the image is rebuilt and the VM redeployed, so waiting is not a strategy and a redeploy is the delivery mechanism.
+
+What delta measured, and did not repair, because measuring it was the finding:
+
+- `SKILL.md` at `musterd:content v21` while main wrote v22.
+- The VM was redeployed 13:24Z from `4636b396`; `git merge-base --is-ancestor 3648c7e5 4636b396` → **false**. The v22 bump is not in the image the CLI was built from.
+- So `--refresh-guidance` there writes **v21 over v21** — a no-op that leaves the doctor satisfied. Delta stopped rather than manufacture the exact "you got v21 and your doctor now says you are current" state.
+- `musterd init --check` ended `✓ provisioning is coherent`, with **no version comparison line at all**.
+
+**Why every staleness surface is blind here at once** (2026-09-06; falsify: read `inspectGuidance`'s comparison in `packages/cli/src/onboard/doctor.ts` — a comparison against anything but `GUIDANCE_CONTENT_VERSION` means this is wrong). `inspectGuidance` compares each file's stamp against `GUIDANCE_CONTENT_VERSION` — the constant compiled into the CLI doing the comparing — so it is self-referential by construction and a v21 binary pronounces v21 files current. That is correct and useless. The backstop, `buildSkewNotes`, has two arms and both miss: (a) compares against the daemon, which on a cloud VM is the same image, and (b) compares against `origin/main`, which needs a git checkout a packaged install does not have. Nothing is broken; nothing can see.
+
+**Green is worse than quiet.** The five-day outage above was silence, and silence at least invites a second look. A ✓ is a positive claim of health, and it was made about a question the binary cannot answer.
+
+| Install kind | How a new CLI arrives | What the doctor can compare against |
+| --- | --- | --- |
+| source checkout | `git pull` + build (`musterd service refresh`) | `origin/main` — a real answer |
+| packaged (npm/brew) | `npm i -g @musterd/cli@latest`, `brew upgrade musterd` | itself, plus the daemon if it differs |
+| baked image (cloud VM) | rebuild the image, redeploy the machine | itself — the daemon is the same image |
+
+The doctor now states the **ceiling** rather than implying currency (2026-09-14; falsify: `packagedInstallNotes` in `packages/cli/src/runtime.ts` returning one note rather than two means this regressed). On a packaged install it says which guidance version this binary writes, that `--refresh-guidance` can only ever write what the binary carries, and that a ✓ means *"your guidance matches this CLI"* and not *"your guidance is current with main"*. `isPackagedCliInstall` cannot tell a baked image from an npm global — both are "no `pnpm-workspace.yaml` above the bin" — so the update line names both paths rather than the one that happens to fit the laptop.
+
+**The rule.** *A version constant compiled into a binary can only ever report on itself, so any check built from one is a statement about the binary, not about the world.* Say which it is at the point of the claim. And the routing half, which is how this reached a second machine at all: **a repair steer names a delivery path, and a delivery path is a property of the install kind** — naming only the one the author is standing in silently excludes every other. The cloud seat can detect its own staleness and cannot fix it; that repair belongs to whoever rebuilds the image.
+
 ## The rule this leaves
 
 **A reader keyed to a schema version silently disables everything downstream of it when the schema moves.** The failure is not an error, a warning, or a wrong answer — it is an early return, which reads exactly like health. When you version a local-state file, grep for every reader of the old version and ask what each one does when the parse fails; `?.field` followed by `if (!field) return` is the shape to look for. Related: [instrument silence is not evidence](instrument-silence.md) — the doctor's quiet was a claim, and it went unchecked for five days because quiet is what "fine" looks like.
