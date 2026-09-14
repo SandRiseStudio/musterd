@@ -628,6 +628,89 @@ multi-wake lane into repeated cold starts**: once past 256 KiB every subsequent 
 re-reads the lane, and spends its budget re-orienting — ~$3.80 across four wakes for one docs commit
 that was never made from the VM.
 
+## 2026-09-14 — what the cloud seat costs per day
+
+Lane `01M1T3HA9T` asked for the figure the 09-04 open-items list left as "the Fly dashboard figure
+goes here after a full day". The machine has now existed for **10.6 days** (created 2026-09-04
+04:33:31Z, read 2026-09-14 19:00Z), never auto-stopped, so there is a real window to read.
+
+**Read this table as two different kinds of number.** The model spend is *measured* — every row is a
+`wake cost recorded` line the actuator wrote on the machine. The infrastructure spend is *list
+price arithmetic*, not an invoice: Fly's published rates applied to this machine's actual shape.
+They are not the same evidence and the table says which is which.
+
+### Model spend — measured, every wake since the machine existed
+
+`grep "wake cost recorded" /data/log/host.log` gives 15 leases, 9 of which carry a number:
+
+| wake | cost | what it bought |
+| --- | --- | --- |
+| `01M1PZ2Y01` | `$0.2156` | the first successful wake (09-05) |
+| `01M1PZ6D43` | `$0.3257` | |
+| `01M1Q2JAA4` | `$0.2476` | |
+| `01M1TC90GS` | **`$3.4128`** | **exit=1 at 521.5 s — paid in full, delivered nothing** |
+| `01M1VH16X3` | `$3.7200` | PR #1353, the lane taken end to end from the VM |
+| `01M2GF3158` | `$3.0403` | the #1371 falsifier report (2026-09-14) |
+| `01M2GFPY6M` | `$0.7519` | |
+| `01M2GJJC7H` | `$0.8374` | the lane close |
+| (earlier) | `$0.1073` | wake 4, the 23.8 s no-occupy that became finding 18 |
+
+**Total `$12.6586` across 9 billed wakes — `$1.41` mean, `$1.19`/day averaged over the machine's
+life.** The remaining 6 leases recorded `$—`: watchdog kills and the four credit-exhausted runs,
+which cost nothing because no tokens were spent.
+
+Two things this table says that a mean hides:
+
+1. **The distribution is not flat — three wakes are 80% of the spend.** `$3.41 + $3.72 + $3.04 =
+   $10.17` of `$12.66`. A wake that does real work costs ~20× one that reads its inbox and stops.
+2. **A failed wake can be the most expensive one.** `01M1TC90GS` exited 1 after 521.5 s having
+   charged `$3.4128` — more than the wake that opened PR #1353. Failure is not free, and
+   `$—` in this log means "no tokens", never "no cost".
+
+### Infrastructure — list price, not the invoice
+
+`shared-cpu-2x`, 2048 MB RAM, one 3 GB volume, `sjc`, no `[[services]]` block so Fly's auto-stop
+never applies (spec §image; the machine stays up while enrolled).
+
+| line | rate | /month |
+| --- | --- | --- |
+| `shared-cpu-2x` preset (512 MB) | $4.04 | $4.04 |
+| + 1.5 GB RAM to reach 2 GB | ~$5/GB/mo | $7.50 |
+| 3 GB volume | $0.15/GB/mo | $0.45 |
+| egress | $0.02/GB (NA) | ~$0 — the seat pulls, it does not serve |
+| **always-on total** | | **$11.99/mo ≈ $0.40/day** |
+
+**Infrastructure to date: ~$4.24.** So over this machine's life, **model spend is ~3× the machine
+that runs it** — $12.66 against $4.24, 75% of an all-in $16.90 (2026-09-14; falsify: read the Fly
+invoice for the period and compare — a difference over 20% means these list rates are wrong for
+this account, and the model half is unaffected because it is measured, not derived).
+
+### Parked vs always-up — the README's "cents per month", measured
+
+README §Park says parking a seat costs cents per month. It does:
+
+| state | /month | |
+| --- | --- | --- |
+| always-up | $11.99 | the seat can be woken at any time |
+| parked (`fly machine stop`) | **$0.53** | rootfs $0.08 (506 MB image at $0.15/GB/30d) + volume $0.45 |
+
+**A parked seat is 4% of a running one**, and the volume is 85% of what is left — the data outlives
+the machine and is billed whether or not anything is attached. So the choice is not "pay or don't
+pay", it is `$11.46/month for wakeability`. For a seat woken a handful of times a week, parking and
+accepting a cold boot is the cheaper shape; for one enrolled as an always-reachable joiner, it is
+not, and that is a decision about reachability rather than about money.
+
+### What a real working day costs
+
+2026-09-14 is the only day with a full arc of wakes on a current image: four wakes, `$4.6296` in
+model spend, `$0.3997` of machine. **`$5.03` all-in for one day of one cloud seat doing real work** —
+and `$3.80` of that went to the four wakes it took to get one report out, because a credit failure
+did not retry and the transcript-hygiene bound cold-started every wake after (see 18a).
+
+**The cheapest thing on this page is the machine.** Every optimisation that matters is in the wake
+economy — not re-spawning fresh, not paying for failed wakes, not waking a seat to do bookkeeping a
+tool call could do.
+
 ## 2026-09-06 03:36 UTC — exit criterion 3 met: a lane taken end to end from the VM
 
 `delta` claimed lane `01M1T3YXVD`, wrote `docs/wiki/cloud-seat-from-inside.md`, committed, pushed,
@@ -728,7 +811,9 @@ refusal or inventing a value. That is the right shape for a measurement page.
   once #1349's dist is deployed there.~~ Folded into the `seat.sh` line above (2026-09-06).
 - **The two-machine experiments** (ADR 366 cursor, ADR 371 counts) — lane `01M1T3H3RB`, unblocked
   now that the seat can work.
-- **Cost per day** — lane `01M1T3HA9T`. Today's arc: two clean runs at `$0.2476` and `$0.1073`, four
-  killed runs at `$—`.
+- ~~**Cost per day** — lane `01M1T3HA9T`.~~ **Read 2026-09-14** (see "what the cloud seat costs
+  per day" above): `$12.66` model over 10.6 days against `$4.24` of machine, `$5.03` for one real
+  working day, and a parked seat at `$0.53/month` against `$11.99` running. The machine is the
+  cheap half.
 - **Residency enrollment still does not replicate** (finding 6), now with a sibling: team policy does
   not either (finding 16). Same family, one lane each.
