@@ -220,6 +220,58 @@ A team whose every live cross-model agent is mid-turn will wake an offline seat 
   obligation rail should be harness-specific at all, or whether ADR 225's guarantee is only as
   strong as the weakest adapter — which today means it does not hold for any non-claude seat.
 
+- **2026-09-14 — the re-run is n=0 and its scheduler is gone; but the cumulative window answered
+  item 1 anyway, and the concentration prediction resolves INCONCLUSIVE inside its own deadband**
+  (dolly, lane `01M2GKFC6P`; falsify every number below by running
+  `node scripts/research/adr-260-acceptance-eval.ts` and `--concentration`).
+
+  **The re-run this ADR asked for produced no reading.** "Re-run the instrument after a week with no
+  routing changes landing in it" fired on 2026-09-14 over the trailing 7 days: **n=0 live-routed**.
+  The window is genuinely clean — no `policy.change` row, no commit to `review.ts` / `orientation.ts`
+  / `envelope.ts` — so this is not contamination, it is an empty slot. The date had already been
+  pushed 08-21 → 09-11 for the routing freeze. Same shape as research finding 011: a scheduled
+  experiment that costs its slot and yields nothing. **And the LaunchAgent that fired it has since
+  been unloaded and its plist deleted**, so nothing will ask again on its own; the only surviving
+  record of that run is `~/.musterd/research/adr260-rerun.log`, which is machine-local. Anyone who
+  wants a scheduled re-read has to build it.
+
+  **Item 1 is nevertheless answerable now, because the ON window kept growing while nobody looked.**
+  It is no longer the 28 hours and n=18 the 2026-08-14 read had to work with:
+
+  | window | n live-routed | good ≤10m | median age-at-close | top-reviewer share |
+  | ------ | ------------- | --------- | ------------------- | ------------------ |
+  | baseline, pre-arming | 102 | **23%** | 17m | miley 19% |
+  | increment 1 ON (769.6h) | **219** | **27%** | 36m | wanderer **45%** |
+
+  **The rate did not move** — 23% → 27% at twelve times the earlier n. That is this ADR's
+  pre-registered stop condition, in its own words: *"If (1) does not move and stalls are
+  attention-while-quiet, do not build increment 2 from this ADR."* Read it only that far. The
+  confounds above are unrepaired and ADR 303 still stands, so this licenses **not building**, which
+  is what the ADR pre-committed to; it licenses no causal claim in either direction. Item 5 also
+  settles on the honest units it was retracted onto: **189 wake decisions at 0.25/h** against 1 at
+  0.08/h — a real shift onto the ADR 191 path, with 187 of 209 wakes now priced, so ADR 269's
+  refusal defect is no longer eating the cost rows.
+
+  **The concentration prediction fails to resolve, and not for want of n.** At the detected boundary
+  the AFTER window is **n=270** — 13.5× the ≥20 the prediction required — and top-reviewer share is
+  **43%**, which is inside the 40–50% band that prediction itself declared INCONCLUSIVE. A deadband
+  wide enough to swallow the result at 13.5× the required n is **a defect in the prediction, not a
+  missing measurement**, and the honest move is to say so rather than round 43% toward the verdict
+  one prefers. Minority-family share did move hard — 8% → 53%, and the accepting minority seats went
+  from `[gptbot]` to six — so the population changed even though the headline did not resolve.
+
+  **The worse methodological point, which outlives this ADR.** The boundary is detected from the
+  data — *"the first ready row naming a second distinct minority-family seat"* — precisely so an
+  author cannot fit a changepoint after the fact. It resolves to **2026-08-05T23:06, the first ask
+  to kimi: nine days BEFORE the prediction was written on 2026-08-14**, and it is not the
+  intervention the prediction named (nick's codex / gpt-5.6 seat, "not yet accepting" at the time).
+  So the AFTER window already contained the data its author was looking at while registering the
+  prediction, and the prediction is **not pre-registered with respect to its own boundary**. The
+  guard against fitting was real and it was pointed the wrong way: a rule that *detects* a boundary
+  still needs to require that the boundary lie in the future at registration time. Any future
+  prediction on this team should state that explicitly, and state a deadband it is willing to be
+  wrong inside.
+
 - **2026-08-21 — the concentration `FAIL` is descriptive, not causal** (ADR 303). The evaluator
   rebuilt historic reviewer families from each Member's latest model attestation and did not retain
   the decision-time eligible candidate set. It can show a skew but cannot distinguish selection
