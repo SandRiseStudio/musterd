@@ -1,6 +1,7 @@
-# Build context for the images that build musterd from source — deploy/cloud-seat/Dockerfile and
-# scripts/perf/broadcast-bench.Dockerfile. Both are `COPY . .` from the repo root, so this file is
-# the only thing standing between a developer's working tree and a published image layer.
+# Build context for every image that builds musterd from source — deploy/cloud-seat/Dockerfile,
+# scripts/broadcast/hosted.Dockerfile and scripts/perf/broadcast-bench.Dockerfile. All three are
+# `COPY . .` from the repo root, so this file is the only thing standing between a developer's
+# working tree and a published image layer. `pnpm build-context:check` enforces that.
 #
 # It wants the tree — but never the host's installed dependencies (wrong platform for
 # better-sqlite3's native binding), never the history, and never per-seat state.

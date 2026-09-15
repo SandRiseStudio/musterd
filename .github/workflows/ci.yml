@@ -114,7 +114,8 @@ jobs:
 
   # prettier + roadmap:check + roadmap-truth:check + arch-trees:check + obs-evals:check +
   # adr-numbers:check + guidance:check + vocab:check + tokens:check + migrations:check +
-  # source-nul:check + wiki:check + controls:check + watch:check — then the diff-based ADR gate.
+  # source-nul:check + build-context:check + wiki:check + controls:check + watch:check — then the
+  # diff-based ADR gate.
   docs:
     name: docs
     runs-on: ubuntu-latest
