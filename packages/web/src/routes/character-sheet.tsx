@@ -42,15 +42,25 @@ function CharacterSheet() {
 
     void (async () => {
       // Client-only: the scene modules reach for canvas/DOM at import time.
-      const [{ drawCharacter }, { solveSkeleton, seedOf, typingBurst }, { drawDog }] = await Promise.all([
+      const [
+        { drawCharacter },
+        { solveSkeleton, seedOf, typingBurst, handsInLap },
+        { drawDog, drawActor, deskStationItems, actorSortAnchor, actorDepth, seatedArmsDepth },
+        { CHAIR_OFF, FWD },
+      ] = await Promise.all([
         import('../live/office-scene/character'),
         import('../live/office-scene/skeleton'),
         import('../live/office-scene/render'),
+        import('../live/office-scene/layout'),
       ]);
       if (stop) return;
 
       const CELL = 190;
-      const ROW = 210;
+      /* 250, not the 210 a lone body needed: the seated row draws a whole workstation now, and a desk
+         with a monitor standing on it is roughly twice a seated body's height. At 210 the monitor and
+         the desk's far edge were cropped off the top of the row — the sheet exists to show exactly
+         that kind of thing, so it cannot be the thing being cut off. */
+      const ROW = 250;
       const cols = 6;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       // 3 blocks (seated+typing / walking / standing) × 4 facings each is too wide; instead: for each name,
@@ -125,7 +135,7 @@ function CharacterSheet() {
         const fit = { ox: 0, oy: 0, scale: 1.55 };
 
         const MODES = [
-          { label: 'seated · typing', sit: 1, stride: 0, dir: 'S' as const },
+          { label: 'seated', sit: 1, stride: 0, dir: 'S' as const }, // typing is visible in the cell; the label has to fit CELL
           { label: 'walking', sit: 0, stride: 1, dir: 'E' as const },
           { label: 'standing', sit: 0, stride: 0, dir: 'S' as const },
         ];
@@ -178,6 +188,78 @@ function CharacterSheet() {
             });
             // Draw at an explicit screen point by faking the projection origin.
             const f = { ...fit, ox: cx, oy: cy };
+
+            /*
+             * THE SEATED CELL DRAWS A WHOLE STATION, not a body in mid-air.
+             *
+             * A seated member in the room is SIX interleaved depth items — desk slab, the desk's
+             * room-side half again at the front edge, chair cushion, chair back, the body, and the
+             * forearms a second time on TOP of the slab. This sheet drew item five and called the row
+             * "seated · typing". Everything that makes a seated beat a seated beat was therefore
+             * unshowable on the one tool built to show it: the arms-over-desk overlay (#1397 was that
+             * pass disagreeing with the slab), `handsInLap` suppressing it for lean/roll, and the
+             * chair beats, which move a chair this cell did not have. #1394's regression — a desk
+             * burying a sitter's head and torso at N/W facings — reached nick on the live broadcast
+             * for exactly this reason (lane 01M2K1G140).
+             *
+             * It calls the ROOM'S OWN builder with a one-desk slot at this cell's fake origin, and
+             * sorts by the room's own keys. A fixture that draws its own approximation of a desk is
+             * worse than no fixture: it drifts, and then it is confidently wrong. Nothing about the
+             * paint order is decided here — `deskStationItems` decides it, once, for both surfaces.
+             */
+            if (mode.sit) {
+              /* The station sits 22px higher in its cell than a lone body did. At an N or W facing the
+                 chair is on the NEAR side, so the sitter and their chair extend toward the viewer past
+                 the desk's own origin — far enough at 4x to land on the caption. Raising the whole
+                 station keeps the desk clear of the top of the row and the sitter clear of the label. */
+              const sf = { ...f, oy: cy - 22 };
+              const slot = { id: i, lx: 0, ly: 0, dir, pod: -1, kind: 'pod' as const };
+              const fwd = FWD[dir];
+              // Seated means sitting in the chair, which stands CHAIR_OFF back from the desk centre —
+              // the same offset the room seats people at, so `actorSortAnchor` recognises this as
+              // "at their own desk" rather than as a walker who happens to be nearby.
+              const pose = {
+                lx: slot.lx - fwd[0] * CHAIR_OFF,
+                ly: slot.ly - fwd[1] * CHAIR_OFF,
+                dir,
+                small: false,
+                carry,
+                bubble: null,
+                alpha: 1,
+                moving: false,
+                run: false,
+                gesture,
+                gestureT: gesture ? (t * 0.45) % 1 : 0,
+                phase: 0,
+                stride: 0,
+                sit: 1,
+              };
+              const station = deskStationItems(ctx, sf, slot, node, {
+                ownerPose: pose,
+                teamName: 'revive',
+                t,
+              });
+              const anchor = actorSortAnchor(pose, slot, undefined);
+              const cellItems = [
+                ...station.items,
+                { d: actorDepth(anchor.lx, anchor.ly), fn: () => drawActor(ctx, sf, pose, node, t) },
+              ];
+              // The overlay, under the room's own gate: a beat that drops the hands into the lap must
+              // NOT paint them over the slab, and a sheet that always drew it would hide that bug.
+              if (!handsInLap(pose.gesture, pose.gestureT)) {
+                cellItems.push({
+                  d: seatedArmsDepth(slot),
+                  fn: () => drawActor(ctx, sf, pose, node, t, true),
+                });
+              }
+              for (const item of [...cellItems].sort((a, b) => a.d - b.d)) item.fn();
+              ctx.fillStyle = 'rgba(30,20,10,.72)';
+              ctx.font = canvasFont(11, '--font-mono', 400);
+              ctx.textAlign = 'center';
+              ctx.fillText(`${name} · ${kind[0]} · ${dir} · ${mode.label}`, cx, row * ROW + ROW - 6);
+              return;
+            }
+
             drawCharacter(ctx, f, {
               lx: 0,
               ly: 0,
