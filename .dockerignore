@@ -1,6 +1,10 @@
-# Build context for scripts/perf/broadcast-bench.Dockerfile. The image builds from source, so it
-# wants the tree — but never the host's installed dependencies (wrong platform for better-sqlite3'
-# native binding) or the history.
+# Build context for every image that builds musterd from source — deploy/cloud-seat/Dockerfile,
+# scripts/broadcast/hosted.Dockerfile and scripts/perf/broadcast-bench.Dockerfile. All three are
+# `COPY . .` from the repo root, so this file is the only thing standing between a developer's
+# working tree and a published image layer. `pnpm build-context:check` enforces that.
+#
+# It wants the tree — but never the host's installed dependencies (wrong platform for
+# better-sqlite3's native binding), never the history, and never per-seat state.
 node_modules
 **/node_modules
 .git
@@ -9,3 +13,22 @@ node_modules
 **/.vite
 coverage
 *.log
+
+# Per-seat local state, none of it tracked in this repo (`git ls-tree origin/main .musterd` is
+# empty — the durable roster of ADR 058 lives in the team home repo, not here). `.musterd/` holds
+# the seat's binding, which carries a live credential at mode 600; a `COPY . .` from any seat
+# worktree would bake that key into the image as a world-readable layer, which is the ADR 390
+# least-privilege finding ("the hub's team agent key as a live Fly secret") one layer up.
+#
+# .gitignore already keeps these out of commits, file by file. Docker does not read .gitignore, so
+# the same protection has to be stated here — and here it is stated as the whole directory, since
+# nothing under it belongs in an image at all.
+.musterd/
+**/.musterd/
+
+# Harness-provisioned, per-workspace and personal, written by `musterd init` / the harness itself
+# (ADR 085). Same class: not tracked, not wanted in an image, and `.codex/` can hold auth.
+.claude/
+**/.claude/
+.codex/
+**/.codex/
