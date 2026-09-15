@@ -73,7 +73,20 @@ Observed, not argued: reading delta's inbox moved its cursor to 1788562249698, p
 
 The by-id root fetch in `listInterruptCandidates` rescues the **root** from the cursor window — ADR 378's own comment explains why it must. Nothing rescues a **turn**. This contradicts the ADR's expectation that a missed huddle bell "self-heals on the next push": self-healing holds only while no inbox read intervenes, and with a 60-second fold lag on a second machine, one usually does.
 
-**Repaired 2026-09-15** (izzo, lane 01M1T43B84): the claim above is invalidated from that date. `listInterruptCandidates` now treats a huddle root landing inside the window as the arrival of its whole thread and fetches that thread's turns from below the cursor, so the buried turn rings on the first probe after the root folds (2026-09-15; falsify: fold a turn to a joiner, read that seat's inbox, then fold the root — a silent `inbox --interrupt-check` disproves this). The turn is discharged like any other row once a read carries the cursor past the root. Not yet re-measured on a real second machine; the unit test reproduces the receipt-order scenario exactly. <!-- claim: defect -->
+**Repaired 2026-09-15** (izzo, lane 01M1T43B84): the claim above is invalidated from that date. `listInterruptCandidates` now treats a huddle root landing inside the window as the arrival of its whole thread and fetches that thread's turns from below the cursor, so the buried turn rings on the first probe after the root folds (2026-09-15; falsify: fold a turn to a joiner, read that seat's inbox, then fold the root — a silent `inbox --interrupt-check` disproves this). The turn is discharged like any other row once a read carries the cursor past the root. The unit test reproduces the receipt-order scenario exactly. <!-- claim: defect -->
+
+**Re-measured on delta, 2026-09-15 20:03–20:12Z** (izzo; hub laptop → `delta`, machine `850e40a4499168`, image `deployment-01M2KA7PKBTVP95TN7A8CK78HB` built from main at `8a3c0c37`, epoch 20). The receipt order was forced with two machines, no third node needed: `musterd huddle say <fresh-ulid>` sends a turn against a root the daemon has never seen (the gap named below), and a script then sends the root with that same id.
+
+| step | hub `ts` | delta `created_at` | delta cursor after |
+| --- | --- | --- | --- |
+| turn `01M2KANJFB` sent 20:03:26Z | 1789502605804 | 1789502692295 (+86s) | — |
+| `musterd inbox --limit 0 --unread` on delta | — | — | 1789502692295 (= the turn: buried) |
+| root `01M2KANHNQ` sent 20:09:13Z | 1789502952877 | 1789503053609 (+101s) | unchanged |
+| probe: candidate read + fold, as `delta` | — | — | **raised `01M2KANJFB`** (the turn, from izzo) |
+| `musterd inbox --limit 0 --unread` on delta | — | — | 1789503053609 (past the root) |
+| probe again | — | — | candidates `[]`, raised `[]` — discharged |
+
+Two honest limits. **The probe was the daemon's own code path run in-process against delta's live database** (`listInterruptCandidates` → `rowsToEnvelopes` → `pendingInterrupts`, with delta's real cursor), not `musterd inbox --interrupt-check` over HTTP: no session held delta's lease during the run, so the route refused every probe with the #1317 deaf line — cause 1 above, still real and still the first thing to check on a silent bell (2026-09-15; falsify: hold a live delta Presence during the run and see the HTTP probe raise the same act). And the turn's `created_at` landed exactly equal to the cursor, which the old window (`created_at > cursorTs`) excludes just as a lower one would — the sharpest form of the burial, and the row the old read could never return. <!-- claim: other -->
 
 ## What this did *not* find
 
