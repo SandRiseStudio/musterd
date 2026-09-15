@@ -92,7 +92,7 @@ read: one relay poll *or one fold* away, whichever the node can do.
 
 ## Consequences
 
-- **One more audit-shaped kind**, following the `record` template: a schema extension and union
+- **One more audit-shaped kind**, following the `record` kind's shape: a schema extension and union
   member (`protocol/src/sync.ts`), one push tag arm (`sync/push.ts`), an ingest authority rule
   (`sync/log.ts`), a verb set + projector + fold block (`sync/fold.ts`), a pull stop case
   (`sync/pull.ts`), writers moved to `appendReplicatedEvent`, a `sync/seed.test.ts`, and a census
@@ -107,8 +107,27 @@ read: one relay poll *or one fold* away, whichever the node can do.
 
 ## Observability & Evaluation
 
-**Experiment.** The seed kind is inert until a second machine exists; this team has one, so it runs
-for real between the laptop hub and the delta VM.
+**Traces** — after one sync tick, both daemons hold a `seed.captured` audit row for the same
+`relay_id` with `origin_seq > 0`, and the joiner holds a `seeds` row for it. Falsify:
+`sqlite3 ~/.musterd/musterd.db "select origin_seq, target from audit where action='seed.captured' order by ts desc limit 3"`
+on hub and joiner, plus
+`select count(*) from seeds` on both. A joiner that stays at zero while the hub's count climbs
+falsifies this ADR — that is exactly the 2026-09-14 reading this ADR exists to fix.
+
+**Eval** — seed agreement across daemons after one round trip, by `relay_id` rather than by
+`seeds.id`. `sync/seed.test.ts` carries the claim (the capture crosses; re-delivery does not
+duplicate; a joiner-minted `seed` is refused) and the negatives that keep it honest: lifecycle
+does NOT cross (the claim stays where it was made), and `census.test.ts`'s existing row still
+holds that a bare `UPDATE seeds SET state` ships nothing. ADR 371 falsifier 2 in
+`sync/record.test.ts` is the end-to-end eval — a thread entry appended on the joiner lands on the
+hub under the same entry id with `by` naming the seat, which could not run before this ADR.
+
+**Experiment** — none as a flag or rollout: the kind is inert until a second machine exists, the
+same posture ADR 371 took. The live pair (the revive hub and delta's joiner) is the first
+production read, and it is owed rather than assumed: after this lands and both daemons run it,
+`musterd seed list` on delta should answer with the hub's seeds, and a brief appended there should
+appear in the hub's thread. Until that runs, the two-daemon in-process test is the evidence and the
+cross-machine claim is unproven — recorded that way rather than implied.
 
 **Falsifiers.**
 
