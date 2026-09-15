@@ -385,6 +385,62 @@ describe('musterd stream', () => {
       expect(asks.length).toBe(1);
     });
 
+    /*
+     * Lane 01M2K6BWVR — the end-to-end half. `standDownReport` is unit-tested next door; this is the
+     * wiring, because the defect lived entirely in the wiring: `LaunchResult` already carried
+     * `output`, and `ensure` destructured `{ code }` and dropped it on the floor. The pure function
+     * could have been perfect and the human would still have been told the wrong thing.
+     */
+    it('three failed launches are reported as the environment, with fly’s own error', async () => {
+      // The real line from ensure.log, not an abbreviated one — its length is load-bearing (the
+      // cause is at the end, past where a naive cap would cut).
+      const dns =
+        'Error: failed to run query ($appName: String!) { appcompact:app(name: $appName) { id ' +
+        'internalNumericId name hostname cnameTarget deployed network status appUrl platformVersion ' +
+        'organization { id internalNumericId slug paidPlan } postgresAppRole: role { name } } }: ' +
+        'Post "https://api.fly.io/graphql": dial tcp: lookup api.fly.io: no such host';
+      withImage(); // a relaunch needs a recorded digest to run
+      const failing = sup({ launch: () => ((launches += 1), { code: 1, output: dns }) });
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [],
+        image: 'sha256:' + 'a'.repeat(64), // same digest → not a deploy, so restarts are charged
+      });
+
+      // Each tick: no machine, so a restart is spent; the launch fails, so still no machine.
+      for (let i = 0; i < 3; i++) expect(await run(['ensure'], failing)).toBe(0);
+      expect(launches).toBe(3);
+      // The fourth tick is the one that gives up and speaks to a human.
+      expect(await run(['ensure'], failing)).toBe(0);
+
+      expect(asks.length).toBe(1);
+      const ask = asks[0]!;
+      // What it must say: this is the environment, and here is the thing to go and fix.
+      expect(ask).toContain('launch attempts failed');
+      expect(ask).toContain('lookup api.fly.io: no such host');
+      expect(ask).toContain('musterd stream doctor');
+      // What it must never say again. Nothing crashed — no machine ever came up.
+      expect(ask).not.toContain('crashed');
+    });
+
+    it('machines that really did vanish still read as the broadcast stopping', async () => {
+      // Launches SUCCEED here, so a machine came up each time and then went away on its own —
+      // the one case the old wording actually fitted.
+      withImage();
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [],
+        image: 'sha256:' + 'a'.repeat(64),
+      });
+      for (let i = 0; i < 3; i++) expect(await run(['ensure'], sup())).toBe(0);
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(asks.length).toBe(1);
+      expect(asks[0]!).toContain('stopped 3×');
+      expect(asks[0]!).not.toContain('launch attempts failed');
+    });
+
     it('a machine gone across an image change is a deploy — relaunched, budget untouched', async () => {
       withImage(); // .image-digest now says aaa… — but the dead machine ran bbb…
       writeStreamState(statePath, {
