@@ -1218,3 +1218,55 @@ whenever that happens.
 512.3 KiB (hygiene bound 256 KiB) — fresh spawn` — finding 18a's transcript-hygiene cold start
 firing again, costing a fresh spawn rather than a resume. Unrelated to this falsifier, recorded
 because it was in the same three log lines.
+
+## 2026-09-15 — ADR 399's seed kind, run between the laptop and the VM
+
+The cross-machine run ADR 399 recorded as owed. Both daemons on `fdabd1e6` first — the hub by
+autorefresh (which held the bounce through its own 10-minute settle window rather than being forced),
+delta by `fly deploy`. delta's image carries no commit ref (`.git` is dockerignored, finding above),
+so it was verified behaviourally instead: `seed.captured` present in its deployed
+`protocol/dist/sync.js` and `server/dist/store/seeds.js`.
+
+**Baseline, read immediately before the run (23:03:18Z)** — the defect ADR 399 exists to fix, one
+last time: hub 53 seeds, **delta 0**; `seed.captured` audit rows 0 on both; seed payloads in
+`sync_log` 0. So every row below is caused by this run and cannot be confused with history.
+
+| time (UTC) | step | result |
+| --- | --- | --- |
+| 23:12:59 | `musterd seed capture` on the **hub** | seed `01M2KNGPCE…`, event `seed.captured` at `origin_seq` 55823 |
+| 23:13:54 | read **delta** (one tick later) | **seed present** — same `relay_id`, same body, local id `01M2KNHY2B…` |
+| 23:15:0x | `seed claim` on **delta** | `exploring as delta` |
+| 23:15:51 | `seed ask` on **delta** | entry `01M2KNNZTB6ERS6H92TQQK5S56`, `by` = `delta` |
+| 23:17:5x | read the **hub** (two ticks) | **entry present**, same id `01M2KNNZTB…`, `by` = `delta` |
+
+**Falsifier 1 (ADR 399) — PASS.** The capture crossed hub→joiner by fold. delta went 0 seeds to 1.
+The local ids differ (`01M2KNGPCE…` vs `01M2KNHY2B…`) which is the whole reason the event is keyed
+by `relay_id` and not by `seeds.id`.
+
+**Falsifier 2 (ADR 371, unrun since it was written 2026-09-03) — PASS.** A clarification appended on
+the joiner reached the hub's thread under the **same entry id** with **`by` naming the seat**. This
+could not run before ADR 399 because the joiner could not hold the seed to append to; that is the
+precondition the 2026-09-14 reading found missing, not the mechanism.
+
+**Falsifier 4 (lifecycle does not cross) — PASS, and it is the interesting one.** At the end the hub
+holds the seed `open` while delta holds it `needs_clarification`. The *capture* and the *thread
+entry* replicate; the explorer claim and the state beside it stay local, exactly as ADR 371 §3 said
+and ADR 399 kept. A run that showed the hub flipping to `exploring` would have falsified the ADR's
+own scope claim.
+
+**What this run did NOT test, stated so it is not read as more than it is.** The seed was a **repo
+capture**, not a relay ingest: `policy.seeds_relay_url` / `seeds_relay_token` are unset on both
+machines, so the relay poll is dormant everywhere and the relay leg is still unexercised. Both
+creation paths emit the same `seed.captured`, so the *kind* is genuinely exercised end to end — but
+nobody should read this as "the relay works across machines". It was never switched on.
+
+**Friction, and a mistake worth recording.** Finding delta's workspace, I ran `cat` on its
+`~/.musterd/config.json` without checking what else the file held, and a live `mscr_` CLI credential
+for nick went into a session transcript in cleartext. This is the SECOND time an agent did this in
+one day — miley did it with `stream/seat-token` hours earlier and wrote the lesson down, and I read
+that message before repeating the mistake. **Disposition:** the rule is mechanical, not attitudinal.
+Never `cat` a whole config/binding/token file to read one field; query the single key
+(`node -e` on the parsed JSON, `jq -r '.bindings|keys'`), and treat everything under `~/.musterd`
+and `/data/home/.musterd` as credential-bearing until proven otherwise. Also: the seat CLI answers
+only from a *seat-bound* workspace — `/data/agents-delta` refused with "the team agent key is
+bootstrap-only", `/data/musterd-delta` worked.
