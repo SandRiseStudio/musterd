@@ -380,6 +380,26 @@ async function startVerb(
   let result = await a.launch(args);
   for (let attempt = 1; attempt <= LAUNCH_RETRIES && result.code !== 0; attempt++) {
     if (!isUnpropagatedImage(result.output)) break;
+    // A MANIFEST_UNKNOWN exit does NOT mean no machine was created. `fly machine run` creates the
+    // machine and THEN the VM fails to pull a digest the registry has not published yet; the
+    // machine keeps trying and comes up on its own once the registry catches up (observed live
+    // 2026-09-15: the "failed" first attempt's machine went live 52s later, unaided). Relaunching
+    // over the top of it puts a second performance-4x beside a healthy one, both publishing to the
+    // same key — the 2026-09-03 duplicate-launch, reached through start's own retry, and only ever
+    // resolved by Twitch refusing the second publisher. So before relaunching, ask the same
+    // occupied? question the top-of-function guard asks: if this attempt already left a machine,
+    // wait for it rather than racing it. (This is the guard `ensure` has carried since 2026-09-03,
+    // finally applied to `start`'s retry too.)
+    const left = occupiedMachines(machineListJson(a.exec, a.app));
+    if (left.length > 0) {
+      a.out(
+        `${theme.ok('◉ live')} ${theme.meta(
+          `machine ${left[0]} is up and pulling ${digest.slice(7, 15)} — ` +
+            `waiting for the registry, not launching a second · watch: fly logs -a ${a.app}`,
+        )}\n`,
+      );
+      return 0;
+    }
     a.out(
       `${theme.warn('↻')} ${theme.meta(
         `the registry has not published ${digest.slice(7, 15)} yet — retrying in ` +
