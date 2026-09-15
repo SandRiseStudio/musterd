@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { FEATURE_EPOCH } from '@musterd/protocol';
 import { memoryFs, type HarnessContext, type MemoryFs } from '../reconcile/context.js';
+import { CODEX_HOOK_MARKER, codexHookCommands } from './codexHooks.js';
 import { codexAdapter } from './codex.js';
 import type { CodexServer } from './codexToml.js';
 
@@ -178,6 +180,37 @@ describe('codexAdapter — managed fragments', () => {
     ]);
     expect(parsed.hooks.PostToolUse).toBeUndefined();
     expect(await codexAdapter.observe(ctx, hooks)).toEqual({ state: 'absent' });
+  });
+
+  it('does not downgrade a newer marker-owned hook set', async () => {
+    const fs = memoryFs();
+    const ctx = ctxOf(fs);
+    const hooks = (await intentsOf(ctx)).find((i) => i.fragmentKey === 'hooks')!;
+    const newer = JSON.stringify({
+      hooks: Object.fromEntries(
+        codexHookCommands().map(({ event, command }) => [
+          event,
+          [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: command.replace(
+                    new RegExp(`${CODEX_HOOK_MARKER}(?: e\\d+)?$`),
+                    `${CODEX_HOOK_MARKER} e${FEATURE_EPOCH + 1}`,
+                  ),
+                },
+              ],
+            },
+          ],
+        ]),
+      ),
+    });
+    fs.writeFile(HOOKS, newer, 0o600);
+
+    await codexAdapter.apply(ctx, { kind: 'write', intent: hooks });
+
+    expect(fs.readFile(HOOKS)).toBe(newer);
   });
 
   it('emits no plugin fragments for a generalist / empty toolkit', async () => {

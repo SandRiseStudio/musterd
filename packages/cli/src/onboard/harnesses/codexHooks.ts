@@ -99,6 +99,14 @@ function markerHandlers(file: HooksFile, event?: string): z.infer<typeof Handler
   return groups.flatMap((group) => group.hooks.filter((handler) => owned(handler.command)));
 }
 
+/** A newer marker belongs to a newer checkout; this build must never overwrite it. */
+export function hasNewerCodexHookEpoch(commands: Iterable<string | undefined>): boolean {
+  return Array.from(commands)
+    .map((command) => /\se(\d+)(?:\s|$)/.exec(command ?? '')?.[1])
+    .flatMap((epoch) => (epoch === undefined ? [] : [Number(epoch)]))
+    .some((epoch) => epoch > FEATURE_EPOCH);
+}
+
 function healthy(file: HooksFile): boolean {
   return (
     markerHandlers(file).length === REQUIRED.length &&
@@ -117,7 +125,13 @@ function healthy(file: HooksFile): boolean {
 function installCodexHooksAt(path: string): string[] {
   const exists = existsSync(path);
   const file = exists ? read(path) : {};
-  if (!file || healthy(file)) return [];
+  if (
+    !file ||
+    healthy(file) ||
+    hasNewerCodexHookEpoch(markerHandlers(file).map((handler) => handler.command))
+  ) {
+    return [];
+  }
 
   const hooks: Record<string, z.infer<typeof GroupSchema>[]> = {};
   for (const [event, groups] of Object.entries(file.hooks ?? {})) {

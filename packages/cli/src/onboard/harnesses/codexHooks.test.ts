@@ -113,9 +113,12 @@ describe('Codex project hooks', () => {
   });
 
   it('says a newer marker epoch belongs to a newer checkout, not a hook refresh', () => {
-    writeFileSync(hooksPath, JSON.stringify(markerOwnedHooks(FEATURE_EPOCH + 1), null, 2));
+    const newer = JSON.stringify(markerOwnedHooks(FEATURE_EPOCH + 1), null, 2);
+    writeFileSync(hooksPath, newer);
 
     expect(inspectCodexHookDrift(root)[0]).toContain('checkout is behind');
+    expect(installCodexHooks(root)).toEqual([]);
+    expect(readFileSync(hooksPath, 'utf8')).toBe(newer);
   });
 
   it('identifies an older marker epoch as repairable drift', () => {
@@ -223,6 +226,16 @@ describe('Codex hooks in a git worktree (common-dir resolution)', () => {
     );
 
     expect(inspectCodexHookDrift(worktreeRoot)[0]).toContain('checkout is behind');
+  });
+
+  it('does not downgrade a newer git-common-dir copy during refresh', () => {
+    installCodexHooks(worktreeRoot);
+    const commonPath = join(mainRoot, '.codex', 'hooks.json');
+    const newer = JSON.stringify(markerOwnedHooks(FEATURE_EPOCH + 1), null, 2);
+    writeFileSync(commonPath, newer);
+
+    expect(installCodexHooks(worktreeRoot)).toEqual([]);
+    expect(readFileSync(commonPath, 'utf8')).toBe(newer);
   });
 
   it('removeCodexHooks only touches the worktree copy, never the shared common-dir one', () => {

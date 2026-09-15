@@ -11,7 +11,7 @@ import {
 } from '../harness.js';
 import type { McpServerEntry } from '../mcpEntry.js';
 import { launchEntryEnv, markerGenerationOfEnv, resolveMcpLaunch } from '../mcpEntry.js';
-import type { FsSeam, HarnessContext } from '../reconcile/context.js';
+import { nodeFs, type FsSeam, type HarnessContext } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
   folderResourceKey,
@@ -23,6 +23,7 @@ import {
   CODEX_HOOK_MARKER,
   codexHookCommands,
   codexHooksPath,
+  hasNewerCodexHookEpoch,
   inspectCodexHookDrift,
   installCodexHooks,
   removeCodexHooks,
@@ -429,6 +430,12 @@ export const codexAdapter: HarnessAdapter = {
         const read = readHooksJson(ctx.fs, path);
         if (read === null) throw new Error('.codex/hooks.json invalid at apply time');
         const file = read ?? {};
+        if (
+          mutation.kind !== 'remove' &&
+          hasNewerCodexHookEpoch(musterdCodexHandlers(file).map(({ command }) => command))
+        ) {
+          return;
+        }
         const hooks: NonNullable<CodexHooksJson['hooks']> = {};
         // Keep every non-musterd handler/group; drop every marker-owned one.
         for (const [event, groups] of Object.entries(file.hooks ?? {})) {
@@ -455,6 +462,9 @@ export const codexAdapter: HarnessAdapter = {
         else delete next.hooks;
         ctx.fs.mkdirp(dirname(path));
         ctx.fs.writeFile(path, `${JSON.stringify(next, null, 2)}\n`, 0o644);
+        // The fragment ledger owns the workspace copy. In a real worktree, Codex reads the shared
+        // git-common-dir copy instead, so refresh that runtime copy through the same epoch guard.
+        if (mutation.kind !== 'remove' && ctx.fs === nodeFs) installCodexHooks(ctx.worktreeRoot);
         return;
       }
       default: {
