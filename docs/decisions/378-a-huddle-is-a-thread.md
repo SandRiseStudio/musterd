@@ -252,6 +252,13 @@ envelopes).
   is not this ADR's to specify — it belongs with whoever owns `interruptCandidates` — but the
   sentence that said the failure was a delay is withdrawn.
 
+  _Repaired 2026-09-15 (izzo, lane 01M1T43B84): a turn now arrives when its ROOT does.
+  `listInterruptCandidates` treats every huddle root that lands inside the cursor window as the
+  arrival of its thread, and fetches that thread's turns from below the cursor — keyed on root ids
+  already in hand, so a window with no freshly landed root costs nothing. The fold still decides
+  which turns ring, and the next read that carries the cursor past the root discharges them. The
+  falsifier above is now a test in `interruptCandidates.test.ts`._
+
   Evidence: `docs/wiki/cross-machine-huddle-bell.md` (stanley, PR #1315). Falsifier for the
   amendment itself: fold a turn onto a second daemon with its root held back, read that seat's
   inbox, then release the root, and check whether the bell ever rings. It does not.
