@@ -125,6 +125,27 @@ export const GESTURE = {
   call: 13,
 } as const;
 
+/**
+ * The errand beats: played on a walk's hold/sit legs via `Leg.overlay`, never chosen by the gesture
+ * scheduler. Listed here (rather than by id range) because this is the ONLY thing that separates the
+ * two families, and the separation has to be derivable — see `IDLE_GESTURES` directly below.
+ */
+const ERRAND_GESTURES = ['browse', 'fill', 'eat', 'pour', 'call'] as const;
+
+/** A beat the gesture scheduler may pick: everything in the registry that is not an errand overlay. */
+export type IdleGesture = (typeof GESTURE)[Exclude<keyof typeof GESTURE, (typeof ERRAND_GESTURES)[number]>];
+
+/**
+ * Every scheduler-pickable beat, DERIVED from the registry rather than re-listed (lane 01M2JYBGMQ).
+ * #1430 added four beats and the duration table did not hear about it, so all four silently took the
+ * shortest window in it; a re-listed set would have gone stale the same way. Add a beat to `GESTURE`
+ * and it lands here automatically — and `GESTURE_DUR`, keyed by `IdleGesture`, stops compiling until
+ * somebody chooses its window.
+ */
+export const IDLE_GESTURES: readonly IdleGesture[] = Object.entries(GESTURE)
+  .filter(([key]) => !(ERRAND_GESTURES as readonly string[]).includes(key))
+  .map(([, id]) => id as IdleGesture);
+
 /** An arc-shaped envelope over the gesture window: 0 → 1 → 0, zero-velocity at both ends (no pop). */
 const arcEnv = (gT: number): number => Math.sin(smooth(gT) * Math.PI);
 /** A plateau envelope: ramp in over the first ~18% of the window, hold, ramp out over the last ~18%. */

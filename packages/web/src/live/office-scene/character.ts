@@ -183,20 +183,6 @@ export function drawCharacter(
   const prev = ctx.globalAlpha;
   if (o.alpha < 1) ctx.globalAlpha = Math.max(0, o.alpha);
 
-  /*
-   * IDLE SWAY — the weight-shift a person makes when they are not doing anything (nick, 2026-09-14).
-   *
-   * Between beats a member used to be geometrically perfect and perfectly still, which is the single
-   * biggest thing separating this room from a room. This is a very slow, very small drift of the
-   * upper body: about a unit and a half over a ~9s period, seeded per member so nineteen people are
-   * never in phase — an office breathing in unison is worse than an office holding its breath.
-   *
-   * It needs NO reduced-motion or STILL gate of its own, which is the point of driving it off the
-   * scene clock rather than wall time: under reduced motion the loop never starts, and under `?still`
-   * it parks after the one play-through, so in both cases the clock stops and the sway freezes with
-   * it. The a11y sweep's settle detector therefore still sees a page that stops changing.
-   */
-
   interface Part {
     d: number;
     fn: () => void;

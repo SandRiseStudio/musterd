@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createActors, deskNeighbourPairs, homePoses, travelDir } from './actors';
+import { GESTURE_DUR, createActors, deskNeighbourPairs, homePoses, travelDir } from './actors';
 import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK, NOOK_RUG_R, STRIP_CAP } from './layout';
-import { GESTURE } from './skeleton';
+import { GESTURE, IDLE_GESTURES } from './skeleton';
 import { LEISURE_SPOTS } from './layout';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
@@ -1205,5 +1205,42 @@ describe('the laptop on the person (laptop/dock design §0)', () => {
     // which is exactly why the carry is derived per frame rather than baked into the home pose.
     actors.setHomes(placements, new Map([['Ada', idle('Ada')]]), true);
     expect(actors.poses().get('Ada')!.carry).toBe('laptop');
+  });
+});
+
+describe('the gesture window table', () => {
+  /*
+   * Lane 01M2JYBGMQ, finding 2 (delta, re-read by izzo). Four ids shipped in #1430 with no entry
+   * here — shoulders/behindHead/rubEyes/pocketPhone all fell through `?? 2.4` to the SHORTEST
+   * window in the table, two of them held poses where the duration *is* the beat. It shipped
+   * because `Record<number, number>` cannot report that it is incomplete. The type now can;
+   * this is the runtime half of the same claim, so a new beat cannot slip past either.
+   */
+  it('declares a window for every beat the scheduler can pick — and for nothing else', () => {
+    expect(Object.keys(GESTURE_DUR).map(Number).sort((a, b) => a - b)).toEqual(
+      [...IDLE_GESTURES].sort((a, b) => a - b),
+    );
+  });
+
+  it('no beat rides the old 2.4s fallback by accident — every window is one somebody chose', () => {
+    for (const kind of IDLE_GESTURES) {
+      expect(GESTURE_DUR[kind], `gesture ${String(kind)} has no declared window`).toBeGreaterThan(0);
+    }
+  });
+
+  it('a held pose outlasts the quickest arc — behindHead is not a twitch', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.gestureBeat('Ada', GESTURE.behindHead)).toBe(true);
+    expect(actors.gestureBeat('Bo', GESTURE.glance)).toBe(true);
+    for (let i = 0; i < 68; i++) actors.step(0.05); // 3.4s: past glance (2.4s)
+    expect(actors.poses().get('Bo')!.gesture).toBe(0);
+    expect(actors.poses().get('Ada')!.gesture).toBe(GESTURE.behindHead); // still laced behind the head
+  });
+
+  it('settle stays the longest of them — getting comfortable is not a quick motion', () => {
+    const longest = Math.max(...IDLE_GESTURES.map((k) => GESTURE_DUR[k]));
+    expect(GESTURE_DUR[GESTURE.settle]).toBe(longest);
   });
 });
