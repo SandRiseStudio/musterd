@@ -62,7 +62,7 @@ point, and the table is wrong without it.
 | grok | holds, one seam only | `PreToolUse` `additionalContext`. PostToolUse stdout **and** additionalContext are discarded | wanderer, 2026-09-03 (falsify: a PostToolUse canary in `chat_history.jsonl`) |
 | claude-code | holds | `PostToolUse` stdout → `PostToolUse:<Tool> hook additional context`, after **native and MCP** calls alike | izzo native 2026-09-14; delta MCP (`team_join`, `team_inbox_check`, `lane_board`, `team_send`, `lane_update`) 2026-09-14 |
 | opencode | holds at native boundaries only | ADR 392 plugin `tool.execute.after` fence. Zero fences across ~15 MCP calls in the same window native fences arrived | ghost, 2026-09-14 |
-| codex | **fails** | `PostToolUse` runs `musterd codex-hook post-tool-use --stdin`; `observeModel` writes `model_observed` and never calls `--interrupt-check`. ADR 249's "existing low-cost interrupt check" is not in the implementation | big-body, 2026-09-14, from `.codex/hooks.json` and source |
+| codex | **holds in unit; live unmeasured** | `PostToolUse` runs `musterd codex-hook post-tool-use --stdin`, writes `model_observed`, then performs the lease-authenticated interrupt read. A raised line becomes exactly `hookSpecificOutput.additionalContext`; quiet/refused/error cases emit nothing. No Stop or idle rail. | ADR 397 focused hook tests, 2026-09-15. The authorized Codex 0.154.0 Surface was uncallable from a different adapter checkout, so live model delivery remains unmeasured. |
 | native | **holds** (shipped 2026-09-14, lane 01M2GNYGEY) | `bridgeTools` asks `MusterdClient.interruptCheck()` after every bridged tool call and `appendInterrupt` appends the daemon-composed line to that tool result. Delivery is provable from the daemon side: the line is in the turn's `wake_turns` capture row | ryder, 2026-09-14, `nativeBridge.ts` / `nativeInterrupt.test.ts`. **Not** the `onBeforeTurn` push this row originally proposed: `BetaToolRunner.pushMessages` sets the runner's private `#mutated`, and the iterator appends the assistant message only `if (!this.#mutated)` — injecting from inside the `for await` body drops the turn the model just took and no tool then runs (@anthropic-ai/sdk 0.116.0, pinned as a regression fixture) |
 
 Six harnesses, four different seams, two with none. **"Every tool boundary" holds nowhere** and
@@ -110,7 +110,7 @@ harness that holds it by construction shows the clause was written around one im
 | cursor | holds | `inspectCursorHookDrift` (#1350) detects missing/stale `--interrupt` command text |
 | opencode | holds | marker-owned plugin; doctor names missing or STALE |
 | grok | **holds** (unit tests + live probe) | `inspectGrokHookDrift` compares installed command **text** against what this build would write and stamps `FEATURE_EPOCH` with the two-way verdict (ADR 168). A same-marker PreToolUse that discards stdout is STALE; a newer epoch blames the checkout and forbids init. Tombstone consulted only for MISSING (ADR 332) — a declined event does not silence STALE. Leftover PostToolUse still named. Fired against a scratch worktree 2026-09-14 (delta PROBE A/B/C on `9b7b4baf`; wanderer declined+stale after). (lane 01M2GP1FNA) |
-| codex | partial | required event/subcommand plus static marker v2, including the git-common-dir copy — but `healthy()` is substring checks, no full-text comparison, no epoch. A same-marker stale command passes (big-body) |
+| codex | **holds (unit)** | `inspectCodexHookDrift` compares the exact marker-owned event/type/command set, including `FEATURE_EPOCH`, in both workspace and git-common-dir copies. Missing, older, text-different, or duplicate owned handlers prescribe `musterd init --refresh-hooks`; a newer epoch says the checkout is behind and forbids a downgrade rewrite. (ADR 397) |
 | native | **exempt** | `nativeMcpConfig` sends `epoch: FEATURE_EPOCH`, `markerGeneration: 'native'` from the build that runs the loop (`nativeBridge.ts:93,103`). Nothing is installed, so nothing can drift and nothing can be doctored. Real drift for native is host build vs daemon build, which no `inspect*` looks at (ryder) |
 
 ### (5) `musterd init --refresh-hooks` as the only writer
@@ -120,8 +120,9 @@ handlers preserved, removal marker-exact. **Exempt** for native: nothing install
 
 ### (6) The one-line notice headlined by class
 
-Holds wherever (1) delivers: cursor, grok, claude-code, opencode measured it this session. Codex:
-**blocked on (1)** — the daemon composes the headline; the harness cannot deliver it. Native held it
+Holds wherever (1) delivers: cursor, grok, claude-code, opencode measured it this session. Codex
+holds in the focused seam test but remains live-unmeasured because its evaluated Surface was
+uncallable; the daemon still composes the headline. Native held it
 **at wake only** (`spec.order.composed_line` is the whole prompt the loop starts with) until its
 clause-1 seam shipped; mid-loop it now emits the daemon's line verbatim, never a locally composed one.
 
@@ -232,8 +233,10 @@ working, and every boundary before that is guaranteed deaf (clause 3, delta).
 - **Clause 7 — lane `01M2GJFCQV` (izzo), landed the same day as ADR 088 amendment 3:** (ii) lane
   state, (iii) co-addressee answers fetched by reference, (iv) `inbox.rendered` on read plus the
   addressee's own reply. ryder's ask and delta's steer are the regression fixtures.
-- **Codex has no interrupt seam** and ADR 249 says it does. Someone owns making the document match
-  the code or the code match the document.
+- **Codex live delivery remains unmeasured:** ADR 397 ships the bounded PostToolUse seam and unit
+  proof, but the authorized Codex 0.154.0 Surface resolved a different adapter checkout and could
+  not call musterd. A correctly wired disposable run must record callability and model delivery;
+  it must not imply an idle or reconnect rail.
 - ~~**Native's seam is one function away**~~ **Shipped** (ryder, lane 01M2GNYGEY, 2026-09-14) — in
   the bridge rather than on the engine seam, for the runner reason recorded in the clause-1 row.
   Native is now the reference row: the only harness that can prove delivery from the daemon side.
@@ -246,7 +249,8 @@ working, and every boundary before that is guaranteed deaf (clause 3, delta).
   #21524 204-with-no-turn race). The canary that covers detector and delivery at once: idle
   with a raised line.
 - ~~**Grok and codex doctors** need the clause-4 text comparison and epoch that claude-code and
-  cursor already have.~~ **Grok clause 4 shipped** (wanderer, lane 01M2GP1FNA, 2026-09-14). Codex still partial.
+  cursor already have.~~ **Grok clause 4 shipped** (wanderer, lane 01M2GP1FNA, 2026-09-14); **Codex
+  clause 4 shipped in unit** (ADR 397, 2026-09-15).
 - **Clause 8 — lane `01M2GP2Z90` (schmidt, Cursor evaluation landed):** Cursor measured live. Dynamic
   tools require `GetDynamicTools` discovery before `CallDynamicTool`; on MCP stdio drop/reconnect
   mid-session, Cursor does not reconnect the stdio process, returning `Error: Tool execution error. Not connected`

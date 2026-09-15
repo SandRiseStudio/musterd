@@ -18,13 +18,14 @@ turn ends, or be injected while idle?
 | Turn-end continuation | Yes | A `Stop` hook returning `decision: "block"` with a reason causes Codex to create a new continuation prompt using that reason. This is the direct native analogue of a turn-end doorbell, rather than a `followup_message` field. |
 | Idle-at-prompt delivery | No (observed 2026-09-03) | A completed background hook waits for the next user turn when no turn is active; it does not begin a new turn (2026-09-03). `Interrupt` likewise does not run for idle threads. Falsifier: a hook completion begins a new Codex turn without a user prompt or an explicit wake. |
 
-## Current musterd gap
+## Shipped musterd seam (ADR 397, 2026-09-15)
 
 `packages/cli/src/onboard/harnesses/codexHooks.ts` installs
 SessionStart, SessionEnd, PostToolUse, and UserPromptSubmit. Its PostToolUse
-handler records model observation only and emits no output, so musterd has no
-mid-turn interrupt delivery today even though Codex provides the seam. It
-installs no Stop handler, so it has no native turn-end continuation either.
+handler now records model observation, performs the shared lease-authenticated interrupt read, and
+emits one `hookSpecificOutput.additionalContext` object only for a raised daemon line. Hermetic
+tests pin raised structured output, quiet/read-error silence, and exact command/epoch drift repair.
+It installs no Stop handler, so it has no native turn-end continuation or idle delivery rail.
 
 ## Clause-8 follow-up (2026-09-15)
 
@@ -37,16 +38,15 @@ unmeasured until an adapter built from the evaluated workspace can expose its to
 
 ## Recommendation
 
-Treat Codex as capable of both a structured PostToolUse interrupt and a Stop
-continuation. A future change should add marker-owned handlers only after an
-ADR specifies: bounded urgent/acceptance selection, the JSON output shape for
-PostToolUse, the Stop continuation reason, loop suppression, and a live
-falsifier. ADR 397 now specifies the bounded PostToolUse half only. Do not
-claim idle push capability.
+Codex has a bounded, unit-proven structured PostToolUse seam. A future Stop change needs its own
+ADR for continuation reason, loop suppression, and a live falsifier. Do not claim idle push,
+tool callability, deferral, or reconnect behavior from the current evaluation.
 
 ## Sources
 
 - Local command: `codex --version` reported `codex-cli 0.152.1`; `codex features list` reported hooks stable.
 - [Codex Hooks documentation](https://developers.openai.com/codex/hooks), consulted 2026-09-03: lifecycle events, PostToolUse output, UserPromptSubmit context, Stop continuation, and idle background-hook behavior.
 - ADR 333: existing SessionStart and UserPromptSubmit orientation wiring.
-- `packages/cli/src/onboard/harnesses/codexHooks.ts` and `packages/cli/src/commands/codexHook.ts`: installed handlers and current no-output PostToolUse implementation.
+- ADR 397 plus `packages/cli/src/onboard/harnesses/codexHooks.ts` and
+  `packages/cli/src/commands/codexHook.ts`: installed handlers, exact drift inspection, and the
+  PostToolUse structured-output implementation.

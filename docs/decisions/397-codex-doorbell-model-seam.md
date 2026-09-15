@@ -72,6 +72,12 @@ It must name its Codex version and may remain `unmeasured` when no authorized re
 
 ## Consequences
 
+- **2026-09-15 — implemented.** `codex-hook post-tool-use` now writes causal model evidence before
+  the shared hook interrupt probe and renders only a raised line as Codex `hookSpecificOutput`.
+  The desired hook set is exact and epoch-20-stamped; focused tests cover raised/quiet/error output,
+  stale/duplicate commands, both epoch directions, user-handler preservation, and git-common-dir
+  inspection. The authorized Codex Surface evaluation remains unavailable, not a delivery claim.
+
 - ADR 249's PostToolUse interrupt-check claim becomes true only after the new hook tuple is
   installed; existing installs report drift rather than silently passing.
 - A raised interrupt can reach a busy Codex model at its next supported local tool boundary.
