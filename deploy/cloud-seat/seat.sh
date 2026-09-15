@@ -52,11 +52,9 @@ node -e '
   }' TEAM_HOME="$TEAM_HOME"
 kill -HUP "$DAEMON_PID"
 sleep 3
-# Team policy does NOT replicate to a joiner (finding 16, docs/perf/cloud-seat.md): the hub's
-# `loops.dispatch` is on, this daemon's is null, and THIS daemon derives the wake — so without this
-# line every wake a seat here can receive is a reply doorbell under the 5-minute reply budget, and a
-# lane handoff can never arrive as a work order. Arm it locally to agree with the hub. Idempotent;
-# blast radius is the seats enrolled on this daemon. Remove once lane 01M1T6DJ7J replicates policy.
+# Floor until the hub's first sync tick after ADR 398 restates unstamped policy (finding 16).
+# Idempotent; a joiner that has already folded the hub's loops is a no-op. Keep until a redeploy
+# has pulled once on a build that includes ADR 398.
 ( cd "$TEAM_HOME" && musterd team policy --dispatch-loop on --as nick >/dev/null ) \
   || log "team policy --dispatch-loop on refused — handoffs to this seat will run as 5 m doorbells (finding 16)"
 

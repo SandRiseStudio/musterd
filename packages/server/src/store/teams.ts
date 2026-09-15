@@ -598,6 +598,52 @@ export function applyPolicyChange(
   })();
 }
 
+/**
+ * Restate the current stored policy as one stamped `policy.change` when the hub has never
+ * stamped one (ADR 398).
+ *
+ * ADR 367 stamps new writes. A policy stored before the kind existed, or via silent `setPolicy`,
+ * has `origin_seq = 0` (or no audit row at all) and never ships. A joiner then runs different
+ * `loops` / `hourly_cap` than the hub — the live hole that made every cloud-seat wake a 5-minute
+ * reply doorbell. This is the one-shot catch-up: if a stamped `policy.change` already exists, we
+ * do nothing, so a later silent `setPolicy` stays the projector's seam (census.test.ts gap 1).
+ *
+ * Returns whether a stamp was minted.
+ */
+export function restateUnstampedPolicy(db: Database, teamId: string): boolean {
+  const stamped = db
+    .prepare<[string], { one: number }>(
+      `SELECT 1 AS one FROM audit
+        WHERE team_id = ? AND action = 'policy.change' AND origin_seq > 0
+        LIMIT 1`,
+    )
+    .get(teamId);
+  if (stamped) return false;
+  const stored = getStoredPolicy(db, teamId);
+  if (Object.keys(stored).length === 0) return false;
+  applyPolicyChange(db, teamId, policyRestateActor(db, teamId), stored);
+  return true;
+}
+
+/** Who set the unstamped row, else the team's oldest living member, else a hub fallback. */
+function policyRestateActor(db: Database, teamId: string): string {
+  const unstamped = db
+    .prepare<[string], { actor: string | null }>(
+      `SELECT actor FROM audit
+        WHERE team_id = ? AND action = 'policy.change' AND origin_seq = 0 AND actor IS NOT NULL
+        ORDER BY ts DESC LIMIT 1`,
+    )
+    .get(teamId);
+  if (unstamped?.actor) return unstamped.actor;
+  const oldest = db
+    .prepare<
+      [string],
+      { name: string }
+    >(`SELECT name FROM members WHERE team_id = ? AND left_at IS NULL ORDER BY created_at ASC LIMIT 1`)
+    .get(teamId);
+  return oldest?.name ?? 'hub';
+}
+
 function readStored(db: Database, teamId: string): unknown {
   const row = db
     .prepare<[string], { policy: string | null }>('SELECT policy FROM teams WHERE id = ?')

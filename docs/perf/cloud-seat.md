@@ -425,6 +425,13 @@ projected shape — the joiner's is null anyway (2026-09-06; falsify: read
 Whether the hub never emitted the policy event, or the joiner folded it before the loops were armed
 and nothing re-emits, is the first question for the lane.
 
+**Disposition (2026-09-15, ADR 398):** the hub never emitted it. ADR 367 stamped *new* writes; the
+live pair's `loops` were armed before the kind existed, so nothing was in `sync_log` to fold. The
+hub now restates current stored policy as one stamped `policy.change` the first time it has joiners
+and no stamp exists. The 2026-09-06 hand-arm on the joiner is the floor until that tick has run.
+(Falsify: joiner `json_extract(policy,'$.loops')` still null after one hub sync tick on a build
+that includes ADR 398, with hub loops non-null.)
+
 **Disposition (2026-09-06 02:00Z):** armed the joiner's own team policy to agree with the hub —
 `musterd team policy --dispatch-loop on --as nick`, run on the VM. Blast radius is delta alone: that
 daemon has exactly one enrolled seat. With `loops.dispatch` on *and* `flow: auto` *and* the 30 m
@@ -1067,7 +1074,8 @@ refusal or inventing a value. That is the right shape for a measurement page.
 
 - **Two wake-path defects have lanes**: ~~`01M1T6D80Q` (high — the actuator's credential is a
   field three code paths own)~~ **FIXED 2026-09-14, ADR 395** (`binding.host_key`) and
-  `01M1T6DJ7J` (high — team policy does not replicate to a joiner). ~~and finding 18's `seat-policy` narrowing~~ — **finding 18 is closed
+  ~~`01M1T6DJ7J` (high — team policy does not replicate to a joiner)~~ **FIXED 2026-09-15, ADR 398**
+  (hub restates unstamped stored policy once joiners exist). ~~and finding 18's `seat-policy` narrowing~~ — **finding 18 is closed
   (#1371, confirmed on the VM 2026-09-14; see 18a)**. Two new ones opened in its place, both from
   the confirming run: a granted tool is not yet a callable tool (the musterd tools arrive deferred,
   and ryder reproduced it on the laptop and across an MCP reconnect — not a cloud-seat property);
@@ -1098,8 +1106,8 @@ refusal or inventing a value. That is the right shape for a measurement page.
   only `run exited (code 1) without occupying the seat` — the reason is visible nowhere but the
   transcript. That is lane `01M1VDY8PY`'s third fix. ~~Unmeasured until the credit is topped up.~~
   **Measured 2026-09-14 16:35Z: the credit was topped up and the line now reads `… — harness: Credit
-  balance is too low` (18a).** Finding 18 is closed. `01M1T6DJ7J` (team policy does not replicate)
-  stays open. `01M1T6D80Q` is ADR 395: the actuator now polls with `binding.host_key`, a field no
+  balance is too low` (18a).** Finding 18 is closed. ~~`01M1T6DJ7J` (team policy does not replicate)
+  stays open.~~ **FIXED 2026-09-15, ADR 398.** `01M1T6D80Q` is ADR 395: the actuator now polls with `binding.host_key`, a field no
   claim path writes. The boot script remains the floor for enrollments that have not yet run
   `residency on` on a build that mints it. Finding 14's "the wake rewrites the credential" was
   already falsified (2026-09-06 13:15Z): after the 01:24Z rebind delta was woken five times, each
@@ -1116,5 +1124,7 @@ refusal or inventing a value. That is the right shape for a measurement page.
   per day" above): `$12.66` model over 10.6 days against `$4.24` of machine, `$5.03` for one real
   working day, and a parked seat at `$0.53/month` against `$11.99` running. The machine is the
   cheap half.
-- **Residency enrollment still does not replicate** (finding 6), now with a sibling: team policy does
-  not either (finding 16). Same family, one lane each.
+- **Residency enrollment still does not replicate** (finding 6). ~~Team policy does
+  not either (finding 16).~~ **Finding 16 closed 2026-09-15 by ADR 398** — the hub restates
+  unstamped stored policy once joiners exist; a later silent `setPolicy` still does not ship
+  (census gap 1, unchanged).
