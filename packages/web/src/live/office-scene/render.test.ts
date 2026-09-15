@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { homePoses } from './actors';
 import { memberColor } from '../format';
 import { depth, fitFloor, project } from './iso';
-import { CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
+import { BENCH, CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import {
@@ -18,6 +18,10 @@ import {
   actorDepth,
   deskNearDepth,
   deskPropSort,
+  DOCK_CRADLE_ALONG,
+  benchDockAt,
+  benchMonitorAt,
+  benchPropSort,
   deskSeat,
   deskStationItems,
   seatedArmsDepth,
@@ -1049,5 +1053,74 @@ describe('one station, one set of keys — the room and the character sheet', ()
     // second home for something the room already knows, and a fixture that drifts is worse than none.
     expect(sheet).not.toMatch(/\bdepth\(/);
     expect(sheet, 'the sheet must not derive the chair from CHAIR_OFF/FWD').not.toMatch(/CHAIR_OFF|\bFWD\b/);
+  });
+});
+
+/**
+ * nick, watching /live 2026-09-15: "in the row of desks on the northeast wall, all the laptop
+ * stands/laptops look like they are floating in front of the monitors." That row is the BENCH — the
+ * four-seat shared counter, the only run of seats against a wall.
+ *
+ * Two independent defects put them there, and a third is why no test said so.
+ *
+ * `benchStation` placed the dock with `DOCK_ALONG`/`DOCK_ACROSS`, which are sized against a POD desk
+ * (DESK_D 68, DESK_W 100). The bench counter is 30 deep and each seat's share of the top is 75, so
+ * the dock stood 17 units past the back edge — in the air — and leaned 12.5 units into its
+ * neighbour's seat. The monitor one line above already derived its own position from `BENCH.deep`;
+ * the dock beside it got the pod constants verbatim. One prop knew what furniture it was standing on.
+ *
+ * And `benchStation` painted monitor → dock → keyboard in CALL ORDER, with no depth sort at all,
+ * while `drawWorkstation` sorts every prop. So the dock painted over the monitor at every facing
+ * regardless of where it was — which is why it read as "in front of" rather than as a near miss.
+ */
+describe('the bench row: a dock has to be standing on the counter it is docked to', () => {
+  const seatShare = BENCH.long / BENCH.seats;
+  const benchSeats = DESK_SLOTS.filter((s) => s.kind === 'bench');
+
+  it('has the four seats this is about', () => {
+    expect(benchSeats).toHaveLength(BENCH.seats);
+  });
+
+  it('every dock stands entirely ON the counter, not out past its back edge', () => {
+    for (const slot of benchSeats) {
+      const { lx, ly } = benchDockAt(slot);
+      // The cradle's own footprint, not just its centre: an overhanging edge is the visible defect.
+      const backEdge = BENCH.ly - BENCH.deep / 2;
+      const frontEdge = BENCH.ly + BENCH.deep / 2;
+      expect(ly - DOCK_CRADLE_ALONG / 2, `seat ${slot.id} hangs off the BACK of the counter`).toBeGreaterThanOrEqual(backEdge);
+      expect(ly + DOCK_CRADLE_ALONG / 2, `seat ${slot.id} hangs off the FRONT of the counter`).toBeLessThanOrEqual(frontEdge);
+      expect(Number.isFinite(lx)).toBe(true);
+    }
+  });
+
+  it('every dock stays inside its own seat’s share of the counter', () => {
+    for (const slot of benchSeats) {
+      const { lx } = benchDockAt(slot);
+      const off = Math.abs(lx - slot.lx) + DOCK_HALF_ACROSS;
+      expect(off, `seat ${slot.id} leans into its neighbour`).toBeLessThanOrEqual(seatShare / 2);
+    }
+  });
+
+  it('the dock paints BEHIND the monitor — by geometry, not by call order', () => {
+    for (const slot of benchSeats) {
+      expect(
+        benchPropSort(slot, benchDockAt(slot)),
+        `seat ${slot.id}: the dock must sort before its monitor`,
+      ).toBeLessThan(benchPropSort(slot, benchMonitorAt(slot)));
+    }
+  });
+
+  /*
+   * `deskPropSort` was exported with the comment "so the dock's 'behind the monitor' claim can be
+   * falsified" — and `drawWorkstation` inlined the identical expression instead of calling it. The
+   * four-facing test below it was therefore checking a COPY of the rule, and would have gone on
+   * passing if the painter's copy drifted. Same trap as #1397, #1404 and #1430, in the one place
+   * that exists to prove this class of thing.
+   */
+  it('the painter asks deskPropSort for its order — it does not keep its own copy of the rule', () => {
+    const src = readFileSync(fileURLToPath(new URL('./render.ts', import.meta.url)), 'utf8');
+    expect(src).toMatch(/sum:\s*deskPropSort\(/);
+    // The inlined spelling must be gone: one home, or the test above proves nothing.
+    expect(src).not.toMatch(/sum:\s*f\[0\] \* along/);
   });
 });
