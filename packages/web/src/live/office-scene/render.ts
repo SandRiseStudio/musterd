@@ -4128,6 +4128,7 @@ export function actorSortAnchor(
  *
  * The body itself is NOT here — it sorts in the pose loop, at `actorDepth`, with its forearms coming
  * back a second time at `seatedArmsDepth`. Those two keys are exported beside this for the same reason.
+
  */
 export function deskStationItems(
   ctx: CanvasRenderingContext2D,
@@ -4253,6 +4254,20 @@ export function deskStationItems(
     });
   }
   return { items: out, lampLit: litLamps.has(slot.id) };
+}
+
+/**
+ * Where this desk seats somebody: the chair, one `CHAIR_OFF` back from the desk centre along its
+ * facing. Exported because WHERE A SITTER GOES AT A DESK is the room's knowledge, not its caller's —
+ * /character-sheet deriving it from `CHAIR_OFF` and `FWD` itself would be a second spelling of the
+ * chair's position, which is the drift `deskStationItems` exists to prevent, one value along.
+ *
+ * `actorSortAnchor` reads the same offset to decide a pose is "at their own desk", so a body placed
+ * here is recognised as seated rather than as a walker who happens to be standing nearby.
+ */
+export function deskSeat(slot: { lx: number; ly: number; dir: Dir }): { lx: number; ly: number } {
+  const f = FWD[slot.dir];
+  return { lx: slot.lx - f[0] * CHAIR_OFF, ly: slot.ly - f[1] * CHAIR_OFF };
 }
 
 /**

@@ -18,6 +18,7 @@ import {
   actorDepth,
   deskNearDepth,
   deskPropSort,
+  deskSeat,
   deskStationItems,
   seatedArmsDepth,
   DOCK_HALF_ACROSS,
@@ -1006,8 +1007,7 @@ describe('one station, one set of keys — the room and the character sheet', ()
   it('the sitter sits on the cushion at every facing, and the chair runs away from the desk', () => {
     for (const dir of FACINGS) {
       const slot = slotAt(dir);
-      const f = FWD[dir];
-      const seat = { lx: 400 - f[0] * CHAIR_OFF, ly: 400 - f[1] * CHAIR_OFF };
+      const seat = deskSeat(slot);
       const { items } = deskStationItems(ctx, FIT, slot, null, { teamName: 'revive' });
       const [slab, , base, back] = [items[0]!, items[1]!, items[2]!, items[3]!];
       const body = actorDepth(seat.lx, seat.ly);
@@ -1039,13 +1039,15 @@ describe('one station, one set of keys — the room and the character sheet', ()
       'utf8',
     );
     // It goes through the shared builder and the shared keys…
-    for (const fn of ['deskStationItems', 'actorDepth', 'seatedArmsDepth', 'actorSortAnchor']) {
+    for (const fn of ['deskStationItems', 'deskSeat', 'actorDepth', 'seatedArmsDepth', 'actorSortAnchor']) {
       expect(sheet, `the sheet must reach for ${fn}`).toContain(fn);
     }
     // …and it honours the overlay's own gate, so a beat that drops the hands into the lap does not
     // paint lap arms floating on the desk. A sheet that always drew the overlay would HIDE that bug.
     expect(sheet).toContain('handsInLap');
-    // …and it never computes a sort key itself. `depth(` in this file would be a second home.
+    // …and it never computes a sort key OR a chair position itself. Either one in this file is a
+    // second home for something the room already knows, and a fixture that drifts is worse than none.
     expect(sheet).not.toMatch(/\bdepth\(/);
+    expect(sheet, 'the sheet must not derive the chair from CHAIR_OFF/FWD').not.toMatch(/CHAIR_OFF|\bFWD\b/);
   });
 });

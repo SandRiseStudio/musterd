@@ -45,13 +45,11 @@ function CharacterSheet() {
       const [
         { drawCharacter },
         { solveSkeleton, seedOf, typingBurst, handsInLap },
-        { drawDog, drawActor, deskStationItems, actorSortAnchor, actorDepth, seatedArmsDepth },
-        { CHAIR_OFF, FWD },
+        { drawDog, drawActor, deskStationItems, deskSeat, actorSortAnchor, actorDepth, seatedArmsDepth },
       ] = await Promise.all([
         import('../live/office-scene/character'),
         import('../live/office-scene/skeleton'),
         import('../live/office-scene/render'),
-        import('../live/office-scene/layout'),
       ]);
       if (stop) return;
 
@@ -214,13 +212,11 @@ function CharacterSheet() {
                  station keeps the desk clear of the top of the row and the sitter clear of the label. */
               const sf = { ...f, oy: cy - 22 };
               const slot = { id: i, lx: 0, ly: 0, dir, pod: -1, kind: 'pod' as const };
-              const fwd = FWD[dir];
-              // Seated means sitting in the chair, which stands CHAIR_OFF back from the desk centre —
-              // the same offset the room seats people at, so `actorSortAnchor` recognises this as
-              // "at their own desk" rather than as a walker who happens to be nearby.
+              // The room says where this desk seats somebody; the sheet does not work it out.
+              const seat = deskSeat(slot);
               const pose = {
-                lx: slot.lx - fwd[0] * CHAIR_OFF,
-                ly: slot.ly - fwd[1] * CHAIR_OFF,
+                lx: seat.lx,
+                ly: seat.ly,
                 dir,
                 small: false,
                 carry,
