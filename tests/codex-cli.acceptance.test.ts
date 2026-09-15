@@ -36,8 +36,25 @@ export function redactCodexDiagnostic(value: string): string {
     .replace(/\bBearer\s+[^\s]+/gi, 'Bearer [redacted]');
 }
 
-function runCodex(bin: string, args: string[], cwd: string, timeoutMs = 75_000): Promise<Run> {
-  return new Promise((resolve, reject) => {
+/**
+ * A running `codex exec`. `done` is the ordinary result promise; `settled` is what `done` has
+ * already produced, readable WITHOUT awaiting — the presence poll runs for seconds before anyone
+ * awaits `done`, and it must be able to see that the child has died in that window.
+ */
+interface CodexRun {
+  done: Promise<Run>;
+  /** `undefined` while the child is still running. */
+  settled?: { ok: true; run: Run } | { ok: false; error: unknown };
+}
+
+/** Why the child is gone, in one line fit for a failure message. Diagnostics are already redacted. */
+function describeExit(settled: NonNullable<CodexRun['settled']>): string {
+  if (!settled.ok) return `it failed to run: ${String(settled.error)}`;
+  return `exit code ${settled.run.code}; stderr: ${settled.run.stderr.trim() || '(empty)'}`;
+}
+
+function runCodex(bin: string, args: string[], cwd: string, timeoutMs = 75_000): CodexRun {
+  const done = new Promise<Run>((resolve, reject) => {
     const child = spawn(bin, args, {
       cwd,
       env: codexAcceptanceEnv(process.env),
@@ -63,7 +80,14 @@ function runCodex(bin: string, args: string[], cwd: string, timeoutMs = 75_000):
     child.once('error', reject);
     child.once('exit', (code) => {
       clearTimeout(timer);
-      if (timedOut) return reject(new Error('Codex real acceptance timed out'));
+      // Carry the diagnostics into the rejection: an owner-gated run costs a real Codex execution,
+      // so a timeout that throws away the stderr it already captured makes the next attempt blind.
+      if (timedOut)
+        return reject(
+          new Error(
+            `Codex real acceptance timed out after ${timeoutMs}ms; stderr: ${redactCodexDiagnostic(stderr).trim() || '(empty)'}`,
+          ),
+        );
       threadId ??= parseCodexThreadLine(stdoutRemainder);
       resolve({
         code,
@@ -73,6 +97,27 @@ function runCodex(bin: string, args: string[], cwd: string, timeoutMs = 75_000):
       });
     });
   });
+  const run: CodexRun = { done };
+  // Attach the handlers NOW. `done` rejects on a spawn error and on the SIGTERM timeout above,
+  // and the caller does not await it until the presence poll returns — a rejection in that window
+  // would otherwise be an unhandled rejection that vitest attributes to no test, while the real
+  // stderr is thrown away.
+  void done.then(
+    (value) => (run.settled = { ok: true, run: value }),
+    (error: unknown) => (run.settled = { ok: false, error }),
+  );
+  return run;
+}
+
+/** The ordinary case: start a `codex exec` and wait for it, with no concurrent observation. */
+function runCodexToCompletion(
+  bin: string,
+  args: string[],
+  cwd: string,
+  timeoutMs?: number,
+): Promise<Run> {
+  return (timeoutMs === undefined ? runCodex(bin, args, cwd) : runCodex(bin, args, cwd, timeoutMs))
+    .done;
 }
 
 async function api(
@@ -97,15 +142,30 @@ async function api(
   return text ? (JSON.parse(text) as Record<string, any>) : {};
 }
 
+/**
+ * Wait for an online Presence that exists WHILE `run` is still executing — ADR 396's claim is about
+ * a Presence observed against a live process, not one seen at any point. Codex releases the
+ * Presence when its adapter shuts down, so a row still online after the child exits means that
+ * release did not happen; returning it would pass this acceptance for exactly the regression the
+ * decision exists to catch.
+ *
+ * `timeoutMs` is deliberately LONGER than `runCodex`'s own timeout: when Codex hangs, the child's
+ * SIGTERM fires first and this loop reports that cause, rather than both deadlines racing to
+ * produce the less informative error.
+ */
 async function waitForOnlinePresence(
   base: string,
   credential: string,
   memberName: string,
   surface: 'codex',
-  timeoutMs = 75_000,
+  run: CodexRun,
+  timeoutMs = 90_000,
 ) {
   const deadline = Date.now() + timeoutMs;
   do {
+    // Read liveness BEFORE the roster call, so a Presence found in that response was observed
+    // against a process that had not yet exited.
+    const exitedBeforeRead = run.settled;
     const roster = await api(base, 'GET', '/teams/codex-real/members', undefined, credential);
     const member = MemberSummarySchema.array()
       .parse(roster.members)
@@ -113,7 +173,17 @@ async function waitForOnlinePresence(
     const presence = member?.presences.find(
       (candidate) => candidate.surface === surface && candidate.status === 'online',
     );
-    if (presence) return presence;
+    if (presence) {
+      if (exitedBeforeRead)
+        throw new Error(
+          `${memberName} is online via ${surface} but \`codex exec\` had already exited — the adapter's shutdown release did not happen (ADR 396); ${describeExit(exitedBeforeRead)}`,
+        );
+      return presence;
+    }
+    if (run.settled)
+      throw new Error(
+        `\`codex exec\` exited before ${memberName} appeared online via ${surface}: ${describeExit(run.settled)}`,
+      );
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
   } while (Date.now() < deadline);
   throw new Error(`timed out waiting for ${memberName} to be online via ${surface}`);
@@ -231,8 +301,14 @@ describe('Codex CLI real acceptance (owner-gated)', () => {
         ],
         workspace,
       );
-      const onlineCodexPresence = await waitForOnlinePresence(base, admin, 'Ada', 'codex');
-      const first = await firstRun;
+      const onlineCodexPresence = await waitForOnlinePresence(
+        base,
+        admin,
+        'Ada',
+        'codex',
+        firstRun,
+      );
+      const first = await firstRun.done;
       expect(first.code, first.stderr).toBe(0);
       expect(first.threadId, first.stdout).toBeTruthy();
       // v0.3 identity persists the seat inside `claim`, not a scalar `member` (ADR 075 / ADR 281).
@@ -253,7 +329,7 @@ describe('Codex CLI real acceptance (owner-gated)', () => {
       );
       expect(unread.messages).toEqual([]);
 
-      const resumed = await runCodex(
+      const resumed = await runCodexToCompletion(
         bin!,
         [
           'exec',
