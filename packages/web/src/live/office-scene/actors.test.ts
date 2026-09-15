@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createActors, deskNeighbourPairs, homePoses, travelDir } from './actors';
 import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK, NOOK_RUG_R, STRIP_CAP } from './layout';
 import { GESTURE } from './skeleton';
+import { LEISURE_SPOTS } from './layout';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
 import { slotRng } from './ambientSeed';
@@ -973,6 +974,41 @@ describe('deskNeighbourPairs — the shared pair pool (E1 spec §2)', () => {
     actors.setHomes(placements, byName, true);
     return { placements, byName, actors };
   }
+
+  /** A room with members sitting somewhere OTHER than a desk. `active` (between claims) is what puts
+   *  someone on the leisure furniture — it is not desk overflow, which is the wrong guess I made
+   *  first and the guard assertion below caught. The 12-desk fixture above has no leisure sitters at
+   *  all, which is why it could not see the two pools disagree (2026-09-14). */
+  function loungeWorld() {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    for (let i = 0; i < 5; i++) nodes[i]!.posture = 'active';
+    const { placements, byName } = world(nodes);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    return { placements, byName, actors };
+  }
+
+  it('the two pools still agree once members sit somewhere other than a desk', () => {
+    const { placements, byName, actors } = loungeWorld();
+    const leisure = [...placements.values()].filter((p) => p.kind === 'leisure');
+    // Guard the guard: if seating ever stops overflowing, this test silently stops testing anything.
+    expect(leisure.length, 'fixture must actually seat someone off-desk').toBeGreaterThan(0);
+    expect(deskNeighbourPairs(placements, byName)).toEqual(actors.deskNeighbours());
+  });
+
+  it('pairs two members in the same leisure zone, and never across zones', () => {
+    const { placements, byName } = loungeWorld();
+    const zoneOf = new Map<string, string>();
+    for (const [name, pl] of placements) {
+      if (pl.kind === 'leisure') zoneOf.set(name, LEISURE_SPOTS[pl.spot]?.zone ?? '?');
+    }
+    const pairs = deskNeighbourPairs(placements, byName).filter(
+      ([a, b]) => zoneOf.has(a) && zoneOf.has(b),
+    );
+    for (const [a, b] of pairs) {
+      expect(zoneOf.get(a), `${a} and ${b} must share a zone`).toBe(zoneOf.get(b));
+    }
+  });
 
   it('matches the scene-state pool exactly when nobody is busy', () => {
     const { placements, byName, actors } = fullWorld();

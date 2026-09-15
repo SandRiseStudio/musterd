@@ -79,6 +79,24 @@ function CharacterSheet() {
        * /office-preview, which is one room or the other. Inert and null unless asked for, so the
        * sheet's empty-handed day job is unchanged.
        */
+      /*
+       * `?gesture=N` — PLAY A GESTURE ON THE WHOLE SHEET, looping.
+       *
+       * Same blind spot `?carry=` fixed, one layer along: this sheet exists to put every body at every
+       * facing under 4x scrutiny, and it hardcoded `gesture: 0`, so the one thing it could not show was
+       * a beat. Reviewing a new gesture meant hunting it in the room at 40px and hoping the scheduler
+       * picked the member you were watching (miley, 2026-09-14, adding four idle beats).
+       *
+       * `gestureT` is driven off the sheet clock so the beat plays over and over — a still frame of an
+       * arc tells you almost nothing, and the interesting failures (a hand through a skull, an arm
+       * inside the torso) happen mid-window.
+       */
+      const gesture = (() => {
+        const v = new URLSearchParams(window.location.search).get('gesture');
+        const n = v ? Number(v) : 0;
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      })();
+
       const carry = (() => {
         const v = new URLSearchParams(window.location.search).get('carry');
         const kinds = ['laptop', 'box', 'plate', 'bottle', 'mug', 'phone'];
@@ -95,11 +113,12 @@ function CharacterSheet() {
         // The carry as ONE sheet caption, not a per-cell label suffix: CELL is only wide enough for
         // `name · kind · dir · mode`, and appending to each cell ran the text into its neighbour's.
         // A screenshot of this sheet still has to say what it is showing, so it says it once.
-        if (carry) {
+        if (carry || gesture) {
           ctx.fillStyle = 'rgba(30,20,10,.72)';
           ctx.font = canvasFont(12, '--font-mono', 400);
           ctx.textAlign = 'left';
-          ctx.fillText(`carrying · ${carry}`, 10, 20);
+          const bits = [carry ? `carrying · ${carry}` : '', gesture ? `gesture · ${gesture}` : ''];
+          ctx.fillText(bits.filter(Boolean).join('   ·   '), 10, 20);
         }
 
         // A big "fit" so one logical unit is ~1.6px — the character reads at roughly 4× office size.
@@ -153,8 +172,8 @@ function CharacterSheet() {
               typing: mode.sit ? typingBurst(seed, t) : 0,
               carry,
               help: false,
-              gesture: 0,
-              gestureT: 0,
+              gesture,
+              gestureT: gesture ? (t * 0.45) % 1 : 0,
               seed,
             });
             // Draw at an explicit screen point by faking the projection origin.
@@ -168,6 +187,11 @@ function CharacterSheet() {
               size: 1,
               alpha: 1,
               carry,
+              // The painter reads these too, not just the skeleton — the sip mug sorts against the head
+              // by gesture, so a sheet that solved the pose but drew with gesture 0 would disagree with
+              // the room about where a hand is.
+              gesture,
+              gestureT: gesture ? (t * 0.45) % 1 : 0,
               t,
               seed,
             });
