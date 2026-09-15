@@ -21,6 +21,7 @@ import {
 import { BUILTIN_TOOLKITS, parseToolkit } from '../toolkit.js';
 import {
   CODEX_HOOK_MARKER,
+  codexCommonDirRoot,
   codexHookCommands,
   codexHooksPath,
   hasNewerCodexHookEpoch,
@@ -430,9 +431,20 @@ export const codexAdapter: HarnessAdapter = {
         const read = readHooksJson(ctx.fs, path);
         if (read === null) throw new Error('.codex/hooks.json invalid at apply time');
         const file = read ?? {};
+        const commonPath =
+          ctx.fs === nodeFs
+            ? (() => {
+                const commonRoot = codexCommonDirRoot(ctx.worktreeRoot);
+                return commonRoot ? codexHooksPath(commonRoot) : undefined;
+              })()
+            : undefined;
+        const common = commonPath ? readHooksJson(ctx.fs, commonPath) : undefined;
         if (
           mutation.kind !== 'remove' &&
-          hasNewerCodexHookEpoch(musterdCodexHandlers(file).map(({ command }) => command))
+          (hasNewerCodexHookEpoch(musterdCodexHandlers(file).map(({ command }) => command)) ||
+            (common !== null &&
+              common !== undefined &&
+              hasNewerCodexHookEpoch(musterdCodexHandlers(common).map(({ command }) => command))))
         ) {
           return;
         }

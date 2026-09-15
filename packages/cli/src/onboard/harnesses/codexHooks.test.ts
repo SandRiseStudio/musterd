@@ -230,11 +230,15 @@ describe('Codex hooks in a git worktree (common-dir resolution)', () => {
 
   it('does not downgrade a newer git-common-dir copy during refresh', () => {
     installCodexHooks(worktreeRoot);
+    const worktreePath = join(worktreeRoot, '.codex', 'hooks.json');
+    const olderWorkspace = JSON.stringify(markerOwnedHooks(FEATURE_EPOCH - 1), null, 2);
+    writeFileSync(worktreePath, olderWorkspace);
     const commonPath = join(mainRoot, '.codex', 'hooks.json');
     const newer = JSON.stringify(markerOwnedHooks(FEATURE_EPOCH + 1), null, 2);
     writeFileSync(commonPath, newer);
 
     expect(installCodexHooks(worktreeRoot)).toEqual([]);
+    expect(readFileSync(worktreePath, 'utf8')).toBe(olderWorkspace);
     expect(readFileSync(commonPath, 'utf8')).toBe(newer);
   });
 

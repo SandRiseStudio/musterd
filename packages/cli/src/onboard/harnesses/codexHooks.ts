@@ -159,10 +159,21 @@ function installCodexHooksAt(path: string): string[] {
  */
 export function installCodexHooks(root: string): string[] {
   const commonRoot = codexCommonDirRoot(root);
-  return [
-    ...installCodexHooksAt(pathFor(root)),
-    ...(commonRoot !== undefined ? installCodexHooksAt(pathFor(commonRoot)) : []),
-  ];
+  const paths = [pathFor(root), ...(commonRoot !== undefined ? [pathFor(commonRoot)] : [])];
+  // A worktree and its common-dir copy are one configured hook set. Preflight every readable copy
+  // before writing either one: an e21 common copy must not let an e20 checkout rewrite its e19
+  // workspace sibling and leave the pair split across generations.
+  if (
+    paths.some((path) => {
+      const file = read(path);
+      return (
+        file !== undefined && hasNewerCodexHookEpoch(markerHandlers(file).map((h) => h.command))
+      );
+    })
+  ) {
+    return [];
+  }
+  return paths.flatMap((path) => installCodexHooksAt(path));
 }
 
 /** Reverse only marker-owned additions at one path; never remove user-defined handlers or groups. */
