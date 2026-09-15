@@ -67,7 +67,7 @@ export function contentHash(renderable: string): string {
  * {@link strippedBody} — which also normalizes to a trailing newline. Hashing the raw `renderable`
  * instead would false-flag an untouched file whenever the renderable lacked a final newline (the
  * `join('\n')` renderers in `@musterd/protocol` do). */
-function stamped(renderable: string): string {
+export function stamped(renderable: string): string {
   const body = renderable.endsWith('\n') ? renderable : renderable + '\n';
   return `${body}${renderContentStamp(GUIDANCE_CONTENT_VERSION, contentHash(body))}\n`;
 }
@@ -294,8 +294,14 @@ export function removeGuidance(dir: string, harnesses: Harness[]): { removed: st
 // writeGuidance/removeGuidance above keep serving the pre-282 lifecycle path until it is retired.
 
 /** The per-harness guidance file map, rendered + stamped, keyed by path relative to the worktree. */
-export function guidanceFileMap(g: HarnessGuidance, team: string): Record<string, string> {
-  const out: Record<string, string> = {};
+export function guidanceFileMap(
+  g: HarnessGuidance,
+  team: string,
+  /** ADR 334: the seat's role-skill bridges, merged in so they are managed like every other guidance
+   * file — observed, drift-detected, and released on deselect/uninstall by the same machinery. */
+  roleBridges: Record<string, string> = {},
+): Record<string, string> {
+  const out: Record<string, string> = { ...roleBridges };
   out[g.skillPath] = stamped(skillFile(g.frontmatter, team));
   if (g.sessionsSkillPath) {
     out[g.sessionsSkillPath] = stamped(

@@ -202,6 +202,12 @@ export interface HarnessGuidance {
    * no native catalog (Codex, OpenCode) omit this; they get the canonical `.musterd/skill/orient.md`
    * instead. Presence of this path is catalog, not a claim that the repeating nudge fires there. */
   orientSkillPath?: string;
+  /** Path pattern for a **role-skill bridge** (ADR 334) — `<role>` is substituted with the seat's
+   * roster role. Declared by harnesses that catalog a native skill/rule shell, the same set as
+   * {@link orientSkillPath}; harnesses without one (Codex, OpenCode) omit it and reach a committed
+   * role skill through the AGENTS.md primer instead. The bridge is a thin pointer at
+   * `.agents/skills/<role>/SKILL.md` (ADR 299 §2), never a copy of that body. */
+  roleSkillPattern?: string;
 }
 
 /** What a harness gets to work with when observing its own session's model. */
