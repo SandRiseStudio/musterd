@@ -26,13 +26,23 @@ handler records model observation only and emits no output, so musterd has no
 mid-turn interrupt delivery today even though Codex provides the seam. It
 installs no Stop handler, so it has no native turn-end continuation either.
 
+## Clause-8 follow-up (2026-09-15)
+
+An authorized `codex-cli 0.154.0` run attempted `team_inbox_check` as its first action, with no
+tool-discovery action first. It returned `MUSTERD_TOOL_RESULT=failure; DISCOVERY_USED=no` without a
+musterd tool call. `codex mcp list` showed the musterd entry enabled, but its command resolved to a
+different checkout's adapter build. This establishes that the configured Surface was uncallable in
+this run; it does **not** establish a Codex deferral mechanism or reconnect behavior. Those remain
+unmeasured until an adapter built from the evaluated workspace can expose its tools.
+
 ## Recommendation
 
 Treat Codex as capable of both a structured PostToolUse interrupt and a Stop
 continuation. A future change should add marker-owned handlers only after an
 ADR specifies: bounded urgent/acceptance selection, the JSON output shape for
 PostToolUse, the Stop continuation reason, loop suppression, and a live
-falsifier. Do not claim idle push capability.
+falsifier. ADR 397 now specifies the bounded PostToolUse half only. Do not
+claim idle push capability.
 
 ## Sources
 
