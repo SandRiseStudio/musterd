@@ -73,6 +73,8 @@ Observed, not argued: reading delta's inbox moved its cursor to 1788562249698, p
 
 The by-id root fetch in `listInterruptCandidates` rescues the **root** from the cursor window — ADR 378's own comment explains why it must. Nothing rescues a **turn**. This contradicts the ADR's expectation that a missed huddle bell "self-heals on the next push": self-healing holds only while no inbox read intervenes, and with a 60-second fold lag on a second machine, one usually does.
 
+**Repaired 2026-09-15** (izzo, lane 01M1T43B84): the claim above is invalidated from that date. `listInterruptCandidates` now treats a huddle root landing inside the window as the arrival of its whole thread and fetches that thread's turns from below the cursor, so the buried turn rings on the first probe after the root folds (2026-09-15; falsify: fold a turn to a joiner, read that seat's inbox, then fold the root — a silent `inbox --interrupt-check` disproves this). The turn is discharged like any other row once a read carries the cursor past the root. Not yet re-measured on a real second machine; the unit test reproduces the receipt-order scenario exactly. <!-- claim: defect -->
+
 ## What this did *not* find
 
 `pendingInterrupts` is not implicated. The fold is correct, the SQL admits the rows, and the predicate never gets to run because the request is rejected at the door. The ordering hazard predicted before the run — a root from node A racing a turn from node B on independent sequences — **needs three nodes to bite**, and the team has two: with a hub and one joiner there is no arrangement where a peer holds a turn while waiting for its root, because a seat cannot name a root it has not seen. It remains real and unwitnessed.
