@@ -1,4 +1,4 @@
-# 277 — Codex CLI Presence Evidence During Active Execution
+# 396 — Codex CLI Presence Evidence During Active Execution
 
 - Status: accepted
 - Date: 2026-08-15

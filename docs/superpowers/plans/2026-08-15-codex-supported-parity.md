@@ -44,7 +44,7 @@ expect(bindingSeat(binding)).toBe('Ada');
 While the first Codex process remains active, query the fixture roster and assert an online `Ada`
 Member has a Presence whose Surface is `codex`. Use the existing typed response shape; no ambient
 machine binding reads. After the process exits, no live Presence is expected because the adapter
-releases it on shutdown (ADR 277).
+releases it on shutdown (ADR 396).
 
 - [ ] **Step 3: Verify gate-closed behavior**
 
