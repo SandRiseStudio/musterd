@@ -1,14 +1,39 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FEATURE_EPOCH } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CODEX_HOOK_MARKER,
   codexCommonDirRoot,
+  codexHookCommands,
   inspectCodexHookDrift,
   installCodexHooks,
   removeCodexHooks,
 } from './codexHooks.js';
+
+function markerOwnedHooks(epoch = FEATURE_EPOCH): { hooks: Record<string, unknown[]> } {
+  return {
+    hooks: Object.fromEntries(
+      codexHookCommands().map(({ event, command }) => [
+        event,
+        [
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: command.replace(
+                  new RegExp(`${CODEX_HOOK_MARKER}(?: e\\d+)?$`),
+                  `${CODEX_HOOK_MARKER} e${epoch}`,
+                ),
+              },
+            ],
+          },
+        ],
+      ]),
+    ),
+  };
+}
 
 describe('Codex project hooks', () => {
   let root: string;
@@ -51,6 +76,52 @@ describe('Codex project hooks', () => {
     expect(cmd).toContain('session orient-nudge');
     expect(cmd).toContain(CODEX_HOOK_MARKER);
     expect(cmd).not.toContain('codex-hook start');
+  });
+
+  it('repairs text-different and duplicate marker-owned commands without touching user handlers', () => {
+    const source = markerOwnedHooks();
+    const user = { matcher: 'Bash', hooks: [{ type: 'command', command: 'echo user' }] };
+    source.hooks.PostToolUse = [
+      user,
+      {
+        hooks: [
+          {
+            type: 'command',
+            command: `musterd codex-hook post-tool-use --stdin --wrong # ${CODEX_HOOK_MARKER} e${FEATURE_EPOCH}`,
+          },
+        ],
+      },
+      {
+        hooks: [
+          {
+            type: 'command',
+            command: `musterd codex-hook post-tool-use --stdin # ${CODEX_HOOK_MARKER} e${FEATURE_EPOCH}`,
+          },
+        ],
+      },
+    ];
+    writeFileSync(hooksPath, JSON.stringify(source, null, 2));
+
+    expect(inspectCodexHookDrift(root)[0]).toContain('differ from the supported configuration');
+    installCodexHooks(root);
+
+    const repaired = JSON.parse(readFileSync(hooksPath, 'utf8')) as {
+      hooks: Record<string, unknown[]>;
+    };
+    expect(repaired.hooks.PostToolUse).toContainEqual(user);
+    expect(inspectCodexHookDrift(root)).toEqual([]);
+  });
+
+  it('says a newer marker epoch belongs to a newer checkout, not a hook refresh', () => {
+    writeFileSync(hooksPath, JSON.stringify(markerOwnedHooks(FEATURE_EPOCH + 1), null, 2));
+
+    expect(inspectCodexHookDrift(root)[0]).toContain('checkout is behind');
+  });
+
+  it('identifies an older marker epoch as repairable drift', () => {
+    writeFileSync(hooksPath, JSON.stringify(markerOwnedHooks(FEATURE_EPOCH - 1), null, 2));
+
+    expect(inspectCodexHookDrift(root)[0]).toContain('refresh-hooks');
   });
 
   it('removes only marker-owned hooks and leaves a user-only file intact', () => {
@@ -142,6 +213,16 @@ describe('Codex hooks in a git worktree (common-dir resolution)', () => {
     const drift = inspectCodexHookDrift(worktreeRoot);
     expect(drift).toHaveLength(1);
     expect(drift[0]).toContain('git common dir');
+  });
+
+  it('uses the exact epoch comparison for the common-dir copy', () => {
+    installCodexHooks(worktreeRoot);
+    writeFileSync(
+      join(mainRoot, '.codex', 'hooks.json'),
+      JSON.stringify(markerOwnedHooks(FEATURE_EPOCH + 1), null, 2),
+    );
+
+    expect(inspectCodexHookDrift(worktreeRoot)[0]).toContain('checkout is behind');
   });
 
   it('removeCodexHooks only touches the worktree copy, never the shared common-dir one', () => {
