@@ -5547,6 +5547,18 @@ export async function handleHttp(
       if (method === 'GET' && rest === '/inbox') {
         const { team, member } = authTouch(ctx, slug, req);
         assertSeatCanRead(member);
+        // `?ids=a,b,c` reads named acts back and nothing else — the retrieval path for a body
+        // `team_inbox_check` clipped to stay inside its byte budget (lane 01M2JZYTAH). No cursor
+        // floor, no window, no `truncated`: the caller named the rows, so there is no remainder.
+        const idsRaw = url.searchParams.get('ids');
+        if (idsRaw !== null) {
+          const ids = idsRaw.split(',').filter((id) => id.length > 0);
+          const named = listInbox(ctx.db, member, { ids });
+          return sendJson(res, 200, {
+            messages: rowsToEnvelopes(ctx.db, team.slug, named),
+            cursor: getCursor(ctx.db, member.id),
+          });
+        }
         const unread = url.searchParams.get('unread') === '1';
         const since = url.searchParams.get('since');
         const limitRaw = Number(url.searchParams.get('limit') ?? '');

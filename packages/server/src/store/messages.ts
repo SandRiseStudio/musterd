@@ -211,6 +211,17 @@ export interface InboxOpts {
    * and catching up takes several reads and reaches every message in order.
    */
   headLimit?: number;
+  /**
+   * Read these specific rows back, cursor and bounds ignored (lane 01M2JZYTAH).
+   *
+   * `team_inbox_check` clips a long body so one act cannot spend a whole reply's byte budget, and a
+   * clip is only honest if the rest is reachable — before this, nothing on the read path named a
+   * row: unreadOnly, since, limit and headLimit all select a WINDOW. This is not a cursor read. It
+   * names acts the caller has already been shown, so it ignores the cursor (a clipped act is read
+   * by the time anyone asks for it) and it moves nothing. Visibility is unchanged: the same team,
+   * addressed-to-me-or-the-team, not-my-own-sends predicate as every other read here.
+   */
+  ids?: readonly string[];
 }
 
 /**
@@ -226,6 +237,18 @@ export function listInbox(
   let where = `WHERE team_id = ?
        AND (to_member = ? OR to_kind IN ('team','broadcast'))
        AND from_member != ?`;
+  // The id read short-circuits everything else: no cursor floor, no window, no pinning. An empty
+  // list means "no rows", never "every row" — the caller asked for a named set and got it.
+  if (opts.ids) {
+    if (opts.ids.length === 0) return [];
+    const holes = opts.ids.map(() => '?').join(',');
+    return db
+      .prepare<
+        unknown[],
+        MessageRow
+      >(`SELECT * FROM messages ${where} AND id IN (${holes}) ORDER BY created_at ASC, id ASC`)
+      .all(...params, ...opts.ids);
+  }
   if (opts.unreadOnly) {
     // Both floors apply when both are given: `cursorTs` is what the seat has already read, `since` is
     // how far a paging caller has walked. They are applied SEPARATELY rather than as `max(...)`,
