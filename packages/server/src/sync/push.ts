@@ -11,7 +11,7 @@ import { readNodeState } from '../node/state.js';
 import { REPLICATED_LEDGER_VERBS, type AuditRow } from '../store/audit.js';
 import { rowToEnvelope } from '../store/messages.js';
 import type { MessageRow } from '../store/rows.js';
-import { listActiveTeams } from '../store/teams.js';
+import { listActiveTeams, restateUnstampedPolicy } from '../store/teams.js';
 import { hasEnrolledJoiners, ingestBatch, SyncGapError } from './log.js';
 
 /**
@@ -241,40 +241,50 @@ export async function pushTeam(
   now: number = Date.now(),
 ): Promise<number> {
   const nodeId = localNodeId(ctx, team.id);
-  // No local row means this daemon has stamped no origin for the team, so it has nothing of its own
-  // to push — and must not mint an identity just to discover that.
-  if (!nodeId) return 0;
   // An enrollment is THIS daemon's only if it names this daemon's node row: node.json is keyed by
   // team slug, and a record minted for another node (two daemons sharing one state file, as the
   // through-DB tests do) must not make a hub believe it is a joiner.
   const record = readNodeState().nodes[team.slug];
-  const enrollment = record && record.node_id === nodeId ? record : undefined;
+  const enrollment = record && nodeId && record.node_id === nodeId ? record : undefined;
 
   // Three cases. Enrolled: push to the hub over HTTP (below). Not enrolled but hosting enrolled
   // joiners: this daemon IS the hub, and its own traffic must reach sync_log or the log it serves
   // is missing every event it minted itself — stage in-process through the same ingestBatch the
   // route calls (spec 2026-09-01 §Finding 1). Neither: a single-machine install, which is every
   // musterd install today. Not an error.
-  const loopback = !enrollment && hasEnrolledJoiners(ctx.db, team.id, nodeId);
+  const loopback = !enrollment && hasEnrolledJoiners(ctx.db, team.id, nodeId ?? '');
   if (!enrollment && !loopback) return 0;
 
-  const cursor = readCursor(ctx, team.id, nodeId);
-  const pending = unpushed(ctx, team.id, nodeId, cursor);
+  // ADR 398: a hub whose stored policy was never stamped (pre-kind history, or silent
+  // `setPolicy`) restates it once, so the loopback push below ships the live doc. Must run
+  // before `unpushed` or this tick would skip the event it just minted. A hub that has joiners
+  // but has never minted a local node (policy written via silent `setPolicy`) gets one here —
+  // applyPolicyChange is what mints it. Must not mint a node on a single-machine install just
+  // to discover there is nothing to push; loopback already proved joiners exist.
+  if (loopback) restateUnstampedPolicy(ctx.db, team.id);
+
+  // No local row means this daemon has stamped no origin for the team, so it has nothing of its
+  // own to push. Re-read: restatement above may have just minted the hub's node.
+  const originId = localNodeId(ctx, team.id);
+  if (!originId) return 0;
+
+  const cursor = readCursor(ctx, team.id, originId);
+  const pending = unpushed(ctx, team.id, originId, cursor);
   if (pending.length === 0) return 0;
 
   const events: SyncEvent[] = pending.map((p) => toSyncEvent(p, team.slug));
 
   if (loopback) {
     try {
-      const result = ingestBatch(ctx.db, team.id, nodeId, events, now);
-      advanceCursor(ctx, team.id, nodeId, pending[pending.length - 1]!.row.origin_seq, now);
+      const result = ingestBatch(ctx.db, team.id, originId, events, now);
+      advanceCursor(ctx, team.id, originId, pending[pending.length - 1]!.row.origin_seq, now);
       return result.accepted;
     } catch (err) {
       // A gap here means the push cursor and sync_log disagree about this node — the cursor was
       // lost or rolled back. Believe the log (it is the authority on what it holds), bounded by
       // this node's own head exactly as the HTTP path bounds a hub's resume point.
       if (err instanceof SyncGapError) {
-        const head = localHead(ctx, team.id, nodeId);
+        const head = localHead(ctx, team.id, originId);
         if (err.expectedSeq > head + 1) {
           log.error({
             msg: 'sync_loopback_impossible_resume',
@@ -286,7 +296,7 @@ export async function pushTeam(
           });
           throw err;
         }
-        advanceCursor(ctx, team.id, nodeId, err.expectedSeq - 1, now);
+        advanceCursor(ctx, team.id, originId, err.expectedSeq - 1, now);
         log.warn({ msg: 'sync_loopback_gap', team: team.slug, resume_at: err.expectedSeq });
         return 0;
       }
@@ -318,7 +328,7 @@ export async function pushTeam(
     // here, reported by nobody (dolly, 2026-08-28, #1102 required B).
     const body = (await res.json().catch(() => null)) as { expected_seq?: unknown } | null;
     const expected = body?.expected_seq;
-    const head = localHead(ctx, team.id, nodeId);
+    const head = localHead(ctx, team.id, originId);
     if (typeof expected === 'number' && Number.isInteger(expected) && expected >= 1) {
       if (expected > head + 1) {
         // Decision 7 (ADR 335 §7): every refusal must be distinguishable from being offline.
@@ -339,7 +349,7 @@ export async function pushTeam(
             'impossible, so refusing rather than skipping events',
         );
       }
-      advanceCursor(ctx, team.id, nodeId, expected - 1, now);
+      advanceCursor(ctx, team.id, originId, expected - 1, now);
       log.warn({ msg: 'sync_push_gap', team: team.slug, resume_at: expected });
       return 0;
     }
@@ -374,7 +384,7 @@ export async function pushTeam(
       recordPushRefusal(
         ctx,
         team.id,
-        nodeId,
+        originId,
         {
           seat: body.seat,
           bound_to: typeof body.node_label === 'string' ? body.node_label : body.node_id,
@@ -418,7 +428,7 @@ export async function pushTeam(
   const ack = SyncPushResponseSchema.parse(await res.json());
   // Only now, and only as far as the batch we actually sent. `accepted` counts what was NEW to the
   // hub — a replay acks 0 — so the cursor follows the batch, not the count.
-  advanceCursor(ctx, team.id, nodeId, pending[pending.length - 1]!.row.origin_seq, now);
+  advanceCursor(ctx, team.id, originId, pending[pending.length - 1]!.row.origin_seq, now);
   return ack.accepted;
 }
 

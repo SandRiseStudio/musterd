@@ -113,6 +113,11 @@ straight face, and the ledger they feed reads as one team's spend.
   that at ingest instead. `REPLICATED_LEDGER_VERBS` in `store/audit.ts` is where the next one lands.
 - Census gap 1 closes; gaps 2 (`seat_memory` / `inbox_cursors`, lane `01M1JNY14F`) and 3 (the
   insight substrate, lane `01M1JNY95C`) stay open.
+- _(2026-09-15: ADR 367 stamped **new** writes. A hub whose policy was last written unstamped —
+  before the kind existed, or via silent `setPolicy` — still shipped nothing, so a live joiner's
+  `loops` stayed null and every wake there was a 5-minute reply doorbell. [ADR 398](398-unstamped-team-policy-restates-once-joiners-exist.md)
+  restates the current stored doc once when joiners exist and no stamp exists. The silent
+  `setPolicy` seam is unchanged.)_
 
 ## Observability & Evaluation
 
