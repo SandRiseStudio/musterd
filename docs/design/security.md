@@ -91,6 +91,11 @@ Members, cover unrelated harnesses, or activate enforcement. The
 [paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md) defines the
 later governed-launch boundary.
 
+[ADR 400](../decisions/400-aperture-policy-generator.md) adds a local, deterministic generator for the
+musterd-managed policy fragment. Its committed input is secret-free, exact provider/model policy and
+opaque Member workload mappings; it writes no provider credentials and never contacts Aperture.
+Generation or a matching doctor result remains configuration evidence, not enforced routing.
+
 ## Out of scope (roadmap, named so we don't design into a corner)
 
 Automatic/scheduled credential rotation; mTLS / authenticated remote transport; encryption-at-rest for the DB; multi-admin policy & delegation; signed audit log; rate-limiting / anomaly detection on claims; secret storage via OS keychain instead of plaintext config files.

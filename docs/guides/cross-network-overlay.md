@@ -114,6 +114,18 @@ in this guide. Aperture model-configuration readiness is independent; see the
 [approved paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md)
 for `musterd integration doctor --aperture <https-url>` and the combined invocation.
 
+Before checking a Team's managed Aperture policy, generate and review its local fragment from the
+committed roster and secret-free `.musterd/governed-models.json`:
+
+```bash
+musterd integration generate aperture --write
+musterd integration generate aperture --check
+```
+
+This creates no network connection and never applies configuration; an operator manually merges the
+two generated files into Aperture. The doctor then compares only that musterd-managed portion and
+still reports configuration readiness rather than active enforcement.
+
 Run this checklist before you trust the team:
 
 1. **Reachability** — from a member's machine, confirm the daemon's `host:port` is reachable over the
