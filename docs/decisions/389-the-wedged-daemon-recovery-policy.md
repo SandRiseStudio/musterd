@@ -270,3 +270,24 @@ this week's read and a human say so.
   (0a636599, bounced 2026-09-05 17:59), so it is not the old verdict the watch warned about.
   Follows-up: none until the successor is read — a rule for `???` written now would be the
   `void_if` clause firing on itself (2026-09-14).
+
+## Amendment 1 — the load average separates starved from blocked (2026-09-14, lane `01M2GTB0RA`)
+
+§1 said only the sample can make `daemon_wedged`. Six raises on 2026-09-14 (20:02Z–21:23Z) show
+the sample cannot make it either: each named a synchronous frame at 91–100% share, and each was a
+daemon starved by a laptop at load 16–29 on 8 cores (other seats' `tsc` and vitest, opencode), not
+blocked by its own work — every store function behind the stalled endpoints ran in milliseconds on
+the same db read-only, and every raise cleared by the next autorefresh bounce. A busy single-threaded
+sync daemon is always inside some frame; the frame is not evidence of a wedge.
+
+**Amended:** the tick collects the 1-minute load average and core count. On the persisted
+clean-exit-unreachable shape, load above `STARVED_LOAD_PER_CORE` (2×) classifies **`daemon_starved`**
+at **`observe`** — recorded (`guardian.observed`), never a page — ahead of the sample rule; under it,
+§1 stands unchanged. The class is deliberately not `auto`: a restart of a starved daemon changes
+nothing about the load and ends live work. The remedy is on the machine: the daemon's LaunchAgent
+now carries `ProcessType Interactive` and `Nice -5`, the per-turn surfaces read `/next/summary`
+instead of the brief, and the seats keep heavy suites off the laptop (running-the-gates.md).
+
+Falsify: on a laptop at load > 2× cores with the daemon unreachable across two ticks, the audit
+shows `guardian.observed {class: daemon_starved}` and no `daemon_wedged` raise; under 2×, the
+2026-09-05 behaviour reproduces exactly.

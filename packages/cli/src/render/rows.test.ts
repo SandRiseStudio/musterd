@@ -918,13 +918,38 @@ describe('renderMessageRow with an eligible set (ADR 254)', () => {
   });
 
   it('says who took it, and that the reader is off the hook', () => {
-    const out = renderMessageRow(asked, kindOf, { dischargedBy: 'izzo' });
+    const out = renderMessageRow(asked, kindOf, { discharge: { by: 'izzo', reason: 'answered' } });
     expect(out).toContain('answered by izzo');
     expect(out).toContain('no longer owe');
   });
 
   it('stays silent while the act is still owed', () => {
     expect(renderMessageRow(asked, kindOf)).not.toContain('answered by');
+  });
+
+  /**
+   * Doorbell clause 7 shapes (ii) and (iv). Neither has an answering seat — the lane simply closed,
+   * or the reader was already shown the act — so the trace must say what happened and never borrow
+   * an answerer. A line reading "answered by" on a lane nobody answered would be a false statement
+   * about a teammate, which is worse than the overcount it replaced.
+   */
+  it('names the lane closing, and invents no answerer', () => {
+    const out = renderMessageRow(asked, kindOf, { discharge: { reason: 'lane_closed' } });
+    expect(out).toContain('the lane closed');
+    expect(out).toContain('no longer owe');
+    expect(out).not.toContain('answered by');
+  });
+
+  it('names the read, and invents no answerer', () => {
+    const out = renderMessageRow(asked, kindOf, { discharge: { reason: 'read' } });
+    expect(out).toContain('already been shown');
+    expect(out).not.toContain('answered by');
+  });
+
+  it('degrades to the pre-clause-7 sentence on an older daemon, which sends a `by` and no reason', () => {
+    expect(renderMessageRow(asked, kindOf, { discharge: { by: 'izzo' } })).toContain(
+      'answered by izzo',
+    );
   });
 
   it('regression: a plain team act still reads @team', () => {
@@ -941,7 +966,7 @@ describe('renderMessageRow with an eligible set (ADR 254)', () => {
     const other = env({ id: 'other', body: 'unrelated', meta: null });
     const out = renderInbox([asked, other], kindOf, {
       cursorTs: 0,
-      discharged: new Map([['el-1', 'izzo']]),
+      discharged: new Map([['el-1', { by: 'izzo', reason: 'answered' as const }]]),
       now: Date.UTC(2026, 5, 9, 15, 0),
     });
     expect(out).toContain('answered by izzo');

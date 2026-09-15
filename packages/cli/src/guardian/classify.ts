@@ -64,7 +64,19 @@ export interface GuardianSignals {
    * was attempted and could not be read — and both degrade to `daemon_down`, never past it.
    */
   stack?: StackSample;
+  /**
+   * The machine's 1-minute load average against its core count (lane 01M2GTB0RA). Absent on a
+   * build that wires no reader; the classifier then degrades to the sample-only rule.
+   */
+  load?: { one: number; cores: number };
 }
+
+/**
+ * Above this many runnable tasks per core the machine, not the daemon, owns the stall. 2× is
+ * deliberately coarse: the six measured pages sat at 2.0–3.6× (16–29 on 8 cores), and a laptop
+ * merely busy sits under 1×.
+ */
+export const STARVED_LOAD_PER_CORE = 2;
 
 /** A crashloop is only attributed to a refresh that happened inside this window. */
 export const CRASHLOOP_REFRESH_WINDOW_MS = 30 * 60_000;
@@ -82,6 +94,7 @@ export const DEFAULT_TIERS: Record<GuardianClass, GuardianTier> = {
   // policy away from a machine that has never watched it fire — and the tier alone still would not
   // be enough, because §4's ladder is a second, independent condition.
   daemon_wedged: 'alert',
+  daemon_starved: 'observe',
   schema_drift: 'alert',
   wrong_db: 'alert',
   error_rate: 'alert',
@@ -164,6 +177,21 @@ export function classify(s: GuardianSignals): Incident[] {
             base +
             `First sighting — held one tick to separate a transient stall from an outage ` +
             `(a stall recovers before the next tick; an outage does not).` +
+            sample,
+        });
+      } else if (s.load !== undefined && s.load.one > STARVED_LOAD_PER_CORE * s.load.cores) {
+        // The machine is the reason (lane 01M2GTB0RA): with the load average past twice the core
+        // count, a single-threaded sync daemon cannot get a slot inside the bound, and the sample
+        // — whatever frame it names — is what a busy healthy daemon looks like. Not a page: the
+        // remedy is on the machine (stop the tsc/vitest, rank the daemon), not with a reader.
+        alert.push({
+          class: 'daemon_starved',
+          evidence:
+            base +
+            `Persisted across ticks: still unreachable ${Math.round(persisted / 1000)}s after the ` +
+            `first sighting. The MACHINE is the reason: load average ${s.load.one.toFixed(1)} on ` +
+            `${s.load.cores} cores (over ${STARVED_LOAD_PER_CORE}× per core) — a single-threaded ` +
+            `daemon starved by other work, not blocked by its own.` +
             sample,
         });
       } else if (s.stack?.wedged === true) {

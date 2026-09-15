@@ -18,6 +18,7 @@ import {
   SeedListSchema,
   SeedResultSchema,
   NextBriefSchema,
+  NextSummarySchema,
   PROTOCOL_VERSION,
   ReportSchema,
   resolveAttestedModel,
@@ -73,6 +74,7 @@ import {
   type MemberSummary,
   type MemoryEnvelope,
   type NextBrief,
+  type NextSummary,
   type OpenLane,
   type RefusedCode,
   type Report,
@@ -562,7 +564,10 @@ export class HttpClient {
     /** ADR 254: eligible-set acts in this inbox that someone else has already answered, and who.
      *  Server-computed and underivable here: the discharging reply is a DM to the asker, so a second
      *  eligible seat is not a party to it. Absent from an older daemon ⇒ the act shows as still owed. */
-    discharged?: { id: string; by: string }[];
+    /** Doorbell clause 7: why an act is no longer owed. Only `answered` carries `by` — the lane
+     *  closing and the seat having been shown the act have no answerer to name. `reason` is absent
+     *  on a pre-clause-7 daemon. */
+    discharged?: { id: string; by?: string; reason?: 'answered' | 'lane_closed' | 'read' }[];
     /** More was waiting than this reply carried: a caller that named no `limit` gets a bounded
      *  PREFIX, so page on with `since` = the last message's ts until this is absent. Absent from an
      *  older daemon ⇒ the reply was complete, the prior behaviour. */
@@ -854,6 +859,16 @@ export class HttpClient {
     const json = await this.request('GET', `/teams/${slug}/next`);
     const parsed = NextBriefSchema.safeParse(json);
     if (!parsed.success) throw new CliError('next response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /** The brief's per-turn numbers (lane 01M2GTB0RA) — `GET /teams/:slug/next/summary`. Three bounded
+   *  queries, for the statusline and the orient nudge; the full brief stays `next()`. */
+  async nextSummary(slug: string): Promise<NextSummary> {
+    const json = await this.request('GET', `/teams/${slug}/next/summary`);
+    const parsed = NextSummarySchema.safeParse(json);
+    if (!parsed.success)
+      throw new CliError('next/summary response did not match the protocol schema', 1);
     return parsed.data;
   }
 

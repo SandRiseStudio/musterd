@@ -549,6 +549,24 @@ export type LaneBoard = z.infer<typeof LaneBoardSchema>;
  * one projection. The derived floor works at zero compliance: it reads the daemon's own lane/act
  * state. (The roadmap-Goal-by-wave enrichment is deferred with the Goal-source seam, ADR 048.)
  */
+/**
+ * The three numbers the per-turn surfaces need from the brief (lane 01M2GTB0RA, 2026-09-14):
+ * the statusline and the orient nudge were calling `GET /next` — the whole brief, 0.5 s on the
+ * live db and 1.8 s under load, from nine sessions on every turn and every statusline refresh —
+ * and reading `in_flight.length`, `incidents[].lane` and `owed_reviews[].{lane,ts}` out of it.
+ * `GET /next/summary` answers those from three bounded queries and nothing else.
+ */
+export const NextSummarySchema = z.object({
+  member: z.string(),
+  /** Lanes this seat holds in a live state (`in_flight.length` of the brief). */
+  carrying: z.number().int().nonnegative(),
+  /** Open incident lane ids, oldest first (`incidents[].lane` of the brief). */
+  incidents: z.array(z.string()),
+  /** Acceptance asks this seat owes a verdict on (`owed_reviews[].{lane.id, ts}` of the brief). */
+  owed: z.array(z.object({ lane: z.string(), ts: z.number().int() })),
+});
+export type NextSummary = z.infer<typeof NextSummarySchema>;
+
 export const NextBriefSchema = z.object({
   /** Whose brief this is. */
   member: z.string(),

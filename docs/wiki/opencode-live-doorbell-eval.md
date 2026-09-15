@@ -266,12 +266,65 @@ archeology held for that lane, not judged here: #17099 (a transient
 `listTools()` failure permanently evicts the client — `delete
 s.clients[clientName]`, no retry, no `onclose` handler) with fix PRs #17651
 (retry + lazy re-creation) and #32084 (`onclose` removes the closed client
-  and marks status failed), against open-as-of-2026-09-14 #38266 (serve: stdio
-  connection reportedly dropped mid-session with tools unavailable until
-  restart) and #25282 (no auto-reconnect or notification reported) — both
-  upstream claims, neither re-measured here; falsify either on 1.18.31 with
-  the live kill-and-call measurement on lane `01M2GS6Q4`. Whether 1.18.31 reconnects or stays mute is
-  a live kill-and-call measurement, not a docs read.
+and marks status failed), against open-as-of-2026-09-14 #38266 (serve: stdio
+connection reportedly dropped mid-session with tools unavailable until
+restart) and #25282 (no auto-reconnect or notification reported) — both
+upstream claims, neither re-measured here; falsify either on 1.18.31 with
+the live kill-and-call measurement on lane `01M2GS6Q4` (done — see §10:
+#38266's shape reproduced exactly, #25282's "no auto-reconnect" confirmed
+for the stdio drop). Whether 1.18.31 reconnects or stays mute is
+a live kill-and-call measurement, not a docs read — measured in §10 below.
+
+
+## 10. Clause-8 reconnect half: a mid-session MCP drop mutes the seat until serve restart (lane `01M2GS6Q4`)
+
+Measured 2026-09-14 on opencode 1.18.31 (headless `opencode serve` on scratch
+port 4599, scratch dir, default provider; 4 small model turns). Rig: a
+pid-echoing stdio MCP server (`probe_ping` → `pong pid=<server pid>`, SDK v2
+`registerTool` + `serveStdio`, node built-ins + SDK only), so a respawned
+server is distinguishable from a recovered one (pid changes) and from a
+cached answer (pid repeats a dead process). Scratch session only — no live
+seat's server was touched (six sibling `mcp/dist` processes share one binary
+path; the scratch child was identified by PPID chain under the scratch
+serve pid).
+
+- **Baseline: callable.** `prompt_async` reply-mode "call probe_ping note
+  one" → `pong pid=66164` (tool `probe_probe_ping`, completed, ~70ms).
+- **Drop: SIGTERM to pid 66164.** Dead per `ps`, no respawn — no new probe
+  child under the serve pid.
+- **Turn 2, same session: tool gone from the catalog.** The model tried
+  `probe_ping` twice; both calls returned `invalid`: "Model tried to call
+  unavailable tool … Available tools: bash, edit, glob, grep, invalid,
+  question, read, skill, task, todowrite, webfetch, websearch, write" — zero
+  MCP tools listed. The failure shape is eviction (tools vanish, #17099),
+  not Cursor's cached-schema-plus-`Not connected`. No in-turn recovery.
+- **Turn 3, fresh turn minutes later: still unavailable.** Same `invalid`
+  shape, no probe child spawned. No lazy re-creation across turns either
+  (the #17651 shape is not what 1.18.31 does on this path).
+- **Serve restart: same session recovers.** After killing and restarting the
+  scratch serve (new serve pid), the SAME session id called `probe_ping`
+  note four → `pong pid=73459`. Recovery costs a serve restart, not a new
+  conversation — cheaper than Cursor (window reload) but still an external
+  action no model move can substitute.
+
+Verdict: **fails on reconnect — a mid-session stdio MCP death permanently
+mutes MCP tools for that serve lifetime** (2026-09-14, live kill-and-call —
+falsify: repeat the rig with SIGKILL instead of SIGTERM, or on a build
+carrying #17651/#32084's retry path, and watch turn 2 for a fresh pid).
+Daemon-side blindness holds as on Cursor: the project config, the plugin
+marker, and the doctor's drift check are all files, and all intact — the
+seat reads granted and healthy while unable to answer. `opencode mcp list`
+may know; nothing the model can call does.
+
+Method trap, recorded so the next rig skips it: `pgrep -f <pattern>`
+matches its own command line, so a bare-pid sighting mid-run (here: 67627)
+is not a respawn — confirm via `ps -o pid,ppid` before claiming one
+(2026-09-14 — falsify: none needed, process-table reading, but the trap
+bit once already).
+
+Cost note: 4 reply-mode turns, each a few hundred tokens — the noReply
+discipline from §6 applies to doorbell traffic, not to eval turns that
+must observe tool results.
 
 
 ## Related

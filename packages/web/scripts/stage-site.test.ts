@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { blogEntries } from './site-files';
+// @ts-expect-error plain .mjs data module
+import { BEACON_TOKEN, beaconTag, hasBeacon, injectBeacon } from './beacon.mjs';
 // @ts-expect-error plain .mjs data module
 import { DAEMON_ROUTES, PUBLIC_ALLOW } from './stage-allowlist.mjs';
 
@@ -28,5 +31,42 @@ describe('the public-origin allowlist (ADR 302)', () => {
       expect(DAEMON_ROUTES).toContain(r);
       expect(PUBLIC_ALLOW).not.toContain(r);
     }
+  });
+});
+
+describe('the Web Analytics beacon (staged into the public artifact only)', () => {
+  const page = '<!DOCTYPE html><html><head><title>musterd</title></head><body>hi</body></html>';
+
+  it('puts the beacon last in head', () => {
+    const out = injectBeacon(page);
+    expect(out).toContain('static.cloudflareinsights.com/beacon.min.js');
+    expect(out).toContain(BEACON_TOKEN);
+    // Last in head, not before the title: the page's own metadata still parses first.
+    expect(out.indexOf('<title>')).toBeLessThan(out.indexOf('cloudflareinsights'));
+    expect(out.indexOf('cloudflareinsights')).toBeLessThan(out.indexOf('</head>'));
+  });
+
+  it('is idempotent — staging a staged page does not double the beacon', () => {
+    const once = injectBeacon(page);
+    expect(injectBeacon(once)).toBe(once);
+    expect(once.match(/cloudflareinsights/g)).toHaveLength(1);
+  });
+
+  it('reports no injection point rather than returning an unrecorded page', () => {
+    // stage-site turns this null into a loud failure: a deployed page with no beacon is the exact
+    // silence this replaced, and it must not be reachable by a shrug.
+    expect(injectBeacon('<p>no head here</p>')).toBeNull();
+  });
+
+  it('recognises a page that already carries one', () => {
+    expect(hasBeacon(page)).toBe(false);
+    expect(hasBeacon(beaconTag())).toBe(true);
+  });
+
+  it('does not put the beacon in the shared shell, where daemon routes would inherit it', () => {
+    // The gate is the staging step, so __root.tsx must stay clean: /live, /board, /audit,
+    // /approvals and /broadcast are served from dist/client (ADR 132/156) and never get this.
+    const shell = readFileSync(new URL('../src/routes/__root.tsx', import.meta.url), 'utf8');
+    expect(shell).not.toContain('cloudflareinsights');
   });
 });

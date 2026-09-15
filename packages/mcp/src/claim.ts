@@ -45,9 +45,28 @@ export async function claimAndJoin(
   config: McpConfig,
   target: ClaimTarget,
   waitMs?: number,
+  opts?: { verify?: boolean },
 ): Promise<ClaimResult> {
+  // `client.joined` is IN-PROCESS state, and the thing that dies is server-side: a reaped Presence,
+  // a daemon bounce, an MCP transport drop. So on the repair path the flag is precisely the wrong
+  // authority — it reports on an occupancy it cannot see, and answering an explicit join from it
+  // returns "already joined" while the seat stays deaf (clause 8, lane 01M2GP25R3).
+  //
+  // That matters because the deaf line PRESCRIBES team_join as the repair: it is the only thing
+  // that holds a Presence, and `musterd claim` provably does not (see commands/inbox.ts). A
+  // prescription that no-ops is worse than none — measured 2026-09-14, izzo (deaf on every daemon
+  // bounce, "Already joined" changed nothing, a later team_send repaired it via request()'s
+  // lease-refusal re-join) and stanley (same after an MCP reconnect).
+  //
+  // Scoped to EXPLICIT joins. Autojoin rides every tool call and must stay free; it also does not
+  // need this, because its sibling HTTP calls already hit the refusal path that re-joins for real.
+  // An explicit team_join is a decision to re-occupy, and is rare enough to afford the round trip.
   const reused =
-    client.claimed && 'seat' in target && client.member === target.seat && client.joined;
+    opts?.verify !== true &&
+    client.claimed &&
+    'seat' in target &&
+    client.member === target.seat &&
+    client.joined;
   if (reused) return { member: client.member!, reused: true };
 
   // Single-flight the claim (first live native wake, 2026-08-12). The `reused` guard above answers
@@ -61,10 +80,12 @@ export async function claimAndJoin(
   //
   // Keyed by target: two callers converging on the same seat share one claim, while a deliberate
   // re-target (a different seat or pool) is a distinct intent and still proceeds on its own.
-  const key = targetKey(target);
+  // A verify is a DIFFERENT intent from an ordinary claim — it must not be answered by an in-flight
+  // reuse-path claim that will early-return inside join().
+  const key = targetKey(target) + (opts?.verify === true ? '#verify' : '');
   const pending = inFlight.get(client);
   if (pending && pending.key === key) return pending.promise;
-  const promise = performClaim(client, config, target, waitMs).finally(() => {
+  const promise = performClaim(client, config, target, waitMs, opts?.verify).finally(() => {
     if (inFlight.get(client)?.promise === promise) inFlight.delete(client);
   });
   inFlight.set(client, { key, promise });
@@ -81,6 +102,7 @@ async function performClaim(
   config: McpConfig,
   target: ClaimTarget,
   waitMs?: number,
+  reoccupy?: boolean,
 ): Promise<ClaimResult> {
   // Re-read binding.json before an explicit named claim (#118 class / ADR 018 source-of-truth). The
   // boot config pins the grant + key read at launch, so an in-session binding *repair* — e.g. a
@@ -107,7 +129,10 @@ async function performClaim(
   config.claim =
     'seat' in target ? { mode: 'seat', name: target.seat } : { mode: 'role', role: target.role };
   try {
-    const outcome = await client.join(waitMs, { parkOnPending: true });
+    const outcome = await client.join(waitMs, {
+      parkOnPending: true,
+      ...(reoccupy ? { reoccupy: true } : {}),
+    });
     if (outcome === 'pending') {
       // Non-blocking return (ADR 095). Deliberately BEFORE persistBinding/clearPendingMarker: this
       // session holds no seat, and the pending marker is what a later `musterd claim --for <code>`

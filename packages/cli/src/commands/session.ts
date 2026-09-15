@@ -211,9 +211,11 @@ async function defaultOrientationFetcher(
     surface: 'cli',
     ...(model !== undefined ? { model } : {}),
   });
+  // Lane 01M2GTB0RA: the summary, not the brief — this runs on every turn of every session, and
+  // the brief cost the daemon 0.5–1.8 s of its single thread per call for three numbers.
   const [inboxRes, brief, memory] = await Promise.all([
     http.inbox(team, { unread: true }),
-    http.next(team),
+    http.nextSummary(team),
     http.getMemoryEnvelope(team).catch(() => undefined), // absent memory is a normal state
   ]);
   const waiting = openActionNeeded(
@@ -240,9 +242,9 @@ async function defaultOrientationFetcher(
         }
       : {}),
     waiting,
-    incidents: (brief.incidents ?? []).map((i) => ({ id: i.lane })),
-    owed: (brief.owed_reviews ?? []).map((r) => ({ laneId: r.lane.id, waitedMs: now - r.ts })),
-    carrying: brief.in_flight.length,
+    incidents: brief.incidents.map((id) => ({ id })),
+    owed: brief.owed.map((r) => ({ laneId: r.lane, waitedMs: now - r.ts })),
+    carrying: brief.carrying,
   };
 }
 
@@ -320,9 +322,10 @@ async function defaultStatuslineFetcher(
     surface: 'cli',
     ...(model !== undefined ? { model } : {}),
   }).presenceNeutral();
+  // Lane 01M2GTB0RA: the summary, not the brief — see defaultOrientationFetcher.
   const [inboxRes, brief] = await Promise.all([
     http.inbox(team, { unread: true, limit: STATUSLINE_INBOX_LIMIT }),
-    http.next(team),
+    http.nextSummary(team),
   ]);
   const waiting = openActionNeeded(
     inboxRes.messages,
@@ -341,8 +344,8 @@ async function defaultStatuslineFetcher(
     // It counts UNREAD rows while `waiting` counts the action-needed subset, so it means "more was
     // cut that I did not classify" — exactly a floor marker, which is all `n+` claims.
     ...((inboxRes.unread_remaining ?? 0) > 0 ? { waitingTruncated: true } : {}),
-    incidents: (brief.incidents ?? []).length,
-    carrying: brief.in_flight.length,
+    incidents: brief.incidents.length,
+    carrying: brief.carrying,
   };
 }
 

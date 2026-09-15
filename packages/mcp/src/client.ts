@@ -472,7 +472,10 @@ export class MusterdClient {
      *  Server-computed for the same reason as `answered`, and more so: the discharging reply is a DM
      *  to the asker, so a second eligible seat is not a party to it and cannot see it at any price.
      *  Absent from an older daemon; callers degrade to showing the act as still owed. */
-    discharged?: { id: string; by: string }[];
+    /** Doorbell clause 7: why an act is no longer owed. Only `answered` carries `by` — the lane
+     *  closing and the seat having been shown the act have no answerer to name. `reason` is absent
+     *  on a pre-clause-7 daemon. */
+    discharged?: { id: string; by?: string; reason?: 'answered' | 'lane_closed' | 'read' }[];
     /** Unread this reply could not carry. Non-zero means the read cursor must not move past what
      *  was rendered — see `planInboxCheck`. Absent from an older daemon ⇒ nothing was cut. */
     unread_remaining?: number;
@@ -758,7 +761,17 @@ export class MusterdClient {
    * ignore the value keep today's meaning, because every other path either resolves occupied or
    * rejects.
    */
-  join(timeoutMs?: number, opts?: { parkOnPending?: boolean }): Promise<JoinOutcome> {
+  join(
+    timeoutMs?: number,
+    opts?: { parkOnPending?: boolean; reoccupy?: boolean },
+  ): Promise<JoinOutcome> {
+    // `reoccupy` is an EXPLICIT re-occupy (lane 01M2GP25R3): the caller has reason to believe this
+    // Presence is dead server-side — a daemon bounce, a reaped presence, an MCP transport drop —
+    // and `joinedFlag` is in-process state that cannot see any of those. Answering from it is what
+    // made `team_join` a no-op on exactly the path the deaf line prescribes it for. Clearing the
+    // flag here is the same move the lease-refusal recovery in `request()` already makes, for the
+    // same reason; it is never set speculatively, only when a caller asks to re-occupy.
+    if (opts?.reoccupy === true) this.joinedFlag = false;
     if (this.joinedFlag) return Promise.resolve<JoinOutcome>('occupied');
     if (!this.config.agent_key && !this.config.seatCredential) {
       return Promise.reject(

@@ -314,6 +314,69 @@ describe('inbox command', () => {
     expect(parsed.hookSpecificOutput.additionalContext).toMatch(/team_join/);
   });
 
+  /**
+   * Lane 01M2GP25R3. The deaf line prescribes `team_join` — an MCP tool — and on a harness with a
+   * TOOL-DEFERRAL path that is exactly the class of thing the model cannot call yet.
+   *
+   * Measured by stanley on the laptop 2026-09-14 20:50Z: the musterd MCP server dropped mid-session
+   * while the daemon stayed healthy, and on reconnect all 29 tools came back deferred — names only,
+   * nothing callable until `ToolSearch` re-fetched each schema. The adapter's own lease repair
+   * (`client.ts` request(): re-join once and replay on a refused lease) is correct and complete, and
+   * is triggered ONLY by an HTTP call through the adapter — so deferral gates the repair behind the
+   * capability the reconnect removed. The seat sat deaf until the model manually ran ToolSearch and
+   * then team_join.
+   *
+   * So on a deferral harness the line must name the round trip, or it prescribes an unreachable
+   * repair — the same failure it already refuses for `musterd claim`.
+   */
+  it('names the ToolSearch round trip on a deferral harness, so the repair it prescribes is reachable', async () => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: serverUrl,
+        team: 'dawn',
+        claim: { mode: 'seat', name: 'Ada' },
+        seat_credential: (ada as unknown as { opts: { key: string } }).opts.key,
+        session_lease: 'lease-that-died-with-its-presence',
+      }) + '\n',
+    );
+    const { code, out } = await capture(() =>
+      inboxCommand(parseArgs(['--interrupt-check', '--hook', 'claude-code'])),
+    );
+    expect(code).toBe(0);
+    const line = (JSON.parse(out.trim()) as { hookSpecificOutput: { additionalContext: string } })
+      .hookSpecificOutput.additionalContext;
+    // The repair still ends at team_join — it is the only thing that holds a Presence.
+    expect(line).toMatch(/team_join/);
+    // …but it must say how to make team_join callable first, by name.
+    expect(line).toMatch(/ToolSearch/);
+    // The ordering has to be explicit: fetching the schema AFTER trying the call is the loop the
+    // seat is already stuck in.
+    expect(line.indexOf('ToolSearch')).toBeLessThan(line.lastIndexOf('team_join'));
+  });
+
+  it('does NOT name ToolSearch on a harness with no deferral path — the line stays as short as it can', async () => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: serverUrl,
+        team: 'dawn',
+        claim: { mode: 'seat', name: 'Ada' },
+        seat_credential: (ada as unknown as { opts: { key: string } }).opts.key,
+        session_lease: 'lease-that-died-with-its-presence',
+      }) + '\n',
+    );
+    // No --hook at all: a bare CLI probe, where there is no deferral and no schema to fetch.
+    const { code, out } = await capture(() => inboxCommand(parseArgs(['--interrupt-check'])));
+    expect(code).toBe(0);
+    expect(out).toMatch(/team_join/);
+    expect(out).not.toMatch(/ToolSearch/);
+  });
+
   it('--hook claude-code stays silent when nothing is raised — the common path is still free', async () => {
     const { code, out } = await capture(() =>
       inboxCommand(parseArgs(['--interrupt-check', '--hook', 'claude-code'])),

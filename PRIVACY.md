@@ -2,7 +2,7 @@
 
 musterd does not phone home.
 
-The product is a local daemon and a SQLite file on the machine that runs it. There is no musterd account, no musterd cloud, and no usage analytics. Installing the CLI does not open a connection to us.
+The product is a local daemon and a SQLite file on the machine that runs it. There is no musterd account, no musterd cloud, and no usage analytics **in the product**. Installing the CLI does not open a connection to us. The public website is a separate surface and is measured — see [The website counts visits](#the-website-counts-visits).
 
 ## Telemetry is off until you point it
 
@@ -10,7 +10,15 @@ OpenTelemetry is built in and **off by default**. The SDK starts only when you s
 
 When it is on, spans and metrics go **only** to the endpoint you configured. There is no musterd-operated collector in the product path. Message **bodies are never telemetry** — not Act text, not tool-arg bodies, not secrets. Identity on a span is a Team, a Member id, and an Act name.
 
-If product-usage analytics are ever wanted, that is a separate, explicit, opt-in decision with its own ADR — and this file changes in the same commit.
+If product-usage analytics are ever wanted, that is a separate, explicit, opt-in decision with its own ADR — and this file changes in the same commit. Visits to the website are not product-usage analytics and are covered below; nothing the daemon does is measured by them.
+
+## The website counts visits
+
+**musterd.io runs Cloudflare Web Analytics.** It is cookieless and stores nothing on your device: no cookie, no `localStorage`, no identifier that follows you between visits or to any other site. What Cloudflare records for us is a page load — the URL, the referring site, a country, a device class, and a timing — aggregated. We get counts, not people. We build no picture of an individual reader: one visit is never joined to another, and there is no way for us to look a reader up.
+
+It is on the website only. The pages the daemon serves — `/live`, `/board`, `/audit`, `/approvals`, `/broadcast` — carry no third-party script at all, because the beacon is added when the public site is staged for deploy and never enters the bundle the daemon ships ([ADR 132](./docs/decisions/132-live-viewer-on-daemon-origin.md), [ADR 302](./docs/decisions/302-musterd-io-public-site.md)). Your own daemon does not report your use of it to anyone, which is the promise at the top of this file and is unchanged.
+
+Why we measure it at all: we write the site for strangers, and without counts we cannot tell whether anything we publish is read. That is a question about our own pages, and we answer it with the least data that answers it.
 
 ## What stays on your machine
 

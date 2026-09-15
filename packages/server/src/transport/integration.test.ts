@@ -798,7 +798,7 @@ describe('HTTP API', () => {
       await answer(t['cy'], 'cy', 'ans-a', 'el-a');
 
       const inbox = await get('/teams/dawn/inbox', t['bo']);
-      expect(inbox.json.discharged).toContainEqual({ id: 'el-a', by: 'cy' });
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-a', by: 'cy', reason: 'answered' });
     });
 
     it('a decline discharges it too — "not me" is an answer', async () => {
@@ -807,7 +807,7 @@ describe('HTTP API', () => {
       await answer(t['cy'], 'cy', 'ans-b', 'el-b', 'decline');
 
       const inbox = await get('/teams/dawn/inbox', t['bo']);
-      expect(inbox.json.discharged).toContainEqual({ id: 'el-b', by: 'cy' });
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-b', by: 'cy', reason: 'answered' });
     });
 
     it('the discharging act is invisible to bo in the timeline — this is why it needs its own read', async () => {
@@ -820,7 +820,7 @@ describe('HTTP API', () => {
       const timeline = await get('/teams/dawn/messages', t['bo']);
       expect(timeline.json.messages.map((m: { id: string }) => m.id)).not.toContain('ans-c');
       const inbox = await get('/teams/dawn/inbox', t['bo']);
-      expect(inbox.json.discharged).toContainEqual({ id: 'el-c', by: 'cy' });
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-c', by: 'cy', reason: 'answered' });
     });
 
     it('reports the FIRST answer when two land', async () => {
@@ -831,7 +831,7 @@ describe('HTTP API', () => {
 
       const inbox = await get('/teams/dawn/inbox', t['bo']);
       const rows = inbox.json.discharged.filter((d: { id: string }) => d.id === 'el-d');
-      expect(rows).toEqual([{ id: 'el-d', by: 'cy' }]);
+      expect(rows).toEqual([{ id: 'el-d', by: 'cy', reason: 'answered' }]);
     });
 
     it('says nothing to a seat outside the set — it never owed the act', async () => {
@@ -4127,6 +4127,11 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(spine).toMatchObject({ wave: 'later', epoch: 1 });
     const next = await get('/teams/dawn/next', nickTok);
     expect(next.json.next_goal?.id).toBe('client');
+    // Lane 01M2GTB0RA: the per-turn summary agrees with the brief it replaces on the hot path.
+    const summary = await get('/teams/dawn/next/summary', nickTok);
+    expect(summary.status).toBe(200);
+    expect(summary.json.carrying).toBe(next.json.in_flight.length);
+    expect(summary.json.incidents).toEqual(next.json.incidents.map((i: any) => i.lane));
 
     // Teeth #2 — targeted invalidation: stan (the stale lane's owner) got a directed stale_plan wake.
     const inbox = await get('/teams/dawn/inbox?unread=1', stanTok);

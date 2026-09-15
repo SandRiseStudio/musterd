@@ -103,6 +103,8 @@ describe('DEFAULT_TIERS (spec §4 shipped defaults)', () => {
       // ADR 389 §3: ships dark. The only class whose remediation is destructive, and the tier is
       // deliberately not sufficient to arm it on its own.
       daemon_wedged: 'alert',
+      // Lane 01M2GTB0RA: the machine's fault, recorded, never a page.
+      daemon_starved: 'observe',
       schema_drift: 'alert',
       wrong_db: 'alert',
       error_rate: 'alert',
@@ -262,6 +264,32 @@ describe('daemon_wedged is made by the sample, never by the circumstances', () =
     expect(out[0]!.defer).toBeUndefined();
     expect(out[0]!.evidence).toContain('sqlite3_step');
     expect(out[0]!.evidence).toMatch(/ALIVE and blocked/);
+  });
+
+  // Lane 01M2GTB0RA (izzo, 2026-09-14): six daemon_wedged/daemon_down pages in one afternoon, every
+  // one a starved single-threaded daemon on a laptop at load 16–29 on 8 cores (other seats' tsc and
+  // vitest, opencode, the daemon itself), every one cleared by the next autorefresh bounce, none a
+  // block. The sample cannot tell the two apart — a busy sync daemon is always inside some frame —
+  // but the machine can: the load average is the missing signal.
+  it('a machine under load makes daemon_starved, not daemon_wedged, and names the load in the evidence', () => {
+    const out = classify({
+      ...persisted,
+      stack: heldSample,
+      load: { one: 24.5, cores: 8 },
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.class).toBe('daemon_starved');
+    expect(out[0]!.evidence).toMatch(/load average 24\.5 on 8 cores/);
+    expect(out[0]!.evidence).toContain('sqlite3_step');
+  });
+
+  it('the same shape on a quiet machine still promotes to daemon_wedged', () => {
+    const out = classify({ ...persisted, stack: heldSample, load: { one: 2.1, cores: 8 } });
+    expect(out[0]!.class).toBe('daemon_wedged');
+  });
+
+  it('daemon_starved ships at observe: recorded, never a page — the human cannot fix load by reading about it', () => {
+    expect(DEFAULT_TIERS.daemon_starved).toBe('observe');
   });
 
   it('ships dark: the promoted class still carries the alert tier, not auto', () => {

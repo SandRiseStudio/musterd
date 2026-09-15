@@ -617,6 +617,8 @@ describe('team_inbox_check handler', () => {
       expect(text(r)).toContain('answered by izzo');
       expect(text(r)).toContain('no longer owe');
       expect((r.structuredContent as any).messages[0].discharged_by).toBe('izzo');
+      // A pre-clause-7 daemon sends no `reason`; the entry still reads as the answer it is.
+      expect((r.structuredContent as any).messages[0].discharged_reason).toBe('answered');
     });
 
     it('stays silent on an act nobody has answered', async () => {
@@ -629,6 +631,48 @@ describe('team_inbox_check handler', () => {
       const r = await handler({ unread_only: true, limit: 50 });
       expect(text(r)).not.toContain('answered by');
       expect((r.structuredContent as any).messages[0].discharged_by).toBeUndefined();
+    });
+
+    /**
+     * Doorbell clause 7 shapes (ii) and (iv). Neither has an answerer. Saying "answered by" would
+     * name a teammate who did nothing; saying nothing would retire the act silently, which is the
+     * defect ADR 254 rejected for shape (iii). The trace says WHY.
+     */
+    it('names the lane closing, and never invents an answerer', async () => {
+      const handler = capture(
+        registerInboxCheck,
+        inboxClient({
+          fetchInbox: (async () => ({
+            messages: [asked],
+            cursor: null,
+            discharged: [{ id: 'el-1', reason: 'lane_closed' }],
+          })) as any,
+        }),
+      );
+      const r = await handler({ unread_only: true, limit: 50 });
+      expect(text(r)).toContain('the lane closed');
+      expect(text(r)).toContain('no longer owe');
+      expect(text(r)).not.toContain('answered by');
+      const m = (r.structuredContent as any).messages[0];
+      expect(m.discharged_reason).toBe('lane_closed');
+      expect(m.discharged_by).toBeUndefined();
+    });
+
+    it('names the read for an act with no answering move', async () => {
+      const handler = capture(
+        registerInboxCheck,
+        inboxClient({
+          fetchInbox: (async () => ({
+            messages: [asked],
+            cursor: null,
+            discharged: [{ id: 'el-1', reason: 'read' }],
+          })) as any,
+        }),
+      );
+      const r = await handler({ unread_only: true, limit: 50 });
+      expect(text(r)).toContain('already been shown');
+      expect(text(r)).not.toContain('answered by');
+      expect((r.structuredContent as any).messages[0].discharged_reason).toBe('read');
     });
 
     it('degrades quietly against an older daemon that sends no trace', async () => {
@@ -713,6 +757,40 @@ describe('team_inbox_check handler', () => {
     expect(text(r)).toContain('100 older unread not shown');
     expect(text(r)).toContain('Call again with limit: 150');
     expect(text(r)).not.toContain('Call again with limit: 50 to');
+  });
+
+  it('a complete fetch past the limit digests the oldest rows and walks the cursor over them', async () => {
+    // Lane 01M2GT874Y: with the cursor held entirely on any elision, a seat past its limit never
+    // advanced. Now the oldest unread render as digest lines and the watermark passes them.
+    const mk = (id: string, ts: number) =>
+      makeEnvelope({
+        id,
+        team: 'dawn',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: `body of ${id}`,
+        ts,
+      });
+    const messages = Array.from({ length: 120 }, (_, i) => mk(`n${i}`, 1000 + i));
+    const markRead = vi.fn(async () => undefined);
+    const handler = capture(
+      registerInboxCheck,
+      inboxClient({
+        fetchInbox: (async () => ({ messages, cursor: null })) as any,
+        markRead,
+      }),
+    );
+    const r = await handler({ unread_only: true, limit: 50 });
+    expect(text(r)).toContain('ℹ 70 older unread digested below and marked read');
+    expect(text(r)).not.toContain('older unread not shown');
+    expect(text(r)).toContain('— 70 older unread, now read (oldest first) —');
+    expect(text(r)).toContain('· nick [status_update] → @team: body of n0 (id=n0)');
+    expect(text(r)).not.toContain('Nothing was marked read');
+    // Everything was rendered in one form or the other, so the cursor goes to the newest.
+    expect(markRead).toHaveBeenCalledWith('n119');
+    expect((r as any).structuredContent.digested_unread).toHaveLength(70);
+    expect((r as any).structuredContent.elided_unread).toBe(0);
   });
 
   it('merges buffered + fetched, dedups by id, sorts by ts, and advances the cursor', async () => {

@@ -19,17 +19,12 @@ describe('defaultOrientationFetcher against a stub daemon', () => {
   let dir: string;
   let inboxBody: Record<string, unknown>;
 
+  // Lane 01M2GTB0RA: the fetchers read `/next/summary`, not the brief.
   const brief = (): Record<string, unknown> => ({
     member: 'dolly',
-    in_flight: [],
-    shipped: [],
-    up_next: [],
-    owed_reviews: [],
+    carrying: 0,
     incidents: [],
-    why: null,
-    next_goal: null,
-    goals: [],
-    review_debt: [],
+    owed: [],
   });
 
   beforeEach(async () => {

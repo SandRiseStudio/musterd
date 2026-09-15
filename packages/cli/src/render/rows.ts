@@ -79,7 +79,7 @@ export function renderInbox(
   kindOf: KindOf,
   /** ADR 254: `discharged` maps an eligible-set act id → the seat that answered it, so the row can
    *  say so instead of silently retiring it. */
-  opts: { cursorTs: number; now?: number; discharged?: Map<string, string> },
+  opts: { cursorTs: number; now?: number; discharged?: Map<string, Discharge> },
 ): string {
   const now = opts.now ?? Date.now();
   const out: string[] = [];
@@ -94,11 +94,11 @@ export function renderInbox(
       out.push((lastDay === null ? '' : '\n') + theme.dayHeader(day));
       lastDay = day;
     }
-    const by = opts.discharged?.get(m.id);
+    const stand = opts.discharged?.get(m.id);
     out.push(
       renderMessageRow(m, kindOf, {
         unread: envelopePosition(m) > opts.cursorTs,
-        ...(by ? { dischargedBy: by } : {}),
+        ...(stand ? { discharge: stand } : {}),
         ...(m.thread && topics.has(m.thread) ? { huddleTopic: topics.get(m.thread)! } : {}),
       }),
     );
@@ -109,9 +109,10 @@ export function renderInbox(
 export function renderMessageRow(
   env: Envelope,
   kindOf: KindOf,
-  /** ADR 254: `dischargedBy` names the seat that already answered this eligible-set act, when one
-   *  has. Omitted ⇒ the act is still owed (or is not an eligible-set act at all). */
-  opts: { unread?: boolean; dischargedBy?: string; huddleTopic?: string } = {},
+  /** ADR 254 / doorbell clause 7: `discharge` says WHY this act is no longer owed, when it is not.
+   *  Only `answered` names a seat — (ii) the lane closed and (iv) the seat was shown the act have
+   *  no answerer, and rendering one would invent it. Omitted ⇒ the act is still owed. */
+  opts: { unread?: boolean; discharge?: Discharge; huddleTopic?: string } = {},
 ): string {
   const marker = opts.unread ? theme.accent('▌') + ' ' : '  ';
   const eligible = eligibleOf(env.meta as Record<string, unknown> | null | undefined);
@@ -126,8 +127,8 @@ export function renderMessageRow(
     .join('\n');
   // The stand-down trace, on the line under the question it retires. Silence here would be the
   // silent retirement the design rejected — the reader may be mid-draft on an answered question.
-  const stood = opts.dischargedBy
-    ? `\n${indent}${theme.meta(`↳ answered by ${opts.dischargedBy} — you no longer owe this`)}`
+  const stood = opts.discharge
+    ? `\n${indent}${theme.meta(`↳ ${dischargeReason(opts.discharge)} — you no longer owe this`)}`
     : '';
   return (env.body ? `${marker}${head}\n${body}` : `${marker}${head}`) + stood;
 }
@@ -534,6 +535,24 @@ export function openActionNeeded(
  */
 export function dischargedIds(res: { discharged?: { id: string }[] }): string[] {
   return (res.discharged ?? []).map((d) => d.id);
+}
+
+/**
+ * Why an act is no longer owed (doorbell contract clause 7). `answered` is the co-addressee's
+ * accept and is the only one with a seat to name; `lane_closed` is the referenced lane leaving
+ * awaiting acceptance with nobody having answered at all; `read` is an act with no answering move
+ * that this seat has already been shown. An older daemon sends neither `reason` nor these shapes,
+ * so the absent-reason case renders as the pre-clause-7 sentence.
+ */
+export interface Discharge {
+  by?: string;
+  reason?: 'answered' | 'lane_closed' | 'read';
+}
+
+export function dischargeReason(d: Discharge): string {
+  if (d.reason === 'lane_closed') return 'the lane closed';
+  if (d.reason === 'read') return 'you have already been shown this';
+  return d.by ? `answered by ${d.by}` : 'answered';
 }
 
 /**

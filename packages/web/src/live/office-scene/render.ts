@@ -3025,9 +3025,8 @@ const CHAIR_BACK_OFF = 14; // how far behind the seat centre the backrest stands
 // here, a wheeled office chair there, an armed exec seat, the odd high-backed gamer chair. The variation
 // never touches the two load-bearing invariants: the cushion top stays at SEAT_TOP (where `skeleton.ts`
 // lands a seated pelvis) and the backrest keeps its footprint (so a sitter still sorts between the two).
-type ChairKind = 'stool' | 'wheeled' | 'exec' | 'gamer';
+type ChairKind = 'task' | 'wheeled' | 'exec' | 'gamer';
 interface ChairStyle {
-  caster: boolean; // a 5-star wheeled base instead of four splayed legs
   backH: number; // backrest height
   backW: number; // backrest width along the shoulders
   arms: boolean; // a low armrest each side
@@ -3035,33 +3034,41 @@ interface ChairStyle {
   wings: boolean; // racing-style side bolsters on the backrest
 }
 const CHAIR_ARM_SALT = 22;
-const TASK_CHAIR: ChairStyle = { caster: false, backH: 26, backW: 34, arms: false, headrest: false, wings: false };
+/* Every chair in this office rolls (nick, 2026-09-14). It used to be a `caster` flag with the plain
+   task chair — and with it the meeting-room set, which takes this same default — standing on four
+   splayed legs. A room where three desks out of twelve cannot swivel is a room where the ambient
+   chair beats are unevenly distributed for a reason nobody can see, and the four-leg base was the
+   weaker drawing anyway: the star base has arms AND wheels, which is what makes it read as a chair
+   rather than as dots under a cushion. The flag is gone rather than set to true everywhere, so there
+   is no second state to keep working. */
+const TASK_CHAIR: ChairStyle = { backH: 26, backW: 34, arms: false, headrest: false, wings: false };
 
 // The office is a *fixed* set of 12 desks (three pods of four). A probability hash over so few ids doesn't
 // guarantee coverage — it can (and did) bucket all 12 into one variant, so the variety never shows. Instead
 // each desk's chair/monitor is a curated spread: every kind appears, and every pod shows a mix (adjacent
 // desks differ), which is exactly what makes the variety read. Still fully deterministic + stable per frame.
 const CHAIR_KINDS_BY_ID: readonly ChairKind[] = [
-  'gamer', 'wheeled', 'exec', 'stool', // pod 0 (top — two desks face the camera)
-  'exec', 'gamer', 'stool', 'wheeled', // pod 1 (centre)
-  'wheeled', 'exec', 'gamer', 'stool', // pod 2 (left)
+  'gamer', 'wheeled', 'exec', 'task', // pod 0 (top — two desks face the camera)
+  'exec', 'gamer', 'task', 'wheeled', // pod 1 (centre)
+  'wheeled', 'exec', 'gamer', 'task', // pod 2 (left)
 ];
 
-/** Exported for the ambient scheduler: the chair beats (swivel/roll) need casters — a stool can't. */
-export function chairKindFor(id: number): ChairKind {
+/** The ambient scheduler used to import this so it could skip the one kind with no casters. Every kind
+ *  has them now, so its question collapsed to "is there a desk chair" and this went back to private. */
+function chairKindFor(id: number): ChairKind {
   return CHAIR_KINDS_BY_ID[id % CHAIR_KINDS_BY_ID.length]!;
 }
 function chairStyleFor(id: number): ChairStyle {
   const arms = deskRnd(id, CHAIR_ARM_SALT) < 0.5;
   switch (chairKindFor(id)) {
-    case 'stool':
+    case 'task':
       return TASK_CHAIR;
     case 'wheeled':
-      return { caster: true, backH: 27, backW: 34, arms, headrest: false, wings: false };
+      return { backH: 27, backW: 34, arms, headrest: false, wings: false };
     case 'exec':
-      return { caster: true, backH: 35, backW: 36, arms: true, headrest: false, wings: false };
+      return { backH: 35, backW: 36, arms: true, headrest: false, wings: false };
     case 'gamer':
-      return { caster: true, backH: 43, backW: 38, arms: true, headrest: true, wings: true };
+      return { backH: 43, backW: 38, arms: true, headrest: true, wings: true };
   }
 }
 
@@ -3077,7 +3084,7 @@ function chairBase(
 ): void {
   const sn = FWD[dir][1] !== 0;
   const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-seat unit
-  if (style.caster) {
+  {
     // A 5-star caster base: a central column, five ARMS radiating from it, and a wheel at each tip.
     //
     // The arms are the whole point of this block. Without them the base was five ellipses and a post
@@ -3120,15 +3127,6 @@ function chairBase(
       );
     }
     box(ctx, fit, lx, ly, 6, 6, CHAIR_LIFT, dim(color, 0.55));
-  } else {
-    for (const [sx, sy] of [
-      [-1, -1],
-      [1, -1],
-      [1, 1],
-      [-1, 1],
-    ] as const) {
-      box(ctx, fit, lx + sx * 10, ly + sy * 10, 4, 4, CHAIR_LIFT, dim(color, 0.6));
-    }
   }
   // The cushion top is SEAT_TOP — the exact height `skeleton.ts` puts a seated pelvis at, so a member lands
   // on the chair rather than near it.
@@ -3679,6 +3677,69 @@ export function deskPropSort(dir: Dir, along: number, across: number): number {
   return f[0] * along + p[0] * across + (f[1] * along + p[1] * across);
 }
 
+/**
+ * The desk's ROOM-SIDE HALF, redrawn as its own depth item so a member standing in front of a desk
+ * is not painted behind it.
+ *
+ * The problem this solves, and the two failed attempts before it (#1394, #1400). `depth(lx,ly) =
+ * lx + ly` gives one scalar per item, and a desk anchored at its centre sits (w + d) / 2 behind the
+ * edge the viewer sees — 84 units on a 100x68 desk. A member plainly in FRONT of that edge still
+ * keys lower than the desk and paints behind it. Moving the whole desk's key forward fixes that and
+ * breaks the opposite case: a desk facing N or W puts its CHAIR on the near side, so its own sitter
+ * keys higher than the desk centre, and a forward slab buries their head and torso. One key cannot
+ * answer both questions, because the passer-by and the sitter are asking opposite ones.
+ *
+ * So the desk keeps its centre key and everything that depends on it — the whole workstation, every
+ * prop, the seated arms overlay — is untouched, which is what makes this safe. What is ADDED is the
+ * front half of the slab and its two front legs, drawn again at the FRONT EDGE's depth. Same pixels,
+ * same colours: on an empty stretch of floor the second pass is invisible, because it repaints
+ * exactly what the first pass already put there. It only changes anything where a body has landed in
+ * between, and there it is the correct answer — the near lip of the desk is in front of you.
+ *
+ * `render.test.ts` pins the ordering at all four facings, which is the check #1394 did not have.
+ */
+function deskNearHalf(ctx: CanvasRenderingContext2D, fit: Fit, slot: DeskSlot): void {
+  const { lx, ly, dir } = slot;
+  const sn = dir === 'S' || dir === 'N';
+  const wx = sn ? DESK_W : DESK_D;
+  const dy = sn ? DESK_D : DESK_W;
+  // The half NEAREST THE CAMERA, which is +lx / +ly — a property of the projection, not of the facing.
+  // Getting that wrong is what the tests caught on the first cut of this function: on an N or W desk
+  // `FWD` points AWAY from the viewer, so "the side the desk faces" and "the side the viewer sees" are
+  // opposite, and a room-side half is the far half on half the floor.
+  for (const side of [-1, 1] as const) {
+    box(ctx, fit, lx + side * (wx / 2 - 6), ly + (dy / 2 - 6), 8, 8, DESK_LEG_H, dim(PAL.wood, 0.9));
+  }
+  box(ctx, fit, lx, ly + dy / 4, wx, dy / 2, DESK_SLAB, PAL.wood, DESK_LEG_H);
+}
+
+/**
+ * The depth key for that near half — and why it is not a constant.
+ *
+ * The near half wants to key at the desk's NEAR CORNER, so it beats a member standing in front of the
+ * desk. But on an N or W desk the CHAIR is on the near side too, so that desk's own sitter also keys
+ * past the desk centre — and a near-corner key would paint the desk over them, which is exactly the
+ * regression #1394 shipped and #1400 reverted.
+ *
+ * Both cases are satisfiable, just not by one number: key at the near corner, EXCEPT never past the
+ * member seated at this desk. An empty desk has no such constraint and takes the corner.
+ *
+ * That is the piece the first attempt was missing. It went looking for a better ANCHOR, when what the
+ * geometry needs is for the anchor to depend on who is sitting there — which the render loop knows
+ * and `nearDepth` never could.
+ */
+export function deskNearDepth(
+  slot: { lx: number; ly: number; dir: Dir },
+  seatedAt: { lx: number; ly: number } | null,
+): number {
+  const sn = slot.dir === 'S' || slot.dir === 'N';
+  const wx = sn ? DESK_W : DESK_D;
+  const dy = sn ? DESK_D : DESK_W;
+  const corner = depth(slot.lx + wx / 2, slot.ly + dy / 2);
+  if (!seatedAt) return corner;
+  return Math.min(corner, depth(seatedAt.lx, seatedAt.ly) - 0.2);
+}
+
 /** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
  * keyboard + mouse and a deterministic mix of personal props. The task chair and the seated member are
  * NOT drawn here — the chair is its own depth item at its own footprint (see renderScene) and members are
@@ -4170,6 +4231,14 @@ export function renderScene(
     // pieces use two blocks below, so it lands on the frame the body settles into the chair, not the
     // frame the roster changed.
     const seatedWorking = workingAtDesk(node ?? undefined, ownerPose?.sit);
+    /* Where this desk's own sitter sorts, or null for an empty desk — the one input `deskNearDepth`
+       cannot get from geometry. Same `actorSortAnchor` the member's own item uses, so the desk and
+       the body cannot disagree about where the body is. */
+    const seatedHere = (() => {
+      if (!ownerPose) return null;
+      const a = actorSortAnchor(ownerPose, slot, undefined);
+      return a.seatedAtDesk ? { lx: a.lx, ly: a.ly } : null;
+    })();
     if (slot.kind === 'bench') {
       // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
@@ -4192,6 +4261,12 @@ export function renderScene(
         d: depth(slot.lx, slot.ly),
         fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
       });
+      // The room-side half again, at the FRONT EDGE's depth — so a member standing in front of this
+      // desk paints in front of it. Additive by construction: the same pixels in the same colours, so
+      // on empty floor the second pass is invisible. It changes the picture only where a body has
+      // landed between the two keys, and there it is the right answer. See `deskNearHalf` for why
+      // the desk's own key cannot simply move (#1394, #1400).
+      items.push({ d: deskNearDepth(slot, seatedHere), fn: () => deskNearHalf(ctx, fit, slot) });
     }
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between

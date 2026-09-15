@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CliError } from '../errors.js';
 import type { DetectResult } from './harness.js';
 
 // Hoisted mock state: the harnesses the doctor inspects + the primer classification + the folder
@@ -15,6 +16,8 @@ const h = vi.hoisted(() => ({
   spec: null as { surface?: string } | null,
   roster: { members: [] as any[] },
   rosterThrows: false,
+  interruptCheck: { raised: false } as { raised: boolean; line?: string },
+  interruptCheckThrows: null as unknown,
   agentKeys: {} as Record<string, string>,
   knownIdentities: [] as { team: string; name: string; key: string; surface: string }[],
 }));
@@ -52,7 +55,15 @@ vi.mock('../client.js', () => ({
       if (h.rosterThrows) throw new Error('unreachable');
       return h.roster;
     }
+    async interruptCheck() {
+      if (h.interruptCheckThrows) throw h.interruptCheckThrows;
+      return h.interruptCheck;
+    }
   },
+  // Pure predicate — mirrored from the real module so the dead-lease tests exercise the real
+  // refusal shape (code + message), not the mock's opinion of it.
+  isSessionLeaseRefusal: (error: { code: string; message: string }) =>
+    error.code === 'unauthorized' && /agent session lease/i.test(error.message),
 }));
 
 const { buildSkewNotes, footprintNotes, inspectProvisioning, runSessionProbe } =
@@ -719,6 +730,90 @@ describe('inspectProvisioning', () => {
   });
 });
 
+/**
+ * ryder, 2026-09-14, found by running the doctor's own prescription rather than reading it: the
+ * line hardcodes "version 1" but fires on `provisioning.kind === 'legacy'`, which is a
+ * CLASSIFICATION covering BOTH v1 and v2 (`loadProvisioning`'s legacy predicate accepts
+ * `WorktreeProvisioningV2Schema` OR `ProvisionManifestSchema`). ryder's worktree read
+ * `"version": 2` while the doctor told him it was version 1, and the "single-harness era" gloss is
+ * false for a v2 file besides.
+ *
+ * The line had NO test of any kind, which is how a wrong number shipped. `loadProvisioning`
+ * returns `{ kind: 'legacy', value: unknown }` — the real number is in hand and was never read.
+ */
+describe('inspectProvisioning — the legacy manifest line says what it read (ryder, 2026-09-14)', () => {
+  const dirs: string[] = [];
+  // Both bodies must be COMPLETE for their frozen schema — an incomplete one classifies `invalid`,
+  // not `legacy`, and would exercise the other branch entirely. (It did, first time round.)
+  const V1 = {
+    version: 1,
+    profile: 'toolkit',
+    harness: 'claude-code',
+    mcpServers: ['musterd'],
+    permissions: { allow: [], ask: [], deny: [] },
+    provisionedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const V2 = {
+    version: 2,
+    profile: 'toolkit',
+    desired: ['claude-code'],
+    contributions: { 'claude-code': ['mcp'] },
+    provisionedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const legacyManifest = (body: Record<string, unknown>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-doctor-manifest-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(join(dir, '.musterd', 'provisioned.json'), JSON.stringify(body));
+    return dir;
+  };
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const manifestLine = (drift: string[]) =>
+    drift.find((d) => d.includes('provisioning manifest')) ?? '';
+
+  it('names version 2 as version 2 — never "version 1"', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    const dir = legacyManifest(V2);
+    const line = manifestLine((await inspectProvisioning(dir)).drift);
+    expect(line).toContain('version 2');
+    expect(line).not.toContain('version 1');
+    // v2 is the multi-harness shape; the era gloss was only ever true of v1.
+    expect(line).not.toContain('single-harness');
+  });
+
+  it('still names version 1 as version 1', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    const dir = legacyManifest(V1);
+    const line = manifestLine((await inspectProvisioning(dir)).drift);
+    expect(line).toContain('version 1');
+  });
+
+  it('degrades to naming the shape when the file carries no readable version', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    // A future frozen shape, or a `role`-keyed pre-rename v1 whose version key went missing: the
+    // classifier still says legacy, so the line must still fire — naming a number it cannot read
+    // is the defect, saying nothing at all would be worse.
+    const dir = legacyManifest({ ...V1, version: 'one' as unknown as number });
+    const line = manifestLine((await inspectProvisioning(dir)).drift);
+    expect(line === '' || line.includes('pre-v3 shape')).toBe(true);
+    expect(line).not.toContain('version 1 (');
+  });
+
+  it('prescribes the same repair either way — the classification is what the prescription rests on', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    for (const body of [V1, V2]) {
+      const line = manifestLine((await inspectProvisioning(legacyManifest(body))).drift);
+      expect(line, `v${body.version}`).toContain('musterd harness configure');
+    }
+  });
+});
+
 describe('inspectProvisioning — duplicate adapters (ADR 092)', () => {
   beforeEach(() => {
     h.harnesses = [];
@@ -824,6 +919,91 @@ describe('inspectProvisioning — model attestation (ADR 120)', () => {
     expect(report.notes).toContainEqual(
       expect.stringContaining('MCP model declaration is unknown'),
     );
+  });
+});
+
+/**
+ * The dead hook lease (lane 01M2H0GHMK): the folder binding carries a session lease the daemon
+ * refuses, while the seat holds a live adapter Presence here — the interrupt line is deaf and
+ * every other surface reads healthy. The doctor is the second channel that names it.
+ *
+ * Red-first: the first version of the note's repair named `musterd claim`, which mints a lease
+ * that dies with the command — the exact un-prescription the deaf line refuses to give. The
+ * tests pin the adapter rejoin instead.
+ */
+describe('inspectProvisioning — the dead hook lease (lane 01M2H0GHMK)', () => {
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'none';
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      surface: 'cli',
+      claim: { mode: 'seat', name: 'Ada' },
+      seat_credential: 'msac_x',
+      session_lease: 'msls_dead',
+    };
+    h.roster = { members: [] };
+    h.rosterThrows = false;
+    h.interruptCheck = { raised: false };
+    h.interruptCheckThrows = null;
+    process.env['MUSTERD_WORKSPACE'] = 'repo@main';
+  });
+  afterEach(() => {
+    delete process.env['MUSTERD_WORKSPACE'];
+  });
+
+  function adaLive() {
+    h.roster = {
+      members: [{ name: 'Ada', presences: [{ status: 'online', workspace: 'repo@main' }] }],
+    };
+  }
+
+  function leaseRefusal() {
+    return new CliError('invalid, expired, or revoked agent session lease', 1, 'unauthorized');
+  }
+
+  it('notes (never drift) when the folder lease is refused but the seat is live here', async () => {
+    adaLive();
+    h.interruptCheckThrows = leaseRefusal();
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+    expect(r.notes).toContainEqual(expect.stringContaining('session lease is dead'));
+    expect(r.notes).toContainEqual(expect.stringContaining('team_join'));
+  });
+
+  it('is silent when the lease still answers, raised or not', async () => {
+    adaLive();
+    h.interruptCheck = { raised: true, line: 'someone took a turn' };
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent with no live Presence here — an offline seat owes no bell', async () => {
+    h.interruptCheckThrows = leaseRefusal();
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent with no lease on disk — ambient and CLI-human steady state stays quiet', async () => {
+    adaLive();
+    (h.binding as Record<string, unknown>)['session_lease'] = undefined;
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent when the server is unreachable — never invents drift', async () => {
+    adaLive();
+    h.rosterThrows = true;
+    const r = await inspectProvisioning('/x');
+    expect(r.notes).toEqual([]);
+  });
+
+  it('is silent on a refusal that is not a lease refusal — a bad credential is nobody’s hook problem', async () => {
+    adaLive();
+    h.interruptCheckThrows = new CliError('forbidden', 1, 'forbidden');
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
   });
 });
 
