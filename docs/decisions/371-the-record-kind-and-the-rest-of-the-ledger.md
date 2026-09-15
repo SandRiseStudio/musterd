@@ -125,7 +125,17 @@ member's name). The fold resolves the seed to its **local** `seeds.id` and the m
 under the same key. A seed this daemon has not ingested from the relay yet stops as `seed_unborn`,
 retried each tick — `startSeedsIngest` runs on every daemon unconditionally (`index.ts:181`), so the
 seed is at most one relay poll away, and blocking is the `lane_unborn` discipline: a thread entry
-with no seed to hang on would be a row nothing can find. An unknown member name is git lag,
+with no seed to hang on would be a row nothing can find.
+
+> **Amended 2026-09-15 by [ADR 399](399-the-seed-kind-ideation-crosses-without-the-credential.md).**
+> "At most one relay poll away" ~~holds for every daemon~~ **holds only for a daemon that can reach
+> the relay.** The call site is unconditional; the poll is not. `ingestTeamSeeds` returns at once
+> unless `policy.seeds_relay_url` *and* `seeds_relay_token` are both set, so a joiner without the
+> relay's bearer token waits forever — measured on delta 2026-09-14, `seeds` = 0 against the hub's
+> 53. Giving every joiner the token was rejected (ADR 390/344: the cloud seat holds what its job
+> needs). Instead the capture crosses as its own hub-minted `seed` kind, and the sentence now reads:
+> the seed is at most one relay poll **or one fold** away, whichever that node can do. The
+> `seed_unborn` stop below is unchanged and still correct; what changed is how the window closes. An unknown member name is git lag,
 `unresolved_seat`, as for every seat-fact kind.
 
 **Seed lifecycle state does not cross with the entry.** A brief written on the joiner replicates;
@@ -255,6 +265,14 @@ Between two real daemons in `sync/record.test.ts`, plus the readers in `store/re
 2. A brief appended on the joiner appears in the hub's `toSeed(...).thread` with the same entry id
    and `by` naming the seat; appended before the hub has relay-ingested the seed, the fold stops
    `seed_unborn` and applies it on the tick after ingest. Fails without §3.
+   **~~Unrun.~~ UNTESTABLE AS WRITTEN 2026-09-14; runnable and RUN since ADR 399 (2026-09-15).**
+   It presumed the joiner could hold the seed. It could not: measured on delta, `seeds` = 0 against
+   the hub's 53, and no seed payload had ever crossed in either direction. The precondition was
+   missing, not the mechanism — so it was recorded UNRUN-BLOCKED rather than failed. §3's premise
+   is the thing that was wrong (see the §3 note below). [ADR 399](399-the-seed-kind-ideation-crosses-without-the-credential.md)
+   makes the capture its own replicated kind, and this falsifier now runs as written in
+   `sync/record.test.ts` — the seed reaches the joiner by fold, a seat there appends, and the entry
+   lands on the hub under the same entry id with `by` naming the seat.
 3. Three seats blocked on the same gate — two posting to the hub, one to the joiner — open exactly
    one `incident: <gate>` lane, on the hub, and `incidentReporters` lists all three on **both**
    daemons after one tick. Before this ADR: zero lanes. Fails without §2.

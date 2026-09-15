@@ -267,9 +267,17 @@ describe('Seed lifecycle HTTP authorization', () => {
         { action: string; detail: string | null }
       >("SELECT action, detail FROM audit WHERE team_id = ? AND action LIKE 'seed.%' ORDER BY ts, id")
       .all(team.id);
-    expect(audit).toHaveLength(3);
+    // Four since ADR 399: the capture itself is now a stamped `seed.captured` so it can cross to a
+    // joiner. It carries the raw idea, never the brief — which is what the body-free assertions
+    // below are actually about, and they still hold.
+    expect(audit).toHaveLength(4);
     expect(audit.map((row) => row.action)).toEqual(
-      expect.arrayContaining(['seed.claimed', 'seed.brief_submitted', 'seed.promoted']),
+      expect.arrayContaining([
+        'seed.captured',
+        'seed.claimed',
+        'seed.brief_submitted',
+        'seed.promoted',
+      ]),
     );
     expect(JSON.stringify(audit)).not.toContain(brief.problem);
     expect(JSON.stringify(audit)).not.toContain(brief.recommendation);

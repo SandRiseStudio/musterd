@@ -67,7 +67,10 @@ export class SyncResidenceError extends Error {
       | 'ledger'
       | 'policy'
       | 'continuity'
-      | 'record' = 'presence',
+      | 'record'
+      // ADR 399. Unreachable for a seed in practice — a seed event's actor is nulled above, so the
+      // residence check never runs on one — but the parameter takes every kind and must not lie.
+      | 'seed' = 'presence',
   ) {
     super(
       `a ${kind} event names seat "${seat}", which is bound to node "${boundLabel}"; this node may not speak for it`,
@@ -201,7 +204,21 @@ export function ingestBatch(
             'that carries it, and the hub pools it there',
         );
       }
-      const actor = event.kind === 'policy' || hubRecord ? null : syncEventActor(event);
+      // The relay is the hub's (ADR 399): a seed is born from exactly one relay poll per team, so a
+      // `seed` event is admissible only on the hub's own loopback push — the policy rule a third
+      // time. Two daemons polling the same relay cursor would race the same capture into two
+      // `relay_id`-colliding rows; refusing a pushed one keeps the birth single. The joiner needs
+      // the seed, not the relay token, which is the whole point of replicating the kind.
+      if (event.kind === 'seed' && !loopback) {
+        throw new SyncOriginError(
+          "a seed is the hub's to ingest (ADR 399): the relay is polled in one place and the " +
+            'capture reaches every node by fold',
+        );
+      }
+      const actor =
+        event.kind === 'policy' || event.kind === 'seed' || hubRecord
+          ? null
+          : syncEventActor(event);
       const seat = actor ? getMemberByName(db, teamId, actor) : undefined;
       if (seat && seat.kind !== 'service') {
         const bound = bindSeatToNode(db, teamId, seat.id, nodeId, now);
