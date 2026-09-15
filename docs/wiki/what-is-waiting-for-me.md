@@ -24,7 +24,7 @@ Evidence: `~/.musterd/musterd.db` read with `sqlite3 -readonly`; nick's cursor w
 
 And one drift restored: ADR 053 §1 decided the approval-prompt hook "prints any unread directed acts"; the implementation had drifted to the banner alone, while the help text still said "print directed acts waiting for this seat". `nudge` now prints the acts under the banner (oldest first, five lines, then `+N more`).
 
-## The bell went quiet and the number beside it did not — clause 7 reached the model's surface, not the human's (2026-09-14; falsify: a `lane_review` ask whose lane is `done` must be absent from BOTH `musterd inbox --interrupt-check` and the `⚑ N acts waiting` count)
+## The bell went quiet and the number beside it did not — clause 7 reached the model's surface, not the human's (2026-09-14; falsify: a `lane_review` ask whose lane is `done` must be absent from BOTH `musterd inbox --interrupt-check` and the `⚑ N acts waiting` count) <!-- claim: defect -->
 
 The fix below taught `listInterruptCandidates` to discharge three shapes, and the interrupt line went quiet. The human-facing count did not. Measured the same day on the laptop daemon carrying `abc462cb`: acceptance ask `01M2GMN7V1` on lane `01M2GJFCQV`, lane `done` — `musterd inbox --interrupt-check` silent, `musterd inbox --waiting` still counting it, seat line still reading `⚑ 8`.
 
@@ -34,11 +34,11 @@ FIXED: `GET /inbox`'s `discharged` carries all three shapes, each with its own `
 
 The general lesson: a discharge rule that lives in one surface's query is a rule the other surfaces do not have. `interrupt-check` and the `⚑` count answer the same question — *what do I still owe?* — and they were two implementations of it.
 
-## Interrupt-check rang acts nothing this seat could do would discharge (2026-09-14; falsify: a `lane_review` ask whose lane is `done`, or a steer `musterd inbox` has already shown you, in `interrupt-check`'s `act`)
+## Interrupt-check rang acts nothing this seat could do would discharge (2026-09-14; falsify: a `lane_review` ask whose lane is `done`, or a steer `musterd inbox` has already shown you, in `interrupt-check`'s `act`) <!-- claim: defect -->
 
 The 2026-09-06 fix below discharged what THIS seat answered. Three shapes discharge from outside the seat's window and kept ringing: a routed acceptance whose lane closed without anyone answering the ask (ryder, eight days, two sessions); an eligible-set act a co-addressee accepted, the accept being a DM to the asker; and a steer — no accept/decline exists for it — read, acted on and replied to (delta, ~20 boundaries). Fixed in `listInterruptCandidates`: obligations are checked against lane state, co-addressee answers are fetched by `in_reply_to`, and a steer or urgent act is discharged once GET /inbox has rendered it to the addressee (one `inbox.rendered` audit row per recipient+act) or the addressee replied on it. The watermark cursor still holds on an incomplete view (ADR 287); the line no longer depends on it to stop. The paid wake rail reads the same set, so a wake is no longer leased for a closed lane's ask. ADR 088 amendment 3.
 
-## Interrupt-check rang closed acceptances while the unread pile blocked the cursor (2026-09-06; falsify: accept a directed `lane_review` ask, then `musterd inbox --interrupt-check` — it must be silent)
+## Interrupt-check rang closed acceptances while the unread pile blocked the cursor (2026-09-06; falsify: accept a directed `lane_review` ask, then `musterd inbox --interrupt-check` — it must be silent) <!-- claim: defect -->
 
 The ⚡ line reads only unread interrupt-class rows (`listInterruptCandidates` + `pendingInterrupts`). A watermark cursor (ADR 287) cannot mark the three shown asks without skipping the ~1900 older unread behind them, so those asks stayed unread — and the acceptor's own `accept` is a DM to the asker, dropped by `from_member != me`. The fold never saw the discharge. Fixed by fetching this seat's own `accept`/`decline`/`resolve` into the candidate window (same pattern as huddle "mine" turns) and by not pinning `answered`/`discharged` ids in `team_inbox_check`. The cursor still holds on an incomplete view; the line just stops lying about closed obligations.
 

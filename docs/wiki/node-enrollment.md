@@ -37,7 +37,7 @@ existing row: the hub's own row for that team has a different id, so the present
 The bind is `INSERT … ON CONFLICT(id) DO UPDATE … WHERE credential_hash IS NULL`.
 
 One statement, so the prediction holds in substance — but the wording was wrong, and 331
-§Consequences now records that (2026-08-27). Falsify: on a hub that has never seen a joiner,
+§Consequences now records that (2026-08-27). Falsify: on a hub that has never seen a joiner, <!-- claim: other -->
 `SELECT COUNT(*) FROM nodes` is 1 before the join and 2 after; an UPDATE-shaped adoption would leave
 it at 1.
 
@@ -69,7 +69,7 @@ fail differently on the team-scoped guard, which is why both are kept).
 
 better-sqlite3 **commits** a transaction whose function returns normally — only a throw rolls back.
 Consume-then-bind returning `null` on refusal therefore left the code consumed and nobody enrolled
-(2026-08-27, caught in test before merge; falsify: enroll onto a taken node id with a fresh code,
+(2026-08-27, caught in test before merge; falsify: enroll onto a taken node id with a fresh code, <!-- claim: defect -->
 then retry that same code against a free id — a 409 means the invite survived, a second 409 means it
 was burned). The refusal now throws a sentinel so the consumption rolls back with the bind.
 
@@ -98,7 +98,7 @@ signals failure by returning a value commits that failure.**
   records that label on the *invite*; the node row takes the joining daemon's `hostname()`. Both
   daemons in the acceptance run were the same machine, so both rows read `mac.lan`. Not wrong — a
   machine naming itself is the more trustworthy of the two — but the operator's label is silently
-  dropped (2026-08-27), so `node list` cannot be matched against the invites you sent. Falsify:
+  dropped (2026-08-27), so `node list` cannot be matched against the invites you sent. Falsify: <!-- claim: defect -->
   `musterd node invite --label X` then join, and read `label` on the resulting `nodes` row.
 
 ## When a push wedges
@@ -131,7 +131,7 @@ enrolled joiner refuses and names the hub to run it from; `musterd node join` on
 already has enrolled joiners refuses before any request leaves it.
 
 Before the refusals a joiner could mint an invite and a third machine could join *it*. Everything
-that third machine pushed was then folded by nobody (2026-09-03 at `17706ff9`; falsify:
+that third machine pushed was then folded by nobody (2026-09-03 at `17706ff9`; falsify: <!-- claim: defect -->
 `node-enroll-http.test.ts` "ADR 376") — it sat in the joiner's `sync_log`, and a joiner's pull
 loop never reads its own staging.
 

@@ -6,7 +6,7 @@ The stream rents one Fly machine per stream (its lifetime IS the stream's) reach
 
 `musterd stream start` rents one Fly machine (app `musterd-broadcast`, performance-4x, auto-destroy) that reaches the laptop's loopback-bound daemon via Tailscale (`MUSTERD_AIR_ADDR` is a tailnet name; the ADR 040 allow-list accepts that Host). Stop with `musterd stream stop`, never by killing the machine. Nothing stream-related runs locally unless you run `musterd broadcast` yourself — except the ADR 293 supervisor below.
 
-## Crash vs deliberate stop (2026-08-19, ADR 293; falsify: induce a crash with a raw `fly machine stop` and watch `stream ensure` heal it)
+## Crash vs deliberate stop (2026-08-19, ADR 293; falsify: induce a crash with a raw `fly machine stop` and watch `stream ensure` heal it) <!-- claim: other -->
 
 The verbs record intent in `~/.musterd/stream/state.json`: `start` says live (before launching), `stop` says stopped with **who and why** (`--reason`, shown by `stream status`) — so a machine gone while the file says live is a crash by definition. `musterd service install --stream` installs a 60s LaunchAgent running `stream ensure`: crash → relaunch (≤3 per 30min, then it stands down and asks the team as the `streamwatch` service seat until a human `stream start` re-arms). Consequences to know: killing the machine any way other than `stream stop` now gets healed within ~60s, and `stream start --once` is the opt-out for deliberately unsupervised (e.g. `--duration`) runs. The 2026-08-18 Chrome death ("Chrome DevTools socket closed", dead until a human noticed) is the incident this closes; ADR 292 keeps the restarted page's bundle current from there.
 
@@ -19,7 +19,7 @@ The verbs record intent in `~/.musterd/stream/state.json`: `start` says live (be
 
 Hardware encode is essentially free (ffmpeg on `h264_videotoolbox`: 4.3–8.6 % of one core); the bottleneck is Chrome's render. Mid-run speed dipped to 0.57x before recovering — marginal, not comfortable. nick's decision 2026-07-29: leave the stream infra exactly as is; do not migrate to the laptop on the strength of a 45 s probe. A 10–15 min soak (guarded per [nicks-laptop](nicks-laptop.md)) remains queued.
 
-## The supervisor used to duplicate a healthy start (2026-09-03; falsify: `fly machine list --json` during a boot, then run `stream ensure`)
+## The supervisor used to duplicate a healthy start (2026-09-03; falsify: `fly machine list --json` during a boot, then run `stream ensure`) <!-- claim: defect -->
 
 `startedMachines()` filters `state === 'started'`, and every "is a machine already there" decision
 asked it: the ADR 293 crash predicate, `start`'s own double-launch guard, and `stop`. But Fly reports
@@ -41,7 +41,7 @@ same bug made `stream stop` during a boot print "nothing live" and walk away fro
 then came up and billed unattended; that path is fixed with it. `status` deliberately still reports
 `started`, because there "live" means *streaming* and a booting machine is not yet.
 
-## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream)
+## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream) <!-- claim: defect -->
 
 Within a second of going live, ffmpeg reported against **both** inputs: `Thread message queue
 blocking; consider raising the thread_queue_size option (current value: 8)`. Eight packets is a third
@@ -56,7 +56,7 @@ load average **5.50 / 4.54 / 2.49 on 4 cores**, chromium ~2.2 cores across four 
 0.83 — Chrome's render is still the bottleneck this page has recorded since 2026-07-29, and
 `performance-4x` still cannot step down. If `speed=` sits below 1.0x, no queue size fixes that.
 
-## `Page.navigate` ran on a deadline sized for local calls (2026-09-03; falsify: cold-boot a machine and time `streaming (rtmps)` → `◉ live`)
+## `Page.navigate` ran on a deadline sized for local calls (2026-09-03; falsify: cold-boot a machine and time `streaming (rtmps)` → `◉ live`) <!-- claim: defect -->
 
 `CDP_TIMEOUT_MS` is 15s and applied to **every** CDP call, but the startup calls are not alike.
 `Page.enable`, `Runtime.enable` and `Emulation.setDeviceMetricsOverride` are local bookkeeping that
@@ -78,7 +78,7 @@ detectable, and raising it everywhere would trade a startup flake for a hang not
 Note `waitBroadcastReady` already had its own 30s budget for exactly this reason — navigate is the
 same kind of wait and had simply never been given one.
 
-## A digest the registry has not published yet is not a failed start (2026-09-03; falsify: `stream build` then `stream start` immediately)
+## A digest the registry has not published yet is not a failed start (2026-09-03; falsify: `stream build` then `stream start` immediately) <!-- claim: defect -->
 
 `stream start` failed **twice** with `MANIFEST_UNKNOWN ... manifest unknown [http 404]` against a
 digest `stream build` had just pushed — while flyctl's own `image found: img_…` line said it had

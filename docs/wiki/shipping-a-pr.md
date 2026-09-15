@@ -10,21 +10,21 @@ Branch `feat/`|`fix/`|`docs/` from fresh `origin/main`; commits are throwaway (s
 
 Seat reviews are musterd acts, so a fully-reviewed PR routinely shows **0 reviews and 0 comments** on GitHub. Do not read an empty forge as an unreviewed PR, and post substantive reviews to both stores with each pointing at the other — see [the ledger and the forge](ledger-and-forge.md).
 
-## Bugbot no-show (2026-07-08, PR #170, intermittent; falsify: check-runs list on a stalled PR)
+## Bugbot no-show (2026-07-08, PR #170, intermittent; falsify: check-runs list on a stalled PR) <!-- claim: defect -->
 
 Cursor Bugbot can silently never register its check-run (2026-07-08, PR #170; intermittent — #167 minutes earlier ran normally): `gates` green for 20+ minutes while auto-merge waits on a check that does not exist, and nothing alerts. If a PR sits OPEN with `gates` SUCCESS and no `Cursor Bugbot` entry in `gh api repos/…/commits/<sha>/check-runs`, comment `bugbot run` on the PR — it registers and completes within ~90s (neutral conclusion = clean, auto-merge fires).
 
-## A conflicted PR gets ZERO check-runs (2026-08-13, PR #793; falsify: open a PR with a conflict and list its check-runs)
+## A conflicted PR gets ZERO check-runs (2026-08-13, PR #793; falsify: open a PR with a conflict and list its check-runs) <!-- claim: defect -->
 
 GitHub never creates the pull_request CI run for an unmergeable (mergeStateStatus DIRTY) PR, so auto-merge waits on nothing forever — the same stalled-OPEN symptom as the Bugbot no-show but a different cause and fix. Diagnose with `gh pr view --json mergeStateStatus`; fix by rebasing onto origin/main + `--force-with-lease`, not by `bugbot run`. Corollary: branching from a stale or sibling branch invites this — branch from `origin/main` explicitly (`git checkout -b <name> origin/main`); `git checkout main` fails silently useless in a worktree checkout where another worktree holds main.
 
-## After the merge, the branch you are standing on lies (2026-08-13; falsify: `git status -sb` in a worktree after an auto-merge landed)
+## After the merge, the branch you are standing on lies (2026-08-13; falsify: `git status -sb` in a worktree after an auto-merge landed) <!-- claim: defect -->
 
 `--delete-branch` removes the remote, so the local branch is left tracking a `[gone]` upstream. `git pull` there fails outright (`no such ref was fetched`) — loud, and therefore harmless. The dangerous half is quiet: **every command that reads the working tree instead of a ref keeps answering, from a snapshot of main that stopped moving when you merged.** It bit a measurement script the same day, which counted the wiki off a post-merge worktree and reported 24 pages / 52,849 B / 8 commits against `origin/main`'s real 25 / 59,384 / 10 — understating a teammate's contribution threefold.
 
 Anything that measures or reports on the repo should name the ref: `git fetch origin` first, then `git ls-tree origin/main <path>` and `git log origin/main`, never `ls`/`cat`/`git log` over the checked-out tree. To resume work, branch afresh (`git checkout -b <name> origin/main`) rather than pulling.
 
-## Branch cleanup is repo-wide, and tidying up is what removes the guard (2026-08-13; falsify: `git worktree list`, then try `git branch -D` on a branch another worktree holds)
+## Branch cleanup is repo-wide, and tidying up is what removes the guard (2026-08-13; falsify: `git worktree list`, then try `git branch -D` on a branch another worktree holds) <!-- claim: other -->
 
 Every seat worktree shares one `.git`, so `refs/heads` is common — 19 worktrees on this machine, and from any one of them `git branch` lists, and can delete, every other seat's branches. "I pruned my branches" is always "I pruned the team's branches."
 
@@ -36,7 +36,7 @@ Prune by name, never by sweep: delete only branches you own and have verified la
 
 ~~`pnpm format` writes `**/*.{ts,js,mjs,json,md}` but `format:check` only checks `packages/**/*.ts`, `tests/**/*.ts`, `*.{ts,json}` — the committed markdown/json was never prettier-conformant, so `pnpm format` reflows ~100 unrelated docs, burying the real change and breaking `roadmap:check` (glob misalignment verified still present 2026-08-13).~~
 
-ADR 284 removed the asymmetry rather than documenting around it: both modes are now `node scripts/format.ts`, reading one scope list from `scripts/format-scope.ts`, with `.prettierignore` backstopping `docs/` and `scripts/` joining the checked set. `pnpm format` on a clean tree changes 0 files (2026-08-19; falsify: from a clean `origin/main`, `pnpm format && git status --porcelain` — any output revives the struck claim above).
+ADR 284 removed the asymmetry rather than documenting around it: both modes are now `node scripts/format.ts`, reading one scope list from `scripts/format-scope.ts`, with `.prettierignore` backstopping `docs/` and `scripts/` joining the checked set. `pnpm format` on a clean tree changes 0 files (2026-08-19; falsify: from a clean `origin/main`, `pnpm format && git status --porcelain` — any output revives the struck claim above). <!-- claim: other -->
 
 The old workaround — `pnpm exec prettier --write <files>` on your own files only — is no longer necessary, and stays safe if you prefer it.
 

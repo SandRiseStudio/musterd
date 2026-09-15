@@ -14,7 +14,7 @@ Absent all three ⇒ `unknown`, which is legal and never blocks: it poisons conc
 
 An observation is **deliberately never merged into** the declaration. `binding.ts` gives the reason: an observation that overwrote a declaration "would launder itself into one on the next session — the field's epistemic status becomes unknowable". The tiers are kept apart so the comparison between them remains possible at all.
 
-## nick switches models mid-session, routinely (2026-08-21, stated directly by nick; falsify: find a seat whose act stamps change model family within one session while its `binding.model` never changes — if no such seat exists, switching is not happening and a declared/observed disagreement means something else)
+## nick switches models mid-session, routinely (2026-08-21, stated directly by nick; falsify: find a seat whose act stamps change model family within one session while its `binding.model` never changes — if no such seat exists, switching is not happening and a declared/observed disagreement means something else) <!-- claim: other -->
 
 He runs seats across different harnesses and drivers and changes the model inside a single seat's session — fable→opus and back — often. This is not derivable from the code, and it inverts how the two tiers should be read.
 
@@ -24,7 +24,7 @@ Observed instance, 2026-08-21: `miley` declared `claude-opus-5` while observing 
 
 This is a claim that something is **fine**, so per [the wiki's rule 3](README.md) it carries a falsifier that can come out the other way: if the disagreement were rot rather than switching, a seat's *observed* value would hold steady across its session and only the declaration would lag. Changing act stamps within a seat are what separates the two, and they are present.
 
-## The real gap: seats nothing has ever observed (2026-08-21; falsify: `jq '{declared:.model, observed:.model_observed.model}' <worktree>/.musterd/binding.json` per seat — an observation on gptbot or wanderer means this is fixed)
+## The real gap: seats nothing has ever observed (2026-08-21; falsify: `jq '{declared:.model, observed:.model_observed.model}' <worktree>/.musterd/binding.json` per seat — an observation on gptbot or wanderer means this is fixed) <!-- claim: defect -->
 
 | seat | declared | observed |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ Those last two attest a bare declaration. Under stable model assignment that is 
 
 Related: `wanderer`'s `grok-4.6` declaration happens to be correct today, which is [correct by coincidence](correct-by-coincidence.md) — right until the condition nobody states stops holding.
 
-## ~~`modelDrift` is computed and read by nothing (2026-08-21)~~ FIXED 2026-09-03 — it prints at initialize (falsify: make the assignment in `config.ts` unconditional-`delete` and run `packages/mcp packages/server packages/cli packages/protocol` — a failure outside `binding.test.ts`/`telemetry.test.ts` means something consumes it)
+## ~~`modelDrift` is computed and read by nothing (2026-08-21)~~ FIXED 2026-09-03 — it prints at initialize (falsify: make the assignment in `config.ts` unconditional-`delete` and run `packages/mcp packages/server packages/cli packages/protocol` — a failure outside `binding.test.ts`/`telemetry.test.ts` means something consumes it) <!-- claim: defect -->
 
 `resolveAttestation` returns a `drift` boolean, and `config.modelDrift` records `{declared, observed}`. It is not in the claim frame, not in any protocol frame, never reaches the server, and never renders in the CLI. Measured: with the assignment removed, **2 failed / 3784** across those four packages, both failures inside `modelDrift`'s own tests.
 
@@ -48,7 +48,7 @@ Given the section above this is arguably the *right* behaviour — a drift alarm
 
 **Resolved 2026-09-03 by deciding it, not by assuming it.** The noise argument was made and it lost, on one distinction: the drift warning fires **once per session at MCP initialize**, not per act. nick switching models mid-session produces at most one line per session, in the adapter's own stderr, which is the cost of a correct statement about a stale declaration — and the declaration going stale is exactly what the switching pattern guarantees. A per-act alarm would still be wrong for the reason above, and none was built.
 
-## Why the two probed harnesses still land on a declaration (2026-08-21; falsify: for cursor, feed `musterd session observe --stdin` a payload with a new `session_id` and no model and watch `model_observed` survive — it does not)
+## Why the two probed harnesses still land on a declaration (2026-08-21; falsify: for cursor, feed `musterd session observe --stdin` a payload with a new `session_id` and no model and watch `model_observed` survive — it does not) <!-- claim: other -->
 
 Not a missing probe. `observeModel` exists for claude-code, cursor **and** codex, and the hooks are wired in both seats — wanderer's `.cursor/hooks.json` fires `musterd session observe --stdin` on five events, gptbot's `.codex/hooks.json` fires `musterd codex-hook post-tool-use --stdin`. They reach null by two different routes:
 
@@ -57,7 +57,7 @@ Not a missing probe. `observeModel` exists for claude-code, cursor **and** codex
 
 Both then fall through to `binding.model`. **That is the inconsistency worth naming:** the system has already ruled a stale *observation* worse than nothing, and drops it — but has never applied that judgment to a stale *declaration*, which it silently prefers as the fallback. Honest degradation degrades **into** the least-verified tier.
 
-## What this costs the corpus — and the tier that now travels (2026-08-21; falsify: send an act from an occupancy that attested `model_source`, and read `meta.model_source` off the delivered envelope)
+## What this costs the corpus — and the tier that now travels (2026-08-21; falsify: send an act from an occupancy that attested `model_source`, and read `meta.model_source` off the delivered envelope) <!-- claim: other -->
 
 Per-act `meta.model` carried the model id and **not** which tier produced it, so an observed stamp and an unverified declaration were indistinguishable in the act log and any per-model aggregate mixed measurement with assumption. `modelSource` existed but reached only the once-per-session `musterd.mcp.initialize` span as `musterd.model.declaration`.
 
@@ -65,7 +65,7 @@ Per-act `meta.model` carried the model id and **not** which tier produced it, so
 
 Read it as **`observed` = measurement, `environment`/`binding` = assumption**, and note that **absent is a third answer, not a synonym for declared** — rows written before migration 42, or by clients too old to send it, genuinely do not know. Aggregates over acts from before 2026-08-21 have no tier at all and cannot acquire one.
 
-### The tier survived exactly one heartbeat (2026-09-03; falsify: `sqlite3 ~/.musterd/musterd.db "select model, model_source from presence where status='online'"` on a daemon past the fix — a live row with a model and a NULL tier means it is back)
+### The tier survived exactly one heartbeat (2026-09-03; falsify: `sqlite3 ~/.musterd/musterd.db "select model, model_source from presence where status='online'"` on a daemon past the fix — a live row with a model and a NULL tier means it is back) <!-- claim: defect -->
 
 Two weeks after ADR 301 the corpus still read as if nobody sent the tier: on revive since 2026-08-21, 2,950 acts carried a model with no `model_source` and 162 carried `observed`. wanderer read that as a collection gap and proposed making the pair mandatory on claim/heartbeat. It was not collection. Every adapter already sent the pair on both frames, and the claim path stored it — then the first 15s heartbeat re-attested the id alone: `ws.ts` called `reattestModel(db, presenceId, frame.model)` without `frame.model_source`, the store compared the pair, read `observed` → `null` as a real change, and wrote the tier to NULL. Measured: every live presence row had a model and a null tier, including seats on the newest build; 100 of 113 `observed` acts were sent within 16s of a claim against 109 of 1,324 unlabeled; the audit trail shows `occupancy.model_attested old=grok-4.6 new=grok-4.6` rows, which are this write with only the tier changing. The ADR 301 commit (`e13a79c6`) updated both claim sites and missed the heartbeat re-attest, a line from 2026-07-07.
 
@@ -77,7 +77,7 @@ Two lessons for the corpus. The four-percent `observed` share was an instrument 
 
 The tidier-looking fix — a seat whose probe produced nothing attests `unknown` rather than its declaration — was rejected, and the reason is worth recording because it is not obvious. `wanderer` is the **only non-claude family among live agents**. Its `grok-4.6` is an unverified declaration, so attesting `unknown` would flip the ADR 101 family posture from `diverse` to `monoculture` — a change in the team's stated decorrelation basis driven by a *measurement gap*, not by any change in who is actually working. Marking the tier keeps the information and labels its strength instead of discarding it. [research-corpus](research-corpus.md) records that the per-model leaderboard's remaining blocker is **N**; the sharper statement is that **N is not uniform in quality and nothing marks which rows are which** — and under frequent switching that matters more, not less.
 
-## The two silences at initialize now speak (2026-09-03; falsify: launch an adapter on a probe-capable surface with only `binding.model` set and no `model_observed`, and read its stderr — no warning means this regressed)
+## The two silences at initialize now speak (2026-09-03; falsify: launch an adapter on a probe-capable surface with only `binding.model` set and no `model_observed`, and read its stderr — no warning means this regressed) <!-- claim: other -->
 
 Both silences above lived at one seam, `recordAdapterInitialization` in `packages/mcp/src/telemetry.ts`, and both are now warnings. Neither blocks; ADR 101's posture is unchanged.
 

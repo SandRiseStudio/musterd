@@ -11,6 +11,7 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripMarker } from './wiki-claim-marker.ts';
 
 export const WIKI_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'wiki');
 const EXCLUDED = new Set(['README.md', 'INDEX.md']);
@@ -21,11 +22,12 @@ export function renderIndex(dir: string): string {
     .filter((f) => f.endsWith('.md') && !EXCLUDED.has(f))
     .sort()) {
     const lines = readFileSync(join(dir, name), 'utf8').split('\n');
-    const h1 = lines[0]?.match(/^#\s+(.+)$/)?.[1];
-    const summary = lines
-      .slice(1)
-      .find((l) => l.trim() !== '' && !l.startsWith('#'))
-      ?.trim();
+    // Marker-blind: a claim label is metadata on the line, never part of the title or summary the
+    // index quotes (see wiki-claim-marker.ts).
+    const h1 = stripMarker(lines[0] ?? '').match(/^#\s+(.+)$/)?.[1];
+    const summary = stripMarker(
+      lines.slice(1).find((l) => l.trim() !== '' && !l.startsWith('#')) ?? '',
+    ).trim();
     if (!h1 || !summary)
       throw new Error(
         `${name}: needs an H1 on line 1 and a one-line summary as the first body line`,

@@ -25,7 +25,7 @@ replay skip, batch bound — is on the order of 200–300 lines across the three
 the comment lines and the residence/origin blocks from `log.ts` and `push.ts` and count what is
 left; if it is over 500, this paragraph is wrong.
 
-## What Durable Streams is now (2026-09-03; falsify: re-read the linked sources)
+## What Durable Streams is now (2026-09-03; falsify: re-read the linked sources) <!-- claim: other -->
 
 - MIT, "Beta" badge, 1.7k stars; Node reference server, a Caddy plugin, and since 2026-06-26 a Rust
   server ("nearly a million operations per second on a single 4vCPU machine"). Clients in ten

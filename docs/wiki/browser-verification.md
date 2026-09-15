@@ -32,7 +32,7 @@ is genuinely about paint, layout or a real event loop — not to read markup you
 
 The in-app Browser pane lies in three specific ways — a stale vite preview, a permanently hidden document, and React-batched clicks — and each one reads as "my change broke the page" when nothing is wrong.
 
-## The traps (2026-07-28, each cost real time; falsify: reproduce in the Browser pane)
+## The traps (2026-07-28, each cost real time; falsify: reproduce in the Browser pane) <!-- claim: other -->
 
 - **`vite preview` caches dist at server start** — after every web build, stop and restart the preview or the served HTML points at chunk hashes that 404 and the page renders blank with no console error (~30 min lost to a false "my change broke the route").
 - **The Browser pane always reports `document.hidden === true`**, so visibility-gated code appears dead. Override the getter (`Object.defineProperty(document, 'hidden', {get: () => !window.__visible})`) and dispatch `visibilitychange` to exercise both branches.
@@ -67,5 +67,5 @@ any of these by rebuilding `packages/web` and repeating the step described.
   (`innerWidth` 375 immediately after); `resize_page` alone also fell short, landing at 500.
   Falsify: resize the pane and read `innerWidth` — if the claim is wrong it equals the width asked
   for.
-- **Screenshots land in the repo, and nothing was ignoring them (2026-09-01; falsify: take one and run `git status`).** The Playwright MCP server writes `page-*.yml` snapshots and `console-*.log` beside every screenshot in `.playwright-mcp/`, and a `filename` with no directory lands in the **repo root**. Neither path was gitignored: one worktree held 102 files / 5.4 MB there plus 3.6 MB of loose root PNGs, and 16 of the `.yml` were swept into two unrelated PRs (#960, #996) by `git add -A` — nobody noticed, because a page snapshot in a diff looks like nothing. `.playwright-mcp/` is ignored as of #1149 (dolly caught this reading #1148, which is her own ADR 338 drift re-run page); **name screenshots into it** (`filename: '.playwright-mcp/thing.png'`), never bare, or they land in the root where nothing ignores them.
+- **Screenshots land in the repo, and nothing was ignoring them (2026-09-01; falsify: take one and run `git status`).** The Playwright MCP server writes `page-*.yml` snapshots and `console-*.log` beside every screenshot in `.playwright-mcp/`, and a `filename` with no directory lands in the **repo root**. Neither path was gitignored: one worktree held 102 files / 5.4 MB there plus 3.6 MB of loose root PNGs, and 16 of the `.yml` were swept into two unrelated PRs (#960, #996) by `git add -A` — nobody noticed, because a page snapshot in a diff looks like nothing. `.playwright-mcp/` is ignored as of #1149 (dolly caught this reading #1148, which is her own ADR 338 drift re-run page); **name screenshots into it** (`filename: '.playwright-mcp/thing.png'`), never bare, or they land in the root where nothing ignores them. <!-- claim: defect -->
 - `computer {action:'zoom'}` is not supported in the pane — to inspect a region of a tall canvas, `drawImage` the crop into a `position:fixed` overlay canvas on a rAF loop.

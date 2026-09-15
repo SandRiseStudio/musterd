@@ -32,7 +32,7 @@ Same as the baseline's, deliberately: the durable record is the GitHub PR thread
 **Split:** named pin 3, honesty 1, probe-measured 0, leaked secrets 0, **speculative 0**.
 **By reviewer:** dolly 2, izzo 2. **Excluding dolly's own rows: 2 REQUIREDs, both izzo's, both named pin, 0 speculative.**
 
-ADR 338's third falsifier did not fire on this window (2026-09-01): every REQUIRED above cites a probe or a pin. Falsify: re-read the four findings and find one whose severity rests on a category claim alone.
+ADR 338's third falsifier did not fire on this window (2026-09-01): every REQUIRED above cites a probe or a pin. Falsify: re-read the four findings and find one whose severity rests on a category claim alone. <!-- claim: other -->
 
 ## The charter being used, not just obeyed
 
@@ -46,7 +46,7 @@ Distinct from the count, and the more legible signal at this sample size: **ADR 
 
 ## Reviewless merges
 
-**15 of the 21 PRs in this window merged with no review recorded on the PR** (2026-09-01; falsify: find a review of any of #1128, #1131–#1135, #1137–#1139, #1141, #1142, #1144, #1145 in a durable record — a PR comment, a musterd act, or a lane acceptance — that this method missed).
+**15 of the 21 PRs in this window merged with no review recorded on the PR** (2026-09-01; falsify: find a review of any of #1128, #1131–#1135, #1137–#1139, #1141, #1142, #1144, #1145 in a durable record — a PR comment, a musterd act, or a lane acceptance — that this method missed). <!-- claim: defect -->
 
 That method limit is real and inherited: the baseline read PR threads too, so "reviewed" here means "reviewed *on the PR*". A review that happened only in musterd acts or in a session would not be seen by either count.
 

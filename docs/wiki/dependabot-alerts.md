@@ -2,7 +2,7 @@
 
 GitHub raises alerts from its own cached dependency graph, not from the lockfile in front of you, and that graph can lag by weeks — so triage starts by asking whether the package is even in `pnpm-lock.yaml` before anyone reads the advisory.
 
-## The trap (2026-08-14; falsify: `grep -c "^  <pkg>@" pnpm-lock.yaml` on the default branch)
+## The trap (2026-08-14; falsify: `grep -c "^  <pkg>@" pnpm-lock.yaml` on the default branch) <!-- claim: other -->
 
 On 2026-08-14 the repo showed **17 open alerts (5 high, 10 moderate, 2 low)** — the count the push warning prints on every `git push`, which is how it gets read as a standing 17-problem backlog. Only **2** were real.
 
@@ -31,6 +31,6 @@ Put the evidence in the comment — absent from the lockfile, the commit where i
 
 ## What could not be verified
 
-`GET /repos/{owner}/{repo}/dependency-graph/sbom` **404s** for this repo (2026-08-14; falsify: re-run it), so the stale-graph explanation is an inference from the lockfile history and the alert dates, not something read back from GitHub's own graph. If that endpoint ever answers, it is the direct check.
+`GET /repos/{owner}/{repo}/dependency-graph/sbom` **404s** for this repo (2026-08-14; falsify: re-run it), so the stale-graph explanation is an inference from the lockfile history and the alert dates, not something read back from GitHub's own graph. If that endpoint ever answers, it is the direct check. <!-- claim: defect -->
 
 Related: [running the gates](running-the-gates.md) — the sibling habit of confirming what a signal is actually measuring before acting on it.

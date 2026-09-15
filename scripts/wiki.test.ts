@@ -33,6 +33,22 @@ describe('renderIndex', () => {
     ]);
   });
 
+  /* Labeling a claim must not edit the index. Both halves of an entry can carry a marker: a page
+   * whose H1 is itself a dated claim, and a summary line that is one. */
+  it('strips claim markers from the H1 and the summary it quotes', () => {
+    const dir = fixture({
+      'a-topic.md':
+        '# Topic A never fires (2026-01-01; falsify: x) <!-- claim: defect -->\n\nSummary of A (2026-01-01; falsify: y). <!-- claim: other -->\n',
+    });
+    expect(
+      renderIndex(dir)
+        .split('\n')
+        .filter((l) => l.startsWith('- ')),
+    ).toEqual([
+      '- [Topic A never fires (2026-01-01; falsify: x)](a-topic.md) — Summary of A (2026-01-01; falsify: y).',
+    ]);
+  });
+
   it('throws, naming the file, when a page lacks an H1 or a summary line', () => {
     const dir = fixture({ 'bad.md': 'no heading here\n' });
     expect(() => renderIndex(dir)).toThrow(/bad\.md/);
@@ -180,6 +196,28 @@ describe('checkEatenSections (diff-aware)', () => {
       ],
     ]);
     expect(checkEatenSections(base, current)).toEqual([]);
+  });
+
+  /* Adding a label to an existing claim is not a retitle and not an eaten section — it is the
+   * migration that introduced markers, and unguarded it flagged five real pages at once. */
+  it('says nothing when a heading and its body only gain claim markers', () => {
+    // Both lines must carry one for this to bite: the marked heading drops out of `headingsAfter`,
+    // and the marked body line stops matching `stillOpens` — so the old body text is found only as
+    // a SUBSTRING of the marked line and the section reads as absorbed. That is precisely what
+    // happened to five real pages on the migration commit.
+    const markedBase = new Map([
+      [
+        'a.md',
+        '# A\n\nSummary.\n\n## Kept\n\nKept body.\n\n## Eaten (2026-01-01)\n\nOrphan body (2026-01-01; falsify: x).\n',
+      ],
+    ]);
+    const current = new Map([
+      [
+        'a.md',
+        '# A\n\nSummary.\n\n## Kept\n\nKept body.\n\n## Eaten (2026-01-01) <!-- claim: other -->\n\nOrphan body (2026-01-01; falsify: x). <!-- claim: defect -->\n',
+      ],
+    ]);
+    expect(checkEatenSections(markedBase, current)).toEqual([]);
   });
 
   it('says nothing about a page that did not exist at the base', () => {

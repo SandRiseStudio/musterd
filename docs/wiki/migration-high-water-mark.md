@@ -1,6 +1,6 @@
 # A reserved migration number is a promise to land first
 
-The migration runner keeps a high-water mark, not a set, so a number reserved for an open branch that lands *after* a higher one is skipped on every database that already moved past it (2026-09-02; falsify: the v54 instance below — a database at 55 that has `sync_pull_cursor` without a later re-issue would disprove it).
+The migration runner keeps a high-water mark, not a set, so a number reserved for an open branch that lands *after* a higher one is skipped on every database that already moved past it (2026-09-02; falsify: the v54 instance below — a database at 55 that has `sync_pull_cursor` without a later re-issue would disprove it). <!-- claim: defect -->
 
 ## The mechanism
 

@@ -2,7 +2,7 @@
 
 `musterd claim`, `claim --detach`, and every ordinary CLI command each occupy a seat by a different route — so a fix to one is not a fix to the others, and twice in one day it was mistaken for one.
 
-## The map (2026-09-05, at `e8e9301a`; falsify: `grep -n "watchClaim\|http.claim\|claimSessionLease" packages/cli/src/commands/claim.ts packages/cli/src/commands/helpers.ts packages/cli/src/client.ts` — three distinct entry points, or this page is out of date)
+## The map (2026-09-05, at `e8e9301a`; falsify: `grep -n "watchClaim\|http.claim\|claimSessionLease" packages/cli/src/commands/claim.ts packages/cli/src/commands/helpers.ts packages/cli/src/client.ts` — three distinct entry points, or this page is out of date) <!-- claim: other -->
 
 | path | entry | transport | who takes it |
 |---|---|---|---|
@@ -19,7 +19,7 @@ The third is the surprising one. `resolve()` sets `claimSeatPerRequest: true` **
 Each fix below was written believing it covered "the claim". None did:
 
 - **[#1289](https://github.com/SandRiseStudio/musterd/pull/1289)** carried `workspace` on the stateless mirror. The live claim already had it; the per-request claim did not need it. One path.
-- **[#1309](https://github.com/SandRiseStudio/musterd/pull/1309)** added `provenance` to the stateless mirror's three occupy branches. I then ran `MUSTERD_PROVENANCE=session musterd claim` to verify it on the live rail and got `provenance: (null)` — because `musterd claim` does not use that route at all. **A verification that exercises the wrong path reads exactly like a broken fix** (2026-09-05; falsify: the audit row for that claim carries `surface: cli` and `via: ws`).
+- **[#1309](https://github.com/SandRiseStudio/musterd/pull/1309)** added `provenance` to the stateless mirror's three occupy branches. I then ran `MUSTERD_PROVENANCE=session musterd claim` to verify it on the live rail and got `provenance: (null)` — because `musterd claim` does not use that route at all. **A verification that exercises the wrong path reads exactly like a broken fix** (2026-09-05; falsify: the audit row for that claim carries `surface: cli` and `via: ws`). <!-- claim: defect -->
 - **[#1322](https://github.com/SandRiseStudio/musterd/pull/1322)** then carried it on the live claim, which is the path `musterd claim` actually takes.
 - **[#1339](https://github.com/SandRiseStudio/musterd/pull/1339)** restored `workspace_key` on the stateless mirror; **[#1341](https://github.com/SandRiseStudio/musterd/pull/1341)** had to restore it again, separately, on the per-request claim.
 

@@ -319,7 +319,7 @@ may know; nothing the model can call does.
 Method trap, recorded so the next rig skips it: `pgrep -f <pattern>`
 matches its own command line, so a bare-pid sighting mid-run (here: 67627)
 is not a respawn — confirm via `ps -o pid,ppid` before claiming one
-(2026-09-14 — falsify: none needed, process-table reading, but the trap
+(2026-09-14 — falsify: none needed, process-table reading, but the trap <!-- claim: other -->
 bit once already).
 
 Cost note: 4 reply-mode turns, each a few hundred tokens — the noReply

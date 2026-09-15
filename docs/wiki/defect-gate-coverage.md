@@ -2,25 +2,37 @@
 
 The wiki defect-claim gate would catch roughly a fifth of the wiki's own defect claims if their dates were dropped — and the larger hole is structural, not vocabulary: two in five defect claims live in headings, which the gate never lints at all.
 
-## The definition — what "coverage" means here (2026-08-24; falsify: read the header comment of `scripts/wiki-coverage.ts` against this paragraph)
+## The definition — what "coverage" means here (2026-08-24; falsify: read the header comment of `scripts/wiki-coverage.ts` against this paragraph) <!-- claim: other -->
 
 Before this meter, recall had one anecdote ("~10%") with no denominator. The definition now enforced in `scripts/wiki-coverage.ts`:
 
 - **Corpus**: every non-fenced line in `docs/wiki` (INDEX.md aside) carrying **both** a date and a `falsify:` marker — the self-labeled population of authors who followed README rule 2.
-- **Labels**: each corpus line is hand-labeled in `scripts/wiki-claim-labels.json` as `defect` (asserts an absence or malfunction — the broken/absent/unconsumed population `DEFECT_RE` exists to police) or `other` (rules, principles, measured facts, positive-behavior traps, statuses, titles, fragments — territory the gate deliberately does not lint).
+- **Labels**: each corpus line is hand-labeled **on the line itself**, as a trailing `<!-- claim: defect -->` or `<!-- claim: other -->` comment (invisible in rendered markdown). `defect` asserts an absence or malfunction — the broken/absent/unconsumed population `DEFECT_RE` exists to police; `other` is rules, principles, measured facts, positive-behavior traps, statuses, titles, fragments — territory the gate deliberately does not lint.
 - **Coverage**: the share of `defect` lines the gate would still catch if the author forgot the date. The dated parenthetical is stripped before matching, so no credit comes from defect vocabulary inside the falsifier text itself; a heading line counts as missed regardless of vocabulary, because `checkWiki` returns from heading lines before its `DEFECT_RE` branch.
 
-`pnpm wiki:check` prints the number on every run and fails on an unlabeled corpus line or a stale label — the denominator stays complete on touch. The number itself never gates: a target number would be answered by relabeling, not by widening.
+`pnpm wiki:check` prints the number on every run and fails on an unmarked corpus line, a marker sitting on a line that is not a claim line, or a marker naming a label outside the two — the denominator stays complete on touch. The number itself never gates: a target number would be answered by relabeling, not by widening.
+
+## The label lives on the claim line because the map it used to live in was the repo's busiest merge conflict (2026-09-15; falsify: `git log --oneline origin/main -- scripts/wiki-claim-labels.json` for 2026-09-14 — 18 commits in under 20 hours — and `pnpm vitest run scripts/wiki-coverage.test.ts`, whose "scores a marked line exactly as the same line unmarked" case is what makes the move safe) <!-- claim: other -->
+
+Until 2026-09-15 every label lived in `scripts/wiki-claim-labels.json`: one flat JSON object, 277 entries, keyed by the **entire prose line**. Every wiki-touching PR appended to the same tail of that one file, so the conflicts were structural rather than unlucky — 8 of them across 4 seats in a single afternoon (dolly 3, izzo 1, miley 3 on PR #1410 alone, rebased three times). Long sentence keys gave a three-way merge nothing short or structured to align on.
+
+The cost was never only time. On #1417 the conflict left the PR `CONFLICTING`, and GitHub therefore never fired the `pull_request` webhook: the PR sat with **no CI at all**, looking merely slow rather than blocked, and had to be found by hand. A conflict that stops the gate from running is worse than one that fails it.
+
+Two seats editing different wiki pages can no longer collide at all, and the label now travels with its claim: re-wording a claim used to orphan its label *and* demand a new one — one edit reported as two failures, a stale label and an unlabeled line. The replacement for the stale-label gate is the misplaced-marker gate, which catches the same junk at the same moment.
+
+The migration was **score-neutral, measured not assumed**: 277 labels onto 277 distinct corpus lines, no stale keys, no duplicates, and `pnpm wiki:check` printed the same coverage triple before and after — `33/158 — 62 shape misses, 63 heading misses` on the rebased branch, matching `origin/main` at `ca1662af` exactly (falsify: `git archive origin/main scripts docs/wiki | tar -x -C <tmp>` and run `scripts/check-wiki.ts` there — its second output line is the same triple).
+
+The trap the migration itself sprang: **anything that compares wiki prose to wiki prose must strip the marker first.** Marking 277 lines instantly turned five real pages into false "a section lost its heading" failures and put `INDEX.md` out of sync, because `checkEatenSections` compares heading and body TEXT across two versions of a page and `renderIndex` quotes the H1 and first body line verbatim. Both are marker-blind now, via `stripMarker` in `scripts/wiki-claim-marker.ts`, and both have a regression test that goes red when it is neutered.
 
 ## Measured 2026-08-24: 10 of 50 defect claims covered (falsify: `pnpm wiki:check` — its second output line is this number, recomputed)
 
 At the meter's first run (103 corpus lines, 49 labeled `defect`; 50 once this page's own heading-miss claim below joined the corpus): coverage **10/50**, with **19 shape misses** and **21 heading misses**. The 2026-08-24 widening that added the "reaches-nobody" family bought real ground — 6 of the 10 covered claims match on shapes added that day — and the honest recall is still one in five.
 
-## Headings are never linted, and that is the bigger hole (2026-08-24; falsify: `checkWiki` in `scripts/check-wiki.ts` — the `HEADING_RE` branch returns before the `DEFECT_RE` test; or relabel nothing and count the meter's heading misses against its shape misses)
+## Headings are never linted, and that is the bigger hole (2026-08-24; falsify: `checkWiki` in `scripts/check-wiki.ts` — the `HEADING_RE` branch returns before the `DEFECT_RE` test; or relabel nothing and count the meter's heading misses against its shape misses) <!-- claim: defect -->
 
 This wiki's house style puts the claim **in** the heading — `## <claim> (<date>; <falsifier>)` — so the gate's structural skip of heading lines excludes 21 of 50 defect claims from linting entirely (2026-08-24), including specimens in already-enforced shapes (`` `gh pr edit` is broken on this repo ``, "`modelDrift` is computed and read by nothing"). Widening `DEFECT_RE` cannot reach any of them. If heading linting is ever added, do it deliberately: headings carry their dates inline by convention, so the false-positive surface is different from body prose — measure before and after with this meter.
 
-## Limits of the number (2026-08-24; falsify: each limit names its own check)
+## Limits of the number (2026-08-24; falsify: each limit names its own check) <!-- claim: other -->
 
 - **Survivorship**: the corpus is rule-2-compliant lines — claims by authors who already dated them. The gate's true target, the undated claim someone will write next, is unobservable by construction; using the compliant population as its stand-in assumes future defect claims are phrased like past ones (falsify: when the next undated claim slips through in review, check whether the meter's corpus contained its shape).
 - **Line-based extraction**: hard-wrapped prose splits claims across lines, so a few corpus entries are fragments (`adr-296-terminology-eval.md` contributes five; falsify: the `extractClaims` entries for that file against the page's rendered prose).
