@@ -1219,7 +1219,7 @@ async function teamAgentKey(parsed: Parsed): Promise<number> {
       throw new CliError(
         `"${explicit.slice(0, 6)}…" is not a team agent key — those start with ` +
           `\`${TOKEN_PREFIXES.agent_key}\`. A \`${TOKEN_PREFIXES.credential}\` is a person's ` +
-          `credential (\`musterd join\`), not the team key.`,
+          `credential (\`musterd claim\`), not the team key.`,
         2,
       );
     }

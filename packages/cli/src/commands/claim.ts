@@ -82,7 +82,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     process.env['MUSTERD_AGENT_KEY'] ??
     binding?.agent_key ??
     // The ADR 059 vault: a fresh folder claiming a seat this machine has held before needs no key
-    // pasted — the same fallback `musterd join` always had, so folding join into claim (ADR 377)
+    // pasted — the legacy alias supplied the same fallback, so retiring it at FEATURE_EPOCH 20
     // loses nothing.
     (parsed.positionals[0]
       ? config.knownIdentities.find((i) => i.team === team && i.name === parsed.positionals[0])?.key
@@ -152,7 +152,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     );
   }
 
-  // `--detach` (ADR 377 increment 1): the one-shot HTTP claim `musterd join` always ran. It
+  // `--detach` (ADR 377 increment 1) preserves the predecessor's one-shot HTTP claim behavior. It
   // occupies the seat, binds the folder and EXITS, leaving a Presence with no session lease — so the
   // seat stays present, on the surface named here, after the process is gone (until PRESENCE_TIMEOUT
   // reaps it). The default WS handshake below holds the Presence through a session lease that dies

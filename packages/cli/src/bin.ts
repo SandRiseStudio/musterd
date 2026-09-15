@@ -23,7 +23,6 @@ import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { insightCommand } from './commands/insight.js';
 import { integrationCommand } from './commands/integration.js';
-import { joinCommand } from './commands/join.js';
 import { laneCommand, lanesCommand } from './commands/lane.js';
 import { liveCommand } from './commands/live.js';
 import { memoryCommand } from './commands/memory.js';
@@ -221,8 +220,6 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return integrationCommand(rest);
     case 'team':
       return teamCommand(rest);
-    case 'join':
-      return joinCommand(rest);
     case 'send':
       return sendCommand(rest);
     case 'lane':

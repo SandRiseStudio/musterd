@@ -495,7 +495,7 @@ export function agentKeySeatKindRefusal(
     message:
       `the human seat "${seat}" is not reachable with the team agent key; it authenticates with ` +
       'its own credential',
-    hint: `musterd join <team> --as ${seat} --key mscr_…`,
+    hint: `musterd claim ${seat} --team <team> --key mscr_…`,
   };
 }
 

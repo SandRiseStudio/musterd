@@ -6,7 +6,7 @@
 
 ---
 
-> **Status: EXECUTED** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md); integration-doctor frames added 2026-09-06 under [ADR 385](../decisions/385-optional-tailscale-aperture-doctor.md)). File: [musterd / Terminal UX](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ). The frames mirror the **already-shipped CLI** (reality wins): `cmd/team-add` shows the MCP env block the CLI actually emits (not a generic join token), and `cmd/join` shows the default `cli` surface.
+> **Status: EXECUTED** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md); integration-doctor frames added 2026-09-06 under [ADR 385](../decisions/385-optional-tailscale-aperture-doctor.md)). File: [musterd / Terminal UX](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ). The frames mirror the **already-shipped CLI** (reality wins): `cmd/team-add` shows the MCP env block the CLI actually emits (not a generic join token), and `cmd/claim` shows the default `cli` surface.
 
 ## File
 
@@ -40,7 +40,7 @@ Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, fr
 
 1. `cmd/team-create` — `$ musterd team create dawn` → success line `✓ team "dawn" created` (green ✓), then `you are now a member: nick (human, lead)`, then a hint line in dim: `add members with: musterd team add <name> --kind agent`.
 2. `cmd/team-add` — `$ musterd team add Ada --kind agent --role backend` → `✓ added Ada (agent, backend) to dawn` + a dim MCP env block: `connect this agent via MCP with its scoped key:` then `  MUSTERD_TEAM=… MUSTERD_AGENT_KEY=mskey_… MUSTERD_CLAIM=seat:Ada MUSTERD_LAUNCH_SURFACE=claude-code` (ADR 344: the shown-once key can bootstrap only Ada; a human member instead gets a `musterd claim …` hint).
-3. `cmd/join` — `$ musterd claim Ada --team dawn --detach --key …` → `✓ Ada — occupied on dawn` + presence line `● Ada online via cli` (default surface is `cli`). _(The frame is still named `cmd/join`: the command was respelled by ADR 377 on 2026-09-03 and the frame has not been renamed. `musterd join` survives only as a hidden alias that prints the new spelling, and it retires one FEATURE_EPOCH after 19 — rename the frame when it is next touched.)_
+3. `cmd/claim` — `$ musterd claim Ada --team dawn --detach --key …` → `✓ Ada — occupied on dawn` + presence line `● Ada online via cli` (default surface is `cli`).
 4. `cmd/send` — `$ musterd send --to Lin --act handoff "auth module ready for wiring"` → echoes the sent `message-row` with `✓ sent`.
 5. `cmd/inbox` — `$ musterd inbox` → header `inbox — dawn (2 unread)`, then 2–4 `message-row`s, newest last; unread marked with a leading accent `▌`. Footer dim: `musterd inbox --watch to follow live`.
 6. `cmd/inbox-watch` — `$ musterd inbox --watch` → same header with a live indicator `◉ watching` (green), a stream of rows, and a blinking-cursor affordance at the bottom. Show one incoming `request_help` highlighted (yellow-bold badge) to demonstrate the flagship moment.

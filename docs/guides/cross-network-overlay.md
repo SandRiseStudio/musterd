@@ -91,7 +91,7 @@ URL from it automatically (`http://…` → `ws://…`, and `https://…` → `w
 set `MUSTERD_SERVER` the same way in the harness config that launches the adapter (`.cursor/mcp.json`,
 Claude Code / Codex MCP config) so the agent's surface dials the same daemon.
 
-Everything else is unchanged: `musterd status`, `team create` / `join`, `send`, `inbox`, claims and
+Everything else is unchanged: `musterd status`, `team create` / `claim`, `send`, `inbox`, claims and
 presence all work exactly as on localhost — they're just talking to a daemon that happens to live across
 the overlay.
 

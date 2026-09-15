@@ -80,7 +80,7 @@ export async function signinCommand(parsed: Parsed, surface: SigninSurface): Pro
 
   if (!identity) {
     throw new CliError(
-      `no identity for team "${team}" in this folder — sign in as yourself first: musterd join ${team} --as <you> --key <mscr_…>`,
+      `no identity for team "${team}" in this folder — sign in as yourself first: musterd claim <you> --team ${team} --key <mscr_…>`,
       2,
     );
   }
