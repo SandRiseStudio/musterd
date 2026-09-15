@@ -229,6 +229,49 @@ describe('musterd stream', () => {
       expect(n).toBe(2);
     });
 
+    // 2026-09-15: a MANIFEST_UNKNOWN exit is not proof no machine was created. `fly machine run`
+    // creates the machine, then the VM fails to pull an unpublished digest and heals on its own.
+    // The retry must NOT launch a second machine over the top of the one its "failed" attempt
+    // already left — that is the 2026-09-03 duplicate-launch reached through start's own retry.
+    it('does NOT relaunch when the failed attempt already left an occupying machine', async () => {
+      withImage();
+      let listCalls = 0;
+      // First `fly machine list` is the top-of-function guard (empty → proceed). The second is the
+      // reap check inside the retry loop, after the MANIFEST_UNKNOWN launch left a machine behind.
+      const exec = greenExec({});
+      const stateful: Exec = (cmd, args) => {
+        const key = [cmd, ...args].join(' ');
+        if (key.startsWith('fly machine list')) {
+          listCalls += 1;
+          return listCalls === 1
+            ? ok('[]')
+            : ok(JSON.stringify([{ id: 'm-booting', state: 'created' }]));
+        }
+        return exec(cmd, args);
+      };
+      let n = 0;
+      const code = await run(
+        ['start'],
+        sup({
+          exec: stateful,
+          launch: () => {
+            n += 1;
+            return {
+              code: 1,
+              output:
+                'failed to get manifest ...: request failed: not found [http 404]: ' +
+                '{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}',
+            };
+          },
+          sleep: async () => {},
+        }),
+      );
+      expect(code).toBe(0);
+      expect(n).toBe(1); // launched once, then waited for the machine it had already created
+      expect(out.join('')).toContain('m-booting');
+      expect(out.join('')).toContain('not launching a second');
+    });
+
     // A retry loop over real errors is how you bill for nothing. Anything but the transient
     // registry signature stays fatal on the first try.
     it('does NOT retry a launch that failed for any other reason', async () => {
