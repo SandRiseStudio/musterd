@@ -146,6 +146,22 @@ export const IDLE_GESTURES: readonly IdleGesture[] = Object.entries(GESTURE)
   .filter(([key]) => !(ERRAND_GESTURES as readonly string[]).includes(key))
   .map(([, id]) => id as IdleGesture);
 
+/**
+ * Is this number a beat the scheduler may pick?
+ *
+ * The one place a gesture id arrives from OUTSIDE the type system is `pokeGesture`, which
+ * `/office-preview?beat=<n>` feeds a URL param. `GESTURE_DUR` is keyed by `IdleGesture` and has no
+ * fallback (#1434, correctly — a table that cannot report its own gaps is how four beats shipped on
+ * the shortest window in it), so an errand id arriving there produced `dur: undefined`, and
+ * `g.t >= g.dur` is never true against `undefined`: the member gestured for the life of the scene
+ * and was excluded from every later beat. A cast cannot catch that; this can (izzo, reviewing #1434
+ * — falsify: `pokeGesture(GESTURE.call)` and step the scene; a member still holding a gesture after
+ * its longest window means this guard is not on the path).
+ */
+export function isIdleGesture(kind: number): kind is IdleGesture {
+  return (IDLE_GESTURES as readonly number[]).includes(kind);
+}
+
 /** An arc-shaped envelope over the gesture window: 0 → 1 → 0, zero-velocity at both ends (no pop). */
 const arcEnv = (gT: number): number => Math.sin(smooth(gT) * Math.PI);
 /** A plateau envelope: ramp in over the first ~18% of the window, hold, ramp out over the last ~18%. */

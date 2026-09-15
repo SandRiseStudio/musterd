@@ -1244,3 +1244,20 @@ describe('the gesture window table', () => {
     expect(GESTURE_DUR[GESTURE.settle]).toBe(longest);
   });
 });
+
+/**
+ * The runtime half of what `Record<IdleGesture, number>` promises at compile time.
+ *
+ * The type stops a MISSING key. It cannot stop a present key holding something unusable, and the
+ * failure this guards is not a wrong number — it is `dur` being absent or non-finite, which makes
+ * `g.t >= g.dur` permanently false and strands the member mid-beat (izzo, reviewing #1434).
+ */
+describe('GESTURE_DUR covers every scheduler beat with a usable window', () => {
+  it('has a finite, positive window for each one', () => {
+    for (const kind of IDLE_GESTURES) {
+      const dur = GESTURE_DUR[kind];
+      expect(Number.isFinite(dur), `gesture ${kind} has no usable window`).toBe(true);
+      expect(dur).toBeGreaterThan(0);
+    }
+  });
+});

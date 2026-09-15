@@ -48,7 +48,7 @@ import {
   type Cue,
   type ScenePalette,
 } from './render';
-import { GESTURE } from './skeleton';
+import { GESTURE, isIdleGesture } from './skeleton';
 import type { WallBoard } from './wallboard';
 import {
   enqueueSpeech,
@@ -2011,6 +2011,12 @@ export function mountOffice(
       }
     },
     pokeGesture: (kind = 1) => {
+      // The only door a gesture id comes through as a plain number — `/office-preview?beat=<n>` hands
+      // it straight from the URL. Everything inside is typed `IdleGesture`; this is where a number
+      // becomes one, or is refused. An errand overlay (browse/fill/eat/pour/call) has no scheduler
+      // window, and before this guard it reached `gestureBeat` with `dur: undefined` and froze that
+      // member for the rest of the session.
+      if (!isIdleGesture(kind)) return null;
       // Same path as the ambient scheduler's gesture beat, but on demand — try idle desk members until
       // one accepts (gestureBeat rejects a small/walking/already-gesturing member).
       for (const who of actors.idleDeskMembers()) {

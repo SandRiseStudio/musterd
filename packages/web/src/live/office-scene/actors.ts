@@ -462,7 +462,7 @@ export interface Actors {
   /** Play an in-place ambient gesture (`1` stretch · `2` glance) on a seated desk member for a short
    * window. Stationary filler, not a real act; returns false if the member can't gesture (absent, small,
    * exiting, walking, or already busy). See ADR 086 Phase 2 tail. */
-  gestureBeat(from: string, kind: number): boolean;
+  gestureBeat(from: string, kind: IdleGesture): boolean;
   /** Seated desk members eligible to be sent on an ambient stroll right now (present, not small, idle). */
   idleDeskMembers(): string[];
   /** True when motion is in flight and *all* of it is ambient — drives the idle-FPS cap in the loop. */
@@ -1124,7 +1124,7 @@ export function createActors(): Actors {
       ) {
         return false;
       }
-      gestures.set(from, { kind, t: 0, dur: GESTURE_DUR[kind as IdleGesture] }); // one full beat window, then clear
+      gestures.set(from, { kind, t: 0, dur: GESTURE_DUR[kind] }); // one full beat window, then clear
       return true;
     },
     idleDeskMembers() {
