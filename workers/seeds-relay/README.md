@@ -14,6 +14,11 @@ not `pnpm install`).
 `https://musterd-seeds-relay.nick-sanders-a.workers.dev` (Cloudflare account
 `0f159d2f0622a4fef8e07d64d4a9bdb0`, KV namespace `58c05cfa4ea94dc5a1cf22476f98e665`).
 
+This URL is **Sandrise dogfood**, not a product backend. musterd the package never opens it
+unless a Team sets `seeds_relay_url`. When you deploy this Worker, seeds land in *your* KV.
+Product telemetry stays off / no-phone-home; the public statement is
+[`PRIVACY.md`](../../PRIVACY.md).
+
 Every route fails closed until its secret exists: a missing `PULL_TOKEN`/`TWILIO_AUTH_TOKEN`/
 `SLACK_SIGNING_SECRET` is a 500, not an open door. Deploying before the secrets are set is
 therefore safe — the Worker is inert until configured.

@@ -1,4 +1,9 @@
-import type { Request, RequestKind, RequestStatus } from '@musterd/protocol';
+import {
+  isWireAttestationSource,
+  type Request,
+  type RequestKind,
+  type RequestStatus,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 
@@ -25,6 +30,9 @@ export interface RequestRow {
   expires_at: number;
   /** The claimant's harness-attested model (ADR 101), carried across the approval gap. */
   model: string | null;
+  /** Which tier produced that model — travels with it, or the approved occupancy is attested with
+   *  a model whose provenance was dropped at the gate. */
+  model_source: string | null;
 }
 
 export function toRequest(row: RequestRow): Request {
@@ -40,6 +48,10 @@ export function toRequest(row: RequestRow): Request {
     ts: row.created_at,
     expires_at: row.expires_at,
     model: row.model ?? null,
+    // Narrow on the way OUT, not just on the way in: a value that is not a known tier (hand-edited
+    // db, a future client's vocabulary) reads as null — "tier unknown" — rather than propagating a
+    // string nothing downstream can interpret.
+    model_source: row.model && isWireAttestationSource(row.model_source) ? row.model_source : null,
   };
 }
 
@@ -68,6 +80,8 @@ export function createRequest(
     collapseByTarget?: boolean;
     /** The claimant's attested model (ADR 101), stored so the approved occupancy is attested. */
     model?: string | null;
+    /** The tier behind that model; meaningless without it, so stored only beside one. */
+    model_source?: string | null;
   },
 ): Request {
   if (input.collapseByTarget && input.target !== null) {
@@ -83,13 +97,23 @@ export function createRequest(
       // Distinguish "model not supplied" (keep existing) from an explicit `null` (the new claimer is
       // unattested — it must override, not silently inherit the prior claimer's model).
       const model = input.model !== undefined ? input.model : (existing.model ?? null);
-      db.prepare('UPDATE requests SET from_session = ?, surface = ?, model = ? WHERE id = ?').run(
-        input.from_session,
+      // The tier follows the model's OWN supplied/absent decision, never its own — a refreshed model
+      // under the prior claimer's tier would describe one session's model with another's provenance.
+      const modelSource = !model
+        ? null
+        : input.model !== undefined
+          ? (input.model_source ?? null)
+          : (existing.model_source ?? null);
+      db.prepare(
+        'UPDATE requests SET from_session = ?, surface = ?, model = ?, model_source = ? WHERE id = ?',
+      ).run(input.from_session, surface, model, modelSource, existing.id);
+      return toRequest({
+        ...existing,
+        from_session: input.from_session,
         surface,
         model,
-        existing.id,
-      );
-      return toRequest({ ...existing, from_session: input.from_session, surface, model });
+        model_source: modelSource,
+      });
     }
   } else {
     const existing = db
@@ -115,10 +139,11 @@ export function createRequest(
     created_at: now,
     expires_at: now + REQUEST_TTL_MS,
     model: input.model ?? null,
+    model_source: input.model ? (input.model_source ?? null) : null,
   };
   db.prepare(
-    `INSERT INTO requests (id, team_id, kind, from_session, target, surface, status, decided_by, created_at, expires_at, model)
-     VALUES (@id, @team_id, @kind, @from_session, @target, @surface, @status, @decided_by, @created_at, @expires_at, @model)`,
+    `INSERT INTO requests (id, team_id, kind, from_session, target, surface, status, decided_by, created_at, expires_at, model, model_source)
+     VALUES (@id, @team_id, @kind, @from_session, @target, @surface, @status, @decided_by, @created_at, @expires_at, @model, @model_source)`,
   ).run(row);
   return toRequest(row);
 }

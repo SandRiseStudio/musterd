@@ -1,5 +1,6 @@
 import type {
   Goal,
+  GoalFlow,
   Lane,
   LaneState,
   LaneWarning,
@@ -19,7 +20,7 @@ import {
   type LaneAction,
   type MovedLanes,
 } from './boardWrite';
-import { initial, kindOf, memberAvatar } from './format';
+import { initial, kindOf, memberAvatar, hueOf} from './format';
 import { GoalGrid } from './GoalGridView';
 
 /**
@@ -86,6 +87,8 @@ export interface BoardProps {
   view: 'columns' | 'grid';
   /** Declared Goals with derived status — the grid's mission cards. Empty = grid renders nothing. */
   goals: Goal[];
+  /** `report.goal_flow` (ADR 295) — the daemon's per-goal flow, rendered on the goal cards. */
+  goalFlow?: GoalFlow[] | undefined;
   /** Drill into a goal's lanes (null = the goal-less pool). Absent = cards still render, inert. */
   onOpenGoal?: (goalId: string | null) => void;
   /** Team roster — identity colors (jade agent / rose human) and the handoff seat picker. */
@@ -113,6 +116,7 @@ export function Board({
   warnings,
   view,
   goals,
+  goalFlow,
   onOpenGoal,
   roster,
   me,
@@ -271,6 +275,7 @@ export function Board({
           lanes={lanes.filter((l) => l.state !== 'abandoned')}
           goals={goals}
           warnings={warnings}
+          goalFlow={goalFlow}
           roster={roster}
           onOpenGoal={onOpenGoal ?? (() => undefined)}
         />
@@ -397,7 +402,9 @@ function LaneCard({
                 immediately to its right, so the letter is decoration, not information. */}
             <span
               className="lc-card__avatar"
-              style={{ background: memberAvatar(lane.owner_seat, ownerKind) }}
+              style={{
+                background: memberAvatar(lane.owner_seat, ownerKind, hueOf(lane.owner_seat, rosterIdx)),
+              }}
               aria-hidden="true"
             >
               {initial(lane.owner_seat)}
@@ -520,7 +527,9 @@ function SeatPicker({
         >
           <span
             className="lc-card__avatar"
-            style={{ background: memberAvatar(m.name, m.kind === 'human' ? 'human' : 'agent') }}
+            style={{
+              background: memberAvatar(m.name, m.kind === 'human' ? 'human' : 'agent', m.hue),
+            }}
             aria-hidden="true"
           >
             {initial(m.name)}

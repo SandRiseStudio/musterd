@@ -29,6 +29,27 @@ export type PendingMarker = PendingSession;
  */
 
 /**
+ * How long a pending marker stays believable (ADR 033). **Deliberately not in `@musterd/protocol`:**
+ * the marker SCHEMA is the cross-implementation contract and it is unchanged here — this is a policy
+ * of the one component that reaps, and another implementation reading markers is free to choose its
+ * own window. Putting it in the protocol package would assert a wire-contract change that this is not. Nothing has ever reaped these files: the
+ * adapter writes one at boot and only a claim that *adopts* that code removes it, so a session that
+ * exits unclaimed leaves its marker on disk forever. Measured 2026-09-04: 189 markers across 15
+ * `.musterd/pending/` dirs on one machine, 176 of them older than a week — and a stale one is not
+ * inert, because `musterd claim` refuses with "several unclaimed sessions are waiting here" the
+ * moment two markers match the folder, which is the documented repair for an expired session lease.
+ *
+ * **Seven days, deliberately generous.** `ts` is stamped once at adapter boot and never refreshed
+ * (`writePendingMarker`), so it is a session START time, not a heartbeat — a session genuinely still
+ * waiting to be claimed can carry an old `ts`, and reaping its marker would strand it, because the
+ * ADR 034 resolution sidecar it is waiting on is keyed by that marker's code. The asymmetry decides
+ * the number: offering a two-day-old marker costs one `--for` flag, while dropping a live one breaks
+ * a session's only path online. Seven days sits far outside any plausible waiting window and still
+ * clears 176 of the 189 measured files.
+ */
+export const PENDING_MARKER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
  * The `.musterd` dir this workspace's markers belong to: the nearest ancestor that holds a
  * `binding.json` (a bound workspace root), else `startDir/.musterd`. Mirrors {@link findBinding}'s
  * walk so markers land next to the binding — and, critically, matching on the **binding file** (not
@@ -61,7 +82,8 @@ export function writePending(startDir: string, session: PendingSession): string 
 }
 
 /**
- * All valid pending markers for a team in this folder (skips unparseable/foreign-team files). When
+ * All LIVE, valid pending markers for a team in this folder (skips unparseable/foreign-team files,
+ * and reaps expired ones — see `PENDING_MARKER_TTL_MS`). When
  * `workspace` is given, markers for a *different* workspace are also skipped: a marker's `.musterd`
  * dir can be shared across sibling launches (e.g. a subdir session and the workspace root resolve to
  * the same bound root), so team alone doesn't prove a marker belongs to *this* session's workspace —
@@ -72,6 +94,7 @@ export function listPendingForWorkspace(
   startDir: string,
   team: string,
   workspace?: string,
+  now: number = Date.now(),
 ): PendingMarker[] {
   const dir = pendingDir(startDir);
   if (!existsSync(dir)) return [];
@@ -80,6 +103,19 @@ export function listPendingForWorkspace(
     if (!name.endsWith('.json') || name.endsWith(RESOLVED_SUFFIX)) continue;
     try {
       const parsed = PendingSessionSchema.parse(JSON.parse(readFileSync(join(dir, name), 'utf8')));
+      // Expiry is a property of the MARKER, not of this query, so an expired file is reaped whatever
+      // team or workspace it names — the team/workspace filters below decide what this caller is
+      // shown, and using them to decide what to delete would leave the dir growing for every seat
+      // but the one that happened to read it. This read IS the reaper: no timer, no new process,
+      // and it runs on exactly the path that suffers from the mess (ADR 033).
+      if (now - parsed.ts > PENDING_MARKER_TTL_MS) {
+        try {
+          rmSync(join(dir, name), { force: true });
+        } catch {
+          // an unwritable dir just means the marker is skipped, not cleared — still correct
+        }
+        continue;
+      }
       if (parsed.team !== team) continue;
       if (workspace !== undefined && parsed.workspace !== workspace) continue;
       out.push(parsed);

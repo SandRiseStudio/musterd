@@ -1,12 +1,11 @@
 import { createFileRoute, useRouter } from '@tanstack/react-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Clock } from '../live/Clock';
 import liveCss from '../live/Live.css?url';
 import brandCss from '../brand/brand.css?url';
 import { MusterdWord } from '../brand/MusterdWord';
 import { AsksStrip } from '../live/AsksStrip';
 import { MemberSignInFields, MemberSignInToggle, type AdvancedState } from '../live/MemberSignIn';
-import { BoardOverlay, preloadBoard } from '../live/BoardOverlay';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
@@ -30,9 +29,32 @@ import {
 import { firehoseSound, roomTone } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
 import { officeRoom } from '../live/officeRoom';
+import { useDwell } from '../live/useDwell';
 import { useWorkingOn } from '../live/useWorkingOn';
 import { useReport } from '../live/useReport';
 import { roomEntries } from '../live/workingOn';
+
+const LazySeedsTray = lazy(() =>
+  import('../live/SeedsTray').then((module) => ({ default: module.SeedsTray })),
+);
+
+/**
+ * The board overlay, lazy — its own header has always said it is "kept out of /live's eager graph"
+ * (ADR 151), but only the heavy `Board` inside it ever was. The 219-line modal shell, and with it
+ * `useBoardData`, `goalGrid` and `boardOverlayMath`, rode the entry chunk on a route that renders
+ * none of it until someone reaches for the wall. Measured 2026-09-02: moving the shell out returned
+ * more than #1158 borrowed, which is what paid that PR's perf debt back instead of raising the
+ * ceiling to meet it.
+ *
+ * `preloadBoardOverlay` keeps the hover promise the old `preloadBoard` made, and now covers both
+ * halves: the shell first, then the board it wraps. By the time a click lands, both are usually here.
+ */
+const LazyBoardOverlay = lazy(() =>
+  import('../live/BoardOverlay').then((module) => ({ default: module.BoardOverlay })),
+);
+function preloadBoardOverlay(): void {
+  void import('../live/BoardOverlay').then((module) => module.preloadBoard());
+}
 
 export const Route = createFileRoute('/live')({
   head: () => ({
@@ -71,6 +93,7 @@ function LivePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Collapsed>(NO_COLLAPSE);
   const [companion, setCompanion] = useState(false);
+  const [seedsOpen, setSeedsOpen] = useState(false);
 
   const toggleCollapse = (id: PanelId) => {
     setCollapsed((prev) => {
@@ -158,6 +181,11 @@ function LivePage() {
   // scene) so both routes hand the scene the same already-projected shape.
   const board = useWorkingOn(cfg, envelopes);
   const report = useReport(cfg, envelopes);
+  // What this page has watched come and go (lane 01M1JQENBK). Only the roster rail reads it: a
+  // short visit's trace is a fact about the recent past, and the room itself must keep describing
+  // now. Costs nothing until someone actually leaves — the hook schedules no tick while no trace is
+  // live.
+  const dwell = useDwell(roster);
   const entries = roomEntries(roster, board);
 
   /**
@@ -287,10 +315,14 @@ function LivePage() {
   const openBoard = useCallback((rect: DOMRect) => {
     boardOpener.current = (document.activeElement as HTMLElement | null) ?? null;
     setBoardOrigin(rect);
+    // The paper lift rides the CLICK paths only (E4 spec §2) — the ?lane= deep link below arrives
+    // without a hand, so it stays silent. Centre-panned: the overlay is chrome over the room.
+    roomTone.moment('boardOpen', 0);
   }, []);
   const closeBoard = useCallback(() => {
     setBoardOrigin(null);
     setBoardLane(null);
+    roomTone.moment('boardClose', 0);
     // A macrotask, not rAF: focus must go home even in a hidden tab (rAF stalls there), and by the
     // time this runs React has committed the close and lifted `inert`.
     window.setTimeout(() => boardOpener.current?.focus?.({ preventScroll: true }), 0);
@@ -418,6 +450,19 @@ function LivePage() {
             them a few inches above was the duplication nick asked us to drop (2026-07-24). */}
         <MusterdWord />
         <span className="lc__spacer" />
+        {connected && (
+          <button
+            type="button"
+            className={`lc__pbtn${seedsOpen ? ' lc__pbtn--on' : ''}`}
+            onClick={() => setSeedsOpen(true)}
+            aria-pressed={seedsOpen}
+            title="Shared Seeds — Team ideas before they become Lanes"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 13V7M8 8C5.4 8 3.4 6.6 3 4c2.7-.2 4.7 1 5 4ZM8 10c2.6 0 4.6-1.4 5-4-2.7-.2-4.7 1-5 4Z" />
+            </svg>
+          </button>
+        )}
         {connected && <WatchLinkButton cfg={cfg!} />}
         {connected && <CompanionToggle on={companion} onToggle={toggleCompanion} />}
         {connected && <RoomToneToggle />}
@@ -451,7 +496,7 @@ function LivePage() {
             }
             // A modal means it: while the board overlay is up, the room behind it takes no focus and
             // no clicks (the AsksStrip inert precedent, promoted to page scope).
-            inert={boardOpen}
+            inert={boardOpen || seedsOpen}
           >
             <OfficeScene
               {...officeRoom(team, stream, { entries, board })}
@@ -459,7 +504,7 @@ function LivePage() {
               onCollapse={() => toggleCollapse('office')}
               onActClick={onActClick}
               onBoardOpen={openBoard}
-              onBoardHover={preloadBoard}
+              onBoardHover={preloadBoardOverlay}
               // The asks & approvals rail (ADR 149) rides the top of the room itself — the office
               // frames its own asks (nick, 2026-07-28). Still renders nothing until an ask exists.
               topSlot={
@@ -479,6 +524,8 @@ function LivePage() {
             />
             <RosterPanel
               roster={roster}
+              dwell={dwell.log}
+              dwellNow={dwell.now}
               collapsed={collapsed.roster}
               onCollapse={() => toggleCollapse('roster')}
               daemonBuild={daemonBuild}
@@ -495,15 +542,26 @@ function LivePage() {
             />
           </div>
           {boardOpen && (
-            <BoardOverlay
-              cfg={cfg}
-              roster={roster}
-              base={board}
-              goals={report?.goals ?? []}
-              origin={boardOrigin}
-              focusLane={boardLane}
-              onClose={closeBoard}
-            />
+            <Suspense fallback={null}>
+              <LazyBoardOverlay
+                cfg={cfg}
+                roster={roster}
+                base={board}
+                goals={report?.goals ?? []}
+                origin={boardOrigin}
+                focusLane={boardLane}
+                onClose={closeBoard}
+              />
+            </Suspense>
+          )}
+          {seedsOpen && (
+            <Suspense fallback={null}>
+              <LazySeedsTray
+                cfg={cfg!}
+                activityKey={envelopes[envelopes.length - 1]?.id}
+                onClose={() => setSeedsOpen(false)}
+              />
+            </Suspense>
           )}
         </>
       )}

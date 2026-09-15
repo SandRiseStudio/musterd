@@ -98,3 +98,38 @@ on. Whether the skill actually improves how agents claim/hand-off is measured th
 found: dogfooding (the live check in this ADR's verification), not a metric. If a coordination-quality
 eval later exists (ADR 051/052), "does the skill reduce wasted-work / claim-time" is a natural dataset for
 it, but that engine isn't built yet.
+
+## Amendment 2026-09-06 — the gate is name-only, so meaning must be pinned by test
+
+`pnpm guidance:check` enforces the one duplication this ADR permits (command and tool *names*) by
+asserting that every name the skill claims still resolves. That is **one-directional by design** and
+stays that way: the skill is a playbook, not an index, and a reverse check — every registered tool
+must appear in the prose — would force `team_seed_*`, `team_report` and every ops verb into a
+document whose value is that it can be read in one sitting.
+
+The cost of that asymmetry was paid in full on 2026-09-06 (lane `01M1VD1CQV`). A surface-survey arc
+landed seven command/tool fixes on 2026-09-03; three days later `guidance.ts` still taught the
+pre-fix shape for four of them, in every member workspace at once:
+
+- `musterd done` taught as a plain close, after it grew a second record (attested submit vs
+  unconfirmed self-close);
+- `inbox --wait` taught with no mention of `--waiting`, one letter away and the opposite behaviour;
+- `musterd availability` taught CLI-only after `team_availability` shipped;
+- `team_wake_context` in the name list since v17 with no prose in the body.
+
+**A rename breaks the build; a meaning that moves under a stable name does not.** `done` kept its
+name and changed what it records, and every gate stayed green.
+
+**The rule this adds.** A lane that changes what a command or tool *means* — not what it is called —
+edits `packages/protocol/src/guidance.ts` and bumps `GUIDANCE_CONTENT_VERSION` in the same lane. The
+v22 bump pins each distinction with its own test (`guidance.test.ts`, "the skill teaches the surface
+as it is") so the next such change breaks a named test rather than silently rotting one line of prose
+everywhere. Prefer a test per distinction over widening the gate.
+
+**Two consequences worth stating out loud.** First, the sweep after any correction must cover every
+instruction-bearing surface an agent *loads* — `primer.ts`, `onboard/doctor.ts`, MCP tool
+descriptions, provisioned hook strings — not just `docs/`; on 2026-09-06 all of those were already
+correct and `guidance.ts` was the only stale one, which took one grep to establish and is worth
+recording as a negative result. Second, a version bump is not delivery: the rendered files in each
+worktree move only on `musterd init --refresh-guidance`
+(see `docs/wiki/guidance-distribution.md`, and `docs/wiki/recorded-not-routed.md` for the shape).

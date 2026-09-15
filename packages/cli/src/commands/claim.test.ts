@@ -126,10 +126,10 @@ async function holdSeatLive(name: string, grant: string): Promise<{ close: () =>
     // this hold and drop the presence.
     onOccupied: (seat) => {
       saveBinding(process.cwd(), {
+        version: 2,
         server: serverUrl,
         team: 'dawn',
         agent_key: agentKey,
-        surface: 'cli',
         claim: { mode: 'seat', name: seat.name },
         grant,
       });
@@ -313,10 +313,10 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       }
       // Bind this folder to Ada, then a bare `claim` should just confirm — not re-run the handshake.
       saveBinding(cwd, {
+        version: 2,
         server: serverUrl,
         team: 'dawn',
         agent_key: agentKey,
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Ada' },
         grant: g,
       });
@@ -336,10 +336,10 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     // it never redeclares the model — so the rewrite must carry it through. (Regression: it didn't, and
     // the seat reverted to `unknown` on the next adapter boot.)
     saveBinding(cwd, {
+      version: 2,
       server: serverUrl,
       team: 'dawn',
       agent_key: agentKey,
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Ada' },
       model: 'claude-fable-5',
     });
@@ -361,10 +361,10 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     await declareSeat('Polly');
     const g = await grant('Polly');
     saveBinding(cwd, {
+      version: 2,
       server: serverUrl,
       team: 'dawn',
       agent_key: agentKey,
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Polly' },
       grant: g,
     });
@@ -449,7 +449,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'ws-here',
       surface: 'claude-code',
       connId: 'c1',
-      ts: 1,
+      ts: Date.now(),
     });
     writePending(cwd, {
       code: 'CD34',
@@ -457,10 +457,14 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'ws-here',
       surface: 'cursor',
       connId: 'c2',
-      ts: 2,
+      ts: Date.now(),
     });
+    // The refusal names each marker's AGE. When this fires on junk it is the whole diagnosis: a
+    // marker is stamped once at adapter boot and never refreshed, so "62d" reads as a dead session
+    // nobody reaped, where a bare code reads as a live session competing for the seat.
     await expect(run(['Ada', '--team', 'dawn', '--grant', g])).rejects.toMatchObject({
       exitCode: 2,
+      message: expect.stringMatching(/AB12.*\d+[smhd] old/s),
     });
     const ok = await run(['Ada', '--team', 'dawn', '--grant', g, '--for', 'AB12']);
     expect(ok.code).toBe(0);
@@ -477,7 +481,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'ws-here',
       surface: 'claude-code',
       connId: 'c1',
-      ts: 1,
+      ts: Date.now(),
     });
     writePending(cwd, {
       code: 'THEIRS',
@@ -485,7 +489,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'someone-elses-ws',
       surface: 'claude-code',
       connId: 'c2',
-      ts: 2,
+      ts: Date.now(),
     });
     const ok = await run(['Ada', '--team', 'dawn', '--grant', g]);
     expect(ok.code).toBe(0);
@@ -502,7 +506,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'ws-here',
       surface: 'claude-code',
       connId: 'c1',
-      ts: 1,
+      ts: Date.now(),
     });
     const { out } = await run(['Ada', '--team', 'dawn', '--grant', g, '--for', 'AB12']);
     expect(out).toContain('going online as Ada now');
@@ -511,5 +515,56 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       readFileSync(join(cwd, BINDING_DIR, PENDING_DIR, `AB12${RESOLVED_SUFFIX}`), 'utf8'),
     );
     expect(resolved.seat).toBe('Ada'); // v0.3: the resolution carries the seat, not member+token
+  });
+});
+
+describe('claim --detach (ADR 377 increment 1 — the one-shot HTTP path `join` always ran)', () => {
+  it('occupies on the named surface, binds the folder, and the Presence outlives the process (no lease held)', async () => {
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => {
+      out.push(String(c));
+      return true;
+    });
+    await declareSeat('bo');
+    const g = await grant('bo');
+    let code: number;
+    try {
+      code = await claimCommand(
+        parseArgs([
+          'bo',
+          '--team',
+          'dawn',
+          '--grant',
+          g,
+          '--surface',
+          'cursor',
+          '--detach',
+          '--json',
+        ]),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(code).toBe(0);
+    expect(JSON.parse(out.join('').trim().split('\n').pop()!)).toMatchObject({
+      team: 'dawn',
+      member: 'bo',
+      surface: 'cursor',
+      detached: true,
+    });
+    // The folder is bound to the resolved seat, as the WS path would have.
+    const binding = BindingSchema.parse(
+      JSON.parse(readFileSync(join(cwd, BINDING_DIR, BINDING_FILE), 'utf8')),
+    );
+    expect(binding.claim).toEqual({ mode: 'seat', name: 'bo' });
+    // claimCommand has RETURNED and holds no socket — yet the seat is still present, on `cursor`.
+    // This is the property scripts/a11y/fixture-team.sh depends on; the default WS path drops the
+    // Presence with its session lease when the process exits (ADR 337).
+    const { members } = await new HttpClient({ server: serverUrl, surface: 'cli' }).roster('dawn');
+    const live = members
+      .find((m: MemberSummary) => m.name === 'bo')!
+      .presences.filter((p) => p.status !== 'offline')
+      .map((p) => p.surface);
+    expect(live).toEqual(['cursor']);
   });
 });

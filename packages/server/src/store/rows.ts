@@ -18,6 +18,8 @@ export interface TeamRow {
   archived_at: number | null;
   /** v0.3 P3 (ADR 076): sha256 of the team's rotatable agent key. NULL until an admin sets one. */
   agent_key_hash: string | null;
+  /** ADR 350: when this Team transactionally disabled its legacy Team-wide bootstrap key. */
+  bootstrap_cutover_at: number | null;
   /** v0.3 P3 (ADR 076): team governance policy as JSON (`{ allow_pre_issued_grants }`). NULL ⇒ defaults. */
   policy: string | null;
   /** Recurring Team schedule, JSON-encoded; null means no Team default (ADR 206). */
@@ -40,6 +42,10 @@ export interface MemberRow {
   availability: string | null;
   /** Recurring Member schedule, JSON-encoded; null inherits the Team default (ADR 206). */
   working_hours: string | null;
+  /** ADR 311: Slack identity used only to attribute shared Seeds; human seats only. */
+  slack_user_id: string | null;
+  /** The member's colour as an HSL hue 0–359 (ADR 374); NULL ⇒ unassigned, renderers hash the name. */
+  hue: number | null;
   token_hash: string | null;
   /** Held-since (ADR 058): set on first authenticated touch, cleared on rotation/reclaim. Null ⇒
    * declared-but-unheld (a stray `claim` may rotate it); non-null ⇒ held, only adoptable. */
@@ -83,6 +89,11 @@ export interface PresenceRow {
   /** Harness-attested model id for this occupancy (ADR 101). Attested, never verified; null when
    *  the adapter doesn't attest — rendered as `unknown`, never blocks. Re-attestable mid-occupancy. */
   model: string | null;
+  /** WHICH TIER produced `model` (ADR 101 increment): `observed` (a harness probe saw it),
+   *  `environment`, or `binding` (a declaration). Null when there is no model, and ALSO null on
+   *  rows written before migration 42 or by clients that do not send it — "tier not known" is a
+   *  distinct fact from "it was declared" and is never defaulted into one. */
+  model_source: string | null;
   /** Client-attested build ref of the connecting dist (ADR 135): a git SHA, `-dirty`-suffixed for an
    *  uncommitted build. Null for unstamped/older clients. Only changes with a fresh claim (a build
    *  can only change on process restart), so there is no heartbeat re-attest path. */
@@ -95,6 +106,8 @@ export interface PresenceRow {
    *  actuator handed the child, attested back on claim. Null for every occupancy no wake caused,
    *  which is nearly all of them. The only column here that identifies rather than describes. */
   wake_lease: string | null;
+  /** The `nodes.id` this row was folded from (presence replication, 2026-09-02); NULL = local. */
+  node: string | null;
   created_at: number;
 }
 
@@ -111,6 +124,10 @@ export interface MessageRow {
   /** Sender's presence provenance at send time (v21, ADR 131 §4) — server-stamped, never wire-fed;
    *  the wake ledger's ping-pong demotion read. Null: pre-v21 row or no live presence at send. */
   from_provenance: string | null;
+  /** The ADR 331 ordering pair (v47) — this daemon's `nodes` row for the message's team, and the
+   *  per-node gapless counter. Server-stamped inside `insertMessage`'s transaction, never wire-fed. */
+  origin_node: string;
+  origin_seq: number;
   ts: number;
   created_at: number;
 }
@@ -200,6 +217,8 @@ export function toMember(row: MemberRow, teamSlug: string): Member {
       ? (AvailabilitySchema.safeParse(JSON.parse(row.availability)).data ?? null)
       : null,
     working_hours: parseWorkingHours(row.working_hours),
+    slack_user_id: row.slack_user_id ?? null,
+    hue: row.hue ?? null,
     account_status: resolveAccountStatus(row),
     capabilities: resolveCapabilities(row),
     created_at: row.created_at,

@@ -18,7 +18,7 @@ describe('credentialEnv (SPEC A.9, ADR 075 — the spec-pinned core)', () => {
         surface: 'claude-code',
       }),
     ).toBe(
-      'MUSTERD_TEAM=dawn MUSTERD_AGENT_KEY=mskey_x MUSTERD_CLAIM=seat:Ada MUSTERD_SURFACE=claude-code',
+      'MUSTERD_TEAM=dawn MUSTERD_AGENT_KEY=mskey_x MUSTERD_CLAIM=seat:Ada MUSTERD_LAUNCH_SURFACE=claude-code',
     );
   });
   it('inserts MUSTERD_GRANT when a grant is supplied', () => {
@@ -31,7 +31,7 @@ describe('credentialEnv (SPEC A.9, ADR 075 — the spec-pinned core)', () => {
         surface: 'codex',
       }),
     ).toBe(
-      'MUSTERD_TEAM=dawn MUSTERD_AGENT_KEY=mskey_x MUSTERD_CLAIM=role:backend MUSTERD_GRANT=msgr_y MUSTERD_SURFACE=codex',
+      'MUSTERD_TEAM=dawn MUSTERD_AGENT_KEY=mskey_x MUSTERD_CLAIM=role:backend MUSTERD_GRANT=msgr_y MUSTERD_LAUNCH_SURFACE=codex',
     );
   });
   it('accepts the observe claim target', () => {
@@ -43,7 +43,7 @@ describe('credentialEnv (SPEC A.9, ADR 075 — the spec-pinned core)', () => {
         surface: 'claude-code',
       }),
     ).toBe(
-      'MUSTERD_TEAM=dawn MUSTERD_AGENT_KEY=mskey_x MUSTERD_CLAIM=observe MUSTERD_SURFACE=claude-code',
+      'MUSTERD_TEAM=dawn MUSTERD_AGENT_KEY=mskey_x MUSTERD_CLAIM=observe MUSTERD_LAUNCH_SURFACE=claude-code',
     );
   });
   it('orders the vars team → agent key → claim → grant → surface', () => {
@@ -57,7 +57,7 @@ describe('credentialEnv (SPEC A.9, ADR 075 — the spec-pinned core)', () => {
     expect(s.indexOf('MUSTERD_TEAM=')).toBeLessThan(s.indexOf('MUSTERD_AGENT_KEY='));
     expect(s.indexOf('MUSTERD_AGENT_KEY=')).toBeLessThan(s.indexOf('MUSTERD_CLAIM='));
     expect(s.indexOf('MUSTERD_CLAIM=')).toBeLessThan(s.indexOf('MUSTERD_GRANT='));
-    expect(s.indexOf('MUSTERD_GRANT=')).toBeLessThan(s.indexOf('MUSTERD_SURFACE='));
+    expect(s.indexOf('MUSTERD_GRANT=')).toBeLessThan(s.indexOf('MUSTERD_LAUNCH_SURFACE='));
   });
 });
 
@@ -71,7 +71,7 @@ describe('renderAgentEnvBlock', () => {
     });
     expect(out).toContain('connect this agent via MCP with env');
     expect(out).toContain(
-      'MUSTERD_TEAM=dawn MUSTERD_AGENT_KEY=mskey_x MUSTERD_CLAIM=seat:Ada MUSTERD_SURFACE=claude-code',
+      'MUSTERD_TEAM=dawn MUSTERD_AGENT_KEY=mskey_x MUSTERD_CLAIM=seat:Ada MUSTERD_LAUNCH_SURFACE=claude-code',
     );
   });
 });

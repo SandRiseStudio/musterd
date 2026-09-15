@@ -135,6 +135,72 @@ describe('seated', () => {
   });
 });
 
+/**
+ * Seated on furniture that is NOT a desk — the couch, the four meeting chairs, reception's waiting
+ * chair. The bug this pins (nick, 2026-08-31): `solveSeated` IK-targeted `DESK_REACH` unconditionally,
+ * so an idle member on the lounge couch sat with both arms reaching forward onto a keyboard that was
+ * not there. There is no desk in front of these seats, so there is nothing for the hands to rest on.
+ */
+describe('seated casually (no desk)', () => {
+  const lounge = (o: Partial<SkelInput> = {}): SkelInput => sit({ seat: 'casual', ...o });
+
+  it('rests the hands in the lap, not out at the keyboard', () => {
+    const s = solveSkeleton(lounge());
+    for (const w of s.wrist) {
+      expect(w.z).toBeLessThan(DESK_REACH.z - 10); // nowhere near the keys
+      expect(w.y).toBeLessThan(DESK_UP); // and below desk height, on the thighs
+      expect(w.y).toBeGreaterThan(s.pelvis.y); // resting on the lap, not dangling at the floor
+    }
+  });
+
+  it('reclines instead of leaning into the work — the posture IS the read', () => {
+    const desk = solveSkeleton(sit());
+    const s = solveSkeleton(lounge());
+    expect(s.lean).toBeLessThan(0); // past vertical, settled back
+    expect(s.lean).toBeLessThan(desk.lean);
+    expect(s.head.z).toBeLessThan(desk.head.z); // head back over the seat, not out over a desk
+  });
+
+  it('never types, even if the caller passes a typing intensity', () => {
+    const still = solveSkeleton(lounge({ t: 0, typing: 1 }));
+    const later = solveSkeleton(lounge({ t: 0.04, typing: 1 }));
+    expect(later.wrist[1].y).toBeCloseTo(still.wrist[1].y, 1);
+  });
+
+  it('still breathes and settles — a casual sitter is alive, just slower than a desk one', () => {
+    const ys = [0, 1.4, 2.8, 4.2, 5.6, 7].map((t) => solveSkeleton(lounge({ t })).chest.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(0.2);
+  });
+
+  it('keeps both feet on the floor and the arms within reach — no rubber-band limbs', () => {
+    const s = solveSkeleton(lounge());
+    for (const a of s.ankle) expect(a.y).toBeLessThan(8);
+    for (const i of [0, 1] as const) {
+      const reach = Math.hypot(
+        s.wrist[i].x - s.shoulder[i].x,
+        s.wrist[i].y - s.shoulder[i].y,
+        s.wrist[i].z - s.shoulder[i].z,
+      );
+      expect(reach).toBeLessThanOrEqual(CHAR.upperArm + CHAR.foreArm);
+    }
+  });
+
+  it('leaves the desk pose alone — `seat` defaults to the desk, so every existing caller is unchanged', () => {
+    const implicit = solveSkeleton(sit());
+    const explicit = solveSkeleton(sit({ seat: 'desk' }));
+    expect(explicit.wrist[1]).toEqual(implicit.wrist[1]);
+    expect(explicit.lean).toBe(implicit.lean);
+  });
+
+  it('rides the sit blend like the desk pose — standing up off a couch is still a motion', () => {
+    const stand = solveSkeleton({ ...base, seat: 'casual' });
+    const seated = solveSkeleton(lounge());
+    const half = solveSkeleton({ ...base, seat: 'casual', sit: 0.5 });
+    expect(half.pelvis.y).toBeLessThan(stand.pelvis.y);
+    expect(half.pelvis.y).toBeGreaterThan(seated.pelvis.y);
+  });
+});
+
 describe('typing', () => {
   it('moves the hands while typing', () => {
     const at = (t: number) => solveSkeleton(sit({ t, typing: 1 })).wrist[1].y;

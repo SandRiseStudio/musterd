@@ -1,0 +1,268 @@
+import { makeEnvelope } from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+import { openDb } from '../db/open.js';
+import { appendAudit } from './audit.js';
+import { rowsToEnvelopes } from './hydrate.js';
+import { listInterruptCandidates } from './interruptCandidates.js';
+import { openLane } from './lanes.js';
+import { addMember } from './members.js';
+import { insertMessage, listInbox, pendingInterrupts } from './messages.js';
+import type { MemberRow, TeamRow } from './rows.js';
+import { createTeam } from './teams.js';
+
+/**
+ * `/inbox/interrupt-check` is the most frequently served route in the system — a PostToolUse hook
+ * calls it at every tool boundary of every live agent — and it read the seat's ENTIRE unread window to
+ * answer a question whose answer is almost always "nothing". After #909 the cost is no longer the
+ * hydration but the query itself: `SELECT *` marshalling 6000 rows into JS costs 10.7ms, against
+ * 0.7ms to hydrate them and 0.4ms to fold them.
+ *
+ * `pendingInterrupts` can only ever USE a few shapes, so the window can be narrowed in SQL to exactly
+ * those and the fold left untouched:
+ *
+ *   - what it can RETURN — `meta.urgent`, `steer`, or an obligation (`ask` + `meta.lane_review`);
+ *   - what can SUPPRESS one — `resolve` (closes a thread), `accept`/`decline` (discharge by
+ *     `meta.in_reply_to`);
+ *   - what can REDIRECT one — `meta.eligible`, which replaces the default obligation rule.
+ *
+ * Everything else in the window is inert. The risk in narrowing a fold's input is that a shape you
+ * forgot changes the answer, so the test that matters is equivalence against the unnarrowed read over
+ * a corpus that contains every one of those shapes — not a demonstration that the fast path is fast.
+ */
+function seed() {
+  const db = openDb(':memory:');
+  const team = createTeam(db, { slug: 'revive' });
+  const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
+  const ada = addMember(db, team, { name: 'Ada', kind: 'agent' }).row;
+  const bob = addMember(db, team, { name: 'bob', kind: 'agent' }).row;
+  return { db, team, nick, ada, bob };
+}
+
+let ts = 1_000;
+function say(
+  db: Database,
+  team: TeamRow,
+  from: MemberRow,
+  to: MemberRow | null,
+  act: string,
+  id: string,
+  opts: { meta?: Record<string, unknown>; thread?: string } = {},
+) {
+  insertMessage(
+    db,
+    team.id,
+    from.id,
+    to?.id ?? null,
+    makeEnvelope({
+      id,
+      team: team.slug,
+      from: from.name,
+      to: to ? { kind: 'member', name: to.name } : { kind: 'team' },
+      act: act as 'message',
+      body: 'x',
+      thread: opts.thread ?? null,
+      meta: opts.meta ?? null,
+      ts: ts++,
+    }),
+  );
+}
+
+/** The unnarrowed read the route used to do — the reference answer. */
+function viaWholeWindow(
+  db: Database,
+  team: TeamRow,
+  member: MemberRow,
+  obligations: boolean,
+): string[] {
+  const rows = listInbox(db, member, { unreadOnly: true, cursorTs: 0 });
+  return pendingInterrupts(rowsToEnvelopes(db, team.slug, rows), member.name, { obligations }).map(
+    (e) => e.id,
+  );
+}
+
+function viaCandidates(
+  db: Database,
+  team: TeamRow,
+  member: MemberRow,
+  obligations: boolean,
+): string[] {
+  const rows = listInterruptCandidates(db, member, { cursorTs: 0 });
+  return pendingInterrupts(rowsToEnvelopes(db, team.slug, rows), member.name, { obligations }).map(
+    (e) => e.id,
+  );
+}
+
+/** Every shape the fold can read, plus a lot of noise that it cannot. */
+function corpus() {
+  const s = seed();
+  const { db, team, nick, ada, bob } = s;
+  // Inert bulk: the overwhelming majority of a real window.
+  for (let i = 0; i < 200; i++) say(db, team, nick, null, 'status_update', `noise${i}`);
+  for (let i = 0; i < 50; i++) say(db, team, bob, ada, 'message', `chat${i}`);
+
+  // Urgent directed act — raises.
+  say(db, team, nick, ada, 'message', 'urgent-live', {
+    meta: { urgent: true, urgent_reason: 'r' },
+  });
+  // Urgent directed act whose thread is later resolved — must NOT raise.
+  say(db, team, nick, ada, 'message', 'urgent-closed', {
+    meta: { urgent: true, urgent_reason: 'r' },
+    thread: 'T1',
+  });
+  say(db, team, nick, null, 'resolve', 'res-1', { thread: 'T1' });
+  // Urgent act addressed to someone else — never mine.
+  say(db, team, nick, bob, 'message', 'urgent-not-mine', {
+    meta: { urgent: true, urgent_reason: 'r' },
+  });
+
+  // Steer supersession: only the newest directed steer survives.
+  say(db, team, nick, ada, 'steer', 'steer-old');
+  say(db, team, nick, ada, 'steer', 'steer-new');
+
+  // Eligible-set act, discharged by an accept naming it — must NOT raise.
+  say(db, team, nick, null, 'request_help', 'help-taken', {
+    meta: { urgent: true, urgent_reason: 'r', eligible: ['Ada', 'bob'] },
+  });
+  say(db, team, bob, null, 'accept', 'acc-1', { meta: { in_reply_to: 'help-taken' } });
+  // Eligible-set act still open — raises.
+  say(db, team, nick, null, 'request_help', 'help-open', {
+    meta: { urgent: true, urgent_reason: 'r', eligible: ['Ada', 'bob'] },
+  });
+  // Eligible set that does not name me.
+  say(db, team, nick, null, 'request_help', 'help-not-mine', {
+    meta: { urgent: true, urgent_reason: 'r', eligible: ['bob', 'nick'] },
+  });
+
+  // Obligation class: a routed acceptance, admitted only when obligations:true.
+  say(db, team, nick, ada, 'ask', 'oblig-1', {
+    meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L1' } },
+  });
+  // A plain directed ask must never raise the line.
+  say(db, team, nick, ada, 'ask', 'plain-ask', { meta: { species: 'consult', tier: 'advisory' } });
+  return s;
+}
+
+describe('listInterruptCandidates', () => {
+  it('gives pendingInterrupts the same answer as reading the whole window', () => {
+    const { db, team, ada } = corpus();
+    for (const obligations of [true, false]) {
+      expect(viaCandidates(db, team, ada, obligations)).toEqual(
+        viaWholeWindow(db, team, ada, obligations),
+      );
+    }
+  });
+
+  it('finds the answer the corpus was built to produce, so the equivalence is not two empty lists', () => {
+    const { db, team, ada } = corpus();
+    expect(viaCandidates(db, team, ada, true)).toEqual(
+      expect.arrayContaining(['urgent-live', 'steer-new', 'help-open', 'oblig-1']),
+    );
+    expect(viaCandidates(db, team, ada, true)).not.toEqual(
+      expect.arrayContaining(['urgent-closed', 'steer-old', 'help-taken', 'plain-ask']),
+    );
+  });
+
+  it('reads only the shapes the fold can use, not the window', () => {
+    const { db, ada } = corpus();
+    const whole = listInbox(db, ada, { unreadOnly: true, cursorTs: 0 });
+    const candidates = listInterruptCandidates(db, ada, { cursorTs: 0 });
+    expect(whole.length).toBeGreaterThan(250);
+    // The handful of acts above, not the 250 inert rows they are buried in.
+    expect(candidates.length).toBeLessThan(20);
+  });
+
+  /**
+   * The acceptor's own accept is a DM to the asker. `from_member != me` drops it, and
+   * `to_member = me` would not have kept it either. The fold can only discharge what it is
+   * handed, so a self-answered obligation kept ringing the live rail (wanderer, 2026-09-06:
+   * three accepted lane_review asks, lanes done, interrupt-check still raised them).
+   */
+  it("silences a routed acceptance this seat already accepted — the fold sees the seat's own suppress act", () => {
+    const { db, team, nick, ada } = seed();
+    say(db, team, nick, ada, 'ask', 'oblig-mine', {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L1' } },
+    });
+    say(db, team, ada, nick, 'accept', 'acc-mine', { meta: { in_reply_to: 'oblig-mine' } });
+    expect(viaCandidates(db, team, ada, true)).not.toContain('oblig-mine');
+    // The unnarrowed inbox cannot see the accept either (listInbox excludes own sends), so this
+    // is a case where the candidate path must be *strictly better* than the whole-window path.
+    expect(viaWholeWindow(db, team, ada, true)).toContain('oblig-mine');
+  });
+
+  it('silences a routed acceptance this seat declined, and a thread this seat resolved', () => {
+    const { db, team, nick, ada } = seed();
+    say(db, team, nick, ada, 'ask', 'oblig-no', {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L2' } },
+    });
+    say(db, team, ada, nick, 'decline', 'dec-mine', { meta: { in_reply_to: 'oblig-no' } });
+    say(db, team, nick, ada, 'ask', 'oblig-thread', {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L3' } },
+      thread: 'T-self',
+    });
+    say(db, team, ada, null, 'resolve', 'res-mine', { thread: 'T-self' });
+    const raised = viaCandidates(db, team, ada, true);
+    expect(raised).not.toContain('oblig-no');
+    expect(raised).not.toContain('oblig-thread');
+  });
+
+  // Doorbell contract clause 7 (docs/design/daemon-doorbell-contract.md): six clauses governed
+  // delivery and none governed discharge. Three live falsifiers on c8e89dd8, 2026-09-14 — an act
+  // that is perfectly delivered and rings forever teaches the model to ignore the bell.
+
+  it('clause 7(ii): a routed acceptance whose lane has left awaiting_acceptance stops ringing — nobody answered it, the lane simply closed', () => {
+    const { db, team, nick, ada } = seed();
+    // ryder's fixture: ask 01M1N2DDRY for lane 01M1MM1Y, self-closed by its owner on 2026-09-04 with
+    // no accept naming the ask; it rang at every tool boundary of two sessions for eight days.
+    const lane = openLane(db, team.id, team.slug, 'nick', { title: 'office hue' });
+    db.prepare("UPDATE lanes SET state = 'awaiting_acceptance' WHERE id = ?").run(lane.id);
+    say(db, team, nick, ada, 'ask', 'oblig-live', {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+    });
+    expect(viaCandidates(db, team, ada, true)).toContain('oblig-live');
+
+    db.prepare("UPDATE lanes SET state = 'done' WHERE id = ?").run(lane.id);
+    expect(viaCandidates(db, team, ada, true)).not.toContain('oblig-live');
+  });
+
+  it("clause 7(iii): a co-addressee's accept discharges an eligible-set act — the accept is a DM to the asker, outside this seat's window", () => {
+    const { db, team, nick, ada, bob } = seed();
+    say(db, team, nick, null, 'request_help', 'help-shared', {
+      meta: { urgent: true, urgent_reason: 'r', eligible: ['Ada', 'bob'] },
+    });
+    expect(viaCandidates(db, team, ada, true)).toContain('help-shared');
+    // bob answers. The corpus above sends his accept to the team, but a real accept with reply_to is
+    // a DM to the asker (nick): Ada's window is `to_member = Ada OR team` and `from_member != Ada`,
+    // so the act that stands her down never reaches her fold without a fetch by ref.
+    say(db, team, bob, nick, 'accept', 'acc-bob', { meta: { in_reply_to: 'help-shared' } });
+    expect(viaCandidates(db, team, ada, true)).not.toContain('help-shared');
+  });
+
+  it('clause 7(iv): a steer this seat replied to is discharged — a steer has no accept/decline, the reply is the answer', () => {
+    const { db, team, nick, ada } = seed();
+    // delta's fixture: stanley's steer 01M2GC25MN rang ~20 boundaries after delta read it, acted on
+    // it, and replied on it with reply_to — because only accept/decline fed `discharged`.
+    say(db, team, nick, ada, 'steer', 'steer-1');
+    expect(viaCandidates(db, team, ada, true)).toContain('steer-1');
+    say(db, team, ada, nick, 'message', 'reply-1', { meta: { in_reply_to: 'steer-1' } });
+    expect(viaCandidates(db, team, ada, true)).not.toContain('steer-1');
+  });
+
+  it('clause 7(iv): a steer this seat has been shown in an inbox read is discharged, and the superseded steers under it do not rise in its place', () => {
+    const { db, team, nick, ada } = seed();
+    say(db, team, nick, ada, 'steer', 'steer-old');
+    say(db, team, nick, ada, 'steer', 'steer-new');
+    expect(viaCandidates(db, team, ada, true)).toEqual(['steer-new']);
+    // GET /inbox rendered it to Ada (the watermark cursor may still hold behind it, ADR 287).
+    appendAudit(db, team.id, {
+      actor: ada.name,
+      action: 'inbox.rendered',
+      target: ada.name,
+      result: 'allow',
+      detail: { act: 'steer-new', act_kind: 'steer' },
+    });
+    const raised = viaCandidates(db, team, ada, true);
+    expect(raised).not.toContain('steer-new');
+    expect(raised).not.toContain('steer-old');
+  });
+});

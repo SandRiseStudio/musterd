@@ -5,9 +5,10 @@ instead of reconstructed forensically (lab-notebook finding 001). Layer 1 (ADR 0
 envelope span + coordination metrics; this wires it to a local sink on the machine that runs the daemon.
 
 > **Scope.** This is the _dogfood_ posture — the daemons we operate. The **product** default stays
-> off / no-phone-home (users opt in via the standard OTel env vars, `observability.md` §config). The
-> sink here is a throwaway **local OTLP collector** (ADR 082): emission is pure OTLP, so any real
-> collector — including a future parked batond product (ADR 194) — replaces the _endpoint_, never the
+> off / no-phone-home (you opt in via the standard OTel env vars, `observability.md` §config). The
+> public statement of that product default is [`PRIVACY.md`](../PRIVACY.md). The sink here is a
+> throwaway **local OTLP collector** (ADR 082): emission is pure OTLP, so any real collector —
+> including a future parked batond product (ADR 194) — replaces the _endpoint_, never the
 > instrumentation.
 
 ## What's wired (machine-local, not committed)

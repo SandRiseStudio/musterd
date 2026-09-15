@@ -22,4 +22,40 @@ Cross-package imports resolve to `dist/`, so a stale build lies two ways, neithe
 
 ## Two noises under load that are the runner, not a test (2026-08-12; falsify: rerun the named file alone)
 
-On a busy machine the CLI suite can emit a spurious `[vitest-worker]: Timeout calling "onTaskUpdate"` — that is vitest's own worker RPC timing out, not a test failure; the verdict lines above it are still authoritative. Related but distinct: `pnpm -r test` intermittently fails 3–13 CLI tests (`service`/`inbox`/`archaeology`) that pass in isolation and under `pnpm coverage` — parallel-run spawn starvation (see #782: a test 10× under its cap failing at load 17.9). `pnpm coverage` is the real CI gate; chasing either noise as a defect has wasted sessions.
+On a busy machine the CLI suite can emit a spurious `[vitest-worker]: Timeout calling "onTaskUpdate"` — that is vitest's own worker RPC timing out, not a test failure; the verdict lines above it are still authoritative. Related but distinct: ~~`pnpm -r test` intermittently fails 3–13 CLI tests (`service`/`inbox`/`archaeology`) that pass in isolation and under `pnpm coverage` — parallel-run spawn starvation (see #782: a test 10× under its cap failing at load 17.9), to be lived with rather than chased (2026-08-12).~~ **CAUSE FOUND AND FIXED 2026-08-19** — see the section below. `pnpm coverage` is the real CI gate; chasing the `onTaskUpdate` noise as a defect has wasted sessions, but the `pnpm -r test` half was a real, fixable defect that this page spent seven days telling people to ignore.
+
+## The whole-workspace suite on the laptop takes the live daemon down with it (2026-09-14; falsify: sample `curl -m 5 localhost:4849/health` every 5s during a root `pnpm exec vitest run` — if every probe answers under 100ms, this is wrong)
+
+Measured 2026-09-14, 13:00–13:10 local, from seat izzo: the mcp suite, then the whole-workspace
+`vitest run` from the repo root (476 files, `pool: 'forks'`), twice. The 5-minute load average
+reached 23. The live daemon (28c5ea46) stopped answering `/health` at 13:01:29 and stayed
+unreachable until 13:09; launchd reported the job alive throughout; the guardian raised
+`daemon_wedged` twice ("alive and blocked in synchronous work" — a stack sample under that load
+attributes nothing, so it could not tell starved from blocked, and neither can this page). The
+autorefresh held its bounce correctly ("launchctl reports the job running — one source is never
+enough"), then synced the settled tip and bounced the daemon to 0bc82361 at 13:10:16; it answered
+in 2s. Seven live sessions reconnected. Nothing was wrong with the daemon.
+
+The rule: on this laptop, with seat sessions live, run the package suite you touched
+(`cd packages/<pkg> && pnpm exec vitest run`) and leave the whole-workspace run to CI. The
+server suite alone (98 files, ~50s) did not trip it earlier the same afternoon.
+
+## `pnpm -r test` ran at a different timeout than `pnpm test`, and that WAS the flake (2026-08-19; falsify: `grep -c TEST_TIMEOUT_MS vitest.config.ts packages/*/vitest.config.ts` — any 0 revives it)
+
+A package-local vitest config inherits **nothing** from the root. The root raised `testTimeout` to 30s in #491 with a measured rationale; none of the five package configs ever set it, so `pnpm -r test` — which runs each package's own `vitest run` against its own config, and loads the machine hardest by starting every package's forks at once — ran the whole monorepo at vitest's 5s default.
+
+Measured 2026-08-19 on landed main `a036d75c`, 20 full `pnpm -r test` runs: **2 failed, 5 distinct tests, 10 × `Test timed out in 5000ms`, and zero assertion failures.** The same file passed 200/200 in isolation. That is the whole shape of the "flake": never the same test twice, never reproducible on demand, and nothing wrong with any of the tests.
+
+A third trap, about this page's own earlier claim: it carried a date AND a falsifier (`rerun the named file alone`) and was still wrong for seven days, because a file passing alone is what harmless noise looks like *and* what a load-only defect looks like. See rule 3 in [the wiki README](README.md) — a falsifier must be able to fail.
+
+Two traps worth keeping. **A synchronous test does hit this ceiling** — three of the five were sync (`session.test.ts:851`, `:873`, `:897`), which is worth knowing because "vitest cannot interrupt a sync test" is a plausible-sounding reason to rule the timeout out, and it is wrong. And **a fix applied only at the root reaches only `pnpm test`** — the number is now single-sourced in `vitest.shared.ts` and `tests/vitest-config-parity.test.ts` fails if any config drifts off it.
+
+## `pnpm format:check` on an uncommitted tree is a FALSE GREEN for two of its own gates (2026-08-21, #987; falsify: edit an ADR's Observability without committing, run `pnpm format:check` — green — then commit and run it again)
+
+`watch:check` rules B/C and `change-adr:check` are **diff** checks against `base...HEAD`, and `HEAD` means committed (2026-08-21; falsify: `grep -n 'base\.\.\.HEAD' scripts/check-watches.ts scripts/check-change-adr.ts` — if either moved to a tree walk, this is stale). Every other gate in `format:check` is a tree check. So the two gates that judge your ADR edits are precisely the two that cannot see them until you commit, and running the suite "before committing, to be safe" reports success on the checks most likely to fail in CI.
+
+Measured: #987 passed `pnpm format:check` locally with an edited-but-uncommitted `docs/decisions/250-*.md`, then failed `gates` on `watch:check` for a `rare` in that ADR's frozen `## Decision` — a pre-existing term the edit dragged into scope by touching the file at all. The script says so itself (`check-watches.ts:110`, "that is the house convention... not an oversight"), which is the point: the convention is documented in the place you read only after it has already bitten you.
+
+**It happened again on 2026-09-01 (#1147, miley), the same way and with the page already saying so.** A new ADR 345 passed `pnpm format:check` locally while uncommitted, then failed `gates` on `watch:check` for an `often` in its own `## Decision` — a frequency claim invented rather than measured, which is exactly what the rule is for. The remedy below was already written here; it was missed by reading the first 30 lines of this page instead of the page. Cost ~7 minutes of CI plus a re-push. **A truncated read of a wiki page is not a read of it** — the section that would have saved you sorts by when it was learned, not by how likely you are to need it.
+
+**Commit first, then run `pnpm format:check`.** And when a diff gate fires on a frozen `## Decision` you cannot edit, the waiver is the honest move — `Snapshot-debt: none — <why this is not a snapshot you are asserting>` — not a hunt for a way to make the term disappear.

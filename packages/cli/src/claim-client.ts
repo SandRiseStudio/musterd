@@ -6,7 +6,7 @@ import {
   PROTOCOL_VERSION,
   RefusedFrame,
 } from '@musterd/protocol';
-import type { ClaimTarget, RefusedCode, Surface } from '@musterd/protocol';
+import type { ClaimTarget, Provenance, RefusedCode, Surface } from '@musterd/protocol';
 
 /**
  * The pure client-side half of the v0.3 `claim` handshake (ADR 075/078, SPEC A.3) — the frame builder
@@ -50,8 +50,14 @@ export function buildClaimFrame(input: {
   surface: Surface;
   grant?: string;
   workspace?: string;
+  /** The workspace's stable identity (work tree root) — what displacement compares (lane
+   *  01M1JQYYAC). The label above is branch-qualified and changes under its own session. */
+  workspaceKey?: string;
   model?: string;
   build?: string;
+  /** What ANIMATES this session (ADR 131 §6) — `wake` for an actuator-spawned harness, `session`
+   *  for a person's own. Not identity: the seat is who, this is what caused it to be here. */
+  provenance?: Provenance;
 }): ClaimFrame {
   return ClaimFrame.parse({
     type: 'claim',
@@ -64,10 +70,16 @@ export function buildClaimFrame(input: {
     // CLI-claimed seat reads with a real workspace instead of null (also lets a bare re-claim tell
     // "already live *here*" from "live elsewhere", ADR 087).
     ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
+    // The IDENTITY behind that label (lane 01M1JQYYAC): the label carries a git branch, so it is
+    // renamed by a branch switch or a detached HEAD and cannot be compared for sameness.
+    ...(input.workspaceKey !== undefined ? { workspace_key: input.workspaceKey } : {}),
     // Model attestation (ADR 101) — harness-attested per-occupancy; absent reads as `unknown`.
     ...(input.model !== undefined ? { model: input.model } : {}),
     // Build attestation (ADR 135) — the client dist's own stamp; absent for unstamped builds.
     ...(input.build !== undefined ? { build: input.build } : {}),
+    // Provenance (ADR 131 §6) — the wake actuators read it back to tell their own spawned child
+    // from a stranger holding the seat, so a claim that drops it costs the actuator that judgement.
+    ...(input.provenance !== undefined ? { provenance: input.provenance } : {}),
     // Feature epoch (ADR 148) — this CLI dist's compiled-in capability counter; always attested (a
     // constant, not a stamp), so a CLI-claimed seat carries the roster's skew signal like any other.
     epoch: FEATURE_EPOCH,
@@ -86,6 +98,10 @@ export type ClaimOutcome =
       charter?: string;
       /** A resume token (ADR 087) delivered on first approval — persisted into `binding.grant`. */
       grant?: string;
+      /** Newly minted agent-seat credential, returned once and persisted in the local binding. */
+      seatCredential?: string;
+      /** Fresh Presence-bound agent HTTP lease, persisted in the local binding. */
+      sessionLease?: string;
       /** The seat's memory envelope (ADR 093) — headline + age + size, never the body; null when the
        *  seat has saved nothing. Rendered by `musterd claim` as the one-line continuity pointer. */
       memory: OccupiedFrame['memory'];
@@ -111,6 +127,8 @@ export function parseClaimResponse(raw: unknown): ClaimOutcome {
       serverTime: f.server_time,
       ...(f.charter !== undefined ? { charter: f.charter } : {}),
       ...(f.grant !== undefined ? { grant: f.grant } : {}),
+      ...(f.seat_credential !== undefined ? { seatCredential: f.seat_credential } : {}),
+      ...(f.session_lease !== undefined ? { sessionLease: f.session_lease } : {}),
       memory: f.memory,
     };
   }

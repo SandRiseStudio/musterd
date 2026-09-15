@@ -20,6 +20,8 @@ import { startSeedsIngest } from './seeds/ingest.js';
 import { countDiversityFlagsByTeam } from './store/mast.js';
 import { countOpenLoopsByTeam } from './store/messages.js';
 import { activePresenceBySurface, slowestInboxLagMs } from './store/metrics.js';
+import { startSyncPull } from './sync/pull.js';
+import { startSyncPush } from './sync/push.js';
 import { registerRuntimeGauges, startTelemetry, telemetryEnabled } from './telemetry.js';
 import { handleHttp } from './transport/http.js';
 import { Hub } from './transport/hub.js';
@@ -71,6 +73,13 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
     trustProxy: config.trustProxy,
   });
   const db = opts.db ?? openDb(config.dbPath);
+  // The handle is the FACT; `config.dbPath` is only the intention, and an injected `opts.db` never
+  // opened it. Reconciled here, once, so every reader downstream is honest by construction: the
+  // startup log line, the `dbPath` accessor, and `db` on /health — which exists precisely so a
+  // client can confirm which database this daemon serves, and which guardian turns into the
+  // `wrong_db` alert. In production the two always agreed (`openDb(p)` opens exactly `p`), so the
+  // value was accidentally right rather than derived from anything checked.
+  config.dbPath = db.name || config.dbPath;
   const hub = new Hub();
   // Durable roster roots (ADR 058): explicit list (tests) or the rosterHome registry + env override.
   // An explicit list is fixed (hermetic tests); otherwise `reload()` re-resolves from the registry so
@@ -114,6 +123,8 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   const wss = attachWsServer(ctx, http);
   let stopReaper: (() => void) | null = null;
   let stopSeeds: (() => void) | null = null;
+  let stopSync: (() => void) | null = null;
+  let stopPull: (() => void) | null = null;
   let stopFootprint: (() => void) | null = null;
   let stopWatcher: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
@@ -168,6 +179,8 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           boundPort = typeof addr === 'object' && addr ? addr.port : config.port;
           stopReaper = startReaper(ctx);
           stopSeeds = startSeedsIngest(ctx);
+          stopSync = startSyncPush(ctx);
+          stopPull = startSyncPull(ctx);
           stopFootprint = startFootprintSampler(ctx);
           startWatching();
           log.info({
@@ -211,6 +224,8 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
       closing = new Promise((resolve) => {
         stopReaper?.();
         stopSeeds?.();
+        stopSync?.();
+        stopPull?.();
         stopFootprint?.();
         stopWatcher?.();
         void stopTelemetry?.();
@@ -231,4 +246,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
 
 export { resolveConfig } from './config.js';
 export { openDb } from './db/open.js';
+// The machine's node credentials (ADR 328 §2) — exported so the CLI's tests can assert what the
+// daemon wrote. The CLI never reads or writes this file itself: the daemon owns it.
+export { nodeStatePath, readNodeState } from './node/state.js';
 export { seedDawn } from './db/seed.js';

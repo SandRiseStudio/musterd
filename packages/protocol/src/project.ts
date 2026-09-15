@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { basename, dirname, resolve as resolvePath } from 'node:path';
+import { basename, dirname, relative, resolve as resolvePath } from 'node:path';
 import { DEFAULT_PROJECT } from './lanes.js';
 
 /**
@@ -62,6 +62,86 @@ export function resolveProject(opts: ResolveProjectOpts = {}): string {
   const declared = sanitizeProject((opts.env ?? process.env)['MUSTERD_PROJECT'] ?? '');
   if (declared) return declared;
   return repoProject(opts.cwd ?? process.cwd()) ?? DEFAULT_PROJECT;
+}
+
+/**
+ * The **identity** of the workspace a session runs in — stable for the life of the folder, and the
+ * value single-active displacement compares (ADR 068/092).
+ *
+ * Deliberately NOT the workspace *label* (`resolveWorkspace`, `resolveClaimWorkspace`). That label
+ * is a where-on-attach seed rendered dim on the roster, "approximately right by design", and it is
+ * qualified with the git branch — so it CHANGES under the session that owns it: a branch switch
+ * renames it, and a detached HEAD (every review, every rebase, every `switch --detach origin/main`)
+ * drops the qualifier entirely. Compared by string equality it made a seat's own next attach look
+ * like a foreign workspace, and the same-workspace grace that exists to protect the live session
+ * never engaged — measured 2026-09-02, lane 01M1JQYYAC.
+ *
+ * The work tree root is the right granularity: one seat gets one worktree (`provisionWorkspace`,
+ * ADR 065), it is what a session cannot change without becoming a different session, and unlike the
+ * basename it cannot collide between two checkouts of the same repo. Note this is `--show-toplevel`
+ * and NOT `repoProject`'s `--git-common-dir`: the project name must be worktree-INvariant so N seats
+ * share one surface space; this must be worktree-SPECIFIC so two seats on one repo are two
+ * workspaces. Same repo, opposite invariants, on purpose.
+ *
+ * A declared `MUSTERD_WORKSPACE` wins here as it does for the label — an override names the
+ * workspace on both axes, so a human who says "these two are one workspace" is believed.
+ * Degrades to `cwd` outside a work tree (or with no git at all); never throws.
+ */
+export function resolveWorkspaceKey(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  const declared = env['MUSTERD_WORKSPACE']?.trim();
+  if (declared) return declared.slice(0, 200);
+  return (gitToplevel(cwd) ?? cwd).slice(0, 200);
+}
+
+/**
+ * The "where"-on-attach LABEL (human-agent-dynamics §2; ADR 014) — the sibling of
+ * {@link resolveWorkspaceKey} above, and the thing that key was split from (ADR 368). A
+ * gracefully-degrading label, captured once at join and read out of the roster — never asked of the
+ * agent per status.
+ *
+ * Degradation ladder (locked decisions):
+ *   1. declared override — `MUSTERD_WORKSPACE` wins verbatim (one-time "what are you working on?").
+ *   2. floor — the cwd folder name, which always exists.
+ *   3. qualifier — the *most specific* available leads: git branch when informative, else the cwd
+ *      subpath within the repo, else nothing. A git-less project degrades cleanly to the bare folder.
+ *
+ * Rendered dim, as location context — it is approximately right by design, not an authoritative
+ * scope. Lived in `@musterd/mcp` until 2026-09-04 (ADR 379 amendment): four CLI call sites imported
+ * it across the package boundary AGENTS.md reserves for `@musterd/protocol`, and the wake actuator
+ * (ADR 379) needs the SAME resolver the adapter runs so it can recognise its own child's row — one
+ * copy, in the one package both may import.
+ */
+export function resolveWorkspace(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  const declared = env['MUSTERD_WORKSPACE']?.trim();
+  if (declared) return declared.slice(0, 120);
+
+  const folder = basename(cwd) || cwd;
+  const git = gitContext(cwd);
+  const qualifier = git?.branch || git?.subpath || '';
+  const label = qualifier ? `${folder}@${qualifier}` : folder;
+  return label.slice(0, 120);
+}
+
+interface GitContext {
+  /** Current branch name; empty when detached or unnamed. */
+  branch: string;
+  /** cwd relative to the repo top-level; empty at the root or outside the tree. */
+  subpath: string;
+}
+
+function gitContext(cwd: string): GitContext | null {
+  const top = gitToplevel(cwd);
+  if (!top) return null;
+  const branchRaw = gitOutput(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+  const branch = branchRaw && branchRaw !== 'HEAD' ? branchRaw : '';
+  const subpath = relative(top, cwd);
+  return { branch, subpath: subpath === '' || subpath.startsWith('..') ? '' : subpath };
 }
 
 /**

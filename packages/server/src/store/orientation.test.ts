@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { recordBlockedReport } from './incidents.js';
 import { openLane, updateLane } from './lanes.js';
-import { addMember } from './members.js';
+import { addMember, getMemberByName } from './members.js';
 import { insertMessage } from './messages.js';
-import { WHY_BARE_MAX_AGE_MS, deriveNext } from './orientation.js';
+import { WHY_BARE_MAX_AGE_MS, deriveNext, deriveNextSummary } from './orientation.js';
+import { captureRepoSeed, createSeedFromRelay } from './seeds.js';
 import { createTeam } from './teams.js';
 
 function seed() {
@@ -34,6 +35,28 @@ describe('deriveNext — the orientation brief (ADR 049/084)', () => {
     expect(brief.shipped.map((l) => l.id)).toEqual([shipped.id]);
     expect(brief.up_next.map((l) => l.id)).toEqual([open.id]);
     expect(brief.why).toBeNull();
+  });
+
+  // Lane 01M2GTB0RA: the statusline and the per-turn orient nudge called /next — the whole brief,
+  // 0.5 s on the live db and 1.8 s under load — nine sessions at a time, for three numbers. The
+  // summary is those numbers from three bounded queries, and must agree with the brief.
+  it('deriveNextSummary agrees with the brief on carrying, incidents and owed, from bounded queries', () => {
+    const { db, team } = seed();
+    const active = openLane(db, team.id, 'revive', 'stanley', { title: 'spine', claim: true });
+    updateLane(db, team.id, active.id, 'revive', { state: 'active' });
+    const shipped = openLane(db, team.id, 'revive', 'stanley', { title: 'done one', claim: true });
+    updateLane(db, team.id, shipped.id, 'revive', { state: 'done' });
+    const incident = openLane(db, team.id, 'revive', 'nick', {
+      title: 'incident: daemon_down',
+      kind: 'incident',
+    });
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    const summary = deriveNextSummary(db, team.id, 'revive', 'stanley');
+    expect(summary.carrying).toBe(brief.in_flight.length);
+    expect(summary.carrying).toBe(1);
+    expect(summary.incidents).toEqual(brief.incidents.map((i) => i.lane));
+    expect(summary.incidents).toEqual([incident.id]);
+    expect(summary.owed).toEqual(brief.owed_reviews.map((r) => ({ lane: r.lane.id, ts: r.ts })));
   });
 
   it('surfaces the latest handoff to me or @team as the why, with its goal_id', () => {
@@ -461,6 +484,74 @@ describe('brief leads with goals (goals-front-door design)', () => {
   });
 });
 
+/**
+ * "recently shipped" must not call an unconfirmed close a confirmed one (lane 01M06PR40).
+ *
+ * ADR 169 derives `verified` on every close and the `/lanes` endpoint has annotated done lanes with
+ * it since — which is why the web board has rendered accepted/unconfirmed chips all along
+ * (Board.tsx:409-416). `deriveNext` never applied the same annotation, so the ONE place a seat reads
+ * what just landed showed a swept, unreviewed lane exactly like a peer-accepted one.
+ *
+ * Measured 2026-08-15: lane 01M016D5GA — 44 files joining typecheck, every CI-deciding gate among
+ * them — was swept at 24h with `verified: false` and listed under "recently shipped" unmarked.
+ */
+describe('shipped carries the verified-ness of its close', () => {
+  function closedRow(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    laneId: string,
+    verified: boolean,
+  ) {
+    db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+       VALUES (?, ?, ?, ?, 'lane.closed', ?, 'allow', ?, ?)`,
+    ).run(
+      `closed-${laneId}`,
+      teamId,
+      Date.now(),
+      'musterd',
+      laneId,
+      JSON.stringify({ lane: laneId, state: 'done', verified }),
+      Date.now(),
+    );
+  }
+  function shippedLane(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    title: string,
+    verified: boolean,
+  ) {
+    const lane = openLane(db, teamId, 'revive', 'stanley', { title, claim: true });
+    updateLane(db, teamId, lane.id, 'revive', { state: 'done' });
+    closedRow(db, teamId, lane.id, verified);
+    return lane;
+  }
+
+  it('marks a close nobody confirmed, so the brief stops calling it shipped-and-fine', () => {
+    const { db, team } = seed();
+    shippedLane(db, team.id, 'swept', false);
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.shipped.find((l) => l.title === 'swept')?.verified).toBe(false);
+  });
+
+  it('marks a counterpart-accepted close as verified', () => {
+    const { db, team } = seed();
+    shippedLane(db, team.id, 'accepted', true);
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.shipped.find((l) => l.title === 'accepted')?.verified).toBe(true);
+  });
+
+  it('ABSTAINS on a close that recorded no verdict — pre-ADR-169 lanes invent nothing', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'revive', 'stanley', { title: 'ancient', claim: true });
+    updateLane(db, team.id, lane.id, 'revive', { state: 'done' });
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    // Absent, never defaulted to false: "we do not know" and "nobody confirmed it" are different
+    // claims, and only one of them is true here.
+    expect(brief.shipped.find((l) => l.title === 'ancient')).not.toHaveProperty('verified');
+  });
+});
+
 describe('review_debt (value-layer design)', () => {
   function insertReadyAudit(
     db: ReturnType<typeof seed>['db'],
@@ -594,5 +685,106 @@ describe('incidents lead the brief (spec 2026-08-14 inc 1)', () => {
     });
     updateLane(db, team.id, brief.incidents[0]!.lane, 'revive', { state: 'abandoned' });
     expect(deriveNext(db, team.id, 'revive', 'miley').incidents).toHaveLength(0);
+  });
+});
+
+describe('review_debt unlanded badge (merge-verified submit)', () => {
+  it('marks a lane whose attestation has no SHA as unlanded, and an attested one as not', () => {
+    const { db, team } = seed();
+    const bare = openLane(db, team.id, 'revive', 'nick', { title: 'no attestation', claim: true });
+    updateLane(db, team.id, bare.id, 'revive', { state: 'awaiting_acceptance' });
+    const attested = openLane(db, team.id, 'revive', 'nick', { title: 'landed', claim: true });
+    updateLane(db, team.id, attested.id, 'revive', {
+      state: 'awaiting_acceptance',
+      merged: { sha: 'abc123f', verification: 'ancestor' },
+    });
+
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    const byId = new Map((brief.review_debt ?? []).map((r) => [r.id, r]));
+    expect(byId.get(bare.id)?.unlanded).toBe(true);
+    expect(byId.get(attested.id)?.unlanded).toBe(false);
+  });
+});
+
+describe('deriveNext — recorded intentions above the open lanes (ADR 373 increment 4)', () => {
+  function capture(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    ref: string,
+    body: string,
+    at: number,
+  ) {
+    return captureRepoSeed(
+      db,
+      teamId,
+      getMemberByName(db, teamId, 'nick')!,
+      { ref, body, captured_at: at },
+      at,
+    );
+  }
+
+  it('lists open Seeds oldest first, source-tagged, with the total behind the window', () => {
+    const { db, team } = seed();
+    const first = capture(
+      db,
+      team.id,
+      'docs/decisions/354-x.md#left-for-a-sibling-lane',
+      'Left for a sibling lane; this ADR fixes the attestation.\n— docs/decisions/354-x.md:12',
+      100,
+    );
+    const second = capture(
+      db,
+      team.id,
+      'docs/wiki/wake-leases.md#still-true',
+      'still true, and not fixed here\n— docs/wiki/wake-leases.md:40',
+      200,
+    );
+    capture(db, team.id, 'content/roadmap.data.ts#building-a', "building: 'increments 3–5'", 300);
+    capture(db, team.id, 'content/roadmap.data.ts#building-b', "building: 'M4–M5'", 400);
+
+    const brief = deriveNext(db, team.id, 'revive', 'stanley', 3, 5, { upNextSeedLimit: 2 });
+    expect(brief.up_next_seeds.map((s) => s.id)).toEqual([first.id, second.id]);
+    expect(brief.up_next_seeds_total).toBe(4);
+    expect(brief.up_next_seeds[0]).toMatchObject({
+      source: 'repo',
+      ref: 'docs/decisions/354-x.md#left-for-a-sibling-lane',
+      summary: 'Left for a sibling lane; this ADR fixes the attestation.',
+      submitted_by: 'nick',
+      captured_at: 100,
+    });
+  });
+
+  it('drops a Seed once it is promoted — a started intention is a lane, not an intention', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'revive', 'nick', { title: 'the sibling lane' });
+    capture(db, team.id, 'docs/wiki/a.md#b', 'not yet built', 100);
+    captureRepoSeed(db, team.id, getMemberByName(db, team.id, 'nick')!, {
+      ref: 'docs/decisions/354-x.md#c',
+      body: 'Left for a sibling lane',
+      lane_id: lane.id,
+    });
+
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.up_next_seeds.map((s) => s.ref)).toEqual(['docs/wiki/a.md#b']);
+    expect(brief.up_next_seeds_total).toBe(1);
+  });
+
+  it('carries a relay Seed with a null ref — its source is a person, not a document', () => {
+    const { db, team } = seed();
+    db.prepare("UPDATE members SET slack_user_id = 'U1' WHERE team_id = ? AND name = 'nick'").run(
+      team.id,
+    );
+    createSeedFromRelay(db, team.id, {
+      id: 'relay-1',
+      source: 'slack',
+      body: 'Which Surface should own this?',
+      ts: 50,
+      meta: { user: 'U1' },
+    });
+
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.up_next_seeds).toMatchObject([
+      { source: 'slack', ref: null, summary: 'Which Surface should own this?' },
+    ]);
   });
 });

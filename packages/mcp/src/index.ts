@@ -6,7 +6,7 @@ import {
   type StdioServerHandle,
   StdioServerTransport,
 } from '@modelcontextprotocol/server/stdio';
-import { renderPrimer } from '@musterd/protocol';
+import { renderRuntimePrimer } from '@musterd/protocol';
 import { bind } from './bind.js';
 import { MCP_ICONS } from './brand.js';
 import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
@@ -22,6 +22,7 @@ import { readAndConsumeResolution, writePendingMarker } from './pending.js';
 import { instrumentToolRepair } from './repair.js';
 import { scopeToolSurface } from './scope.js';
 import { instrumentTools, recordAdapterInitialization, startMcpTelemetry } from './telemetry.js';
+import { registerAvailability } from './tools/availability.js';
 import { registerGoals } from './tools/goals.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
 import { registerInsights } from './tools/insights.js';
@@ -30,8 +31,10 @@ import { registerLanes } from './tools/lanes.js';
 import { registerLeave } from './tools/leave.js';
 import { registerMembers } from './tools/members.js';
 import { registerMemory } from './tools/memory.js';
+import { registerSeeds } from './tools/seeds.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
+import { registerTeamMemory } from './tools/teamMemory.js';
 import { registerWakeContext } from './tools/wakeContext.js';
 import {
   instrumentToolTransport,
@@ -45,6 +48,12 @@ export { loadMcpConfig, type McpConfig } from './config.js';
 export { bind } from './bind.js';
 export { resolveWorkspace, resolveProvenance } from './workspace.js';
 export { withTraceContext } from './otel.js';
+// Exported for the CLI-side registry pin (see modelProbe.ts) as well as the adapter's own use.
+export {
+  isProbeCapableSurface,
+  PROBE_CAPABLE_SURFACES,
+  shouldWarnUnobservedModel,
+} from './modelProbe.js';
 
 /**
  * Drop presence and exit on every way the host can go away. The WS socket keeps Node's event loop
@@ -94,16 +103,16 @@ export function installShutdownHandlers(opts: {
 }
 
 /**
- * The standing primer this server returns as MCP `instructions` on initialize (ADR 012 follow-up):
- * the same `renderPrimer` the CLI writes into AGENTS.md, so an agent is onboarded **without any file**
- * — works on every MCP-speaking harness. A provisioned session names its seat; an unclaimed one is
- * told to `team_join` first. Pure, so it's unit-testable without standing up the server.
+ * The process-local primer this server returns as MCP `instructions` on initialize (ADR 307). A
+ * provisioned session names its intended Member target; an unclaimed one is told to `team_join`
+ * first. Authenticated occupancy supplies the Team Role and charter after the server confirms the
+ * Member. Pure, so this is unit-testable without standing up the server.
  */
 export function primerInstructions(config: McpConfig): string {
   // Before claiming, name the seat the folder is bound to claim (the policy target); after, the
   // resolved seat. v0.3 (ADR 075): the seat is server-resolved at claim, so a role pool stays unnamed.
   const seat = config.member ?? (config.claim?.mode === 'seat' ? config.claim.name : undefined);
-  return renderPrimer({ team: config.team, ...(seat ? { member: seat } : {}) });
+  return renderRuntimePrimer({ team: config.team, ...(seat ? { member: seat } : {}) });
 }
 
 /** The canonical registered-tool names (ADR 085) — kept in a dependency-free module so the guidance
@@ -255,8 +264,11 @@ export function buildMcpServer(
   registerInboxCheck(server, client);
   registerStatus(server, client);
   registerMembers(server, client);
+  registerAvailability(server, client);
   registerMemory(server, client);
   registerWakeContext(server, client);
+  registerSeeds(server, client);
+  registerTeamMemory(server, client, config);
   registerLanes(server, client);
   registerGoals(server, client);
   registerInsights(server, client);

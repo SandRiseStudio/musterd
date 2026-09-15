@@ -24,7 +24,9 @@ export function credentialEnv(input: {
   surface: string;
 }): string {
   const grant = input.grant !== undefined ? ` MUSTERD_GRANT=${input.grant}` : '';
-  return `MUSTERD_TEAM=${input.team} MUSTERD_AGENT_KEY=${input.agentKey} MUSTERD_CLAIM=${input.claim}${grant} MUSTERD_SURFACE=${input.surface}`;
+  // Manual external launches declare their Surface with the ADR 286 LAUNCH marker — the retired
+  // MUSTERD_SURFACE is never emitted (a registration carrying it refuses Presence attachment).
+  return `MUSTERD_TEAM=${input.team} MUSTERD_AGENT_KEY=${input.agentKey} MUSTERD_CLAIM=${input.claim}${grant} MUSTERD_LAUNCH_SURFACE=${input.surface}`;
 }
 
 /** The "connect this agent via MCP with env:" block — the P3 successor to the P2 MUSTERD_TOKEN line. */

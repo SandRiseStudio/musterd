@@ -5,6 +5,11 @@ This is the manual acceptance record for the Codex desktop Surface described by
 coordination and explicitly does not advertise desktop daemon wake. Run it in a trusted project
 workspace with the musterd daemon already serving the target Team.
 
+Procedure audit 2026-08-24 (dolly): the matrix steps and tool names remain current against main;
+note the enrolled workspace must carry a strict v2 binding and the ADR 286 launch-Surface marker
+(`musterd harness configure` writes both). The nine `pending` rows still need a human operating
+Codex desktop — automation cannot stand in for them.
+
 ## Run metadata
 
 | field                 | value                          |

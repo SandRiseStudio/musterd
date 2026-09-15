@@ -1,4 +1,4 @@
-import type { ActDelivery, Goal, Report } from '@musterd/protocol';
+import type { ActDelivery, FlowMetrics, Goal, GoalFlow, Report } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
@@ -52,13 +52,36 @@ function renderWaitingOn(r: Report, w: (s: string) => void): void {
     );
 }
 
-function renderFlow(r: Report, w: (s: string) => void): void {
-  const f = r.flow;
+export function renderFlow(f: FlowMetrics, w: (s: string) => void): void {
   const cycle = f.cycle_time_ms === null ? theme.meta('—') : ago(f.cycle_time_ms);
   const age = f.oldest_wip_age_ms === null ? theme.meta('—') : ago(f.oldest_wip_age_ms);
+  // Absent (not zero) against a pre-295 daemon — say nothing rather than claim an empty queue.
+  const queued = f.backlog === undefined ? '' : ` · queued ${theme.accent(String(f.backlog))}`;
   w(
-    `  throughput ${theme.accent(String(f.throughput_7d))}/wk · cycle ${cycle} · WIP ${theme.accent(String(f.wip))} · oldest ${age}\n`,
+    `  throughput ${theme.accent(String(f.throughput_7d))}/wk · cycle ${cycle} · WIP ${theme.accent(String(f.wip))} · oldest ${age}${queued}\n`,
   );
+}
+
+/** `(no goal)` — the goal-less pool reads as a group, never as a bare `null` (ADR 295). */
+const goalLabel = (id: string | null) => id ?? '(no goal)';
+
+/**
+ * Flow per Goal (ADR 295), in the engine's own order — oldest-WIP first, so the dragging goal reads
+ * first. Queue-shaped fields lead and throughput trails: goals are not comparable units, and the
+ * line is built to answer "which goal is stuck", not to rank them.
+ */
+export function renderGoalFlow(byGoal: GoalFlow[], w: (s: string) => void): void {
+  if (byGoal.length === 0) return;
+  w(`\n${theme.accent('per goal')}:\n`);
+  for (const g of byGoal) {
+    const f = g.flow;
+    const parts = [`wip ${theme.accent(String(f.wip))}`];
+    if (f.oldest_wip_age_ms !== null) parts.push(`oldest ${ago(f.oldest_wip_age_ms)}`);
+    if (f.backlog) parts.push(`queued ${f.backlog}`);
+    if (f.cycle_time_ms !== null) parts.push(`cycle ${ago(f.cycle_time_ms)}`);
+    if (f.throughput_7d) parts.push(`${f.throughput_7d}/wk`);
+    w(`  ${goalLabel(g.goal_id)} — ${parts.join(' · ')}\n`);
+  }
 }
 
 const pct = (r: number) => `${Math.round(r * 100)}%`;
@@ -134,7 +157,8 @@ function render(r: Report, altitude: Altitude, liveness?: SweepFinding): void {
   // team (default): the digest. Wake sits directly under steering — the ADR 131 O&E baseline is
   // the steering-latency metric "extended to offline recipients as the same headline number".
   w(`\n${theme.accent('flow')}:\n`);
-  renderFlow(r, w);
+  renderFlow(r.flow, w);
+  renderGoalFlow(r.goal_flow ?? [], w);
   w(`\n${theme.accent('coordination')}:\n`);
   renderCoordination(r, w);
   w(`\n${theme.accent('steering')}:\n`);
@@ -485,6 +509,13 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   // misleads. The exempt count without the sampled count reads as acceptance quietly eroding; the
   // sampled count is the evidence that the low tier is still being measured, which is the whole
   // condition on which the exemption was allowed to ship early.
+  // ADR 348: hand-routed acceptances get their own line and their own rate. They are real asks and
+  // their catches are real — hiding them would be the opposite error — but they are not the
+  // picker's asks, and the rate above is a statement about the picker. Two numbers, each meaning
+  // exactly one thing, rather than one number meaning neither.
+  if (r.named > 0) {
+    w(`  ${theme.meta(`${r.named} routed by hand (named acceptor, not the picker)`)}\n`);
+  }
   if (r.acceptance_exempt > 0 || r.exempt_sampled > 0) {
     w(
       `  ${theme.meta(`${r.acceptance_exempt} exempt (declared low, no ask) · ${r.exempt_sampled} sampled in and routed anyway`)}\n`,
@@ -496,7 +527,9 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   // `review_timeout` label, which asserts an ask that may never have been sent.
   // ADR 234 increment 2: exempt submits are a KNOWN third outcome and must come out of this
   // subtraction. Left in, every declared-low lane would be reported as predating a 2026-07 fix.
-  const unknown = r.ready - r.routed - r.no_candidate - r.acceptance_exempt;
+  // ADR 348: `named` joins the subtraction for the identical reason exempt did. It is a KNOWN
+  // fourth outcome; left out, every hand-routed lane would be reported as predating a 2026-07 fix.
+  const unknown = r.ready - r.routed - r.no_candidate - r.acceptance_exempt - r.named;
   if (unknown > 0) {
     w(
       `  ${theme.meta(`${unknown} predate routing-outcome recording (ADR 169 follow-up) — their split is unknown, and their closes read as timeouts whether or not an ask was sent`)}\n`,

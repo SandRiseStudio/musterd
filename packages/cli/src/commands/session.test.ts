@@ -5,9 +5,13 @@ import { BindingSchema, type Binding } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
+import { CliError } from '../errors.js';
 import { LOCAL_SESSION_LIVE_MS } from '../session/liveness.js';
+import { resolveClaimWorkspace } from './helpers.js';
 import {
+  attestSlotIfUnattested,
   captureSession,
+  checkCursorInterrupt,
   LABEL_SWEEP_STALE_MS,
   labelSweepDue,
   lookupCcdMeta,
@@ -31,9 +35,9 @@ describe('musterd session (capture)', () => {
   const savedBindingEnv = process.env['MUSTERD_BINDING'];
 
   const bindingOf = (over: Partial<Binding> = {}): Binding => ({
+    version: 2,
     server: 'http://127.0.0.1:1', // nothing listens — the attestation push must fail silently
     team: 'dawn',
-    surface: 'claude-code',
     claim: { mode: 'seat', name: 'scout' },
     agent_key: 'mskey_test',
     grant: 'msgr_standing',
@@ -117,6 +121,210 @@ describe('musterd session (capture)', () => {
   // ADR 252: the wake token the actuator stamps on a woken child rides the attestation, so an
   // expired lease can still be known to have PAID for a session. Never defaulted — an ordinary
   // session attests nothing rather than claiming a lease it knows nothing about (ADR 236).
+  // ADR 337 §4: the stored `binding.session_lease` is minted once, at claim, and lives five minutes.
+  // A hook that fires later presents a dead lease and the route refuses it; before this the refusal
+  // was swallowed with the rest of "daemon unreachable", so every SessionStart/SessionEnd more than
+  // five minutes after the claim wrote a local slot and no ledger row (lane 01M1F92X69, measured on
+  // seat ryder 2026-09-01). The hook must reclaim — once, on refusal, never pre-emptively (the
+  // 2026-09-01 claim storm, #1138/#1143). What it mints is not written back: a one-shot's lease dies
+  // with the Presence its socket releases on exit (ws.ts cleanup → held_until), measured 2026-09-01.
+  describe('a refused session lease is reclaimed', () => {
+    const leaseRefused = () =>
+      new CliError('invalid, expired, or revoked agent session lease', 4, 'unauthorized');
+    const claimSpy = (lease = 'msls_fresh') => {
+      const close = vi.fn();
+      const claim = vi
+        .spyOn(HttpClient.prototype, 'claimSessionLease')
+        .mockResolvedValue({ lease, close });
+      return { claim, close };
+    };
+    /** The roster the never-evict check reads: scout live in `workspaces`, offline otherwise. */
+    const rosterSpy = (...workspaces: (string | null)[]) =>
+      vi.spyOn(HttpClient.prototype, 'roster').mockResolvedValue({
+        members: [
+          {
+            name: 'scout',
+            presences: workspaces.map((workspace) => ({
+              surface: 'mcp',
+              status: 'online',
+              last_seen_at: Date.now(),
+              workspace,
+            })),
+          } as never,
+        ],
+      });
+    beforeEach(() => {
+      rosterSpy();
+    });
+
+    it('reclaims once on refusal, lands the attestation, and stamps the slot', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValueOnce(leaseRefused())
+        .mockResolvedValueOnce(undefined as never);
+      const { claim, close } = claimSpy();
+
+      await captureSession('start', { session_id: 'late-hook', cwd: wsA });
+
+      expect(claim).toHaveBeenCalledTimes(1);
+      expect(attest).toHaveBeenCalledTimes(2);
+      expect(close).toHaveBeenCalledTimes(1); // the claim's Presence is held only through the push
+      const after = readBinding(wsA);
+      expect(after.session!.attested_at).toBeGreaterThan(0);
+      // Nothing but the stamp moves: the credential stays, and the stored lease is not replaced
+      // with one that is dead the moment `close` ran.
+      expect(after.seat_credential).toBe('msac_scout');
+      expect(after.agent_key).toBe('mskey_test');
+      expect(after.session_lease).toBe('msls_stale');
+    });
+
+    // The reclaim is a real seat claim, and a claim is where a Presence gets its model. Built with
+    // no model, it minted a `cli` Presence attesting nothing — the newest non-held row, so the seat
+    // read `unknown` to the ADR 188 picker for as long as that row was the newest (ADR 246's exact
+    // shape, one path over). Post-storm on 2026-09-02: 244 `cli` claims to 50 `claude-code`, and
+    // every `worker_unattested` row of the day sat seconds after one. The hook holds the harness's
+    // own observation in `binding.model_observed`; the claim must carry it through the same ladder
+    // every other CLI one-shot uses (`attestedModel`: observed > env > declared).
+    it('the reclaim carries the observed model, never a bare claim (ADR 246)', async () => {
+      const savedModel = process.env['MUSTERD_MODEL'];
+      delete process.env['MUSTERD_MODEL'];
+      try {
+        writeBinding(
+          wsA,
+          bindingOf({
+            seat_credential: 'msac_scout',
+            session_lease: 'msls_stale',
+            model: 'claude-test-1', // the declaration — outranked by what the harness observed
+            model_observed: {
+              model: 'claude-opus-4-8',
+              harness: 'claude-code',
+              observed_at: Date.now() - 5_000,
+            },
+          }),
+        );
+        vi.spyOn(HttpClient.prototype, 'attestSession')
+          .mockRejectedValueOnce(leaseRefused())
+          .mockResolvedValueOnce(undefined as never);
+        const seen: Array<string | undefined> = [];
+        vi.spyOn(HttpClient.prototype, 'claimSessionLease').mockImplementation(async function (
+          this: HttpClient,
+        ) {
+          seen.push((this as unknown as { opts: { model?: string } }).opts.model);
+          return { lease: 'msls_fresh', close: vi.fn() };
+        });
+
+        await captureSession('start', { session_id: 'observed-hook', cwd: wsA });
+        expect(seen).toEqual(['claude-opus-4-8']);
+      } finally {
+        if (savedModel === undefined) delete process.env['MUSTERD_MODEL'];
+        else process.env['MUSTERD_MODEL'] = savedModel;
+      }
+    });
+
+    it("the tool boundary spends the slot's one claim, then attests with what it holds", async () => {
+      const startedAt = Date.now() - 60_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          seat_credential: 'msac_scout',
+          session_lease: 'msls_stale',
+          session: { harness: 'claude-code', id: 'healed', started_at: startedAt },
+        }),
+      );
+      // The claim lands but the attest keeps failing for a non-lease reason — the shape that would
+      // otherwise claim again on every tool call against the daemon.
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValueOnce(leaseRefused())
+        .mockRejectedValueOnce(new Error('500'))
+        .mockRejectedValue(leaseRefused());
+      const { claim } = claimSpy();
+
+      await attestSlotIfUnattested(wsA);
+      expect(claim).toHaveBeenCalledTimes(1);
+      expect(readBinding(wsA).session!.claim_attempted_at).toBeGreaterThan(0);
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+
+      await attestSlotIfUnattested(wsA);
+      await attestSlotIfUnattested(wsA);
+      expect(claim).toHaveBeenCalledTimes(1); // still one — the boundary never claims twice
+      expect(attest).toHaveBeenCalledTimes(4); // …but keeps presenting what it holds
+
+      // A fresh session event may spend a claim again.
+      await captureSession('start', { session_id: 'next', cwd: wsA });
+      expect(claim).toHaveBeenCalledTimes(2);
+    });
+
+    it('never claims while the seat is live in another workspace — an eviction is worse than a gap', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      rosterSpy('agents-other@main');
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValue(leaseRefused());
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'sibling-hook', cwd: wsA });
+      expect(claim).not.toHaveBeenCalled();
+      expect(attest).toHaveBeenCalledTimes(1);
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+      expect(readBinding(wsA).session!.claim_attempted_at).toBeGreaterThan(0);
+    });
+
+    it('claims beside a live adapter in THIS workspace — the server keeps that one (ADR 340)', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      rosterSpy(resolveClaimWorkspace(process.env, wsA), null);
+      vi.spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValueOnce(leaseRefused())
+        .mockResolvedValueOnce(undefined as never);
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'same-ws-hook', cwd: wsA });
+      expect(claim).toHaveBeenCalledTimes(1);
+      expect(readBinding(wsA).session!.attested_at).toBeGreaterThan(0);
+    });
+
+    it('a roster it cannot read is read as held elsewhere — the safe miss', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      vi.spyOn(HttpClient.prototype, 'roster').mockRejectedValue(new Error('ECONNREFUSED'));
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockRejectedValue(leaseRefused());
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'blind-hook', cwd: wsA });
+      expect(claim).not.toHaveBeenCalled();
+    });
+
+    it('a lease the route accepts is never reclaimed — no claim per hook', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_live' }));
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockResolvedValue(undefined as never);
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'early-hook', cwd: wsA });
+      expect(claim).not.toHaveBeenCalled();
+      expect(readBinding(wsA).session_lease).toBe('msls_live');
+    });
+
+    it('an unreachable daemon is not a refused lease — no claim, no stamp', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_live' }));
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockRejectedValue(new Error('ECONNREFUSED'));
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'offline-hook', cwd: wsA });
+      expect(claim).not.toHaveBeenCalled();
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+    });
+
+    it('a refused reclaim leaves the slot unattested so the tool boundary retries', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValue(leaseRefused());
+      vi.spyOn(HttpClient.prototype, 'claimSessionLease').mockRejectedValue(
+        new CliError('seat "scout" is occupied elsewhere', 4),
+      );
+      await captureSession('start', { session_id: 'refused-hook', cwd: wsA });
+      expect(attest).toHaveBeenCalledTimes(1);
+      const after = readBinding(wsA);
+      expect(after.session!.attested_at).toBeUndefined();
+      expect(after.session_lease).toBe('msls_stale'); // nothing minted, nothing written
+    });
+  });
+
   describe('the wake lease travels with the capture', () => {
     const savedLease = process.env['MUSTERD_WAKE_LEASE'];
     afterEach(() => {
@@ -381,52 +589,38 @@ describe('musterd session (capture)', () => {
     });
   });
 
-  describe('observeCursorSession (ADR 198)', () => {
-    it('stamps harness:cursor and observes model_id without a transcript', async () => {
-      writeBinding(wsA, bindingOf({ model: 'grok-4.5', surface: 'cursor' }));
+  describe('observeCursorSession (ADR 198, probe removed by ADR 383)', () => {
+    it('stamps harness:cursor and records NO observation, even when model_id is present', async () => {
+      writeBinding(wsA, bindingOf({ model: 'grok-4.5' }));
       const got = await observeCursorSession({
         session_id: 'conv-1',
-        model_id: 'claude-opus-4-7',
+        model_id: 'gemini-3.8-flash',
         model: 'thinking-slug',
         cwd: wsA,
       });
-      expect(got).toBe('claude-opus-4-7');
+      // The field still arrives; musterd has stopped calling it a measurement (ADR 383).
+      expect(got).toBeUndefined();
       const a = readBinding(wsA);
       expect(a.session).toMatchObject({ harness: 'cursor', id: 'conv-1' });
-      expect(a.model_observed).toMatchObject({ model: 'claude-opus-4-7', harness: 'cursor' });
-      expect(a.model).toBe('grok-4.5'); // declaration untouched
+      expect(a.model_observed).toBeUndefined();
+      expect(a.model).toBe('grok-4.5'); // the declaration stands, and now wins the ladder
     });
 
-    it('prefers model_id over model, and falls back to model', async () => {
-      await observeCursorSession({ session_id: 'c1', model: 'gpt-5.6-sol', cwd: wsA });
-      expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
-    });
-
-    it('throttles identical observations within OBSERVATION_REFRESH_MS', async () => {
+    it('a new conversation drops an observation the old probe left behind', async () => {
+      // The regression that matters for seats already poisoned: measured on kimi 2026-09-03, the
+      // hook wrote `gemini-3.8-flash` while the session ran kimi-k3, and because an observation
+      // outranks a declaration the seat attested the wrong model with nothing able to notice.
+      writeBinding(wsA, {
+        ...bindingOf({ model: 'kimi-k3' }),
+        model_observed: { model: 'gemini-3.8-flash', harness: 'cursor', observed_at: Date.now() },
+      });
       await observeCursorSession({
-        session_id: 'c1',
-        model_id: 'claude-opus-4-7',
+        session_id: 'conv-new',
+        model_id: 'gemini-3.8-flash',
         cwd: wsA,
       });
-      const firstAt = readBinding(wsA).model_observed!.observed_at;
-      const again = await observeCursorSession({
-        session_id: 'c1',
-        model_id: 'claude-opus-4-7',
-        cwd: wsA,
-      });
-      expect(again).toBeUndefined();
-      expect(readBinding(wsA).model_observed!.observed_at).toBe(firstAt);
-    });
-
-    it('re-observes when the dropdown switches to a new model_id', async () => {
-      await observeCursorSession({ session_id: 'c1', model_id: 'claude-opus-4-7', cwd: wsA });
-      const got = await observeCursorSession({
-        session_id: 'c1',
-        model_id: 'gpt-5.6-sol',
-        cwd: wsA,
-      });
-      expect(got).toBe('gpt-5.6-sol');
-      expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
+      expect(readBinding(wsA).model_observed).toBeUndefined();
+      expect(readBinding(wsA).model).toBe('kimi-k3');
     });
 
     it('a new conversation_id replaces a leftover desktop capture (ADR 265)', async () => {
@@ -435,17 +629,17 @@ describe('musterd session (capture)', () => {
         model_id: 'grok-4.6',
         cwd: wsA,
       });
-      const got = await observeCursorSession({
+      await observeCursorSession({
         session_id: '365e3420-cli',
         model_id: 'cursor-grok-4.6-high',
         cwd: wsA,
       });
-      expect(got).toBe('cursor-grok-4.6-high');
+      // The capture still replaces; only the model half went away with the probe (ADR 383).
       expect(readBinding(wsA).session).toMatchObject({
         harness: 'cursor',
         id: '365e3420-cli',
       });
-      expect(readBinding(wsA).model_observed?.model).toBe('cursor-grok-4.6-high');
+      expect(readBinding(wsA).model_observed).toBeUndefined();
     });
 
     it('a new conversation_id with no model_id DROPS the leftover observation (ADR 268)', async () => {
@@ -468,11 +662,15 @@ describe('musterd session (capture)', () => {
       expect(readBinding(wsA).model_observed).toBeUndefined();
     });
 
-    it('the same conversation_id without a model KEEPS the observation (never-erase within a session)', async () => {
-      await observeCursorSession({
-        session_id: 'c1',
-        model_id: 'gpt-5.6-sol',
-        cwd: wsA,
+    it('the same conversation_id KEEPS an existing observation (never-erase within a session)', async () => {
+      // Cursor writes none of its own since ADR 383, but the never-erase branch still governs one
+      // that is already on the binding — seeded here rather than produced, which is the only
+      // difference from what this pinned before.
+      const now = Date.now();
+      writeBinding(wsA, {
+        ...bindingOf({ model: 'grok-4.5' }),
+        session: { harness: 'cursor', id: 'c1', started_at: now - 1_000 },
+        model_observed: { model: 'gpt-5.6-sol', harness: 'cursor', observed_at: now },
       });
       await observeCursorSession({ session_id: 'c1', cwd: wsA });
       expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
@@ -485,7 +683,6 @@ describe('musterd session (capture)', () => {
       writeBinding(
         wsA,
         bindingOf({
-          surface: 'cursor',
           session: {
             harness: 'cursor',
             id: 'a3fb8a1c-desktop',
@@ -506,6 +703,27 @@ describe('musterd session (capture)', () => {
       ]);
       expect(readBinding(wsA).session?.id).toBe('365e3420-cli');
       expect(readBinding(wsA).model_observed).toBeUndefined();
+    });
+
+    it('checkCursorInterrupt returns the line when interrupt is raised (ADR 369)', async () => {
+      const spy = vi
+        .spyOn(HttpClient.prototype, 'interruptCheck')
+        .mockResolvedValue({ raised: true, line: '⚑ 1 urgent request' });
+      const line = await checkCursorInterrupt(wsA);
+      expect(line).toBe('⚑ 1 urgent request');
+      spy.mockRestore();
+    });
+
+    it('checkCursorInterrupt returns null when no interrupt is raised or nudges are muted', async () => {
+      const spy = vi
+        .spyOn(HttpClient.prototype, 'interruptCheck')
+        .mockResolvedValue({ raised: false });
+      expect(await checkCursorInterrupt(wsA)).toBeNull();
+
+      process.env['MUSTERD_NO_NUDGE'] = '1';
+      expect(await checkCursorInterrupt(wsA)).toBeNull();
+      delete process.env['MUSTERD_NO_NUDGE'];
+      spy.mockRestore();
     });
   });
 
@@ -934,7 +1152,6 @@ describe('musterd session (capture)', () => {
       writeBinding(
         wsA,
         bindingOf({
-          surface: 'cursor',
           session: {
             harness: 'cursor',
             id: 'a3fb8a1c-desktop',
@@ -967,6 +1184,200 @@ describe('musterd session (capture)', () => {
       expect(a.model_observed).toBeUndefined();
     });
   });
+
+  /**
+   * Attestation belongs to HOLDING the slot, not to SessionStart (lane 01M159BHJK).
+   *
+   * Measured on seat ryder 2026-08-28. A wake-spawned session held the slot; an interactive session
+   * started beside it, was turned away by the interloper gate — which is documented to mean "no slot
+   * write AND no daemon attestation" — and then took the slot back legitimately at its first tool
+   * boundary, via the heal. The heal writes the slot and nothing else, and `captureSession` is the
+   * only caller of `attestSession`, so nothing ever told the daemon. That session then ran for two
+   * hours, claimed a lane and closed one, and never existed on the ledger: its correlation digest
+   * `982f768adf12` returned zero audit rows for its whole life, while the last session the daemon
+   * knew about was the wake child that had ended 90 minutes earlier.
+   *
+   * The gate's own note says "the slot self-corrects at the next SessionStart". Locally, yes. The
+   * LEDGER never self-corrects, because the only moment that attests has already passed.
+   *
+   * So the boundary that always happens is the one that reconciles: an un-ended slot the daemon has
+   * not been told about gets attested there, exactly once.
+   */
+  describe('the tool boundary attests a slot SessionStart never did', () => {
+    const transcript = (ws: string, name: string): string => {
+      const p = join(ws, name);
+      writeFileSync(p, JSON.stringify({ message: { role: 'assistant', model: 'm' } }) + '\n');
+      return p;
+    };
+    const enumStub = (rows: { id: string; path: string; mtime: number; bytes: number }[]) => () =>
+      rows;
+
+    it('attests the healed slot, and stamps it so the boundary is idempotent', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'wake-child',
+            transcript_path: join(wsA, 'wake.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+      const livePath = transcript(wsA, 'live.jsonl');
+      refreshModelObservation(
+        wsA,
+        enumStub([{ id: 'gated-live', path: livePath, mtime: Date.now(), bytes: 10 }]),
+      );
+      expect(readBinding(wsA).session!.id).toBe('gated-live'); // the heal took the slot
+      expect(attest).not.toHaveBeenCalled(); // …and told nobody, which is the defect
+
+      await attestSlotIfUnattested(wsA);
+      expect(attest).toHaveBeenCalledTimes(1);
+      expect(attest.mock.calls[0]![1]).toMatchObject({ seat: 'scout', event: 'start' });
+      const stamped = readBinding(wsA).session!;
+      expect(stamped.attested_at).toBeGreaterThan(0);
+
+      // The boundary runs on every tool call — a second pass must not re-announce the session.
+      await attestSlotIfUnattested(wsA);
+      expect(attest).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not stamp when the daemon could not be told — the retry must survive', async () => {
+      // A hook may never fail, so the push is swallowed; stamping regardless would convert one
+      // unreachable daemon into a permanently unattested session, which is the bug this closes.
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockRejectedValue(new Error('unreachable'));
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'live-1',
+            transcript_path: transcript(wsA, 'live1.jsonl'),
+            started_at: Date.now() - 60_000,
+          },
+        }),
+      );
+      await expect(attestSlotIfUnattested(wsA)).resolves.toBeUndefined();
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+    });
+
+    it('captureSession does not stamp a push that failed — the boundary picks it up instead', async () => {
+      // The capture path's half of the same rule, and the one a mutation found unpinned: a
+      // SessionStart whose push never landed (dead daemon, mid-bounce, auth drift) must leave the
+      // slot DUE. Stamping optimistically here would recreate the defect one layer over — the
+      // session would be marked announced while the ledger never heard of it, and the tool boundary
+      // would skip it forever.
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValue(new Error('daemon bouncing'));
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+
+      // The daemon comes back; the next tool boundary settles the debt.
+      attest.mockResolvedValue(undefined as never);
+      await attestSlotIfUnattested(wsA);
+      expect(readBinding(wsA).session!.attested_at).toBeGreaterThan(0);
+    });
+
+    it('leaves an ended slot alone — a corpse is not a session to announce', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'dead-1',
+            transcript_path: transcript(wsA, 'dead1.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+      await attestSlotIfUnattested(wsA);
+      expect(attest).not.toHaveBeenCalled();
+    });
+
+    it('captureSession stamps its own attestation, so the boundary stays quiet', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      expect(attest).toHaveBeenCalledTimes(1);
+      expect(readBinding(wsA).session!.attested_at).toBeGreaterThan(0);
+
+      await attestSlotIfUnattested(wsA);
+      expect(attest).toHaveBeenCalledTimes(1); // the ordinary path is unchanged
+    });
+
+    it('captureSession stamp does not revert a slot heal that landed during the awaited push', async () => {
+      // The stamp is written after an await, and the boundary heal may rewrite the slot meanwhile.
+      // Writing the stamp from the pre-await copy would de-slot the live session — the exact write
+      // this PR exists to make visible. Pins the re-read: a mid-await rewrite must survive.
+      const healed: Binding = bindingOf({
+        session: {
+          harness: 'claude-code',
+          id: 'healed-live',
+          transcript_path: join(wsA, 'healed.jsonl'),
+          started_at: Date.now(),
+        },
+      });
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockImplementation(async () => {
+        writeBinding(wsA, healed); // the concurrent heal lands while the push is in flight
+        return undefined as never;
+      });
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      const after = readBinding(wsA);
+      expect(after.session!.id).toBe('healed-live'); // the heal survived the stamp
+      expect(after.session!.attested_at).toBeUndefined(); // and was not stamped as sid-1's push
+    });
+
+    it('captureSession stamp carries forward a model observation that landed during the push', async () => {
+      // Same await, different concurrent writer: a tool-boundary refresh observing the model. The
+      // fresh read must carry it; a pre-await spread would silently erase the observation.
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockImplementation(async () => {
+        const current = readBinding(wsA);
+        writeBinding(wsA, {
+          ...current,
+          model_observed: { model: 'observed-mid-await', harness: 'claude-code', observed_at: 1 },
+        });
+        return undefined as never;
+      });
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      const after = readBinding(wsA);
+      expect(after.session).toMatchObject({ id: 'sid-1' });
+      expect(after.session!.attested_at).toBeGreaterThan(0); // the stamp itself still lands
+      expect(after.model_observed?.model).toBe('observed-mid-await'); // and the observation survives
+    });
+
+    it('says nothing when the gate turned the newcomer away and the slot is still the occupant', async () => {
+      // The gated newcomer wrote no slot, so there is nothing of ITS to announce — the live
+      // occupant's slot is already attested and stays that way. Pins that this fix does not hand
+      // the interloper the announcement the gate exists to deny it.
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      const t = transcript(wsA, 'occupant.jsonl');
+      await captureSession('start', { session_id: 'occupant', cwd: wsA, transcript_path: t });
+      attest.mockClear();
+      await captureSession('start', {
+        session_id: 'ghost',
+        cwd: wsA,
+        transcript_path: join(wsA, 'ghost.jsonl'),
+      });
+      expect(readBinding(wsA).session!.id).toBe('occupant');
+      await attestSlotIfUnattested(wsA);
+      expect(attest).not.toHaveBeenCalled();
+    });
+  });
 });
 
 /**
@@ -983,9 +1394,9 @@ describe('musterd session resolve-labels (ADR 160)', () => {
   const dirs: string[] = [];
 
   const spec = (name: string) => ({
+    version: 2,
     server: 'http://127.0.0.1:1',
     team: 'dawn',
-    surface: 'claude-code',
     claim: { mode: 'seat', name },
   });
 
@@ -1169,9 +1580,9 @@ describe('musterd session label-nudge (evidence-based due)', () => {
     writeFileSync(
       join(seatWs, '.musterd', 'workspace.json'),
       JSON.stringify({
+        version: 2,
         server: 'http://127.0.0.1:1',
         team: 'dawn',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'miley' },
       }),
     );

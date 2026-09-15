@@ -58,7 +58,12 @@ const spec = (over: Partial<WakeSpec> = {}): WakeSpec => ({
 });
 
 const ctx = (
-  verify: () => Promise<{ occupied: boolean; provenance?: string | null }>,
+  verify: () => Promise<{
+    occupied: boolean;
+    provenance?: string | null;
+    lease_matched?: boolean;
+    own_unattested?: boolean;
+  }>,
 ): BackendContext & { lines: string[] } => {
   const lines: string[] = [];
   return { verifyOccupied: verify, log: (l) => lines.push(l), lines };
@@ -144,12 +149,16 @@ describe('buildResumeArgs (the resume argv invariants, inc 4)', () => {
 });
 
 describe('WakeArgOpts (inc 5): tool policy + turn cap ride the argv', () => {
-  it('seat-policy omits --allowedTools (workspace settings govern) — and STILL never a skip flag', () => {
+  it('seat-policy is a SUPERSET of reply-only: the musterd MCP tools ride both policies (finding 18) — and STILL never a skip flag', () => {
+    // 2026-09-06, delta wake 4: a work_order ran under seat-policy, was handed no --allowedTools,
+    // fell back to a workspace list that allowed the CLI and not the MCP server, and exited in
+    // 23.8 s having occupied nothing. The musterd tools are the wake's own control plane, not part
+    // of the task's permissions — a wake that cannot call them cannot occupy, submit, or report.
     for (const args of [
       buildWakeArgs('l', 'i', { toolPolicy: 'seat-policy' }),
       buildResumeArgs('l', 'i', { toolPolicy: 'seat-policy' }),
     ]) {
-      expect(args).not.toContain('--allowedTools');
+      expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__musterd');
       expect(args.join(' ')).not.toMatch(/skip-permissions|dangerously/i);
       expect(args).not.toContain('--permission-mode');
     }
@@ -172,12 +181,12 @@ describe('claudeCodeBackend.wake', () => {
         order: order({ tool_policy: 'seat-policy', transcript_max_bytes: 1_024 }),
         bounds: { timeout_ms: 60_000, max_turns: 7 },
       }),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(calls).toHaveLength(1); // no resume attempt — the ladder skipped it
     expect(calls[0]!.args).toContain('--session-id');
     expect(calls[0]!.args).not.toContain('--resume');
-    expect(calls[0]!.args).not.toContain('--allowedTools'); // seat-policy
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--allowedTools') + 1]).toBe('mcp__musterd'); // seat-policy too
     expect(calls[0]!.args[calls[0]!.args.indexOf('--max-turns') + 1]).toBe('7');
     expect(actuation.outcome).toEqual({ occupied: true, session: 'fresh' });
     child.exit(0);
@@ -189,7 +198,7 @@ describe('claudeCodeBackend.wake', () => {
     const { backend, calls } = harness(child);
     const p = backend.wake(
       spec(),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     const actuation = await p;
     expect(calls).toHaveLength(1);
@@ -209,7 +218,7 @@ describe('claudeCodeBackend.wake', () => {
     const { backend, calls } = harness(child, { ensurePinned: () => '/pinned/bin' });
     const actuation = await backend.wake(
       spec(),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     // A woken session's hooks call a bare `musterd`; the pin must beat whatever else is on PATH.
     expect(calls[0]!.opts.env?.['PATH']).toMatch(/^\/pinned\/bin:/);
@@ -222,7 +231,7 @@ describe('claudeCodeBackend.wake', () => {
     const { backend, calls } = harness(child, { ensurePinned: () => undefined });
     const actuation = await backend.wake(
       spec(),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(calls[0]!.opts.env?.['PATH']).toBe(process.env['PATH']);
     expect(actuation.outcome).toEqual({ occupied: true, session: 'fresh' });
@@ -252,7 +261,7 @@ describe('claudeCodeBackend.wake', () => {
       confirmBeatMs: 5,
       readSession: () => ({ state: 'none' }),
     });
-    const c = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const c = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
     const actuation = await backend.wake(spec(), c);
 
     expect(invalidated).toBe(1);
@@ -310,10 +319,96 @@ describe('claudeCodeBackend.wake', () => {
   it('verified occupancy with non-wake provenance still occupies but names the stale adapter', async () => {
     const child = new FakeChild();
     const { backend } = harness(child);
-    const context = ctx(async () => ({ occupied: true, provenance: 'session' }));
+    const context = ctx(async () => ({
+      occupied: true,
+      provenance: 'session',
+      lease_matched: true,
+    }));
     const actuation = await backend.wake(spec(), context);
     expect(actuation.outcome.occupied).toBe(true);
     expect(context.lines.join('\n')).toMatch(/predate|rebuild/);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  /**
+   * ADR 241 increment 3 (lane 01M1HQC9JJ). Until 2026-09-02 this backend gated on `occupied`
+   * alone — the only one of five that never read `lease_matched` — so a presence row belonging to
+   * ANOTHER session (a human in the worktree, a prior wake inside its 30m timeout) was credited as
+   * this wake's own: reported delivered, and the spawned child left running beside the occupant.
+   * The stub at the top of this file returned `{occupied: true}` with no `lease_matched` field at
+   * all, which is why the gap survived every green run. The contract (backend.ts): `occupied &&
+   * !lease_matched` is a deferral, never a failure and never a success.
+   */
+  it('a seat held by ANOTHER session defers, never charges, and kills the child (ADR 241 inc 3)', async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const context = ctx(async () => ({
+      occupied: true,
+      provenance: 'session',
+      lease_matched: false,
+    }));
+    const actuation = await backend.wake(spec(), context);
+    expect(actuation.outcome.occupied).toBe(false);
+    expect(actuation.outcome.deferred).toBe(true);
+    expect(actuation.outcome.reason).toMatch(/held by another session/);
+    expect(actuation.outcome.reason).toContain('L1');
+    // The child was never ours to keep: killed, not left burning beside the occupant.
+    expect(child.signals.length).toBeGreaterThan(0);
+    // A foreign row is not a stale adapter dist — the rebuild note must not fire here.
+    expect(context.lines.join('\n')).not.toMatch(/predate|rebuild/);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('a seat held by ANOTHER WAKE defers too — provenance "wake" without a lease match is not ours', async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: false })),
+    );
+    expect(actuation.outcome.occupied).toBe(false);
+    expect(actuation.outcome.deferred).toBe(true);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it("an unattested occupant the loop identifies as this wake's own child is NOT killed (ADR 379)", async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const context = ctx(async () => ({
+      occupied: true,
+      provenance: 'session',
+      lease_matched: false,
+      own_unattested: true,
+    }));
+    const actuation = await backend.wake(spec(), context);
+    expect(actuation.outcome.occupied).toBe(true);
+    expect(actuation.outcome.deferred).toBeUndefined();
+    // The whole point: the actuator held the evidence that this was its own child and did not
+    // kill it on the strength of one missing env var (ADR 354 §Consequences, the named residual).
+    expect(child.signals).toHaveLength(0);
+    expect(context.lines.join('\n')).toMatch(/credited as this wake's own/);
+    expect(context.lines.join('\n')).toMatch(/ADR 379/);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('a resume attempt that finds the seat held by another session does NOT fall through to a fresh spawn', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, { readSession: () => resumable() });
+    const actuation = await backend.wake(
+      spec(),
+      ctx(async () => ({ occupied: true, provenance: 'session', lease_matched: false })),
+    );
+    // One spawn (the --resume), then a deferral — a fresh fallback would be a second process
+    // aimed into a worktree someone else is sitting in.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args).toContain('--resume');
+    expect(actuation.outcome.occupied).toBe(false);
+    expect(actuation.outcome.deferred).toBe(true);
+    expect(actuation.outcome.session).toBe('resumed');
     child.exit(0);
     await actuation.settled;
   });
@@ -347,7 +442,31 @@ describe('claudeCodeBackend.wake', () => {
     expect(actuation.outcome.occupied).toBe(false);
     expect(child.signals).toContain('SIGTERM');
     expect(actuation.outcome.reason).toMatch(/watchdog timeout \(50ms\)|exited/);
-    await actuation.settled;
+    // Lane 01M1G310Y7: a killed run prints no JSON summary, and until 2026-09-02 that meant NO
+    // completion at all — the most expensive wake shape there is (a full timeout_ms of a live
+    // agent) priced at nothing. 26 of the 55 unpriced claude-code settles on the live host log
+    // were exactly this. Wall-clock is the host's own measurement and does not need the child's
+    // cooperation to exist.
+    const completion = await actuation.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+    expect(completion?.duration_ms).toBeGreaterThanOrEqual(50);
+    expect(completion?.cost_usd).toBeUndefined();
+  });
+
+  it('a run that exits with no parseable summary still carries the host-measured wall clock', async () => {
+    // The `exit=error` / `exit=0 with no JSON` shapes — 25 more of the 55 unpriced settles.
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => ({ occupied: false }));
+    const wake = backend.wake(spec({ bounds: { timeout_ms: 1_000 } }), c);
+    await Promise.resolve();
+    child.stdout.emit('data', Buffer.from('not json at all\n'));
+    child.exit(1);
+    const actuation = await wake;
+    expect(actuation.outcome.occupied).toBe(false);
+    const completion = await actuation.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+    expect(completion?.cost_usd).toBeUndefined();
   });
 
   // A host that cannot spawn is DEFERRED, never FAILED (ADR 221). A failure consumes an attempt
@@ -359,7 +478,7 @@ describe('claudeCodeBackend.wake', () => {
     const backend = claudeCodeBackend({ resolveBin: async () => null });
     const actuation = await backend.wake(
       spec(),
-      ctx(async () => ({ occupied: true })),
+      ctx(async () => ({ occupied: true, lease_matched: true })),
     );
     expect(actuation.outcome.occupied).toBe(false);
     expect(actuation.outcome.deferred).toBe(true);
@@ -373,7 +492,7 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     const { backend, calls } = harness(child, { readSession: () => resumable() });
     const actuation = await backend.wake(
       spec(),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('cap-1234');
@@ -388,7 +507,7 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     const { backend, calls } = harness(child, { readSession: () => resumable() });
     const actuation = await backend.wake(
       spec({ order: order({ intended_delivery: 'fresh', continuity_requirement: 'portable' }) }),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args).not.toContain('--resume');
@@ -413,7 +532,9 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     // (no explicit window) does — occupancy only ever comes from the roster, either path.
     const context = ctx(((_seat: string, windowMs?: number) =>
       Promise.resolve(
-        windowMs === 5 ? { occupied: false } : { occupied: true, provenance: 'wake' },
+        windowMs === 5
+          ? { occupied: false }
+          : { occupied: true, provenance: 'wake', lease_matched: true },
       )) as never);
     const actuation = await backend.wake(spec(), context);
 
@@ -453,7 +574,11 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     async (_name, liveness, re) => {
       const child = new FakeChild();
       const { backend, calls } = harness(child, { readSession: () => liveness });
-      const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+      const context = ctx(async () => ({
+        occupied: true,
+        provenance: 'wake',
+        lease_matched: true,
+      }));
       const actuation = await backend.wake(spec(), context);
       expect(calls).toHaveLength(1);
       expect(calls[0]!.args).toContain('--session-id');
@@ -475,7 +600,7 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     const { backend, calls } = harness(child, {
       readSession: () => resumable({ transcriptBytes: 460_597 }), // dolly, the $2.53 resume
     });
-    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
     const actuation = await backend.wake(spec(), context);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args).not.toContain('--resume');
@@ -491,7 +616,7 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     const { backend, calls } = harness(child, {
       readSession: () => resumable({ transcriptBytes: 236_590 }), // dolly, the $1.21 resume
     });
-    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
     const actuation = await backend.wake(spec(), context);
     expect(calls[0]!.args).toContain('--resume');
     expect(context.lines.join('\n')).not.toContain('resume skipped');
@@ -502,7 +627,7 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
   it('the pre-capture world (state none) goes fresh QUIETLY — no skip noise', async () => {
     const child = new FakeChild();
     const { backend, calls } = harness(child); // default readSession: none
-    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
     const actuation = await backend.wake(spec(), context);
     expect(calls[0]!.args).toContain('--session-id');
     expect(context.lines.join('\n')).not.toContain('resume skipped');
@@ -524,7 +649,11 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
       confirmBeatMs: 30,
     });
     // The roster says occupied instantly on BOTH attempts (the debris row lingers)…
-    const context = ctx(async () => ({ occupied: true, provenance: 'session' }));
+    const context = ctx(async () => ({
+      occupied: true,
+      provenance: 'session',
+      lease_matched: true,
+    }));
     // …but the resume child dies nonzero during the confirmation beat.
     setTimeout(() => resumeChild.exit(1), 10);
     const actuation = await backend.wake(spec(), context);
@@ -546,7 +675,7 @@ describe('claudeCodeBackend.wake — the resume ladder (inc 4)', () => {
     });
     const actuation = await backend.wake(
       spec(),
-      ctx(async () => ({ occupied: true })),
+      ctx(async () => ({ occupied: true, lease_matched: true })),
     );
     expect(calls).toHaveLength(0);
     expect(actuation.outcome.occupied).toBe(false);
@@ -575,7 +704,7 @@ describe('claudeCodeBackend.wake — split guard/resume (ADR 166 inc 3)', () => 
     });
     const actuation = await backend.wake(
       spec(),
-      ctx(async () => ({ occupied: true })),
+      ctx(async () => ({ occupied: true, lease_matched: true })),
     );
     expect(calls).toHaveLength(0);
     expect(actuation.outcome).toMatchObject({
@@ -603,7 +732,7 @@ describe('claudeCodeBackend.wake — split guard/resume (ADR 166 inc 3)', () => 
         },
       }),
     });
-    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
     const actuation = await backend.wake(spec(), context);
     expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('enum-5678');
     expect(actuation.outcome).toEqual({ occupied: true, session: 'resumed' });
@@ -629,7 +758,7 @@ describe('claudeCodeBackend.wake — split guard/resume (ADR 166 inc 3)', () => 
           },
         }),
     });
-    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
     const actuation = await backend.wake(spec(), context);
     expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('enum-9012');
     expect(actuation.outcome.session).toBe('resumed');
@@ -652,7 +781,7 @@ describe('claudeCodeBackend.wake — split guard/resume (ADR 166 inc 3)', () => 
         },
       }),
     });
-    const context = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const context = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
     const actuation = await backend.wake(spec(), context);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args).not.toContain('--resume');
@@ -679,7 +808,7 @@ describe('claudeCodeBackend.wake — split guard/resume (ADR 166 inc 3)', () => 
     });
     const actuation = await backend.wake(
       spec(),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('cap-1234');
     child.exit(0);
@@ -704,6 +833,101 @@ describe('parseRunSummary (completion telemetry, never verification)', () => {
   it('garbage stdout reads as null (a hung headless run must cost nothing here)', () => {
     expect(parseRunSummary('not json at all')).toBeNull();
   });
+  it("an error result carries the harness's own words (billing_error on delta, 2026-09-06)", () => {
+    const out = JSON.stringify({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      result: 'Credit balance is too low',
+      total_cost_usd: 0,
+      duration_ms: 9_900,
+    });
+    expect(parseRunSummary(out)).toEqual({
+      cost_usd: 0,
+      duration_ms: 9_900,
+      is_error: true,
+      error_text: 'Credit balance is too low',
+    });
+  });
+  it('a clean result carries no error_text, even when `result` is set', () => {
+    const out = JSON.stringify({ type: 'result', is_error: false, result: 'done' });
+    expect(parseRunSummary(out)).toEqual({ is_error: false });
+  });
+});
+
+describe('a wake that cannot run says WHY (finding 18 fix 3)', () => {
+  // 2026-09-06 04:00–05:35Z: four delta wakes exited 1 in ~10 s at $0.0000 because the model
+  // credential returned `billing_error: Credit balance is too low`, and host.log said only
+  // "run exited (code 1) without occupying the seat". The reason is the operator's only line.
+  it("the harness's error text rides the failure reason", async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => {
+      child.stdout.emit(
+        'data',
+        Buffer.from(
+          JSON.stringify({
+            type: 'result',
+            subtype: 'error_during_execution',
+            is_error: true,
+            result: 'Credit balance is too low',
+            total_cost_usd: 0,
+          }),
+        ),
+      );
+      child.exit(1);
+      return { occupied: false };
+    });
+    const actuation = await backend.wake(spec(), c);
+    expect(actuation.outcome.occupied).toBe(false);
+    expect(actuation.outcome.reason).toBe(
+      'run exited (code 1) without occupying the seat — harness: Credit balance is too low',
+    );
+  });
+  it("with no JSON summary, the last stderr line is the reason's tail", async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => {
+      child.stderr.emit(
+        'data',
+        Buffer.from('warning: something\nError: MCP server "musterd" failed to start\n'),
+      );
+      child.exit(1);
+      return { occupied: false };
+    });
+    const actuation = await backend.wake(spec(), c);
+    expect(actuation.outcome.reason).toBe(
+      'run exited (code 1) without occupying the seat — harness: Error: MCP server "musterd" failed to start',
+    );
+  });
+  it('a clean exit that never occupied still says so, without inventing a cause', async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', is_error: false })));
+      child.exit(0);
+      return { occupied: false };
+    });
+    const actuation = await backend.wake(spec(), c);
+    expect(actuation.outcome.reason).toBe('run exited (code 0) without occupying the seat');
+  });
+  it('the reason stays inside the wire bound (200) with a long harness error', async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => {
+      child.stdout.emit(
+        'data',
+        Buffer.from(JSON.stringify({ type: 'result', is_error: true, result: 'x'.repeat(500) })),
+      );
+      child.exit(1);
+      return { occupied: false };
+    });
+    const actuation = await backend.wake(spec(), c);
+    expect(actuation.outcome.reason!.length).toBeLessThanOrEqual(200);
+    expect(actuation.outcome.reason).toMatch(
+      /^run exited \(code 1\) without occupying the seat — harness: x+$/,
+    );
+  });
 });
 
 describe('WakeCompletion (inc 5): settled resolves the run summary; fast-fail merges', () => {
@@ -712,7 +936,7 @@ describe('WakeCompletion (inc 5): settled resolves the run summary; fast-fail me
     const { backend } = harness(child);
     const actuation = await backend.wake(
       spec(),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(actuation.outcome).toEqual({ occupied: true, session: 'fresh' });
     child.stdout.emit(
@@ -767,7 +991,7 @@ describe('WakeCompletion (inc 5): settled resolves the run summary; fast-fail me
           resumeChild.exit(1);
           return { occupied: false };
         }
-        return { occupied: true, provenance: 'wake' };
+        return { occupied: true, provenance: 'wake', lease_matched: true };
       }),
     );
     expect(actuation.outcome.occupied).toBe(true);
@@ -820,7 +1044,7 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
     });
     const actuation = await backend.wake(
       spec({ order: eligible() }),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('thread-session-9');
     expect(actuation.outcome).toMatchObject({ occupied: true, session: 'resumed' });
@@ -841,7 +1065,7 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
     });
     const actuation = await backend.wake(
       spec({ order: order({ intended_delivery: 'fresh', continuity_requirement: 'portable' }) }),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(reads).toBe(0);
     expect(calls[0]!.args).not.toContain('--resume');
@@ -856,7 +1080,7 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
       readContinuity: () => registry([binding({ thread_id: 'a-different-thread' })]),
       statTranscript: healthyStat,
     });
-    const c = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const c = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
     const actuation = await backend.wake(spec({ order: eligible() }), c);
     expect(calls[0]!.args).not.toContain('--resume');
     expect(actuation.outcome).toMatchObject({
@@ -876,7 +1100,7 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
       readContinuity: () => registry([binding()]),
       statTranscript: () => ({ bytes: 5_000_000, mtimeMs: Date.now() }),
     });
-    const c = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const c = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
     const actuation = await backend.wake(spec({ order: eligible() }), c);
     expect(calls[0]!.args).not.toContain('--resume');
     expect(c.lines.join('\n')).toMatch(/hygiene bound/i);
@@ -893,7 +1117,7 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
     });
     const actuation = await backend.wake(
       spec({ order: eligible() }),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(calls[0]!.args).not.toContain('--resume');
     child.exit(0);
@@ -912,7 +1136,7 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
     });
     const actuation = await backend.wake(
       spec({ order: eligible() }),
-      ctx(async () => ({ occupied: ++call > 1, provenance: 'wake' })),
+      ctx(async () => ({ occupied: ++call > 1, provenance: 'wake', lease_matched: true })),
     );
     expect(calls).toHaveLength(2);
     expect(calls[0]!.args).toContain('--resume');
@@ -954,7 +1178,7 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
       const { backend } = harness(child, { readSession: () => resumable(), ...c.deps });
       const actuation = await backend.wake(
         spec({ order: eligible() }),
-        ctx(async () => ({ occupied: true, provenance: 'wake' })),
+        ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
       );
       expect(actuation.outcome, c.name).toMatchObject({ exact_match: c.expected });
       child.exit(0);
@@ -967,7 +1191,7 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
     const { backend } = harness(child, { readSession: () => resumable() });
     const actuation = await backend.wake(
       spec({ order: order({ intended_delivery: 'fresh' }) }),
-      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+      ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true })),
     );
     expect(actuation.outcome).not.toHaveProperty('exact_match');
     child.exit(0);

@@ -40,7 +40,45 @@
      own value. Before this pair existed --lc-warn was defined NOWHERE and its inline fallback was
      doing the work, which is how an amber this light nearly shipped as body copy (lane 01KZA27Q7C). */
   --lc-warn: #f4cf52; /* FILLS ONLY — the idle/away presence dots */
-  --lc-warn-ink: #7a4e06; /* 4.92:1 on the darkest paper it lands on — anything read as text */
+  /* ── the room's type scale ─────────────────────────────────────────────────────────────────────
+     Counted 2026-08-28 across the four surfaces the office lays over itself: SEVEN absolute sizes in
+     a 5.5px range — 7.5, 8, 9, 10, 10.5, 11.5, 13 — with 10 and 10.5 doing the same job half a pixel
+     apart on different components. That is not a scale, it is a list of numbers that accumulated, and
+     the only thing it tells the next person is that any value is allowed.
+
+     The steps are named for ROLE, not for size, and that is the point. A numeric scale (`--type-1`,
+     `--type-2`) still leaves you guessing which number a new label deserves; a role scale makes the
+     question answerable — you are labelling a tag, or a name, or something a member actually said —
+     and the size follows from the answer. A new surface that fits none of these roles is telling you
+     something worth stopping for, rather than quietly inventing an eighth size.
+
+     Only 10.5 was collapsed (into `aside`). The 7.5/8 pair reads like drift and is NOT: the nameplate
+     metrics are deliberately tight because collapsed plate width is what decides whether plates
+     collide over the desks at twenty seats — see the note above `.lc-gl-label__plate`. It stays, and
+     it stays documented as a decision so nobody "tidies" it into the scale later.
+
+     DEFINED ON `.lc`, not on the paper-set block below, and that is not tidiness. The workstack and
+     the caption rail are NOT inside `.lc-ov` / `.lc-gl-labels` — `.lc-office__work .lc-workstack`
+     redeclares the whole paper set locally for exactly that reason. Scoped with the paper set, three
+     of these six tokens resolved to nothing on the two surfaces that most needed them, and an
+     unresolved `font-size: var(…)` is not an error: the declaration is simply dropped and the element
+     silently inherits. Caught here by checking where the elements actually mount rather than by
+     reading the CSS. `tokens:check` guards colour tokens against precisely this and does not yet
+     cover length tokens, so nothing downstream would have said a word. */
+  --lc-type-tag: 7.5px; /* a classification, not an identity: `service`, `dnd` */
+  --lc-type-name: 8px; /* who this is — the nameplate's own line */
+  --lc-type-meta: 9px; /* the card's labels and counts */
+  --lc-type-aside: 10px; /* secondary chrome: a recipient chip, a row, a "there's more" */
+  --lc-type-body: 11.5px; /* what a member actually said */
+  --lc-type-caption: 13px; /* the one line the room says to a stranger */
+
+  /* Anything read as text; the FILL amber (`--lc-warn`) is never text — see packages/web/AGENTS.md.
+     Re-measured 2026-08-28: the nameplate's stock dropped to `--lc-paper-2` for the paper ranking,
+     which made a NEW darkest paper for this ink and took the old #7a4e06 from 4.92 to 4.67 sampled.
+     Still AA, but 0.17 of margin is not a margin — the `dnd` tag beside this token already has a
+     note recording that a 14% amber fill lightened its ground to 4.35 and failed the gate, so this
+     is the second time this one tag has spent its headroom. Darkened a step to buy it back. */
+  --lc-warn-ink: #744805; /* 5.11:1 on the darkest paper it lands on (paper-2 under the room) */
   /* The keyboard focus ring. --lc-accent is 2.66:1 on the ground — a ring drawn in it is decor,
      not an indicator (WCAG 1.4.11 wants ≥3:1 for functional marks). This mustard holds 3.3:1 on
      surface-3, the darkest chrome a ring lands on, and ~4:1 on the paper family. */
@@ -98,10 +136,17 @@
   --lc-r-sm: 6px;
   --lc-r-md: 9px;
   --lc-r-lg: 14px;
-  --lc-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --lc-ease-quart: cubic-bezier(0.25, 1, 0.5, 1);
-  --lc-fast: 140ms;
-  --lc-med: 220ms;
+  /* The motion scale — mirrors office-scene/motion.ts, enforced by `pnpm tokens:check`.
+     Frame counts at the 720p25 capture rate: 3, 5, 7, 10, 15. A duration that is not a whole
+     frame lands mid-frame on the stream and its last step renders partial — that is the judder. */
+  --lc-dur-1: 120ms;
+  --lc-dur-2: 200ms;
+  --lc-dur-3: 280ms;
+  --lc-dur-4: 400ms;
+  --lc-dur-5: 600ms;
+  --lc-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --lc-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --lc-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
   --lc-z-rail: 1;
   --lc-z-overlay: 5;
 
@@ -114,8 +159,24 @@
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
-  /* daylight horizon: soft morning cream → warm gold (matches --sky, tokens.css light) */
-  background: linear-gradient(178deg, #e9d9c3 0%, #f3e7d4 44%, #ffe9c8 100%);
+  /* ── THE FRAME IS COOL; THE ROOM IS WARM ──────────────────────────────────────────────────────
+     (nick, 2026-09-02: "did we overrotate with the musterd colors?")
+
+     Yes — on the frame, not on the room. This gradient was cream → warm gold, the topbar was cream,
+     the paper chrome is warm card stock and the office floor is sunlit tan: FOUR surfaces in the
+     same 30–45° band, stacked. The room's own art was never the problem — blue-grey walls, green
+     plants, twelve member hues — but it was ringed by its own colour, so the office read as a beige
+     sticker on a beige page rather than as a lit room standing in a space.
+
+     The fix costs the room nothing: not one paper token, floor colour or scene value moves. Only
+     the ground behind the canvas cools to a desaturated putty, and the warm room now has something
+     to be warm AGAINST. Mustard goes back to being an accent — the mark, the LIVE dot, the focus
+     ring — instead of the ground it was competing with.
+
+     Still a horizon rather than a flat fill, and still very slightly warm at the base: a cold flat
+     panel behind a sunlit isometric room reads as a screenshot pasted on a wall. The gradient is
+     what keeps it reading as air. */
+  background: linear-gradient(178deg, #cfd3d6 0%, #dfe0dd 46%, #ece5d9 100%);
 }
 .lc ::selection {
   background: color-mix(in srgb, var(--lc-accent) 34%, transparent);
@@ -124,7 +185,11 @@
   color: var(--lc-text);
 }
 
-/* ─── top bar (glass over the dusk) ───────────────────────────────────── */
+/* ─── top bar (glass over the ground) ─────────────────────────────────────
+   Follows the frame, not the room: a near-white glass with the warmth taken out, so the bar reads
+   as part of the cool surround rather than as one more cream band above a cream page. It keeps its
+   backdrop blur — the topbar is chrome that never appears on the /broadcast capture, so the
+   office-block no-blur rule does not reach it. */
 .lc__topbar {
   display: flex;
   align-items: center;
@@ -132,7 +197,7 @@
   height: 52px;
   padding: 0 var(--lc-7);
   border-bottom: 1px solid var(--lc-border);
-  background: rgba(255, 250, 240, 0.6);
+  background: rgba(250, 251, 252, 0.68);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   flex: 0 0 auto;
@@ -179,9 +244,9 @@
   color: var(--lc-muted);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc__sound:hover,
 .lc__pbtn:hover {
@@ -214,6 +279,216 @@
   fill: none;
   stroke: currentColor;
 }
+
+/* ─── Shared Seeds tray (ADR 319) ───────────────────────────────────── */
+.lc-seeds {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--lc-z-overlay) + 3);
+  display: flex;
+  justify-content: flex-end;
+  background: color-mix(in srgb, var(--lc-ground) 58%, transparent);
+  backdrop-filter: blur(3px);
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
+}
+.lc-seeds__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 92vw);
+  height: 100%;
+  background: var(--lc-ground-2);
+  border-left: 1px solid var(--lc-border-2);
+  box-shadow: -24px 0 70px -40px rgba(42, 33, 24, 0.55);
+  outline: none;
+  animation: lc-seeds-in var(--lc-dur-3) var(--lc-ease-out) both;
+}
+@keyframes lc-seeds-in {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+}
+.lc-seeds__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--lc-8) var(--lc-7) var(--lc-5);
+  border-bottom: 1px solid var(--lc-border);
+}
+.lc-seeds__eyebrow {
+  color: var(--lc-accent-ink);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+.lc-seeds__head h2 {
+  margin: 3px 0 0;
+  font-size: 22px;
+  line-height: 1.1;
+}
+.lc-seeds__close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--lc-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lc-dim);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lc-seeds__tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-3);
+  padding: var(--lc-4) var(--lc-7);
+  border-bottom: 1px solid var(--lc-border);
+}
+.lc-seeds__tabs button {
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lc-dim);
+  font: 700 11px/1 var(--font-mono, monospace);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.lc-seeds__tabs button.is-on {
+  border-color: color-mix(in srgb, var(--lc-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 12%, transparent);
+  color: var(--lc-accent-ink);
+}
+.lc-seeds__tabs > span {
+  margin-left: auto;
+  color: var(--lc-muted);
+  font: 11px/1 var(--font-mono, monospace);
+}
+.lc-seeds__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--lc-5) var(--lc-6) var(--lc-8);
+}
+.lc-seeds__empty,
+.lc-seeds__error {
+  margin: var(--lc-8) var(--lc-3);
+  color: var(--lc-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.lc-seeds__error {
+  color: var(--lc-danger-ink);
+}
+.lc-seed {
+  margin-bottom: var(--lc-4);
+  padding: var(--lc-5);
+  border: 1px solid var(--lc-border);
+  border-left: 3px solid var(--lc-accent);
+  border-radius: var(--lc-r-md);
+  background: var(--lc-surface);
+}
+.lc-seed--completed,
+.lc-seed--promoted {
+  border-left-color: var(--lc-success);
+}
+.lc-seed--needs_clarification {
+  border-left-color: var(--lc-warn-ink);
+}
+.lc-seed__meta,
+.lc-seed__byline {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--lc-4);
+  color: var(--lc-muted);
+  font: 10px/1.3 var(--font-mono, monospace);
+}
+.lc-seed__state {
+  color: var(--lc-accent-ink);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.lc-seed--completed .lc-seed__state,
+.lc-seed--promoted .lc-seed__state {
+  color: var(--lc-success-ink);
+}
+.lc-seed__idea {
+  margin: var(--lc-4) 0;
+  color: var(--lc-text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.lc-seed__thread {
+  margin-top: var(--lc-4);
+  padding: var(--lc-4) var(--lc-5);
+  border-radius: var(--lc-r-sm);
+  background: var(--lc-surface-2);
+}
+.lc-seed__thread p,
+.lc-seed__conclusion {
+  margin: 0 0 var(--lc-3);
+  color: var(--lc-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.lc-seed__thread p:last-child {
+  margin-bottom: 0;
+}
+.lc-seed__result {
+  margin-top: var(--lc-4);
+  color: var(--lc-dim);
+  font-size: 12px;
+}
+.lc-seed__result summary {
+  color: var(--lc-accent-ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+.lc-seed__result > div {
+  margin-top: var(--lc-3);
+}
+.lc-seed__result b {
+  font: 700 10px/1.3 var(--font-mono, monospace);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.lc-seed__result p {
+  margin: 2px 0 0;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.lc-seed__promotion {
+  margin: var(--lc-4) 0 0;
+  color: var(--lc-muted);
+  font: 10px/1.3 var(--font-mono, monospace);
+  text-transform: uppercase;
+}
+.lc-seed__lane {
+  display: inline-block;
+  margin-top: var(--lc-4);
+  color: var(--lc-lane-ink);
+  font: 700 11px/1.3 var(--font-mono, monospace);
+  text-decoration: none;
+}
+.lc-seed__lane:hover {
+  text-decoration: underline;
+}
+.lc-seeds__foot {
+  padding: var(--lc-4) var(--lc-7);
+  border-top: 1px solid var(--lc-border);
+  color: var(--lc-muted);
+  font-size: 11px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-seeds,
+  .lc-seeds__panel {
+    animation: none;
+  }
+}
 /* ─── office clock ────────────────────────────────────────────────────────
  * Wall time as a glass pill: tabular digits, each in a fixed-width slot that a changed glyph rolls
  * up through (the seconds column moves every tick, the hour once an hour). A sheen sweeps the pill on
@@ -239,8 +514,8 @@
   overflow: hidden;
   isolation: isolate;
   transition:
-    border-color var(--lc-med) var(--lc-ease),
-    box-shadow var(--lc-med) var(--lc-ease);
+    border-color var(--lc-dur-2) var(--lc-ease-out),
+    box-shadow var(--lc-dur-2) var(--lc-ease-out);
 }
 .lc-clock:hover {
   border-color: color-mix(in srgb, var(--lc-accent) 40%, transparent);
@@ -260,7 +535,7 @@
     transparent 62%
   );
   transform: translateX(-120%);
-  animation: lc-clock-sheen 7s var(--lc-ease-quart) infinite;
+  animation: lc-clock-sheen 7s var(--lc-ease-out) infinite;
   pointer-events: none;
 }
 @keyframes lc-clock-sheen {
@@ -287,7 +562,7 @@
   display: inline-block;
   width: 0.62em;
   text-align: center;
-  animation: lc-clock-roll 420ms var(--lc-ease) both;
+  animation: lc-clock-roll var(--lc-dur-4) var(--lc-ease-out) both;
 }
 @keyframes lc-clock-roll {
   from {
@@ -308,7 +583,7 @@
   width: 0.34em;
   text-align: center;
   color: var(--lc-accent-ink);
-  animation: lc-clock-breathe 2s var(--lc-ease) infinite;
+  animation: lc-clock-breathe 2s var(--lc-ease-out) infinite;
 }
 /* A breath, not a blink: the colons stay legible at the trough — a colon that vanishes reads as a
    gap in the number rather than as a ticking clock. */
@@ -363,7 +638,7 @@
 .lc__status--live::before {
   background: var(--lc-success);
   opacity: 1;
-  animation: lc-ping 2.4s var(--lc-ease) infinite;
+  animation: lc-ping 2.4s var(--lc-ease-out) infinite;
 }
 .lc__status--error {
   color: var(--lc-danger-ink);
@@ -413,8 +688,8 @@
   font: inherit;
   font-size: 12px;
   transition:
-    border-color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease);
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc__error button:hover {
   background: rgba(255, 255, 255, 0.07);
@@ -442,8 +717,8 @@
   grid-template-columns: var(--col-office) var(--col-roster) var(--col-stream);
   flex: 1;
   min-height: 0;
-  animation: lc-fade var(--lc-med) var(--lc-ease) both;
-  transition: grid-template-columns 380ms var(--lc-ease);
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
+  transition: grid-template-columns var(--lc-dur-4) var(--lc-ease-out);
 }
 /* Pin each panel to its own grid track. Required because the responsive rules below hide a panel
    with `display: none` (roster ≤1080px, office ≤880px), and a `display:none` grid item is pulled out
@@ -512,10 +787,10 @@
   color: var(--lc-dim);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-collapse:hover {
   color: var(--lc-accent-bright);
@@ -575,6 +850,116 @@
   background: var(--lc-ground-2);
 }
 
+/* The two rails share one box and stack — the asks rail above, the huddle rail beneath it. Column
+   flow rather than a second absolute box: an asks rail that grows a row must push the huddles down,
+   never sit on top of them, and nothing here should need a magic top offset to stay clear. */
+.lc-office__asks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-2);
+}
+
+/* ─── huddles: several seats on one topic (ADR 378) ───────────────────────
+   One row per open huddle, under the asks rail. Opaque paper for the same reason the asks rail's is
+   (see above): over the room the 12% bleed is a live WebGL floor, and quiet ink over a moving floor
+   is a contrast ratio that depends on where a character is standing. */
+.lc-huddles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-2);
+}
+
+.lc-huddle {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--lc-2) var(--lc-4);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-r-sm);
+  background: var(--lc-ground-2);
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 0;
+}
+
+.lc-huddle__head,
+.lc-huddle__meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lc-4);
+  min-width: 0;
+}
+
+.lc-huddle__topic {
+  color: var(--lc-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The opening line takes whatever room is left and gives it up first. */
+.lc-huddle__line {
+  color: var(--lc-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-huddle__seats {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lc-2);
+  white-space: nowrap;
+}
+
+/* The gathered seats as dots of their own colour — the same hue the floor and the roster draw them
+   in, so the three surfaces name one member one way. The FILL is `memberAvatar`, not `memberColor`:
+   a circle carrying a white letter is text on a fill, and the floor's lighter fill measured 1.45:1
+   here (the a11y gate, once the fixture opened a huddle for it to see). The initials are decoration
+   over the names beside them, which is what a reader gets the roll-call from. */
+.lc-huddle__seat {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--lc-huddle-hue, var(--lc-surface-2));
+  color: #fff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.lc-huddle__who {
+  color: var(--lc-dim);
+}
+
+.lc-huddle__silent,
+.lc-huddle__count {
+  color: var(--lc-faint);
+  white-space: nowrap;
+}
+
+/* Where the output lands (ADR 378) — the quietest thing on the row and the first to give up width,
+   because a huddle's anchor matters most when you are about to close it. */
+.lc-huddle__anchor {
+  color: var(--lc-faint);
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Over what it declared. It says so and stays — the surface never enforces a budget the daemon
+   refuses to keep (ADR 378 §4), so this is a colour, not a state change. */
+.lc-huddle.is-spent .lc-huddle__count {
+  color: var(--lc-warn-ink);
+  font-weight: 600;
+}
+
 /* ─── the room's watermark ────────────────────────────────────────────────
    The only place the brand appears inside the scene itself — bottom-right, opposite the reel card,
    quiet enough to live under everything. It exists for the frame that leaves this app: a clip or a
@@ -600,10 +985,36 @@
   letter-spacing: -0.02em;
 }
 
+/* The address half of the lockup (`domain` on MusterdWord — /broadcast's mark only). A step quieter
+   than the name, because the brand is the word and the domain is how you reach it; at equal weight
+   the mark stops being a mark and becomes a URL. Quieter, not smaller: shrinking it would make the
+   half that has to survive the encode the half that survives it worst. */
+.lc-office__mark-lockup .brand__tld {
+  opacity: 0.72;
+}
+
 /* The chip's mustard block at full strength would be the loudest thing in the corner; the group
    opacity above mutes chip and word together so they fade as one object. */
 .lc-office__mark svg {
   border-radius: 4px;
+}
+
+/* ─── the corner the route speaks from ────────────────────────────────────
+   Stacked above the watermark, same right edge, and unlike the watermark NOT hidden from
+   assistive tech and NOT washed out: what sits here is a fact the page asserts about itself
+   (where to find us; that this feed may blink while the team ships the thing being watched).
+   `/broadcast` fills it; `/live` leaves it empty. Content-sized so the room keeps every pixel. */
+.lc-office__corner {
+  position: absolute;
+  right: var(--lc-5);
+  bottom: calc(var(--lc-4) + 26px);
+  z-index: var(--lc-z-overlay);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--lc-2);
+  pointer-events: none;
+  max-width: 44%;
 }
 .lc-office__collapse .lc-collapse {
   background: rgba(20, 15, 12, 0.55);
@@ -659,10 +1070,10 @@
   cursor: pointer;
   font: inherit;
   overflow: hidden;
-  animation: lc-rail-in 320ms var(--lc-ease) both;
+  animation: lc-rail-in var(--lc-dur-3) var(--lc-ease-out) both;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-rail--right {
   border-inline-end: 0;
@@ -690,7 +1101,7 @@
     transparent
   );
   opacity: 0.75;
-  transition: opacity var(--lc-med) var(--lc-ease);
+  transition: opacity var(--lc-dur-2) var(--lc-ease-out);
 }
 .lc-rail--right::before {
   inset-inline-start: auto;
@@ -717,8 +1128,8 @@
   border: 1px solid var(--lc-border);
   background: rgba(255, 255, 255, 0.04);
   transition:
-    transform var(--lc-med) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease);
+    transform var(--lc-dur-2) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-rail__chevron svg {
   width: 15px;
@@ -900,7 +1311,7 @@
 }
 .lc-workstack__title-label {
   font-family: var(--font-mono, monospace);
-  font-size: 9px;
+  font-size: var(--lc-type-meta);
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -908,11 +1319,89 @@
      sampling the painted pixel. #8a6508 read 4.06 there. */
   color: #734a05;
 }
+/* The narration line (first-five-seconds §2) in the header, beside the title — it replaced a
+   floating lower-third element over the room (nick, 2026-08-31). One line, truncated, quiet:
+   the room's own sentence, not a headline. Fades on change; reduced-motion needs no branch
+   because the fade is a plain opacity transition. */
+/* ── the narration pill (CaptionPill.tsx) ───────────────────────────────────────────────────────
+   One transient sentence about a real moment. It used to be flat grey italic, which made an
+   acceptance and an urgent ask look identical (nick, 2026-08-31). Now: a dot in the actor's own
+   colour and a tone tint from the act family. Colour is never the only signal — the sentence says
+   the same thing in words, and every tone's INK token is the measured 4.6:1 sibling of its fill
+   (packages/web/AGENTS.md: a fill used as text is the mistake those pairs exist to prevent). */
+.lc-caption {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+.lc-caption__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lc-2, 4px);
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px var(--lc-3, 6px) 2px var(--lc-2, 4px);
+  border: 1px solid color-mix(in srgb, var(--lc-cap-tone) 42%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-cap-tone) 13%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-meta);
+  font-weight: 500;
+  color: var(--lc-cap-ink);
+  animation: lc-caption-in var(--lc-dur-2) ease-out;
+  /* The default tone, so the pill is never unstyled while a new act family is being added. */
+  --lc-cap-tone: var(--lc-info);
+  --lc-cap-ink: var(--lc-info-ink);
+}
+.lc-caption__pill.is-accept {
+  --lc-cap-tone: var(--lc-success);
+  --lc-cap-ink: var(--lc-success-ink);
+}
+.lc-caption__pill.is-ask {
+  --lc-cap-tone: var(--lc-warn);
+  --lc-cap-ink: var(--lc-warn-ink);
+}
+.lc-caption__pill.is-handoff {
+  --lc-cap-tone: var(--lc-handoff);
+  --lc-cap-ink: var(--lc-handoff-ink);
+}
+.lc-caption__pill.is-steer {
+  --lc-cap-tone: var(--lc-steer);
+  --lc-cap-ink: var(--lc-steer-ink);
+}
+.lc-caption__pill.is-presence {
+  --lc-cap-tone: var(--lc-info);
+  --lc-cap-ink: var(--lc-info-ink);
+}
+.lc-caption__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  /* Falls back to the tone when the narrator is not on the roster we can colour from. */
+  background: var(--lc-cap-tone);
+}
+.lc-caption__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lc-workstack__caption {
+  flex: 1 1 auto;
+}
+@keyframes lc-caption-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-caption__pill { animation: none; }
+}
 .lc-workstack__count,
 .lc-workstack__quiet {
   margin-left: auto;
   font-family: var(--font-mono, monospace);
-  font-size: 9px;
+  font-size: var(--lc-type-meta);
   font-weight: 500;
   color: var(--lc-paper-dim, rgba(43, 31, 19, 0.72));
 }
@@ -936,10 +1425,10 @@
   padding: 4px 7px 4px 6px;
   border-radius: 7px;
   font-family: var(--font-mono, monospace);
-  font-size: 10.5px;
+  font-size: var(--lc-type-aside);
   color: var(--lc-paper-ink);
   background: color-mix(in srgb, var(--lc-paper) 58%, transparent);
-  transition: background 160ms ease;
+  transition: background var(--lc-dur-1) ease;
 }
 .lc-workstack__row:hover {
   background: color-mix(in srgb, var(--lc-accent) 12%, var(--lc-paper));
@@ -973,7 +1462,7 @@
 .lc-workstack__said,
 .lc-workstack__more {
   flex: 0 0 auto;
-  font-size: 9px;
+  font-size: var(--lc-type-meta);
   font-weight: 600;
   letter-spacing: 0.03em;
   padding: 1px 6px;
@@ -1057,6 +1546,23 @@
   --lc-paper-drop: rgba(58, 34, 12, 0.42);
   --lc-paper-seat: rgba(58, 34, 12, 0.26);
   --lc-paper-sheen: rgba(255, 251, 240, 0.72);
+
+  /* Harness inks — one per glyph in surfaceGlyph.ts (the harnesses a provider pin cannot
+     distinguish). -ink because they colour text and glyph; there is no fill twin until something
+     actually fills with them.
+     Re-measured against the NAMEPLATE (#e9d3ab), which is the stock they actually land on. The
+     original set was measured on --lc-paper (#f3e2c3) as "the lightest stock they land on" — and
+     `lightest` was the error, twice over: the plate is DARKER than --lc-paper, so a dark ink scores
+     LOWER there, and lightest is the wrong extreme to calibrate a dark ink against in any case. The
+     harness segment renders nowhere but the plate, so the plate is the only paper that was ever
+     load-bearing. Measured 2026-09-02 by the sweep, first time these four have been measured at all:
+     codex came out 4.43 against a 4.5 requirement — a shipped AA failure — and opencode 4.54, which
+     passes by 0.04 and would not survive any paper tweak. Both moved; cursor and grok already cleared
+     it on the real paper and are untouched. The gate now measures all four (`?plates-open`). */
+  --lc-hz-codex-ink: #0e6249; /* 5.02:1 on the plate — was #0f6b52, 4.43:1, below AA */
+  --lc-hz-cursor-ink: #4f46b8; /* 4.95:1 */
+  --lc-hz-grok-ink: #8e2a7d; /* 5.17:1 — magenta, the one hue the other three leave free */
+  --lc-hz-opencode-ink: #963900; /* 4.99:1 on the plate — was #a03d00, 4.54:1, passing by 0.04 */
 }
 
 .lc-gl-labels {
@@ -1075,7 +1581,7 @@
   align-items: center;
   gap: 3px;
   white-space: nowrap;
-  transition: opacity var(--lc-med) var(--lc-ease);
+  transition: opacity var(--lc-dur-2) var(--lc-ease-out);
 }
 /* The nameplate: compact paper pill — collapsed is dot + name + provider icon; expand grows a
    divider after the name and reveals model · harness · role behind it. Broadcast always shows icon +
@@ -1096,19 +1602,66 @@
   /* Opaque for the same reason as the speech bubble directly above it in this file: the last 10% was
      the live room, so an 8px nameplate pinned to a walking character had its paper decided by the
      character it was pinned to. The plate is the smallest text on the surface and the least able to
-     afford it. Nothing else about the pill changes — rim, sheen and glow still carry the accent. */
-  background: var(--lc-paper);
-  border: 1px solid color-mix(in srgb, var(--lc-accent) 26%, var(--lc-paper-rim));
+     afford it.
+
+     THE STOCK IS `--lc-paper-2`, ONE STEP BELOW THE BUBBLE'S — and that is the whole ranking. Every
+     paper surface in this room used to be cut from `--lc-paper` with a rim and a drop shadow: the
+     speech bubble, this plate, the workstack card, the desk wedge. Same stock, same lift, same
+     value. So a name — which is ambient, and only wants to be readable when you look for it — carried
+     the same weight as an utterance, which wants to interrupt you. Nothing receded, and a room where
+     nothing recedes reads as UI laid over a painting rather than a room with labels in it.
+
+     Ranking by STOCK rather than by ink is what keeps nick's 2026-07-28 constraint intact ("need to
+     pop out more but i dont want too dark of colors"): paper-2 is a step of lightness, not a
+     darkening, and `--lc-paper-ink` measures 10.99 on it against 12.60 on paper — both far above AA,
+     so the recede costs the name nothing it needs. */
+  /* The glass, at the plate's scale (nick, 2026-09-02). Same two limits as the bubble — no
+     backdrop-filter (this paints on the /broadcast capture) and the stock stays essentially opaque
+     — but the dose is SMALLER here, and deliberately so: at 8px this is the smallest text on the
+     surface and the least able to spend contrast, and unlike a bubble it is pinned to a character
+     who may be walking, so whatever bleeds through is also MOVING. 4%, and the read comes almost
+     entirely from the specular band and the rim light. */
+  background:
+    linear-gradient(
+      170deg,
+      rgba(255, 255, 255, 0.55) 0%,
+      rgba(255, 255, 255, 0.12) 42%,
+      rgba(255, 255, 255, 0) 68%
+    ),
+    color-mix(in srgb, var(--lc-paper-2) 96%, transparent);
+  /* THE RIM IS THE MEMBER'S, not the house mustard. Every plate used to wear the same
+     `--lc-accent` edge, so on a floor of twelve the only thing saying WHO was the 5px dot — and the
+     dot is spent on posture (working / idle / away / offline), which is a different question. The
+     hue is already the body under the plate and the row in the reel; the plate was skipping it.
+     Mixed at 55% into the paper rim rather than used neat: at full strength a twelve-seat floor is
+     twelve competing outlines, which is the "nothing recedes" failure the stock ranking above
+     exists to fix — but the first cut at 34% was the opposite failure, a hue you had to be told was
+     there (checked at 2x on /office-preview: Ada's rose and Hana's blue were separable, Bo's and
+     Cy's were not). 55% is where the plates read as different people at 1x without any of them
+     shouting. Falls back to the mustard for the receptionist and anything else with no seat. */
+  border: 1px solid
+    color-mix(in srgb, var(--lc-plate-hue, var(--lc-accent)) 55%, var(--lc-paper-rim));
   font-family: var(--font-mono, monospace);
-  font-size: 8px;
+  font-size: var(--lc-type-name);
   letter-spacing: -0.01em;
   color: var(--lc-paper-ink);
+  /* A RESTING PLATE DOES NOT EMIT. The accent halo ring and the 16px accent bloom that used to sit
+     here are gone, and the drop is tightened to match. They were the bubble's own devices — a tonal
+     ring and a tonal glow are how an utterance says "this is live, and this is what kind of act it
+     was" — worn by a label that is neither. On a twenty-seat floor that is twenty little suns burning
+     continuously, and the eye cannot tell which glow means something is happening.
+
+     The emission is not deleted, it MOVES: `:hover`/`:focus-within` below still lights the ring and
+     the bloom, harder than the resting state ever did. That turns the glow from a permanent property
+     of every name into an answer to "which one am I pointing at" — which is the only question it was
+     ever able to answer. Rim, sheen and seat stay: the plate is still a lit object sitting on the
+     floor, it has just stopped radiating. */
   box-shadow:
+    /* the glass edge — a hairline of light all the way round, as on the bubble */
+    inset 0 0 0 1px rgba(255, 253, 247, 0.45),
     inset 0 1px 0 var(--lc-paper-sheen),
-    0 0 0 1px color-mix(in srgb, var(--lc-accent) 14%, transparent),
-    0 2px 6px -1px var(--lc-paper-drop),
-    0 1px 1px -0.5px var(--lc-paper-seat),
-    0 0 16px -4px color-mix(in srgb, var(--lc-accent) 32%, transparent);
+    0 1px 4px -1px var(--lc-paper-drop),
+    0 1px 1px -0.5px var(--lc-paper-seat);
   cursor: default;
 }
 .lc-gl-label:not(.is-broadcast) .lc-gl-label__plate {
@@ -1166,9 +1719,67 @@
   display: block;
 }
 .lc-gl-label__provider-letter {
-  font-size: 8px;
+  font-size: var(--lc-type-name);
   font-weight: 700;
   line-height: 1;
+}
+/* A service seat's mark — sits in the provider icon's slot (ADR 232: pure code, no model to
+   attest, so a provider chip would be the unknown-"?" and read as a broken attestation). Mono,
+   lowercase, quiet: it is a classification, not an identity. */
+.lc-gl-label__service {
+  flex: none;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--lc-paper-ink) 26%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-tag);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: lowercase;
+  color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
+}
+
+
+/* The dnd pill (presence-honesty §3): the one plate tag that is a state, not an identity — the
+   warn ink as border + text on the plate's own paper (--lc-warn-ink measures 5.11 worst case; the
+   14% amber fill this first shipped with lightened the ground to 4.35 and failed the gate). The
+   FILL amber is never text; see AGENTS.md. Same slot grammar as the service tag. */
+.lc-gl-label__dnd {
+  flex: none;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--lc-warn-ink) 55%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-tag);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: lowercase;
+  color: var(--lc-warn-ink);
+}
+/* The woken tag (ADR 131 residency): like `dnd` this is a STATE rather than an identity, so it
+   takes dnd's grammar — border + text in an `-ink` token on the plate's own paper, and NO FILL.
+   The no-fill part is not taste, it is dnd's own measured scar one comment up: a 14% tint under
+   that tag lightened the ground and took a 5.11 to 4.35. `--lc-accent-ink` is 4.60 worst case, so
+   there is even less room here than there was there — any tint at all would fail.
+   Quieter than dnd in weight and border alpha, because dnd is an instruction to the room (do not
+   walk to me) and this is context you read after something has caught your eye. */
+.lc-gl-label__woken {
+  flex: none;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--lc-accent-ink) 40%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-tag);
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: lowercase;
+  color: var(--lc-accent-ink);
 }
 /* ── the expand, animated ───────────────────────────────────────────────────────────────────────
    The detail used to be a `display: none` -> `inline-flex` swap, which is a jump cut: there is no
@@ -1186,7 +1797,7 @@
 .lc-gl-label__detail {
   display: grid;
   grid-template-columns: 0fr;
-  transition: grid-template-columns 460ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: grid-template-columns var(--lc-dur-4) var(--lc-ease-out);
 }
 .lc-gl-label__detailin {
   display: inline-flex;
@@ -1206,8 +1817,8 @@
   opacity: 0;
   transform: translateX(-5px);
   transition:
-    opacity 260ms var(--lc-ease),
-    transform 380ms cubic-bezier(0.22, 1, 0.36, 1);
+    opacity var(--lc-dur-3) var(--lc-ease-out),
+    transform var(--lc-dur-4) var(--lc-ease-out);
 }
 .lc-gl-label.is-expanded .lc-gl-label__detail .lc-gl-label__seg,
 .lc-gl-label.is-expanded .lc-gl-label__detail .lc-gl-label__rule,
@@ -1235,8 +1846,8 @@
   transform: rotate(-45deg) scale(0.86);
   transform-origin: 60% 60%;
   transition:
-    transform 460ms cubic-bezier(0.34, 1.4, 0.5, 1),
-    border-color 200ms var(--lc-ease);
+    transform var(--lc-dur-4) var(--lc-ease-pop),
+    border-color var(--lc-dur-2) var(--lc-ease-out);
 }
 .lc-gl-label.is-expanded .lc-gl-label__caret {
   transform: rotate(45deg) scale(0.86);
@@ -1267,7 +1878,7 @@
   );
 }
 .lc-gl-label.is-expanded .lc-gl-label__plate::after {
-  animation: lc-plate-sweep 620ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: lc-plate-sweep var(--lc-dur-5) var(--lc-ease-out);
 }
 @keyframes lc-plate-sweep {
   from {
@@ -1304,6 +1915,30 @@
   letter-spacing: 0.02em;
   text-transform: lowercase;
   color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
+}
+/* The harness glyph + its ink (surfaceGlyph.ts): the seg carries the colour, the inline SVG
+   tints via currentColor, so glyph and text can never disagree. */
+.lc-gl-label__seg--hz-codex {
+  color: var(--lc-hz-codex-ink);
+}
+.lc-gl-label__seg--hz-cursor {
+  color: var(--lc-hz-cursor-ink);
+}
+.lc-gl-label__seg--hz-grok {
+  color: var(--lc-hz-grok-ink);
+}
+.lc-gl-label__seg--hz-opencode {
+  color: var(--lc-hz-opencode-ink);
+}
+.lc-gl-label__hz {
+  display: inline-block;
+  vertical-align: -1px;
+  margin-right: 3px;
+}
+.lc-gl-label__hz svg {
+  width: 8px;
+  height: 8px;
+  display: block;
 }
 /* Broadcast: always show the compact model crumb after the icon — nothing to click out there. */
 .lc-gl-label.is-broadcast .lc-gl-label__detail {
@@ -1344,7 +1979,7 @@
     0 6px 18px -4px var(--lc-paper-drop),
     0 0 16px -6px color-mix(in srgb, var(--lc-accent) 30%, transparent);
   font-family: var(--font-mono, monospace);
-  font-size: 10px;
+  font-size: var(--lc-type-aside);
   line-height: 1.4;
   white-space: pre-wrap;
   color: var(--lc-paper-ink);
@@ -1419,7 +2054,29 @@
 .lc-gl-label__dot--off {
   background: var(--lc-dot-off);
 }
-/* ─── ephemeral speech bubble (act body typed over the sender's head, then fades) ─────────────── */
+/* ─── ephemeral speech bubble (act body typed over the sender's head, then fades) ───────────────
+ *
+ * ── COLOUR IS IDENTITY. FORM IS THE ACT. (nick, 2026-09-02) ────────────────────────────────────
+ *
+ * `--lc-speech-tone` keeps its name and has changed its meaning: it is the SENDER'S hue now
+ * (`memberColor`), set inline by the scene, and it owns the ring, the tail, the top blush and the
+ * glow. Every bubble a member speaks therefore looks like that member and like nobody else.
+ *
+ * It used to be the act's tone, out of `toneColor()` — nine hues, on a surface with no legend
+ * anywhere. Decoding one meant clicking through to the stream, at which point the colour had done
+ * no work; and they were not nine separable things in the first place (`info`/`challenge`/`lane`/
+ * `handoff` all blue-violet, `success`/`status` both green-teal, with `lane`/`handoff` deliberately
+ * one family per their own comment in format.ts). Meanwhile the member's hue was already on the
+ * body on the floor, the nameplate dot, the reel row and the caption dot — four reinforcements —
+ * and the bubble was the one surface not using it.
+ *
+ * `--lc-speech-ink` is the readable twin, also set inline: same hue, held at a luminance that
+ * clears AA on this paper for every seat. The fill cannot carry text — see `.lc-st-lead`.
+ *
+ * The act now rides ONE RANKED AXIS of form (`.is-mark--*` below), not a palette, so a viewer can
+ * tell which of two marked bubbles matters more without having learned anything. Most bubbles carry
+ * no mark at all, and that is the half that makes the rest legible.
+ */
 .lc-speech {
   position: absolute;
   top: 0;
@@ -1451,20 +2108,56 @@
      legibility is decided by who walks under it — the same rule the caption and the asks rail now
      follow. If the ghosting is wanted back, it belongs in a form that cannot reach the ink: tone the
      RING or the shadow, not the stock. */
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--lc-paper) 88%, var(--lc-speech-tone)) 0%,
-    var(--lc-paper) 34%,
-    var(--lc-paper-2) 100%
-  );
-  /* No backdrop-filter. It was here to buy contrast for a translucent dark bubble; near-opaque paper
-     needs none — and this element renders on the /broadcast 1920x1080 30fps capture, where a blur
-     is a per-frame GPU readback forever (the same rule the reel card block states). */
-  /* The act's tone owns the ring, and it is now a FULL-strength ring rather than a half-alpha
-     suggestion: a bubble has to carry both "someone spoke" and "this is what kind of act it was"
-     across a busy warm room, and at 52% the tone was a rumour. The tighter contact shadow underneath
-     is what actually separates the stock from the floor — see the lift tokens. */
+  background:
+    /* The specular: a bright band raking across the top third, slightly off-horizontal so it reads
+       as light falling on a pane rather than as a second stripe of paper. This layer is the glass —
+       it is what a backdrop-filter would have been bought for, at none of its cost. */
+    linear-gradient(
+      172deg,
+      rgba(255, 255, 255, 0.6) 0%,
+      rgba(255, 255, 255, 0.16) 24%,
+      rgba(255, 255, 255, 0) 48%
+    ),
+    /* The stock beneath it, at 93% — see the glass note above for why not less. */
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, color-mix(in srgb, var(--lc-paper) 88%, var(--lc-speech-tone)) 93%, transparent) 0%,
+      color-mix(in srgb, var(--lc-paper) 93%, transparent) 34%,
+      color-mix(in srgb, var(--lc-paper-2) 93%, transparent) 100%
+    );
+  /* ── the glass, and exactly how much of it there is ───────────────────────────────────────────
+     (nick, 2026-09-02: "a tiny bit of glassmorphism")
+
+     Glassmorphism is normally two ingredients — you see THROUGH the pane, and what you see is
+     BLURRED. This bubble may have the first in a small dose and may not have the second at all, and
+     both limits are load-bearing rather than timidity:
+
+     · NO backdrop-filter, ever. This element renders on the /broadcast 1920x1080 30fps capture,
+       where a blur is a per-frame GPU readback forever — the office-block house rule, stated in
+       four places in this file. A dozen nameplates and several bubbles would each pay it, every
+       frame, for the life of the stream. The blur is the expensive half of glass; the cheap half is
+       the one that actually reads at this size.
+     · The stock stays essentially opaque. The 88%-transparent version this replaced measured 1.38:1
+       over a dark actor (see above). 7% is a different order of magnitude: what bleeds through is a
+       tint, not the room, and `--lc-paper-ink` still measures far above AA on it. Past ~10% the
+       bubble's legibility goes back to being decided by whoever walks under it, which is the exact
+       failure this block exists to prevent.
+
+     What does the work instead is the EDGE: a bright specular band across the top third
+     (`::before`), a one-pixel inner rim light, and the tone ring outside it. That is what the eye
+     reads as a lit pane rather than a lighter patch of floor — the `--lc-paper-sheen` argument from
+     the paper-set block, spent harder here because a bubble is the surface that has to interrupt
+     you. */
+  /* The SPEAKER owns the ring, at full strength rather than as a half-alpha suggestion: it has to
+     carry "who is talking" across a busy warm room, and at 52% the hue was a rumour. (It carried
+     "what kind of act" until 2026-09-02 — see the block header for where that went and why.) The
+     tighter contact shadow underneath is what actually separates the stock from the floor — see the
+     lift tokens. */
   box-shadow:
+    /* The rim light: a full hairline of light INSIDE the edge, not just along the top. On a flat
+       card one lit edge is enough; on something meant to read as a pane the light has to go all the
+       way round, because that is what tells the eye the edge has thickness. */
+    inset 0 0 0 1px rgba(255, 253, 247, 0.5),
     inset 0 1px 0 var(--lc-paper-sheen),
     inset 0 0 16px -6px color-mix(in srgb, var(--lc-speech-tone) 30%, transparent),
     0 0 0 1.5px color-mix(in srgb, var(--lc-speech-tone) 80%, var(--lc-paper-rim)),
@@ -1476,11 +2169,11 @@
   transform: translateY(7px) scale(0.9);
   transform-origin: 50% 100%;
   transition:
-    opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1),
-    max-width 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    max-height 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 220ms ease; /* gentle overshoot on enter — a warm little pop; smooth grow on hover */
+    opacity var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-4) var(--lc-ease-pop),
+    max-width var(--lc-dur-3) var(--lc-ease-out),
+    max-height var(--lc-dur-3) var(--lc-ease-out),
+    box-shadow var(--lc-dur-2) ease; /* gentle overshoot on enter — a warm little pop; smooth grow on hover */
 }
 /* The downward tail, matching the bubble body. Two triangles: a slightly larger one in the tone ring's
    colour with a smaller one in the stock sitting on top of it — the only way a CSS-border triangle
@@ -1513,9 +2206,179 @@
   opacity: 0;
   transform: translateY(-12px) scale(0.97); /* drifts up as it fades — like a spoken word rising away */
   transition:
-    opacity 520ms ease,
-    transform 560ms cubic-bezier(0.4, 0, 0.2, 1);
+    opacity var(--lc-dur-5) ease,
+    transform var(--lc-dur-5) var(--lc-ease-in-out);
 }
+/* ─── the act's mark: ONE RANKED AXIS, not a palette ─────────────────────────────────────────────
+ *
+ * Four marks, in weight order (speech.ts `SPEECH_MARK_WEIGHT`), and the CSS spends escalating
+ * weight on them so the ORDER is readable before the vocabulary is:
+ *
+ *   done       ✓   badge only                     work landed
+ *   review     ◎   badge only, warmer             somebody has to go and read something
+ *   interrupt  ↪   heavy ring + badge             this changes what its recipient is doing now
+ *   needs-human !  heavy ring + badge + pulse     a person must answer; `.is-holding` = a seat is
+ *                                                 actually stopped until they do (ADR 147 §2)
+ *
+ * Everything else — message, status_update, handoff, the lane transitions, goal, defer, insight,
+ * decline — gets NOTHING, and that is the half of the design that makes the rest work. Nine act
+ * hues failed partly because every bubble wore one, so none of them meant "look here".
+ *
+ * The marks are NEUTRAL, never coloured. Colour on this surface means identity now, and a mark that
+ * picked up a hue of its own would start the same guessing game one layer up. They are drawn in the
+ * paper ink at varying weight and opacity, sitting on the ring the member already owns.
+ *
+ * The badge is a real element (see `showSpeech`), not a pseudo: `__inner`'s ::before/::after are
+ * the bubble's tail, and the obvious second choice — `__text::after` — anchors it to the TEXT, so
+ * on a bubble carrying a recipient chip it landed halfway down the body instead of at the corner. */
+.lc-speech__mark {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--lc-paper-2);
+  color: var(--lc-paper-ink);
+  font-family: var(--font-mono, monospace);
+  /* One size up from the nameplate's own line, on a 22px coin: the first cut was a 15px tag-sized
+     badge and nick could not read the act off the stream (2026-09-03) — the mark is the one thing
+     on the bubble that says WHAT happened, so it earns the size, and the sender's ring it sits on
+     still says WHO. */
+  font-size: var(--lc-type-aside);
+  font-weight: 700;
+  line-height: 1;
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--lc-speech-tone) 78%, var(--lc-paper-rim)),
+    0 1px 0 var(--lc-paper-sheen),
+    0 2px 5px -1px var(--lc-paper-drop);
+}
+/* The two loud marks thicken the member's ring rather than recolouring it — weight is the axis, and
+   the hue stays the answer to "who". */
+.lc-speech__inner.is-mark--interrupt,
+.lc-speech__inner.is-mark--needs-human {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 253, 247, 0.5),
+    inset 0 1px 0 var(--lc-paper-sheen),
+    inset 0 0 16px -6px color-mix(in srgb, var(--lc-speech-tone) 34%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--lc-speech-tone) 88%, var(--lc-paper-rim)),
+    0 2px 3px -1px var(--lc-paper-seat),
+    0 9px 22px -8px var(--lc-paper-drop),
+    0 3px 20px -5px color-mix(in srgb, var(--lc-speech-tone) 52%, transparent);
+}
+/* The top of the axis, and the ONLY thing on the floor that pulses: a `blocking` ask whose silence
+   holds its sender (ADR 147 §2 — `askTierHolds`). Not "an ask happened", which is common; "a seat
+   has stopped and will not move until a person answers", which is not. A standard or advisory ask
+   proceeds on its own and gets the heavy ring without the pulse — the difference has been on the
+   wire the whole time and this is the first surface to spend it. */
+/* Scoped to the top mark on purpose, not just to `.is-holding`: the pulse is the room's single
+   loudest device and it must not be reachable from any other rung, however a future caller sets
+   `holds`. Belt and braces with `speechMark`, which already only sets it for a holding ask. */
+.lc-speech__inner.is-mark--needs-human.is-holding {
+  animation: lc-speech-holding 2.4s var(--lc-ease-in-out) infinite;
+}
+@keyframes lc-speech-holding {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 253, 247, 0.5),
+      inset 0 1px 0 var(--lc-paper-sheen),
+      0 0 0 3px color-mix(in srgb, var(--lc-speech-tone) 88%, var(--lc-paper-rim)),
+      0 2px 3px -1px var(--lc-paper-seat),
+      0 9px 22px -8px var(--lc-paper-drop),
+      0 3px 20px -5px color-mix(in srgb, var(--lc-speech-tone) 52%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 253, 247, 0.5),
+      inset 0 1px 0 var(--lc-paper-sheen),
+      0 0 0 3px color-mix(in srgb, var(--lc-speech-tone) 88%, var(--lc-paper-rim)),
+      0 0 0 7px color-mix(in srgb, var(--lc-speech-tone) 26%, transparent),
+      0 2px 3px -1px var(--lc-paper-seat),
+      0 9px 22px -8px var(--lc-paper-drop),
+      0 3px 26px -4px color-mix(in srgb, var(--lc-speech-tone) 62%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The mark still has to READ without the animation — a reduced-motion viewer must not lose the
+     one distinction the room makes about urgency. It holds the pulse's wide halo, static. */
+  .lc-speech__inner.is-mark--needs-human.is-holding {
+    animation: none;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 253, 247, 0.5),
+      inset 0 1px 0 var(--lc-paper-sheen),
+      0 0 0 3px color-mix(in srgb, var(--lc-speech-tone) 88%, var(--lc-paper-rim)),
+      0 0 0 7px color-mix(in srgb, var(--lc-speech-tone) 26%, transparent),
+      0 2px 3px -1px var(--lc-paper-seat),
+      0 9px 22px -8px var(--lc-paper-drop),
+      0 3px 26px -4px color-mix(in srgb, var(--lc-speech-tone) 62%, transparent);
+  }
+}
+
+/* ─── the receptionist's bubble: the HOUSE voice ─────────────────────────────────────────────────
+ *
+ * She is the only speaker on the floor who is not an attested seat (receptionist.ts: staff, not
+ * roster — no nameplate, no headcount, no roster row), and everything the room says about ITSELF
+ * comes out of her mouth: where you have landed, what these people are, what the bubbles mean.
+ * That arrived in the same paper and the same tail as an agent's status update, which made the one
+ * bubble that is NOT a member speaking the hardest one to tell apart from a member speaking.
+ *
+ * So: her own stock — cooler, flatter, no member blush, because she has no identity hue to carry —
+ * and the musterd chip in place of one. The mark IS her identity: she speaks for the product, not
+ * for a seat. Squared-off corners on the tail side finish the separation at a glance, before any of
+ * the detail is legible. */
+.lc-speech.is-reception .lc-speech__inner {
+  --lc-speech-tone: var(--lc-accent-bright);
+  border-radius: 13px 13px 4px 13px;
+  background:
+    linear-gradient(
+      172deg,
+      rgba(255, 255, 255, 0.66) 0%,
+      rgba(255, 255, 255, 0.18) 26%,
+      rgba(255, 255, 255, 0) 50%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--lc-paper) 94%, transparent) 0%,
+      color-mix(in srgb, var(--lc-paper-2) 94%, transparent) 100%
+    );
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 253, 247, 0.55),
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 0 0 1.5px color-mix(in srgb, var(--lc-accent) 46%, var(--lc-paper-rim)),
+    0 2px 3px -1px var(--lc-paper-seat),
+    0 9px 22px -8px var(--lc-paper-drop);
+}
+/* The chip sits in the TOP-LEFT corner, out of the flow — the mirror of the mark badge, which only
+   ever occupies the right. Absolute rather than inline at the head of the sentence, and for the
+   same reason as the mark: a bubble may not grow a row (nick, 2026-09-02). An inline chip is ~18px
+   of first-line width, which is a word — and the word it pushes down is the one the greeting was
+   written to open with. Out of the flow it costs the copy nothing and reads as a speaker's badge
+   rather than as punctuation. */
+.lc-speech__brand {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  display: inline-flex;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1.5px var(--lc-paper),
+    0 1px 3px -1px var(--lc-paper-drop);
+}
+.lc-speech__brand svg {
+  display: block;
+}
+/* Her copy is the room introducing itself, so it gets a touch more air than an act body — this is
+   the one bubble a stranger is meant to actually stop and read (first-five-seconds §4). */
+.lc-speech.is-reception .lc-speech__text {
+  line-height: 1.45;
+}
+
 /* a bubble that carries an act id is a click-through to the stream row — quiet until hovered */
 .lc-speech.is-clickable {
   pointer-events: auto;
@@ -1523,9 +2386,9 @@
 }
 .lc-speech.is-clickable .lc-speech__inner {
   transition:
-    opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 220ms ease;
+    opacity var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-4) var(--lc-ease-pop),
+    box-shadow var(--lc-dur-2) ease;
 }
 .lc-speech.is-clickable:hover .lc-speech__inner {
   transform: translateY(-2px) scale(1.03);
@@ -1551,8 +2414,8 @@
   padding: 0;
   border-radius: 6px;
   transition:
-    box-shadow 220ms var(--lc-ease, ease),
-    transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1.4);
+    box-shadow var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-2) var(--lc-ease-pop);
 }
 /* Hover lifts the board a hair off the wall and warms the light around it — the promise that this
    object comes off the wall, made before you click. Lives on the DOM hotspot, not the canvas, so
@@ -1589,8 +2452,8 @@
   padding: 2px 7px;
   opacity: 0;
   transition:
-    opacity 180ms var(--lc-ease, ease),
-    transform 260ms var(--lc-ease, ease);
+    opacity var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-3) var(--lc-ease-out);
   pointer-events: none;
 }
 .lc-boardspot:hover .lc-boardspot__tag,
@@ -1600,8 +2463,79 @@
 }
 
 /* the soft acknowledge pulse the moment a bubble is clicked (focus hands off to the stream flash) */
+/* The recipient chip: who a directed act is aimed at, so the body can safely say "you". The
+   SPEAKER'S HUE tints the chip's rim and wash only — never its text. `--lc-speech-tone` is
+   `memberColor`, a FILL (~1.2:1 as text at the amber end of the band); the ink stays `--lc-muted`
+   (5.71:1 on the darkest paper), the same fill/ink split the badge palette already enforces. */
+.lc-speech__to {
+  display: inline-block;
+  margin: 0 5px 1px 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--lc-speech-tone) 38%, var(--lc-border));
+  background: color-mix(in srgb, var(--lc-speech-tone) 9%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-aside);
+  line-height: 16px;
+  letter-spacing: -0.01em;
+  color: var(--lc-muted);
+  max-width: 116px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+/* An ADR 254 eligible set names 2-4 seats, and the 116px clamp above HIDES some of them: measured
+   2026-09-02 in the built page, the natural chip is 116px at two names, 158px at three and 213px at
+   four, against a 260px bubble. Ellipsising there would be the same lie this chip exists to end —
+   "ryder, sloane, dol…" claims to name the set and then drops a name. A set chip may use the
+   bubble's full width and wrap instead; the single-name clamp stays, because one long seat name
+   should not be allowed to set the bubble's width. */
+.lc-speech__to--set {
+  max-width: 100%;
+  white-space: normal;
+  text-overflow: clip;
+}
+
+/* The light-trace: one arc from the bubble toward the recipient's desk, drawn on and then fading, so
+   the room reads as wired together rather than as separate speakers. Inert decoration — it must
+   never intercept the pointer the canvas owns. Suppressed entirely under reduced motion and in
+   measurement mode (the scene does not create it at all in those cases). */
+.lc-speech-trace {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+.lc-speech-trace path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--lc-accent-bright) 62%, transparent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1 0;
+  animation: lc-trace-draw var(--lc-dur-5) var(--lc-ease-out) forwards;
+}
+@keyframes lc-trace-draw {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 0;
+  }
+  28% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-speech-trace {
+    display: none;
+  }
+}
+
 .lc-speech.is-picked .lc-speech__inner {
-  animation: lc-speech-picked 460ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: lc-speech-picked var(--lc-dur-4) var(--lc-ease-out);
 }
 @keyframes lc-speech-picked {
   0% {
@@ -1626,7 +2560,7 @@
   -webkit-line-clamp: 5; /* the glance shows ~5 lines; the rest lives one hover away */
   overflow: hidden;
   font-family: var(--font-sans, sans-serif);
-  font-size: 11.5px;
+  font-size: var(--lc-type-body);
   line-height: 1.36;
   font-weight: 500;
   letter-spacing: -0.005em;
@@ -1646,7 +2580,7 @@
    .is-off, which retriggers the pop animation). Each is tinted by the act's tone so a resolve's
    chips read green, an ask's mustard — the bubble feels of a piece with the act it speaks. */
 .lc-st {
-  animation: lc-st-pop 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: lc-st-pop var(--lc-dur-3) var(--lc-ease-pop);
 }
 /* chips are atomic — inline-block so they can scale in and never break mid-token; a runaway-long
    code span ellipsizes inside the bubble instead of overflowing it. Strong prose stays inline so
@@ -1686,14 +2620,20 @@
     transform: scale(1) translateY(0);
   }
 }
-/* the lane/goal verb lead — a small spoken-aloud tag in the act's tone, before the title */
+/* The lane/goal verb lead — a small spoken-aloud tag before the title, tinted toward the SPEAKER.
+   `--lc-speech-ink` and not `--lc-speech-tone`, and the difference is load-bearing rather than
+   tidy: the tone is now `memberColor`, a FILL held at hsl 68%/62% whose relative luminance runs
+   0.154 (indigo) to 0.699 (amber) across the two hue bands. Mixed 52% into the paper ink that is
+   readable for a member on the cool end and washed out for one on the warm end — the same seat-
+   dependent failure the avatar components had before `memberInk` existed (format.ts). The ink is
+   the same hue held at a luminance that clears AA on this paper for every member. */
 .lc-st-lead {
   font-family: var(--font-mono, monospace);
   font-size: 0.84em;
   font-weight: 700;
   letter-spacing: 0.03em;
   margin-right: 4px;
-  color: color-mix(in srgb, var(--lc-speech-tone) 52%, var(--lc-paper-ink));
+  color: color-mix(in srgb, var(--lc-speech-ink) 52%, var(--lc-paper-ink));
 }
 .lc-st-lead::after {
   content: ' ·';
@@ -1713,7 +2653,7 @@
   white-space: nowrap;
 }
 .lc-speech .lc-st-id {
-  color: color-mix(in srgb, var(--lc-paper-dim) 82%, var(--lc-speech-tone));
+  color: color-mix(in srgb, var(--lc-paper-dim) 82%, var(--lc-speech-ink));
   cursor: default;
 }
 /* a PR/issue ref — a bright tone accent, no box; the liveliest word in the line */
@@ -1721,7 +2661,7 @@
   font-family: var(--font-mono, monospace);
   font-size: 0.9em;
   font-weight: 650;
-  color: color-mix(in srgb, var(--lc-speech-tone) 46%, var(--lc-paper-ink));
+  color: color-mix(in srgb, var(--lc-speech-ink) 46%, var(--lc-paper-ink));
   /* No glow: a bloom that reads as light on a dark bubble reads as a smudge on paper. */
 }
 /* **strong** prose — carries the sentence's weight without shouting */
@@ -1735,18 +2675,18 @@
   }
 }
 
-/* a quiet "there's more" chip, bottom-right, tinted with the act tone — fades as the bubble expands */
+/* a quiet "there's more" chip, bottom-right, tinted toward the speaker — fades as the bubble expands */
 .lc-speech__more {
   position: absolute;
   right: 7px;
   bottom: 3px;
-  font-size: 10px;
+  font-size: var(--lc-type-aside);
   line-height: 1;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: color-mix(in srgb, var(--lc-speech-tone) 78%, #f4ead9);
+  color: color-mix(in srgb, var(--lc-speech-ink) 78%, var(--lc-paper-2));
   opacity: 0.85;
-  transition: opacity 160ms ease;
+  transition: opacity var(--lc-dur-1) ease;
   pointer-events: none;
 }
 /* ── hover-expand: the glance grows into the full text, scrollable past a viewport-relative cap ── */
@@ -1772,6 +2712,20 @@
 .lc-speech.is-expanded .lc-speech__more {
   opacity: 0;
 }
+/* Hovering makes `__inner` a scroll container (`overflow-y: auto` above), which CLIPS anything
+   hanging outside its box — and the badge hangs at -7px by design. Tuck it inside on expand rather
+   than letting the mark vanish exactly when the viewer has leaned in to read the act.
+
+   Still `position: absolute`, and that is the point rather than an implementation detail: A BUBBLE
+   MAY NOT GROW A ROW (nick, 2026-09-02). Every device this file adds to a bubble — the mark, the
+   "there's more" chip — is taken OUT of the flow, so the number of lines a bubble occupies is set
+   by what the member actually said and by nothing else. The first cut of this rule floated the
+   badge into the text on expand, which reflowed the opening line around it; a float is a row's
+   worth of disruption wearing different clothes. */
+.lc-speech.is-expanded .lc-speech__mark {
+  top: 5px;
+  right: 5px;
+}
 .lc-speech.is-expanded .lc-speech__inner::-webkit-scrollbar {
   width: 6px;
 }
@@ -1783,11 +2737,11 @@
   /* no spring/drift — just a soft cross-fade (opacity is safe under reduced-motion) */
   .lc-speech__inner {
     transform: none;
-    transition: opacity 160ms linear;
+    transition: opacity var(--lc-dur-1) linear;
   }
   .lc-speech.is-out .lc-speech__inner {
     transform: none;
-    transition: opacity 200ms linear;
+    transition: opacity var(--lc-dur-2) linear;
   }
 }
 
@@ -1814,7 +2768,7 @@
     transparent 62%
   );
   opacity: var(--lc-amb-strength, 0.3);
-  transition: opacity 1200ms ease;
+  transition: opacity var(--lc-dur-5) ease;
   will-change: opacity;
 }
 /* (The working-monitor glow moved into the canvas — it's drawn by `screenPanel` as additive light on the
@@ -2077,7 +3031,7 @@
   gap: var(--lc-3);
   padding: var(--lc-3) var(--lc-3);
   border-radius: var(--lc-r-sm);
-  transition: background var(--lc-fast) var(--lc-ease);
+  transition: background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-seat:hover {
   background: color-mix(in srgb, var(--lc-surface) 60%, transparent);
@@ -2114,7 +3068,7 @@
    not gone. A slow amber breathe distinguishes it from a cold seat without shouting. */
 .lc-seat__dot--recon {
   background: var(--lc-accent);
-  animation: lc-recon-breathe 1.6s var(--lc-ease) infinite;
+  animation: lc-recon-breathe 1.6s var(--lc-ease-out) infinite;
 }
 @keyframes lc-recon-breathe {
   0%,
@@ -2133,9 +3087,24 @@
     opacity: 0.8;
   }
 }
-/* A reclaimable seat isn't as dim as a cold one — it's coming back. */
-.lc-seat--recon {
-  opacity: 0.75;
+/* A reclaimable seat isn't as dim as a cold one — it's coming back. The dim rides the DOT, never
+   the row (matching `.lc-seat--offline` above), because container opacity is not a shade: it
+   composites the whole subtree over the paper, so it lightens the avatar disc AND fades the letter
+   on it at the same time — pushing from both sides at once.
+
+   Measured (miley, 2026-08-31, from CI's own failing rows on #1119): this rule alone produced all
+   nine AA failures on /live connected. The avatar is drawn with `memberAvatar`, deepened to
+   luminance 0.165 precisely so white initials clear 4.88 — and at 0.75 the disc composited to
+   luminance 0.274 while the white went translucent, landing at 2.50. Reproduced to the second
+   decimal against CI's reported #658edb / #509b92 / #52999e. It also dragged `reconnecting`
+   (5.89 designed) to 3.49 and the agent kind tag (6.51 designed) to 3.80. Every one of those
+   colours was chosen correctly; the row dim undid all of them at once.
+
+   `.lc-seat--offline` was converted to a dot-only dim in #781/#789 for exactly this reason. This
+   rule was not converted with it, and the state it governs is one the local a11y fixture never
+   renders — so nothing measured it until CI did. */
+.lc-seat--recon .lc-seat__dot {
+  opacity: 0.8;
 }
 /* ADR 135: this seat's runtime attests a different build than the daemon — quiet amber, details in
    the title (both short SHAs). Same chip anatomy as reconnecting, warn-toned instead of accent. */
@@ -2240,6 +3209,28 @@
   border-radius: 5px;
   border: 1px solid transparent;
 }
+/* The machine a remote seat lives on (presence replication, ADR 356) — ` @ laptop-b` riding the
+   posture chip. Subordinate to the posture, which is what the chip is FOR, so it drops the mono
+   tracking and sits a step back. Deliberately NOT `opacity`: this text sits on the chip's own
+   tinted paper and `--lc-stat--quiet` already paints the faintest ink in the system, so an alpha
+   pass over it lands below AA on the very rows most likely to carry a node. Weight and tracking
+   buy the same recession for free, and the gate measures what a reader actually gets. */
+.lc-stat__node {
+  font-weight: 400;
+  letter-spacing: 0;
+}
+/* The dwell trace (lane 01M1JQENBK) — what this page remembers of a visit that has ENDED.
+   Italic prose, not a chip: the chips beside it all describe NOW, and a past-tense fact wearing
+   their shape would be read as one of them. No `opacity`, for the reason `.lc-stat__node` records
+   two rules up — an alpha pass over the faintest ink in the system lands below AA, and the contrast
+   gate measures what a reader actually gets. `--lc-faint` is already gate-measured here. */
+.lc-roster__dwell {
+  color: var(--lc-faint);
+  font-size: 10.5px;
+  font-style: italic;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
 .lc-stat--quiet {
   color: var(--lc-faint);
   background: transparent;
@@ -2256,6 +3247,26 @@
 .lc-stat--danger {
   color: var(--lc-danger-ink);
   background: color-mix(in srgb, var(--lc-danger) 16%, transparent);
+}
+/* Why a seat is in the room at all (ADR 131) — a wake, not a person opening a session. It sits
+   BESIDE the posture chip rather than replacing it, so it must not out-shout it: posture is the
+   thing you scan for, provenance is what you check once something has caught your eye.
+
+   NO FILL, and this one is measured-by-proxy rather than measured, so the reasoning has to stand on
+   its own. `--lc-accent-ink` is 4.60:1 worst case — a tenth of a point of headroom — and the `dnd`
+   tag's own comment records what a tint does to exactly that kind of margin: a 14% amber under
+   `--lc-warn-ink` lightened the ground and took 5.11 down to 4.35. At 4.60 there is no tint this
+   survives, so it takes the border-and-text grammar instead.
+
+   Why measured-by-proxy: the contrast gate CANNOT reach this chip. Its fixture joins every seat
+   with a team bootstrap key (`mskey_`), and provenance is gated to seat credentials (`msac_`,
+   cli/src/client.ts:321) precisely because it is a harness fact a human must not stamp (ADR 121).
+   I tried seeding it and the gate correctly refused. The same ink and the same no-fill recipe IS
+   swept, on the office nameplate's `woken` tag via /office-preview, which the preview now seats. */
+.lc-stat--woken {
+  color: var(--lc-accent-ink);
+  border-color: color-mix(in srgb, var(--lc-accent-ink) 40%, transparent);
+  background: transparent;
 }
 .lc-stat--muted {
   color: var(--lc-muted);
@@ -2363,8 +3374,8 @@
   letter-spacing: 0.06em;
   cursor: pointer;
   transition:
-    color 140ms ease,
-    border-color 140ms ease;
+    color var(--lc-dur-1) ease,
+    border-color var(--lc-dur-1) ease;
 }
 .lc-earlier:hover {
   color: var(--lc-text);
@@ -2389,18 +3400,18 @@
   padding: var(--lc-4) var(--lc-5);
   border-radius: var(--lc-r-md);
   border: 1px solid transparent;
-  transition: background var(--lc-fast) var(--lc-ease);
+  transition: background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-row:hover {
   background: var(--lc-surface);
 }
 .lc-row--enter {
-  animation: lc-enter 0.42s var(--lc-ease) both;
+  animation: lc-enter 0.42s var(--lc-ease-out) both;
 }
 .lc-row--settle {
   animation:
-    lc-enter 0.42s var(--lc-ease) both,
-    lc-settle 1.7s var(--lc-ease) both;
+    lc-enter 0.42s var(--lc-ease-out) both,
+    lc-settle 1.7s var(--lc-ease-out) both;
 }
 @keyframes lc-settle {
   0% {
@@ -2666,6 +3677,22 @@
   color: var(--lc-text);
   font-weight: 550;
 }
+/* An ADR 254 eligible set: 2-4 seats, ANY one of whom discharges the act. It wears the `direct`
+   pill because that is what it is — a list of real recipients, not a weaker team act — and each
+   seat keeps its own avatar dot so the row answers "which people?" at a glance. `or` is the whole
+   meaning of the shape, so it is set quieter than the names but never dimmer than the pill's own
+   muted ink (both resolve to tokens the contrast gate already measures on this pill). */
+.lc-to__seat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lc-to__or {
+  color: var(--lc-muted);
+  font-weight: 400;
+  /* the pill's flex gap already separates the seats; this only needs to breathe inside one */
+  margin-right: 1px;
+}
 .lc-to--all {
   color: var(--lc-accent-ink);
   border-color: color-mix(in srgb, var(--lc-accent) 32%, transparent);
@@ -2687,8 +3714,8 @@
   cursor: pointer;
   font: inherit;
   transition:
-    background var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    background var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-quote:hover {
   background: color-mix(in srgb, var(--lc-text) 9%, transparent);
@@ -2724,7 +3751,7 @@
 
 /* flash the original when its reply's quote is clicked */
 .lc-row--flash {
-  animation: lc-flash 1.5s var(--lc-ease) both;
+  animation: lc-flash 1.5s var(--lc-ease-out) both;
 }
 @keyframes lc-flash {
   0%,
@@ -2855,7 +3882,7 @@
   background:
     radial-gradient(70% 54% at 50% 42%, rgba(244, 207, 82, 0.13), transparent 60%),
     radial-gradient(120% 80% at 50% 116%, rgba(255, 168, 92, 0.2), transparent 58%);
-  animation: lc-fade var(--lc-med) var(--lc-ease) both;
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-form__card {
   position: relative;
@@ -2872,7 +3899,7 @@
   box-shadow:
     0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
     0 26px 64px -26px rgba(0, 0, 0, 0.66);
-  animation: lc-rise 0.5s var(--lc-ease) both;
+  animation: lc-rise 0.5s var(--lc-ease-out) both;
 }
 @keyframes lc-rise {
   from {
@@ -2927,8 +3954,8 @@
   letter-spacing: normal;
   text-transform: none;
   transition:
-    border-color var(--lc-fast) var(--lc-ease),
-    box-shadow var(--lc-fast) var(--lc-ease);
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    box-shadow var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-form__field input::placeholder {
   color: var(--lc-faint);
@@ -2963,8 +3990,8 @@
   font-size: 14px;
   cursor: pointer;
   transition:
-    filter var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    filter var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-form__connect:hover:not(:disabled) {
   filter: brightness(1.08);
@@ -3002,7 +4029,7 @@
   cursor: pointer;
   padding: var(--lc-1);
   align-self: center;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-form__advanced:hover {
   color: var(--lc-dim);
@@ -3049,8 +4076,8 @@
   padding: 4px 12px;
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-audit__refresh:hover:not(:disabled) {
   color: var(--lc-dim);
@@ -3106,7 +4133,7 @@
 }
 .lc-audit__row {
   border-bottom: 1px solid var(--lc-border);
-  transition: background var(--lc-fast) var(--lc-ease);
+  transition: background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-audit__row:hover {
   background: color-mix(in srgb, var(--lc-surface) 50%, transparent);
@@ -3190,7 +4217,7 @@
   border-radius: var(--lc-r-sm);
   padding: 6px 16px;
   cursor: pointer;
-  transition: background var(--lc-fast) var(--lc-ease);
+  transition: background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-audit__older:hover:not(:disabled) {
   background: var(--lc-surface-2);
@@ -3296,7 +4323,7 @@
     color-mix(in srgb, var(--lc-ground) 68%, transparent)
   );
   opacity: 0;
-  transition: opacity 280ms var(--lc-ease);
+  transition: opacity var(--lc-dur-3) var(--lc-ease-out);
   pointer-events: none;
 }
 .lc-boardoverlay.is-in::before {
@@ -3324,8 +4351,8 @@
   /* The overshoot lives in the curve's tail (>1), not in a keyframe: the panel passes its resting
      size by ~3% and swings back, which is what a held object does and a scaling rectangle doesn't. */
   transition:
-    transform 620ms cubic-bezier(0.2, 0.9, 0.25, 1.08),
-    opacity 260ms var(--lc-ease);
+    transform var(--lc-dur-5) var(--lc-ease-pop),
+    opacity var(--lc-dur-3) var(--lc-ease-out);
   outline: none;
 }
 .lc-boardoverlay.is-in .lc-boardoverlay__panel {
@@ -3333,7 +4360,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .lc-boardoverlay__panel {
-    transition: opacity 180ms var(--lc-ease);
+    transition: opacity var(--lc-dur-2) var(--lc-ease-out);
   }
 }
 .lc-boardoverlay__bar {
@@ -3378,8 +4405,8 @@
   line-height: 1;
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-boardoverlay__close:hover {
   color: var(--lc-text);
@@ -3533,9 +4560,9 @@
   /* resting elevation: barely off the tray */
   box-shadow: 0 1px 2px color-mix(in srgb, #000 5%, transparent);
   transition:
-    border-color var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease),
-    box-shadow var(--lc-fast) var(--lc-ease);
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out),
+    box-shadow var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-card:hover {
   border-color: var(--lc-border-2);
@@ -3647,13 +4674,13 @@
 /* card entrances: first-load stagger + the landing after a move between columns */
 .lc-card--enter,
 .lc-card--landed {
-  animation: lc-rise var(--lc-med) var(--lc-ease) both;
+  animation: lc-rise var(--lc-dur-2) var(--lc-ease-out) both;
 }
 /* the done beat — glide in, then one warm mustard pulse; calm after (#warm-flourish) */
 .lc-card--flourish {
   animation:
-    lc-rise var(--lc-med) var(--lc-ease) both,
-    lc-card-glow 700ms var(--lc-ease) 120ms 1;
+    lc-rise var(--lc-dur-2) var(--lc-ease-out) both,
+    lc-card-glow var(--lc-dur-5) var(--lc-ease-out) var(--lc-dur-1) 1;
 }
 @keyframes lc-card-glow {
   0% {
@@ -3678,7 +4705,7 @@
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--lc-accent) 42%, transparent),
     0 10px 28px -14px color-mix(in srgb, var(--lc-accent) 45%, transparent);
-  animation: lc-card-knock 900ms var(--lc-ease) 180ms 1;
+  animation: lc-card-knock var(--lc-dur-5) var(--lc-ease-out) var(--lc-dur-2) 1;
 }
 /* Hover still lifts it — it just keeps its ring while doing so. */
 .lc-card.lc-card--focused:hover {
@@ -3705,7 +4732,7 @@
 
 /* waiting on a human, made ambient: a human-owned blocked card breathes softly in rose */
 .lc-card--breathe {
-  animation: lc-card-breathe 2.4s var(--lc-ease) infinite;
+  animation: lc-card-breathe 2.4s var(--lc-ease-out) infinite;
 }
 @keyframes lc-card-breathe {
   0%,
@@ -3739,7 +4766,7 @@
 @media (hover: hover) and (pointer: fine) {
   .lc-card__actions {
     opacity: 0;
-    transition: opacity var(--lc-fast) var(--lc-ease);
+    transition: opacity var(--lc-dur-1) var(--lc-ease-out);
   }
   .lc-card:hover .lc-card__actions,
   .lc-card:focus-within .lc-card__actions,
@@ -3774,7 +4801,7 @@
   font-size: 11px;
   color: var(--lc-faint);
   cursor: pointer;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-card__abandon:hover:not(:disabled) {
   color: var(--lc-danger-ink);
@@ -3786,7 +4813,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--lc-3);
-  animation: lc-picker-in var(--lc-fast) var(--lc-ease) both;
+  animation: lc-picker-in var(--lc-dur-1) var(--lc-ease-out) both;
 }
 @keyframes lc-picker-in {
   from {
@@ -3813,7 +4840,7 @@
 .lc-card--compose {
   border-color: color-mix(in srgb, var(--lc-accent) 40%, var(--lc-border));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--lc-accent) 10%, transparent) inset;
-  animation: lc-rise var(--lc-med) var(--lc-ease) both;
+  animation: lc-rise var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-card__compose-title {
   border: 0;
@@ -3872,8 +4899,8 @@
   color: var(--lc-faint);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-col__more:hover {
   color: var(--lc-dim);
@@ -3913,8 +4940,8 @@
   color: var(--lc-muted);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-board__view--on {
   background: color-mix(in srgb, var(--lc-accent) 18%, transparent);
@@ -3932,7 +4959,7 @@
   border: 1px solid var(--lc-border);
   border-radius: var(--lc-r-lg);
   background: color-mix(in srgb, var(--lc-ground) 55%, transparent);
-  animation: lc-rise var(--lc-med) var(--lc-ease) both;
+  animation: lc-rise var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-insight--rail {
   position: relative;
@@ -4024,7 +5051,7 @@
   font-size: 10.5px;
   color: var(--lc-faint);
   cursor: pointer;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-insight__more:hover {
   color: var(--lc-dim);
@@ -4105,9 +5132,9 @@
   color: var(--lc-muted);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-filter:hover {
   color: var(--lc-dim);
@@ -4152,7 +5179,7 @@
   font-size: 10.5px;
   color: var(--lc-faint);
   cursor: pointer;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc__identity-out:hover {
   color: var(--lc-danger-ink);
@@ -4168,8 +5195,8 @@
   font-weight: 600;
   cursor: pointer;
   transition:
-    filter var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    filter var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-board__new:hover:not(:disabled) {
   filter: brightness(1.08);
@@ -4193,30 +5220,89 @@
  * canvas cannot lend back. */
 .lc-asks {
   position: relative;
+  /* The rail's degradation ladder queries THIS box, not the window — see the ladder below for the
+     measurement. `position: relative` was already here for the sheet, so the containment that comes
+     with `container-type` changes no containing block: the sheet's `left:0; right:0` still resolves
+     against exactly the same element it always did. Named so the queries say what they ask about,
+     and cannot be answered by some other inline-size container that happens to be an ancestor. */
+  container: asks / inline-size;
   z-index: var(--lc-z-overlay);
   flex: none;
   margin: var(--lc-4) var(--lc-6) 0;
   border: 1px solid var(--lc-border);
   border-radius: 999px;
   background: color-mix(in srgb, var(--lc-ground-2) 88%, transparent);
-  animation: lc-fade var(--lc-med) var(--lc-ease) both;
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-asks--loud {
-  border-color: color-mix(in srgb, var(--lc-accent) 55%, transparent);
+  /* `--lc-asks-glow` is what loud breathes in: the house accent by default, the lead asker's hue
+     when there is one (`.has-lead` below). A variable rather than a second animation list on
+     purpose — re-declaring `animation:` on the has-lead rule restarted `lc-fade` on every class
+     flip, and the contrast sweep caught the strip mid-fade, translucent over the floor: every
+     avatar and paper in it measured 1.0–1.5 below AA with nothing wrong in the palette (2026-09-03,
+     measured against a green main with the line removed). */
+  --lc-asks-glow: var(--lc-accent);
+  border-color: color-mix(in srgb, var(--lc-asks-glow) 55%, transparent);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--lc-accent) 26%, transparent),
-    0 6px 22px -12px color-mix(in srgb, var(--lc-accent) 55%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--lc-asks-glow) 26%, transparent),
+    0 6px 22px -12px color-mix(in srgb, var(--lc-asks-glow) 55%, transparent);
   animation:
-    lc-fade var(--lc-med) var(--lc-ease) both,
+    lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
     lc-asks-breathe 2.4s ease-in-out infinite;
 }
 @keyframes lc-asks-breathe {
   50% {
     box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--lc-accent) 44%, transparent),
-      0 6px 26px -10px color-mix(in srgb, var(--lc-accent) 70%, transparent);
+      0 0 0 1px color-mix(in srgb, var(--lc-asks-glow) 44%, transparent),
+      0 6px 26px -10px color-mix(in srgb, var(--lc-asks-glow) 70%, transparent);
   }
 }
+/* ─── who is asking, in colour ────────────────────────────────────────────
+   The rail wears the lead asker's identity hue (`--lc-asks-hue`, set inline from `memberColor`)
+   on its rim and its bell, the way a speech bubble's ring wears its speaker's — colour on the
+   floor means WHO, and the rail is the floor's chrome. Urgency stays on the weight axis: loud
+   thickens and breathes the same hue rather than swapping it for the house mustard, which had
+   been answering "who" with "how urgent". A ring and a stroke, never text (fill/ink split). */
+.lc-asks.has-lead {
+  border-color: color-mix(in srgb, var(--lc-asks-hue) 62%, var(--lc-border));
+}
+.lc-asks.has-lead .lc-asks__bell {
+  stroke: var(--lc-asks-hue);
+}
+.lc-asks--loud.has-lead {
+  --lc-asks-glow: var(--lc-asks-hue);
+  border-color: color-mix(in srgb, var(--lc-asks-hue) 84%, var(--lc-border));
+}
+
+/* The tier clock as an arc. `--lc-ask-frac` (0..1, inline) is how much of the tier is left; the
+   ring round the avatar drains clockwise as it runs, and its colour walks from the asker's hue to
+   the house amber as the fraction falls — so a ring that has gone mustard is one about to run out.
+   Over (held, or open past its deadline) is a full ring in danger: the clock is not "nearly done",
+   it is done, and the text beside it says what that means for the agent. The mask cuts the disc to
+   a 2px band; the inner colour is any opaque value, it only decides what the mask keeps. */
+.lc-asks__who {
+  position: relative;
+}
+.lc-asks__who.is-timed::after,
+.lc-asks__who.is-over::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  pointer-events: none;
+  --lc-arc: color-mix(
+    in srgb,
+    var(--lc-accent) calc((1 - var(--lc-ask-frac)) * 100%),
+    var(--lc-asks-hue)
+  );
+  background: conic-gradient(var(--lc-arc) calc(var(--lc-ask-frac) * 360deg), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), var(--lc-accent) 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), var(--lc-accent) 0);
+}
+.lc-asks__who.is-over::after {
+  background: var(--lc-danger);
+}
+
 /* The one line. 30px of chrome, whatever is happening behind it. */
 .lc-asks__rail {
   display: flex;
@@ -4288,7 +5374,7 @@
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-asks__lead:hover {
   color: var(--lc-accent-ink);
@@ -4416,7 +5502,7 @@
   stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
-  transition: transform var(--lc-med) var(--lc-ease);
+  transition: transform var(--lc-dur-2) var(--lc-ease-out);
 }
 .is-open .lc-asks__chev {
   transform: rotate(180deg);
@@ -4452,17 +5538,17 @@
   transform: translateY(-4px) scale(0.98);
   visibility: hidden;
   transition:
-    opacity 120ms var(--lc-ease),
-    transform 120ms var(--lc-ease),
-    visibility 0s linear 120ms;
+    opacity var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out),
+    visibility 0s linear var(--lc-dur-1);
 }
 .lc-asks__sheet[data-open] {
   opacity: 1;
   transform: translateY(0) scale(1);
   visibility: visible;
   transition:
-    opacity var(--lc-med) var(--lc-ease-quart),
-    transform var(--lc-med) var(--lc-ease-quart),
+    opacity var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-2) var(--lc-ease-out),
     visibility 0s;
 }
 /* A LIST, not a grid of cards. Twenty asks is a triage queue, and triage wants one scan axis: every
@@ -4482,7 +5568,7 @@
 /* Cards arrive in sequence, most urgent first — reads as one motion instead of a flash of four.
    The delay caps at the first eight: past that the reader is scrolling, not watching an overture. */
 .lc-asks__sheet[data-open] .lc-ask {
-  animation: lc-ask-in var(--lc-med) var(--lc-ease-quart) backwards;
+  animation: lc-ask-in var(--lc-dur-2) var(--lc-ease-out) backwards;
   animation-delay: calc(min(var(--i, 0), 8) * 45ms);
 }
 @keyframes lc-ask-in {
@@ -4491,14 +5577,48 @@
     transform: translateY(6px);
   }
 }
-/* Narrow: the rail sheds context before it sheds the answer. The gist goes first, then the
-   settled/deciding counts, then the seat-approvals link — accept/decline are the last to leave. */
-@media (max-width: 900px) {
+/* ─── the degradation ladder ───────────────────────────────────────────────────────────────────
+ *
+ * The ORDER here is unchanged and was never the problem: the rail sheds context before it sheds the
+ * answer — the gist goes first, then the settled/deciding counts and the seat-approvals link, and
+ * accept/decline are the last to leave. What changed is the QUESTION each step asks.
+ *
+ * These were `@media (max-width: …)`, which asks about the WINDOW. The rail does not live in the
+ * window; it lives in the office panel, whose track is `2.05fr` of a three-column grid. Measured
+ * 2026-09-02 at a 1440px viewport: the rail box is 551px and its content wants 850px — so it was
+ * short by 299px while every step of its own ladder sat there unfired, because 1440 is not below
+ * 900. The chips did not degrade gracefully, they degraded into stubs:
+ *
+ *     "1 in review"       23px of 57      → "1i…"
+ *     "1 elapsed"         21px of 51      → "1…"
+ *     "seat approvals →"  42px of 95      → "seat …"
+ *
+ * A clipped COUNT is worse than an absent one — a number cut below its own text invites being read
+ * as a different number, and that is the one thing a count must not do. (The clipping itself stays
+ * as the backstop it is: `.lc-asks__meta`/`__link` still `flex-shrink` and ellipsis, and must still
+ * CLIP rather than WRAP — see the 2026-08-14 defect at the shrink rule. The backstop was doing its
+ * job. It was being asked to do the ladder's job as well, because the ladder could not fire.)
+ *
+ * And it could not fire ANYWHERE: `.lc-office` is `display: none` below 880px, so the 720px and
+ * 560px steps could never execute on the one route that renders this rail. They were dead rules
+ * describing a responsive behaviour the product did not have. The same viewport is also why the
+ * office column's width is not a function of the window at all — `.lc__canvas--companion` hands the
+ * office the full page, so the identical 1440px viewport gives this rail 553px or ~1440px depending
+ * on a collapse the media query cannot see.
+ *
+ * The thresholds are the measured content, not the old numbers rescaled. Natural widths at the same
+ * measurement: gist 154, the two counts 108, the link 96, verb 84, tier 66, and 8px of gap between
+ * each. So the rail needs ~850 whole; ~696 once the gist is out; ~476 once the counts and link go
+ * too. Each step fires just below the width at which the previous arrangement stopped fitting.
+ *
+ * Precedent for the mechanism is two rules down the same file (`.lc-ov`, `@container (max-width:
+ * 420px)`) and in `.lc-office__work` — both containers for the same reason, both inside this panel. */
+@container asks (max-width: 850px) {
   .lc-asks__gist {
     display: none;
   }
 }
-@media (max-width: 720px) {
+@container asks (max-width: 700px) {
   .lc-asks__meta,
   .lc-asks__link {
     display: none;
@@ -4507,12 +5627,13 @@
     gap: var(--lc-3);
   }
 }
-/* Phone: the name, the clock, and the two answers. Nothing else earns the width — the tier pill goes
-   too, because a clock reading "timed out — agent holding" in danger red has already said it, and the
-   expander drops to a bare chevron so the WHO never gets squeezed out by chrome. Approve and Deny
-   keep their words at every width: they are the two irreversible answers, and this is the size where
-   a mis-tap is most likely. */
-@media (max-width: 560px) {
+/* Narrowest: the name, the clock, and the two answers. Nothing else earns the width — the tier pill
+   goes too, because a clock reading "timed out — agent holding" in danger red has already said it,
+   and the expander drops to a bare chevron so the WHO never gets squeezed out by chrome. Approve and
+   Deny keep their words at every width: they are the two irreversible answers, and this is the size
+   where a mis-tap is most likely. At the office panel's 553px this step does NOT fire, which is the
+   point — verb and tier outrank the counts, and now the ladder can say so. */
+@container asks (max-width: 480px) {
   .lc-asks__verb,
   .lc-asks__restcount,
   .lc-asks__morelabel,
@@ -4532,7 +5653,7 @@
   .lc-asks__sheet,
   .lc-asks__sheet[data-open] {
     transition:
-      opacity 120ms linear,
+      opacity var(--lc-dur-1) linear,
       visibility 0s;
     transform: none;
   }
@@ -4643,10 +5764,10 @@
   cursor: pointer;
   white-space: nowrap;
   transition:
-    border-color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease),
-    color var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out),
+    color var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-ask__glyph {
   width: 11px;
@@ -4751,8 +5872,14 @@
   }
 }
 /* Narrow: the row unstacks into the old card shape rather than crushing three columns. The clock
-   rides up beside the first line instead of floating mid-paragraph. */
-@media (max-width: 760px) {
+   rides up beside the first line instead of floating mid-paragraph.
+   Container, not viewport, for the same reason as the rail's ladder above: the sheet is `left: 0;
+   right: 0` inside `.lc-asks`, so it is exactly as wide as the rail — 551px measured — and a 760px
+   VIEWPORT rule could never fire on the only route that renders it. The threshold is deliberately
+   BELOW today's width rather than a straight port of 760: measured at 551 the card is not squeezed
+   (columns 410/64, nothing clipped), so re-siting this rule must not restack a card that is fine —
+   it makes a dead rule live again without changing what renders now. */
+@container asks (max-width: 520px) {
   .lc-ask {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
@@ -4765,6 +5892,19 @@
   grid-column: 1 / -1;
   font-size: 11px;
   color: var(--lc-info-ink);
+}
+/* A lapsed ask (`applyTierClock`) is the one note on this card that is not news: it explains why
+   nothing is waiting on you. So it drops from the info ink to the roster's muted neutral — the same
+   colour the rail's counts use, which the a11y sweep already measures as text — while the card
+   itself keeps the plain surface, since only `--open` and `--held` earn the accent tint. Quiet is
+   the whole design: the reader should be able to skim past it, and find it when they want it.
+
+   Deliberately NOT `opacity` (the broadcast reel's dimming idiom). Contrast here is measured in the
+   browser, on the painted pixel — a translucent text layer over the sheet is exactly the stack
+   `pnpm a11y:contrast` exists to score honestly, and dimming would spend contrast rather than
+   change hue. */
+.lc-ask__note--lapsed {
+  color: var(--lc-muted);
 }
 
 /* ─── the office overlay (shared by /live and /broadcast) ─────────────────
@@ -4838,7 +5978,7 @@
     inset 0 1px 0 var(--lc-paper-sheen),
     0 3px 8px -3px var(--lc-paper-seat),
     0 20px 44px -20px var(--lc-paper-drop);
-  animation: lc-ov-card-in 480ms var(--ease-out) both;
+  animation: lc-ov-card-in var(--lc-dur-4) var(--lc-ease-out) both;
 }
 
 .lc-ov__id {
@@ -4900,7 +6040,7 @@
   inset: 0;
   border-radius: 50%;
   border: 1px solid var(--lc-ov-live);
-  animation: lc-ov-breathe 2.4s var(--ease-out) infinite;
+  animation: lc-ov-breathe 2.4s var(--lc-ease-out) infinite;
 }
 
 @keyframes lc-ov-breathe {
@@ -4939,8 +6079,8 @@
   pointer-events: auto;
   cursor: default;
   transition:
-    box-shadow 200ms var(--ease-out),
-    transform 200ms var(--ease-out);
+    box-shadow var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-2) var(--lc-ease-out);
 }
 
 /* Rises a hair under the pointer — the whole "you can drive this" cue, at the cost of one transform. */
@@ -4982,8 +6122,8 @@
   line-height: 1;
   cursor: pointer;
   transition:
-    background-color 140ms var(--ease-out),
-    color 140ms var(--ease-out);
+    background-color var(--lc-dur-1) var(--lc-ease-out),
+    color var(--lc-dur-1) var(--lc-ease-out);
 }
 
 .lc-ov__step:hover {
@@ -5019,13 +6159,19 @@
    One lane at a time, seat tag then title — musterd's own unit of work, laid out the way it is
    spoken. The node is keyed by lane id in the component, so this entrance plays on every change of
    subject: the lift-and-fade IS how you know the card moved on. */
+/* The narration line on the broadcast card — the room's transient sentence, quieter than the
+   member reel above it (it replaced the floating lower-third rail, nick 2026-08-31). */
+.lc-ov__caption {
+  margin: 2px 0 0;
+  min-width: 0;
+}
 .lc-ov__now {
   display: flex;
   align-items: baseline;
   gap: clamp(7px, 0.5cqw, 12px);
   min-width: 0;
   margin: 0;
-  animation: lc-ov-now-in 440ms var(--ease-out) both;
+  animation: lc-ov-now-in var(--lc-dur-4) var(--lc-ease-out) both;
 }
 
 .lc-ov__who {
@@ -5205,7 +6351,7 @@
 @media (prefers-reduced-motion: reduce) {
   /* The hover lift goes with the rest of the motion; the shadow change still reports the hover. */
   .lc-ov.is-interactive .lc-ov__card {
-    transition: box-shadow 200ms var(--ease-out);
+    transition: box-shadow var(--lc-dur-2) var(--lc-ease-out);
   }
   .lc-ov.is-interactive .lc-ov__card:hover,
   .lc-ov.is-interactive .lc-ov__card:focus-visible {

@@ -1,12 +1,12 @@
 import { type Binding, resolveAttestedModel } from '@musterd/protocol';
-import { flagStr, type Parsed } from '../args.js';
+import { flagStr, type Parsed, flagHue } from '../args.js';
 import { loadConfig, saveBinding, saveWorkspaceSpec } from '../config.js';
 import { CliError } from '../errors.js';
 import { infraTouchWarning } from '../infra-gate.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { buildEntry } from '../onboard/mcpEntry.js';
 import { installSeatPermissions } from '../onboard/permissions.js';
-import { loadRole } from '../onboard/role.js';
+import { loadToolkit } from '../onboard/toolkit.js';
 import { provisionWorkspace } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
@@ -21,7 +21,7 @@ import { resolve } from './helpers.js';
  * of that harness in the printed folder then *is* that agent, with no binding thrash against your own
  * seat.
  *
- * `--harness <claude-code|cursor|codex>` picks the harness to wire (default claude-code) — the same
+ * `--harness <claude-code|cursor|codex|opencode|grok>` picks the harness to wire (default claude-code) — the same
  * pluggable adapters `musterd init` uses (ADR 038/085), so a Cursor or Codex user gets a genuinely
  * wired workspace, not a Claude-Code-only one. `--here` keeps the legacy single-folder behavior;
  * `--path <dir>` targets an explicit folder.
@@ -36,11 +36,17 @@ export async function agentCommand(
   const name = parsed.positionals[0];
   if (!name || /\s/.test(name)) {
     throw new CliError(
-      'usage: musterd agent <name> [--role <role>] [--model <id>] [--harness <claude-code|cursor|codex>] [--driver <you>] [--here | --path <dir>]',
+      'usage: musterd agent <name> [--role <label>] [--profile <profile>] [--model <id>] [--harness <claude-code|cursor|codex|opencode|grok>] [--driver <you>] [--here | --path <dir>]',
       2,
     );
   }
+  // ADR 272 inc 2 — the split: `--role` is the team fact (roster label) and `--profile` is the
+  // local setup (workspace provisioning); neither implies the other. Pre-rename, one flag did both.
   const role = flagStr(parsed.flags, 'role');
+  const profileName = flagStr(parsed.flags, 'profile');
+  // ADR 374: the seat's colour, if the creator chose one; otherwise assigned at write (file-backed)
+  // or by the daemon (db-only). Validated first so a typo touches nothing.
+  const hue = flagHue(parsed.flags);
   // Model attestation (ADR 101): persist a *declared* model into the seat's binding.json so the adapter
   // attests by default instead of rotting to `unknown`. `--model` wins, else the ambient env the CLI
   // runs in (MUSTERD_MODEL / ANTHROPIC_MODEL, via the shared resolver). Never a guess — undefined stays
@@ -90,14 +96,24 @@ export async function agentCommand(
   // ADR 058 §5: write the seat file first for a file-backed team so the file stays the single writer;
   // db-only teams skip this and the daemon originates. addMember revives a soft-removed name (ADR 065).
   const home = loadConfig().rosterHome[team];
-  if (home) writeSeatFile(home, name, { kind: 'agent', ...(role ? { role } : {}) });
+  if (home)
+    writeSeatFile(home, name, {
+      kind: 'agent',
+      ...(role ? { role } : {}),
+      ...(hue !== undefined ? { hue } : {}),
+    });
   // Declare the seat (v0.3: no per-seat token — the agent claims it with the team agent key on launch).
   // Idempotent: if the seat is already declared (e.g. you ran `team add <name>` first, or re-ran this
   // command), reuse it and just (re)build the workspace instead of dead-ending on a conflict — a
   // ready-to-run workspace is the whole point of this command. Guard against reusing a *human* seat.
   let reused = false;
   try {
-    await http.addMember(team, { name, kind: 'agent', ...(role ? { role } : {}) });
+    await http.addMember(team, {
+      name,
+      kind: 'agent',
+      ...(role ? { role } : {}),
+      ...(hue !== undefined ? { hue } : {}),
+    });
   } catch (err) {
     if (!(err instanceof CliError) || err.code !== 'conflict') throw err;
     const { members } = await http.roster(team);
@@ -111,15 +127,18 @@ export async function agentCommand(
     }
     reused = true;
   }
-  // The agent workspace authenticates with the team agent key (ADR 075), captured at `team create`.
-  const agentKey = config.agentKeys[team] ?? process.env['MUSTERD_AGENT_KEY'];
-  if (!agentKey) {
-    throw new CliError(
-      `no team agent key for "${team}" — create the team here (\`musterd team create ${team}\`, which ` +
-        `captures it) or set MUSTERD_AGENT_KEY`,
-      4,
-    );
-  }
+  // ADR 344: every provisioned workspace receives a credential constrained to this one seat.
+  // Mint after declaration because the server validates the target against the live roster. Never
+  // fall back to the ambient legacy Team-wide key: that would silently preserve its blast radius.
+  // This field is the *claim* authenticator. The wake actuator authenticates with `binding.host_key`
+  // (ADR 395), minted at `residency on` — a claim-scoped key cannot poll `/residency/wake-leases`.
+  const agentKey = (
+    await http.mintBootstrapCredential(team, {
+      use: 'claim_seat',
+      target: name,
+      label: `${harness.id}:${name}`,
+    })
+  ).agent_key;
 
   // Mint a standing grant for the seat so the workspace's autojoin occupies immediately on launch
   // instead of opening an admin-approval request every session (ADR 077). Best-effort: if it fails
@@ -141,10 +160,10 @@ export async function agentCommand(
   });
 
   const binding: Binding = {
+    version: 2,
     server: config.server,
     team,
     agent_key: agentKey,
-    surface: harness.surface,
     claim: { mode: 'seat', name },
     ...(grant !== undefined ? { grant } : {}),
     ...(model !== undefined ? { model } : {}),
@@ -155,24 +174,24 @@ export async function agentCommand(
     ...(driver ? { driver } : {}),
   };
   saveBinding(ws.dir, binding);
-  // ADR 261: the permissions floor — plus the role's profile when --role names one — lands with
-  // the binding, so a NON-INTERACTIVE session in this worktree can work on day one. Until this
+  // ADR 261: the permissions floor — plus the profile's lists when --profile names one — lands
+  // with the binding, so a NON-INTERACTIVE session in this worktree can work on day one. Until this
   // write, a fresh seat's first Write failed closed with no way to prompt and presented as a
   // broken tool (the 2026-08-13 ryder incident). Best-effort like hook install: a permissions
-  // hiccup never fails seat creation. Dir-aware on purpose — ws.dir is never process.cwd().
+  // hiccup never fails seat creation. Dir-aware — ws.dir is never cwd().
   try {
-    const template = role ? loadRole(ws.dir, role) : undefined;
+    const template = profileName ? loadToolkit(ws.dir, profileName) : undefined;
     installSeatPermissions(ws.dir, template);
   } catch {
-    /* an unknown role name or a broken settings file must not block the seat — init --check
+    /* an unknown profile name or a broken settings file must not block the seat — init --check
        (ADR 261 increment 2) is the surface that reports it */
   }
   // Also write the secret-free committed launch spec (ADR: committed launch spec) so this worktree
   // self-wires via `musterd wire` on a fresh clone/machine — the key stays out of the committed file.
   saveWorkspaceSpec(ws.dir, {
+    version: 2,
     server: config.server,
     team,
-    surface: harness.surface,
     claim: { mode: 'seat', name },
   });
 
@@ -197,7 +216,6 @@ export async function agentCommand(
     server: config.server,
     team,
     agent_key: agentKey,
-    surface: harness.surface,
     claim: { mode: 'seat', name } as const,
     ...(grant !== undefined ? { grant } : {}),
   };

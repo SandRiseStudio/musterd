@@ -24,13 +24,14 @@ describe('HttpClient x-musterd-model forwarding (ADR 119 / 121)', () => {
     delete process.env['ANTHROPIC_MODEL'];
   });
 
-  it('forwards x-musterd-model for an agent key when the env declares a model', async () => {
+  it('forwards x-musterd-model for an agent-seat credential when the env declares a model', async () => {
     process.env['MUSTERD_MODEL'] = 'qwen2.5:3b-instruct';
     const fn = stubOkFetch();
     await new HttpClient({
       server: 'http://x',
-      key: 'mskey_team',
+      key: 'msac_agent',
       seat: 'Ada',
+      sessionLease: 'msls_presence',
       surface: 'cli',
     }).roster('dawn');
     const headers = (fn.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
@@ -53,8 +54,9 @@ describe('HttpClient x-musterd-model forwarding (ADR 119 / 121)', () => {
     const fn = stubOkFetch();
     await new HttpClient({
       server: 'http://x',
-      key: 'mskey_team',
+      key: 'msac_agent',
       seat: 'Ada',
+      sessionLease: 'msls_presence',
       surface: 'cli',
       model: 'claude-fable-5',
     }).roster('dawn');
@@ -68,8 +70,9 @@ describe('HttpClient x-musterd-model forwarding (ADR 119 / 121)', () => {
     const fn = stubOkFetch();
     await new HttpClient({
       server: 'http://x',
-      key: 'mskey_team',
+      key: 'msac_agent',
       seat: 'Ada',
+      sessionLease: 'msls_presence',
       surface: 'cli',
       model: 'claude-fable-5',
     }).roster('dawn');

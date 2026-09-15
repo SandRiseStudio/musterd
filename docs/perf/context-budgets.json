@@ -2,12 +2,12 @@
   "note": "Standing-context byte budgets (spec 2026-08-03, `pnpm context:check`). Every byte musterd injects into a seat's context — tools/list render, primer, hook nudges, including the due-gated label nudge — measured statically from source-of-truth exports. Raising any budget requires replacing that item's `justification`. bytes are UTF-8 of the model-readable text; estTokens = bytes/4 (the SurfaceRender formula).",
   "items": {
     "toolsListDefaultBytes": {
-      "budget": 15852,
-      "justification": "2026-08-12 (15097 B, +team_goal_outcome tool + claim-time goal_id on lane_claim — value layer ADR 258, epoch 11) + 5% headroom"
+      "budget": 18287,
+      "justification": "2026-08-27 (17416 B, +team_insight_search alias team_memory_search — ADR 327 amendment, one-meaning-per-word) + 5% headroom. Pays rent via ADR 327 eval."
     },
     "toolsListMutedBytes": {
-      "budget": 4694,
-      "justification": "baseline 2026-08-03 (4470 B) + 5% headroom"
+      "budget": 8042,
+      "justification": "2026-09-03 re-baseline (7659 B) + 5% headroom. Two things bought this raise, and the second is the reason it is a re-baseline rather than a bump: (1) `team_join {wait}` (ADR 095) costs 91 B and pays rent by removing a measured stall — of 33 claim requests opened from an MCP surface since 2026-07-03, only 5 were decided inside the 120s block the argument makes optional (docs/wiki/claim-approval-latency.md); (2) the prior budget was set 2026-08-27 at 7232 B + 5%, and main had drifted to 7568 B by 2026-09-03 — 336 of its 362 B headroom spent by unattributed growth, so the next byte from any source was going to fail this gate whoever added it. Falsify the rent: if no seat uses `wait: 0` by the next re-baseline, cut the argument and take the bytes back."
     },
     "primerBytes": {
       "budget": 2665,
@@ -26,12 +26,12 @@
       "justification": "post-trim 2026-08-03 (98 B) + 5% headroom"
     },
     "perTurnTotalBytes": {
-      "budget": 16051,
-      "justification": "2026-08-12 (15287 B, +team_goal_outcome tool + claim-time goal_id on lane_claim — value layer ADR 258) + 5% headroom"
+      "budget": 18487,
+      "justification": "2026-08-27 (17606 B, +team_insight_search alias — ADR 327 amendment) + 5% headroom. Pays rent via ADR 327 eval (trap-recurrence down, promotions up), reviewed at next re-baseline."
     },
     "perSessionTotalBytes": {
-      "budget": 18522,
-      "justification": "2026-08-12 (17640 B, +ADR 254 eligible sets: `to` accepts an array, which costs an anyOf branch in the team_send schema — structural — plus one clause teaching it) + 5% headroom. The sibling toolsList/perTurn items were re-baselined by ADR 256 in the same window and already had room; this one did not and was the only raise eligible sets needed."
+      "budget": 21833,
+      "justification": "2026-08-27 (20793 B, same alias) + 5% headroom"
     }
   }
 }

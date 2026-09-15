@@ -199,11 +199,12 @@ the ADR 056 ladder: **cookoff scenario + runs → coordination-dataset → bench
 Real money only goes in once the apparatus is proven. Each rung gates the next.
 
 1. **Smoke** — 1 run, cell D only. Does the whole apparatus work: scenario repo, hidden tests, scoring
-   script, git archaeology?
+   script, git archaeology? **Done 2026-07-17.**
 2. **Pilot** — A + D, 2 runs each. Is there _any_ signal? If D−A shows nothing dramatic, fix the traps
-   before spending more.
+   before spending more. **Done 2026-07-20** (finding 006).
 3. **Flagship** — A / B / C2 / C3 / D × 3–5 runs, fixed model + harness. The runs that produce the
-   published number.
+   published number. **Done 2026-07-20**, n=3 per arm (finding 006 flagship section). Remaining
+   unauthorized: D-res (manifest §3b) and cell E (too-big-for-solo; design in progress).
 
 The scenario repo and scoring harness are one-time costs that amortize — they become the Track A /
 ADR 052 baseline infrastructure regardless of which axis a later run varies.
@@ -234,6 +235,8 @@ double-control** as the credibility spine.
   claim than "musterd vs. the status quo."
 
 ## Open before the smoke run
+
+All three pre-smoke items closed before 2026-07-17; the ladder itself closed 2026-07-20 (finding 006).
 
 - ~~Freeze the **wasted-work operational predicates**~~ — **done**: predicate set v1 frozen by
   [ADR 123](../decisions/123-cookoff-measurement-protocol.md) /

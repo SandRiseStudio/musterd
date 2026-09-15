@@ -8,6 +8,8 @@ import {
   codexBackend,
   codexWakeEnv,
   parseCodexThreadLine,
+  parseCodexUsageLine,
+  addUsage,
 } from './codex.js';
 
 class Child extends EventEmitter {
@@ -51,17 +53,29 @@ const ctx: BackendContext = {
 };
 
 describe('Codex residency argv', () => {
-  it('uses the workspace flag only for fresh exec and never passes a bypass', () => {
-    expect(buildCodexFreshArgs('line', '/ws')).toEqual(['exec', '--json', '-C', '/ws', 'line']);
+  it('uses the workspace flag only for fresh exec, and both forms bypass hook trust (ADR 359)', () => {
+    expect(buildCodexFreshArgs('line', '/ws')).toEqual([
+      'exec',
+      '--json',
+      '--dangerously-bypass-hook-trust',
+      '-C',
+      '/ws',
+      'line',
+    ]);
     expect(buildCodexResumeArgs('line', 'thread')).toEqual([
       'exec',
       'resume',
       '--json',
+      '--dangerously-bypass-hook-trust',
       'thread',
       'line',
     ]);
+    // ADR 359: musterd authors the hooks.json being trusted, so bypassing the interactive
+    // hook-trust prompt (which a headless wake spawn could never show anyway) is deliberate — a
+    // fresh/resume args build that silently drops the flag would go right back to hooks never
+    // firing, exactly as invisible as the bug this fixed.
     for (const args of [buildCodexFreshArgs('line', '/ws'), buildCodexResumeArgs('line', 'thread')])
-      expect(args.join(' ')).not.toMatch(/dangerously|bypass|approval|ignore-user-config/i);
+      expect(args).toContain('--dangerously-bypass-hook-trust');
   });
   it('accepts only a typed thread.started JSONL record', () => {
     expect(parseCodexThreadLine('{"type":"thread.started","thread_id":"t"}')).toBe('t');
@@ -85,6 +99,20 @@ describe('Codex residency argv', () => {
     // verifier is back to matching a description.
     expect(codexWakeEnv({ HOME: '/h' }, 'L42').MUSTERD_WAKE_LEASE).toBe('L42');
     expect(codexWakeEnv({ HOME: '/h' }).MUSTERD_WAKE_LEASE).toBeUndefined();
+  });
+
+  it('puts the pinned actuator build before a Homebrew musterd on PATH', () => {
+    expect(
+      codexWakeEnv(
+        { PATH: '/opt/homebrew/bin:/usr/bin', MUSTERD_AGENT_KEY: 'secret' },
+        'L42',
+        '/Users/nick/.musterd/bin',
+      ),
+    ).toMatchObject({
+      PATH: '/Users/nick/.musterd/bin:/opt/homebrew/bin:/usr/bin',
+      MUSTERD_PROVENANCE: 'wake',
+      MUSTERD_WAKE_LEASE: 'L42',
+    });
   });
 });
 
@@ -197,6 +225,32 @@ describe('codexBackend', () => {
     await result.settled;
   });
 
+  it('spawns Codex with the actuator-pinned musterd before Homebrew on PATH', async () => {
+    const child = new Child();
+    let spawnedEnv: NodeJS.ProcessEnv | undefined;
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      recordFreshThread: () => undefined,
+      ensurePinned: () => '/Users/nick/.musterd/bin',
+      spawn: ((_bin: string, _args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+        spawnedEnv = opts.env;
+        return child;
+      }) as never,
+    });
+    const priorPath = process.env.PATH;
+    process.env.PATH = '/opt/homebrew/bin:/usr/bin';
+    try {
+      const wake = backend.wake(spec, ctx);
+      await Promise.resolve();
+      child.out('{"type":"thread.started","thread_id":"new"}');
+      await wake;
+      expect(spawnedEnv?.PATH).toBe('/Users/nick/.musterd/bin:/opt/homebrew/bin:/usr/bin');
+      child.exit();
+    } finally {
+      process.env.PATH = priorPath;
+    }
+  });
+
   it('a wake that genuinely produced nothing still FAILS — deferral is not the catch-all', async () => {
     // The guard on the guard: an empty roster is a real failure and must keep consuming budget,
     // or a host that spawns nothing retries forever (ADR 236's ceiling reasoning, one layer out).
@@ -220,28 +274,69 @@ describe('codexBackend', () => {
     await result.settled;
   });
 
+  it('GUARD: a demoted conflict (slot live, enumeration disagrees) defers — either side saying live refuses (ADR 166 inc 3)', async () => {
+    // The 2026-08-21 inspection of the sweep's 109 demoted observations found every resolvable
+    // case was a live session enumeration could not see (unscanned harness, unwritten
+    // `.workspace-trusted`) — and the one wake that landed in a demote window came through THIS
+    // backend, saved only by a missing codex CLI. The slot's warm transcript is the evidence.
+    const spawned: string[][] = [];
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      readSession: () => ({
+        state: 'resumable',
+        source: 'enumerated',
+        slotState: 'live',
+        disagreed: true,
+        demoted: true,
+        session: { harness: 'codex', id: 'old', started_at: 1 },
+      }),
+      spawn: ((_bin: string, args: string[]) => {
+        spawned.push(args);
+        return new Child();
+      }) as never,
+    });
+    const result = await backend.wake(spec, ctx);
+    expect(spawned).toHaveLength(0);
+    expect(result.outcome).toMatchObject({
+      occupied: false,
+      deferred: true,
+      reason: 'local-session-live',
+    });
+    await result.settled;
+  });
+
   it('resumes the captured thread only when its JSONL identity agrees', async () => {
     const child = new Child();
     const calls: string[][] = [];
+    let spawnedEnv: NodeJS.ProcessEnv | undefined;
     const backend = codexBackend({
       resolveBin: async () => '/codex',
       readSession: () => ({
         state: 'resumable',
         session: { harness: 'codex', id: 'old', started_at: 1 },
       }),
-      spawn: ((_bin: string, args: string[]) => {
+      ensurePinned: () => '/Users/nick/.musterd/bin',
+      spawn: ((_bin: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
         calls.push(args);
+        spawnedEnv = opts.env;
         return child;
       }) as never,
     });
-    const wake = backend.wake(spec, ctx);
-    await Promise.resolve();
-    child.out('{"type":"thread.started","thread_id":"old"}');
-    const result = await wake;
-    expect(calls[0]).toEqual(buildCodexResumeArgs('wake line', 'old'));
-    expect(result.outcome.session).toBe('resumed');
-    child.exit();
-    await result.settled;
+    const priorPath = process.env.PATH;
+    process.env.PATH = '/opt/homebrew/bin:/usr/bin';
+    try {
+      const wake = backend.wake(spec, ctx);
+      await Promise.resolve();
+      child.out('{"type":"thread.started","thread_id":"old"}');
+      const result = await wake;
+      expect(calls[0]).toEqual(buildCodexResumeArgs('wake line', 'old'));
+      expect(spawnedEnv?.PATH).toBe('/Users/nick/.musterd/bin:/opt/homebrew/bin:/usr/bin');
+      expect(result.outcome.session).toBe('resumed');
+      child.exit();
+      await result.settled;
+    } finally {
+      process.env.PATH = priorPath;
+    }
   });
   it('portable fresh orders bypass resume even with a valid local capture', async () => {
     const child = new Child();
@@ -303,5 +398,242 @@ describe('codexBackend', () => {
     expect(result.outcome).toMatchObject({ occupied: false, session: 'fresh' });
     expect(result.outcome.reason).toContain('code 2');
     await result.settled;
+  });
+});
+
+/**
+ * The wake-lease FILE (lane 01M1HM8EEK, ADR 354). Codex launches its MCP stdio servers with a
+ * sanitized environment — twelve variables, measured 2026-09-02 on 0.150.1, none `MUSTERD_*` — so
+ * `codexWakeEnv`'s MUSTERD_PROVENANCE/MUSTERD_WAKE_LEASE reach the codex process and stop there.
+ * The adapter then attested `provenance: session` with no lease, ADR 241 read the seat as held by
+ * another session, and this backend's not-mine path killed the review it had spawned ninety seconds
+ * earlier. Every codex wake since 2026-08-27 died this way (13 such deferrals in the three days to
+ * 2026-09-02, zero `residency.woke`).
+ *
+ * The backend now hands the lease over on disk as well: written beside binding.json right after
+ * spawn, naming the CHILD's pid so only a process spawned by that codex can honour it, and cleared
+ * when the run settles.
+ */
+describe('the wake-lease file — a second channel for a harness that strips the first', () => {
+  const harness = (child: Child) => {
+    const writes: Array<{ workspace: string; lease: Record<string, unknown> }> = [];
+    const clears: Array<{ workspace: string; lease_id: string }> = [];
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      spawn: (() => child) as never,
+      recordFreshThread: () => undefined,
+      writeWakeLease: (workspace, lease) => {
+        writes.push({ workspace, lease: lease as unknown as Record<string, unknown> });
+      },
+      clearWakeLease: (workspace, lease_id) => {
+        clears.push({ workspace, lease_id });
+      },
+    });
+    return { backend, writes, clears };
+  };
+
+  it('writes the lease naming the spawned child’s pid, before verification can conclude', async () => {
+    const child = new Child();
+    child.pid = 4242;
+    const { backend, writes } = harness(child);
+    const wake = backend.wake(spec, ctx);
+    await Promise.resolve();
+    // Written at spawn — the adapter autojoins ~15s in, long before this attempt settles.
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.workspace).toBe('/ws');
+    expect(writes[0]!.lease).toMatchObject({
+      lease_id: 'l',
+      provenance: 'wake',
+      harness: 'codex',
+      spawner_pid: 4242,
+    });
+    expect(writes[0]!.lease['expires_at']).toBeGreaterThan(Date.now());
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(true);
+    child.exit(0);
+    await result.settled;
+  });
+
+  it('clears the file when the run settles — the next occupant inherits nothing', async () => {
+    const child = new Child();
+    child.pid = 4242;
+    const { backend, clears } = harness(child);
+    const wake = backend.wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    expect(clears).toHaveLength(0);
+    child.exit(0);
+    await result.settled;
+    expect(clears).toEqual([{ workspace: '/ws', lease_id: 'l' }]);
+  });
+
+  it('clears on a failed run too — a killed wake must not leave its lease for a human to pick up', async () => {
+    const child = new Child();
+    child.pid = 4242;
+    const { backend, clears } = harness(child);
+    const wake = backend.wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    child.exit(1);
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(false);
+    await result.settled;
+    expect(clears).toEqual([{ workspace: '/ws', lease_id: 'l' }]);
+  });
+
+  it('a spawn that never produced a pid writes nothing — there is no process to bind to', async () => {
+    const child = new Child(); // pid undefined
+    const { backend, writes } = harness(child);
+    const wake = backend.wake(spec, ctx);
+    await Promise.resolve();
+    expect(writes).toHaveLength(0);
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    child.exit(0);
+    await result.settled;
+  });
+});
+
+/**
+ * The completion record (lane 01M1G310Y7). Until 2026-09-02 this backend's `settled` was typed
+ * `Promise<undefined>` — it resolved with nothing, on every run, so the loop's supplementary
+ * wake-cost report had nothing to post and the daemon never wrote a `residency.wake_cost` row for a
+ * codex seat. Measured on the live host log: gptbot 130 spawns, 0 cost rows, against four
+ * claude-code seats that priced. A wake loop on that seat (six leases in 40 minutes, 2026-09-01)
+ * was invisible to the exact rail ADR 252 built to show it.
+ *
+ * Codex prints no cost summary the host can attest, so `cost_usd` stays absent. But wall-clock is
+ * the HOST's measurement, not the child's report — the same principle the native backend states —
+ * and it is what makes every wake, including the ones that fail, land on the rail.
+ */
+describe('the completion record — every settled run reports what the host measured', () => {
+  const fresh = (child: Child) =>
+    codexBackend({
+      resolveBin: async () => '/codex',
+      spawn: (() => child) as never,
+      recordFreshThread: () => undefined,
+    });
+
+  // Verbatim from `codex exec --json` 0.152.1 on 2026-09-02 (lane 01M1HJY3JF): token counts, no
+  // model, no price. The shape this adapter reads is the shape codex actually prints.
+  const TURN_COMPLETED =
+    '{"type":"turn.completed","usage":{"input_tokens":19818,"cached_input_tokens":11136,' +
+    '"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}';
+
+  it('parses the usage a real turn.completed line carries, and nothing from any other line', () => {
+    expect(parseCodexUsageLine(TURN_COMPLETED)).toEqual({
+      input_tokens: 19818,
+      cached_input_tokens: 11136,
+      cache_write_input_tokens: 0,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+    });
+    expect(parseCodexUsageLine('{"type":"turn.started"}')).toBeUndefined();
+    expect(parseCodexUsageLine('{"type":"turn.completed"}')).toBeUndefined();
+    expect(
+      parseCodexUsageLine(
+        '{"type":"turn.completed","usage":{"input_tokens":-1,"output_tokens":1}}',
+      ),
+    ).toBeUndefined();
+    expect(parseCodexUsageLine('not json')).toBeUndefined();
+  });
+
+  it('sums usage across turns, keeping an optional count absent only when no turn had it', () => {
+    const a = { input_tokens: 10, output_tokens: 1 };
+    const b = { input_tokens: 5, output_tokens: 2, reasoning_output_tokens: 3 };
+    expect(addUsage(undefined, a)).toEqual(a);
+    expect(addUsage(a, b)).toEqual({
+      input_tokens: 15,
+      output_tokens: 3,
+      reasoning_output_tokens: 3,
+    });
+  });
+
+  it('a settled run carries the tokens codex printed and names why there is no price (ADR 364)', async () => {
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    child.out(TURN_COMPLETED);
+    child.exit(0);
+    const completion = await result.settled;
+    expect(completion?.usage).toEqual({
+      input_tokens: 19818,
+      cached_input_tokens: 11136,
+      cache_write_input_tokens: 0,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+    });
+    expect(completion?.unpriced_reason).toBe('harness_prints_no_price');
+    expect(completion?.cost_usd).toBeUndefined();
+    expect(completion?.harness_cost_usd).toBeUndefined();
+  });
+
+  it('a run killed before turn end still names the reason — it is a property of the harness', async () => {
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    child.exit(137);
+    const completion = await result.settled;
+    expect(completion?.usage).toBeUndefined();
+    expect(completion?.unpriced_reason).toBe('harness_prints_no_price');
+  });
+
+  it('a woke run that exits cleanly carries duration_ms', async () => {
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(true);
+    child.exit(0);
+    const completion = await result.settled;
+    expect(completion).toBeDefined();
+    expect(completion?.duration_ms).toBeTypeOf('number');
+    expect(completion?.duration_ms).toBeGreaterThanOrEqual(0);
+    expect(completion?.cost_usd).toBeUndefined();
+  });
+
+  it('a run that FAILS still consumed a spawn and a clock — it prices too', async () => {
+    // gptbot's shape on 2026-09-01: 11 of its wakes died `run exited with code 1`. Each one was a
+    // real process on this machine for real seconds, and none of them reached the rail.
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    child.exit(1);
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(false);
+    const completion = await result.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+  });
+
+  it('a watchdog-killed run prices — it is the most expensive shape there is', async () => {
+    const child = new Child();
+    child.kill = () => {
+      setTimeout(() => child.exit(143), 1);
+      return true;
+    };
+    const slowVerify = () =>
+      new Promise<{ occupied: boolean }>((r) => setTimeout(() => r({ occupied: false }), 150));
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      spawn: (() => child) as never,
+      recordFreshThread: () => undefined,
+      killGraceMs: 5,
+    });
+    const result = await backend.wake(
+      { ...spec, bounds: { timeout_ms: 30 } },
+      { ...ctx, verifyOccupied: slowVerify },
+    );
+    expect(result.outcome.occupied).toBe(false);
+    const completion = await result.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+    expect(completion?.duration_ms).toBeGreaterThanOrEqual(30);
   });
 });

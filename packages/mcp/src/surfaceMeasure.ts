@@ -22,6 +22,17 @@ export async function measureToolSurface(capabilities?: Capabilities): Promise<S
     provenance: 'session',
     workspace: 'repo',
     claim: { mode: 'seat', name: 'Ada' },
+    // Inert by construction, and worth saying why: ADR 275 has `refreshAttestation` rewrite
+    // `config.surface` from the binding found at `bindingDir ?? process.cwd()`, which is how a
+    // fixture ends up measuring the harness of whichever seat worktree ran it (#863, #871). It
+    // cannot happen here — the only caller is `MusterdClient.refreshObservedModel` on the heartbeat
+    // tick, and `fakeClient` above never joins or ticks. So the declared `claude-code` stands
+    // everywhere and the byte count is the same on any machine.
+    //
+    // Keep it that way. This is the one site in that inventory that is NOT a test: it backs
+    // `pnpm context:check`, so a real client here would make a GATE read the developer's capture
+    // rather than the code — machine-dependent CI, not a machine-dependent test. If this ever needs
+    // a live client, anchor it at an empty temp dir instead of cwd.
     bindingDir: process.cwd(),
     ...(capabilities ? { capabilities } : {}),
   } as McpConfig;

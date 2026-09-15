@@ -1,9 +1,13 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+import { makeEnvelope } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
+import { ulid } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args.js';
+import { HttpClient, watchClaim } from './client.js';
+import { claimCommand } from './commands/claim.js';
 import { reachabilityNudge, resolve, resolveRead } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { joinCommand } from './commands/join.js';
@@ -14,9 +18,11 @@ import { captureSession } from './commands/session.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
 import { whoamiCommand } from './commands/whoami.js';
+import { wireCommand } from './commands/wire.js';
 import { loadConfig, saveBinding } from './config.js';
 import { cachedTeamLive } from './onboard/init.js';
 import { sessionDigest } from './session/digest.js';
+import { claimAgentHttp } from './test-auth.js';
 
 let server: RunningServer;
 let dir: string;
@@ -49,18 +55,31 @@ afterEach(async () => {
 
 /** Act explicitly as a member via `MUSTERD_*` env — the way a second member (its own session) acts
  *  from someone else's folder now that an ambient global-config identity can only read (ADR 036). */
-function actAs(team: string, member: string, token: string): void {
+function actAs(team: string, member: string, token: string, sessionLease?: string): void {
   process.env['MUSTERD_TEAM'] = team;
   // v0.3 (ADR 075): the env carries the Bearer secret (here the member's mskd_ seat token, on the
   // untouched authMember path) + the claim target naming the acting seat.
   process.env['MUSTERD_AGENT_KEY'] = token;
   process.env['MUSTERD_CLAIM'] = `seat:${member}`;
+  if (sessionLease !== undefined) process.env['MUSTERD_SESSION_LEASE'] = sessionLease;
 }
 function actAsNobody(): void {
   delete process.env['MUSTERD_TEAM'];
   delete process.env['MUSTERD_AGENT_KEY'];
   delete process.env['MUSTERD_CLAIM'];
   delete process.env['MUSTERD_GRANT'];
+  delete process.env['MUSTERD_SESSION_LEASE'];
+}
+
+async function claimedAgent(team: string, member: string) {
+  const cfg = loadConfig();
+  return claimAgentHttp(
+    process.env['MUSTERD_SERVER']!,
+    team,
+    cfg.agentKeys[team]!,
+    cfg.identities[team]!.key,
+    member,
+  );
 }
 
 /** Run a command fn with captured stdout. */
@@ -77,6 +96,142 @@ async function run(fn: (p: ReturnType<typeof parseArgs>) => Promise<number>, arg
     spy.mockRestore();
   }
 }
+
+describe('CLI end-to-end (ADR 350 legacy bootstrap cutover)', () => {
+  it('migrates two Workspaces and one host without interrupting an occupied Presence', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
+    await run(teamCommand, ['add', 'Grace', '--kind', 'agent']);
+    const config = loadConfig();
+    const legacyKey = config.agentKeys['dawn']!;
+    const adminCredential = config.identities['dawn']!.key;
+    const adaAuth = await claimAgentHttp(
+      process.env['MUSTERD_SERVER']!,
+      'dawn',
+      legacyKey,
+      adminCredential,
+      'Ada',
+    );
+    const graceAuth = await claimAgentHttp(
+      process.env['MUSTERD_SERVER']!,
+      'dawn',
+      legacyKey,
+      adminCredential,
+      'Grace',
+    );
+    const adaPresence = server.db
+      .prepare<[string], { id: string }>(
+        `SELECT p.id FROM presence p JOIN members m ON m.id = p.member_id
+         WHERE m.name = ? AND p.status = 'online'`,
+      )
+      .get('Ada')!.id;
+
+    const adaDir = mkdtempSync(join(tmpdir(), 'musterd-ada-'));
+    const graceDir = mkdtempSync(join(tmpdir(), 'musterd-grace-'));
+    try {
+      for (const [workspace, seat, credential] of [
+        [adaDir, 'Ada', adaAuth.key],
+        [graceDir, 'Grace', graceAuth.key],
+      ] as const) {
+        saveBinding(workspace, {
+          version: 2,
+          server: process.env['MUSTERD_SERVER']!,
+          team: 'dawn',
+          claim: { mode: 'seat', name: seat },
+          agent_key: legacyKey,
+          seat_credential: credential,
+        });
+        cwdSpy.mockReturnValue(workspace);
+        expect((await run(wireCommand, ['wire', '--migrate-bootstrap'])).code).toBe(0);
+      }
+      expect(
+        server.db
+          .prepare<[string], { id: string }>('SELECT id FROM presence WHERE id = ?')
+          .get(adaPresence)?.id,
+      ).toBe(adaPresence);
+
+      cwdSpy.mockReturnValue(cwdDir);
+      const enrolled = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/residency/enroll`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${adminCredential}`,
+        },
+        body: JSON.stringify({ seat: 'Ada', harness: 'cursor', host: 'mac-studio' }),
+      });
+      expect(enrolled.status).toBe(201);
+      const hostMint = JSON.parse(
+        (await run(teamCommand, ['bootstrap', 'mint', '--host', 'mac-studio', '--json'])).out,
+      );
+      const hostUse = await fetch(
+        `${process.env['MUSTERD_SERVER']}/teams/dawn/residency/wake-leases`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${hostMint.agent_key}`,
+          },
+          body: JSON.stringify({ host: 'mac-studio' }),
+        },
+      );
+      expect(hostUse.status).toBe(200);
+
+      const reseatPolicy = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/policy`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${adminCredential}`,
+        },
+        body: JSON.stringify({ standing_reseat_known_agents: true }),
+      });
+      expect(reseatPolicy.status).toBe(200);
+      for (const workspace of [adaDir, graceDir]) {
+        const binding = JSON.parse(
+          readFileSync(join(workspace, '.musterd', 'binding.json'), 'utf8'),
+        );
+        const claimed = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/claim`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            key: binding.agent_key,
+            target: { seat: binding.claim.name },
+            surface: 'cli',
+          }),
+        });
+        expect(claimed.status).toBe(200);
+      }
+
+      const cutover = await run(teamCommand, ['bootstrap', 'cutover', '--yes', '--json']);
+      expect(JSON.parse(cutover.out)).toMatchObject({ ok: true, already_cut_over: false });
+
+      const legacyClaim = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          key: legacyKey,
+          target: { seat: 'Ada' },
+          surface: 'cli',
+        }),
+      });
+      expect(legacyClaim.status).toBe(403);
+      const legacyHost = await fetch(
+        `${process.env['MUSTERD_SERVER']}/teams/dawn/residency/wake-leases`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${legacyKey}`,
+          },
+          body: JSON.stringify({ host: 'mac-studio' }),
+        },
+      );
+      expect(legacyHost.status).toBe(401);
+    } finally {
+      rmSync(adaDir, { recursive: true, force: true });
+      rmSync(graceDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
   it('creates a team, adds a second human, exchanges a message', async () => {
@@ -260,19 +415,91 @@ describe('thread-close clears the comeback summary (ADR 025)', () => {
 });
 
 describe('agent-side reachability nudge (ADR 046)', () => {
+  it('does not supersede a live same-workspace adapter while re-claiming agent HTTP authority', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const authority = await claimedAgent('dawn', 'Ada');
+    const agentKey = loadConfig().agentKeys['dawn']!;
+    const adapterError = vi.fn();
+    let adapter: ReturnType<typeof watchClaim>;
+    await new Promise<void>((resolve, reject) => {
+      adapter = watchClaim({
+        wsUrl: process.env['MUSTERD_SERVER']!.replace(/^http/, 'ws') + '/ws',
+        team: 'dawn',
+        key: authority.key,
+        target: { seat: 'Ada' },
+        surface: 'claude-code',
+        workspace: basename(cwdDir),
+        onDeliver: () => {},
+        onOccupied: () => resolve(),
+        onError: (message) => {
+          adapterError(message);
+          reject(new Error(message));
+        },
+      });
+    });
+
+    try {
+      saveBinding(cwdDir, {
+        version: 2,
+        server: process.env['MUSTERD_SERVER']!,
+        team: 'dawn',
+        agent_key: agentKey,
+        seat_credential: authority.key,
+        session_lease: 'msls_stale',
+        claim: { mode: 'seat', name: 'Ada' },
+      });
+
+      await resolve({}).http.inbox('dawn', { unread: true });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(adapterError).not.toHaveBeenCalled();
+    } finally {
+      adapter!.close();
+    }
+  });
+
+  it('re-claims a bound agent before a routine HTTP read when its stored lease is stale', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const authority = await claimedAgent('dawn', 'Ada');
+    const agentKey = loadConfig().agentKeys['dawn']!;
+
+    saveBinding(cwdDir, {
+      version: 2,
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      agent_key: agentKey,
+      seat_credential: authority.key,
+      session_lease: 'msls_stale',
+      claim: { mode: 'seat', name: 'Ada' },
+    });
+
+    await expect(
+      new HttpClient({
+        server: process.env['MUSTERD_SERVER']!,
+        key: authority.key,
+        seat: 'Ada',
+        sessionLease: 'msls_stale',
+      }).inbox('dawn', { unread: true }),
+    ).rejects.toMatchObject({ exitCode: 4 });
+
+    const restored = await resolve({}).http.inbox('dawn', { unread: true });
+    expect(restored.messages).toEqual([]);
+  });
+
   it('surfaces a directed act on an unrelated command, then self-clears once the inbox is read', async () => {
     // nick creates dawn and adds Ada (a heads-down agent).
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     // ADR 069: Ada (agent) authenticates with the team agent key + seat:Ada (set by actAs).
-    const adaToken = loadConfig().agentKeys['dawn']!;
+    const ada = await claimedAgent('dawn', 'Ada');
 
     // nick directs a request_help at Ada.
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
 
     // Ada acts (explicit via env, ADR 036) — runs an unrelated `send`. The nudge fires for that
     // command, naming the waiting act, even though `send` never shows the inbox itself.
-    actAs('dawn', 'Ada', adaToken);
+    actAs('dawn', 'Ada', ada.key, ada.sessionLease);
     const nudge = await reachabilityNudge(
       'send',
       parseArgs(['--to', 'nick', '--act', 'message', 'ok']),
@@ -289,9 +516,9 @@ describe('agent-side reachability nudge (ADR 046)', () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     // ADR 069: Ada (agent) authenticates with the team agent key + seat:Ada (set by actAs).
-    const adaToken = loadConfig().agentKeys['dawn']!;
+    const ada = await claimedAgent('dawn', 'Ada');
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
-    actAs('dawn', 'Ada', adaToken);
+    actAs('dawn', 'Ada', ada.key, ada.sessionLease);
 
     // No double-surfacing: inbox renders the acts, status leads with the comeback summary.
     expect(await reachabilityNudge('inbox', parseArgs([]))).toBe('');
@@ -321,16 +548,53 @@ describe('agent-side reachability nudge (ADR 046)', () => {
 });
 
 describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', () => {
+  // ADR 088 amendment (2026-09-05): the Claude Code hook must emit the PostToolUse JSON seam —
+  // bare stdout from that event is debug-log only and never reached a model. Same daemon, same line,
+  // one wrapper; the common path stays byte-for-byte empty.
+  it('--hook claude-code emits the raised line as hookSpecificOutput.additionalContext, and nothing when quiet', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
+    const ada = await claimedAgent('dawn', 'Ada');
+
+    actAs('dawn', 'Ada', ada.key, ada.sessionLease);
+    const quiet = await run(inboxCommand, ['--interrupt-check', '--hook', 'claude-code']);
+    expect(quiet.code).toBe(0);
+    expect(quiet.out).toBe('');
+
+    actAsNobody();
+    await run(sendCommand, [
+      '--to',
+      'Ada',
+      '--act',
+      'request_help',
+      '--urgent',
+      '--urgent-reason',
+      'prod is down',
+      'drop everything and look at deploy',
+    ]);
+
+    actAs('dawn', 'Ada', ada.key, ada.sessionLease);
+    const raised = await run(inboxCommand, ['--interrupt-check', '--hook', 'claude-code']);
+    expect(raised.code).toBe(0);
+    const json = JSON.parse(raised.out.trim()) as {
+      hookSpecificOutput: { hookEventName: string; additionalContext: string };
+    };
+    expect(json.hookSpecificOutput.hookEventName).toBe('PostToolUse');
+    expect(json.hookSpecificOutput.additionalContext).toContain('\u26a1 musterd:');
+    expect(json.hookSpecificOutput.additionalContext).toContain('request_help');
+    expect(json.hookSpecificOutput.additionalContext).not.toContain('drop everything'); // §4 still holds
+  });
+
   it('raises one daemon-composed line for a waiting urgent directed act, silent for a plain one', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
-    const adaToken = loadConfig().agentKeys['dawn']!;
+    const ada = await claimedAgent('dawn', 'Ada');
 
     // nick (his bound folder) sends Ada a NON-urgent directed act first.
     await run(sendCommand, ['--to', 'Ada', '--act', 'message', 'fyi, minor thing']);
 
     // As Ada: a non-urgent act is NOT interrupt-class → silent, exit 0, zero output (the free path).
-    actAs('dawn', 'Ada', adaToken);
+    actAs('dawn', 'Ada', ada.key, ada.sessionLease);
     const silent = await run(inboxCommand, ['--interrupt-check']);
     expect(silent.code).toBe(0);
     expect(silent.out).toBe('');
@@ -349,7 +613,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
     ]);
 
     // As Ada: the interrupt line fires — daemon-composed, names sender + act, NEVER the raw body.
-    actAs('dawn', 'Ada', adaToken);
+    actAs('dawn', 'Ada', ada.key, ada.sessionLease);
     const raised = await run(inboxCommand, ['--interrupt-check']);
     expect(raised.code).toBe(0);
     expect(raised.out).toContain('⚡ musterd:');
@@ -361,6 +625,13 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
     const again = await run(inboxCommand, ['--interrupt-check']);
     expect(again.out).toContain('⚡ musterd:');
     await run(inboxCommand, []); // Ada reads her inbox → cursor advances
+    // …and that interactive read RE-CLAIMED (ADR 339: interactive reads opt in), superseding the
+    // Presence Ada's stored lease was bound to. The env lease `actAs` pinned is now dead, so pick up
+    // the one the claim minted — otherwise this final probe measures a stale lease rather than the
+    // cleared cursor it means to measure. (That deafness is its own assertion, in the claim-storm
+    // suite below; lane 01M1QC6XST.)
+    const afterRead = await claimedAgent('dawn', 'Ada');
+    actAs('dawn', 'Ada', afterRead.key, afterRead.sessionLease);
     const cleared = await run(inboxCommand, ['--interrupt-check']);
     expect(cleared.out).toBe('');
   });
@@ -368,7 +639,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
   it('is silent for an unbound folder and honours MUSTERD_NO_NUDGE=1', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
-    const adaToken = loadConfig().agentKeys['dawn']!;
+    const ada = await claimedAgent('dawn', 'Ada');
     await run(sendCommand, [
       '--to',
       'Ada',
@@ -390,7 +661,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
     rmSync(elsewhere, { recursive: true, force: true });
 
     // Explicit as Ada, but the kill-switch silences the probe entirely.
-    actAs('dawn', 'Ada', adaToken);
+    actAs('dawn', 'Ada', ada.key, ada.sessionLease);
     process.env['MUSTERD_NO_NUDGE'] = '1';
     const off = await run(inboxCommand, ['--interrupt-check']);
     expect(off.out).toBe('');
@@ -456,11 +727,62 @@ describe('join honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
     expect(cfg.identities.dawn.name).toBe('nick');
   });
 
-  it('re-joining as the same cached member occupies via its credential (v0.3)', async () => {
+  it('the legacy `join <slug> --as <name>` spelling runs the claim handshake and says so on stderr (ADR 377)', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
-    const ok = await run(joinCommand, ['dawn', '--as', 'nick']);
+    const errChunks: string[] = [];
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: any) => {
+      errChunks.push(String(c));
+      return true;
+    });
+    try {
+      const ok = await run(joinCommand, ['dawn', '--as', 'nick']);
+      expect(ok.code).toBe(0);
+      // Delegated to claim: claim's output, not a second handshake's.
+      expect(ok.out).toContain('occupied on dawn');
+      expect(ok.out).toContain('online via cli (detached');
+      expect(ok.out).not.toContain('joined');
+    } finally {
+      errSpy.mockRestore();
+    }
+    expect(errChunks.join('')).toContain(
+      'musterd join is now: musterd claim nick --team dawn --detach',
+    );
+    // Same handshake, same result: the folder is bound to the seat claim resolved.
+    const ok2 = await run(claimCommand, ['nick', '--team', 'dawn', '--json']);
+    expect(JSON.parse(ok2.out.trim().split('\n').pop()!)).toMatchObject({
+      team: 'dawn',
+      member: 'nick',
+    });
+  });
+
+  it("under --json the alias is silent on stderr and emits claim's JSON shape", async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    const errChunks: string[] = [];
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: any) => {
+      errChunks.push(String(c));
+      return true;
+    });
+    try {
+      const ok = await run(joinCommand, ['dawn', '--as', 'nick', '--json']);
+      expect(ok.code).toBe(0);
+      expect(JSON.parse(ok.out.trim().split('\n').pop()!)).toMatchObject({
+        team: 'dawn',
+        member: 'nick',
+      });
+    } finally {
+      errSpy.mockRestore();
+    }
+    expect(errChunks.join('')).not.toContain('ADR 377');
+  });
+
+  it('`claim <name> --team <slug>` is the same handshake — the vault key is found without --key (ADR 377)', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    const ok = await run(claimCommand, ['nick', '--team', 'dawn', '--json']);
     expect(ok.code).toBe(0);
-    expect(ok.out).toContain('joined');
+    expect(JSON.parse(ok.out.trim().split('\n').pop()!)).toMatchObject({
+      team: 'dawn',
+      member: 'nick',
+    });
   });
 });
 
@@ -484,10 +806,10 @@ describe('resolve() identity alignment with the MCP adapter (ADR 018)', () => {
     );
     // But this workspace is bound to Ui — the CLI must resolve to Ui, not the global Api.
     const bindingPath = saveBinding(dir, {
+      version: 2,
       server: process.env['MUSTERD_SERVER']!,
       team: 'lab',
       agent_key: 'mskd_ui',
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Ui' },
     });
     process.env['MUSTERD_BINDING'] = bindingPath;
@@ -498,12 +820,40 @@ describe('resolve() identity alignment with the MCP adapter (ADR 018)', () => {
     expect(r.identity.key).toBe('mskd_ui');
   });
 
+  it('a pre-ADR-281 binding REFUSES identity resolution — never falls through to the global config', () => {
+    // The other half of the #928-fallout split: advisory reads warn and continue, but a verb that
+    // would act AS this workspace's identity must refuse — falling through to the vault would have
+    // the broken workspace silently act as a different member.
+    writeFileSync(
+      nickConfig,
+      JSON.stringify({
+        server: process.env['MUSTERD_SERVER'],
+        current: 'lab',
+        identities: { lab: { name: 'Api', key: 'mskd_api', surface: 'cli' } },
+      }),
+    );
+    const legacyPath = join(dir, '.musterd', 'binding.json');
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        server: process.env['MUSTERD_SERVER'],
+        team: 'lab',
+        surface: 'claude-code',
+        agent_key: 'mskd_ui',
+        claim: { mode: 'seat', name: 'Ui' },
+      }),
+    );
+    process.env['MUSTERD_BINDING'] = legacyPath;
+    expect(() => resolve({})).toThrow(/musterd harness configure/);
+  });
+
   it('MUSTERD_* env overrides the binding (same precedence as the MCP adapter)', () => {
     const bindingPath = saveBinding(dir, {
+      version: 2,
       server: process.env['MUSTERD_SERVER']!,
       team: 'lab',
       agent_key: 'mskd_ui',
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Ui' },
     });
     process.env['MUSTERD_BINDING'] = bindingPath;
@@ -571,17 +921,15 @@ describe('an active identity is required to act (ADR 036)', () => {
 });
 
 describe('CLI ergonomics papercuts (ADR 067)', () => {
-  async function dawnWithAgent(name: string): Promise<string> {
+  async function dawnWithAgent(name: string) {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
-    // Post-cutover (ADR 069): agents authenticate with the team agent key + their seat (actAs sets
-    // MUSTERD_AGENT_KEY + MUSTERD_CLAIM=seat:<name>), not the now-vestigial mskd_ `team add` token.
-    return loadConfig().agentKeys['dawn']!;
+    return claimedAgent('dawn', name);
   }
 
   it('whoami names the seat this folder resolves to, with its source', async () => {
-    const token = await dawnWithAgent('Ada');
-    actAs('dawn', 'Ada', token);
+    const authority = await dawnWithAgent('Ada');
+    actAs('dawn', 'Ada', authority.key, authority.sessionLease);
     const who = await run(whoamiCommand, []);
     expect(who.code).toBe(0);
     expect(who.out).toContain('Ada');
@@ -594,14 +942,14 @@ describe('CLI ergonomics papercuts (ADR 067)', () => {
   });
 
   it('inbox --act and --from narrow the listing without advancing the cursor', async () => {
-    const token = await dawnWithAgent('Ada');
+    const authority = await dawnWithAgent('Ada');
     await run(teamCommand, ['add', 'Bo', '--kind', 'agent']);
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'please review']);
     await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'refactoring']);
     actAsNobody(); // nick's bound folder is fine; switch sender to Bo for a from-filter contrast
     await run(sendCommand, ['--as', 'nick', '--to', 'Ada', '--act', 'message', 'from nick only']);
 
-    actAs('dawn', 'Ada', token);
+    actAs('dawn', 'Ada', authority.key, authority.sessionLease);
     // --act keeps only the request_help
     const byAct = await run(inboxCommand, ['--act', 'request_help', '--peek']);
     expect(byAct.out).toContain('please review');
@@ -616,7 +964,7 @@ describe('CLI ergonomics papercuts (ADR 067)', () => {
   });
 
   it('accept auto-targets the latest open request when no --reply-to is given', async () => {
-    const token = await dawnWithAgent('Ada');
+    const authority = await dawnWithAgent('Ada');
     const ask = await run(sendCommand, [
       '--to',
       'Ada',
@@ -627,7 +975,7 @@ describe('CLI ergonomics papercuts (ADR 067)', () => {
     ]);
     const askId = JSON.parse(ask.out).id as string;
 
-    actAs('dawn', 'Ada', token);
+    actAs('dawn', 'Ada', authority.key, authority.sessionLease);
     const accepted = await run(sendCommand, ['--act', 'accept', '--to', 'nick', '--json', 'on it']);
     const env = JSON.parse(accepted.out);
     expect(env.meta.in_reply_to).toBe(askId);
@@ -635,62 +983,66 @@ describe('CLI ergonomics papercuts (ADR 067)', () => {
   });
 
   it('accept errors with guidance when there is no open request to answer', async () => {
-    const token = await dawnWithAgent('Ada');
-    actAs('dawn', 'Ada', token);
+    const authority = await dawnWithAgent('Ada');
+    actAs('dawn', 'Ada', authority.key, authority.sessionLease);
     await expect(
       run(sendCommand, ['--act', 'accept', '--to', 'nick', 'on it']),
     ).rejects.toMatchObject({ exitCode: 2 });
   });
 });
 
-describe('nudge — surface waiting acts at the approval prompt (ADR 053)', () => {
+describe('inbox --waiting — surface waiting acts at the approval prompt (ADR 053)', () => {
   it('prints the directed acts waiting for the bound seat, read-only (cursor stays put)', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const token = loadConfig().agentKeys['dawn']!; // ADR 069: agent key + seat:Ada (via actAs)
+    const authority = await claimedAgent('dawn', 'Ada');
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'review the auth PR']);
 
-    actAs('dawn', 'Ada', token);
-    const nudge = await run(nudgeCommand, []);
-    expect(nudge.code).toBe(0);
-    expect(nudge.out).toContain('Ada');
-    expect(nudge.out).toContain('waiting');
+    actAs('dawn', 'Ada', authority.key, authority.sessionLease);
+    const waiting = await run(inboxCommand, ['--waiting']);
+    expect(waiting.code).toBe(0);
+    expect(waiting.out).toContain('Ada');
+    expect(waiting.out).toContain('waiting');
+    expect(waiting.out).toContain('review the auth PR');
 
-    // Read-only: it never advanced the cursor, so a second nudge still surfaces the same act.
-    const again = await run(nudgeCommand, []);
+    // Read-only: it never advanced the cursor, so a second read still surfaces the same act.
+    const again = await run(inboxCommand, ['--waiting']);
     expect(again.out).toContain('waiting');
+
+    // The pre-2026-09-03 name still answers, byte-for-byte — installed hooks keep working until
+    // `init --refresh-hooks` re-points them.
+    const alias = await run(nudgeCommand, []);
+    expect(alias.out).toBe(again.out);
   });
 
   it('prints nothing (exit 0) when no directed act is waiting', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
-    const token = loadConfig().agentKeys['dawn']!; // ADR 069: agent key + seat:Ada (via actAs)
+    const authority = await claimedAgent('dawn', 'Ada');
     // Only broadcast journal traffic — nothing directed at Ada.
     await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'refactoring']);
 
-    actAs('dawn', 'Ada', token);
-    const nudge = await run(nudgeCommand, []);
-    expect(nudge.code).toBe(0);
-    expect(nudge.out).toBe('');
+    actAs('dawn', 'Ada', authority.key, authority.sessionLease);
+    const waiting = await run(inboxCommand, ['--waiting']);
+    expect(waiting.code).toBe(0);
+    expect(waiting.out).toBe('');
   });
 });
 
 describe('inbox --wait — wake on message (ADR 054)', () => {
-  /** Stand up dawn with an agent seat; return the agent's token. */
-  async function dawnWithAgent(name: string): Promise<string> {
+  /** Stand up dawn with an agent seat; return its claimed HTTP authority. */
+  async function dawnWithAgent(name: string) {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
-    // Post-cutover (ADR 069): agents authenticate with the team agent key + their seat (actAs sets
-    // MUSTERD_AGENT_KEY + MUSTERD_CLAIM=seat:<name>), not the now-vestigial mskd_ `team add` token.
-    return loadConfig().agentKeys['dawn']!;
+    return claimedAgent('dawn', name);
   }
 
   it('drains the durable inbox: a directed act already waiting wakes it immediately (exit 0)', async () => {
-    const token = await dawnWithAgent('Ada');
+    const authority = await dawnWithAgent('Ada');
     // A request_help is directed at Ada *before* she waits — the startup-race the pre-check guards.
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'review the auth PR']);
 
-    actAs('dawn', 'Ada', token);
+    actAs('dawn', 'Ada', authority.key, authority.sessionLease);
     const woke = await run(inboxCommand, ['--wait', '--timeout', '1']);
     expect(woke.code).toBe(0);
     expect(woke.out).toContain('review the auth PR');
@@ -701,11 +1053,11 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
   });
 
   it('times out non-zero when nothing directed arrives, and ignores broadcast journal traffic', async () => {
-    const token = await dawnWithAgent('Ada');
+    const authority = await dawnWithAgent('Ada');
     // A plain @team status_update is journal traffic — it must NOT wake a waiting agent.
     await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'still refactoring']);
 
-    actAs('dawn', 'Ada', token);
+    actAs('dawn', 'Ada', authority.key, authority.sessionLease);
     const out = await run(inboxCommand, ['--wait', '--timeout', '1']);
     expect(out.code).toBe(124);
   });
@@ -768,18 +1120,24 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'scout', '--kind', 'agent']);
     const agentKey = loadConfig().agentKeys['dawn']!;
+    const authority = await claimedAgent('dawn', 'scout');
 
     // A seat workspace whose binding points at the live in-memory daemon — what the SessionStart
     // hook sees after `musterd agent scout`.
     const ws = mkdtempSync(join(tmpdir(), 'musterd-e2e-ws-'));
     try {
       saveBinding(ws, {
+        version: 2,
         server: process.env['MUSTERD_SERVER']!,
         team: 'dawn',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'scout' },
         agent_key: agentKey,
+        seat_credential: authority.key,
+        session_lease: authority.sessionLease,
       });
+      const presencesBefore = server.db
+        .prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM presence')
+        .get()?.n;
       await captureSession('start', {
         session_id: 'sid-e2e',
         transcript_path: join(ws, 't.jsonl'),
@@ -809,10 +1167,11 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
         enrolled: false,
         session_digest: sessionDigest(agentKey, 'sid-e2e'),
       });
-      const presences = server.db
+      const presencesAfter = server.db
         .prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM presence')
         .get();
-      expect(presences?.n ?? 0).toBe(0);
+      // Session capture is presence-neutral: the existing claim is the sole row.
+      expect(presencesAfter?.n ?? 0).toBe(presencesBefore ?? 0);
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
@@ -828,15 +1187,18 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
     await run(teamCommand, ['create', 'dusk', '--as', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'rook', '--kind', 'agent']);
     const agentKey = loadConfig().agentKeys['dusk']!;
+    const authority = await claimedAgent('dusk', 'rook');
 
     const ws = mkdtempSync(join(tmpdir(), 'musterd-e2e-ws-'));
     try {
       saveBinding(ws, {
+        version: 2,
         server: process.env['MUSTERD_SERVER']!,
         team: 'dusk',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'rook' },
         agent_key: agentKey,
+        seat_credential: authority.key,
+        session_lease: authority.sessionLease,
       });
 
       await captureSession('start', { session_id: 'sid-one', cwd: ws });
@@ -867,5 +1229,188 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
+  });
+});
+
+describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', () => {
+  afterEach(() => {
+    delete process.env['MUSTERD_BINDING'];
+  });
+
+  /** Bind this folder to agent seat ava with a REVOKED lease — the state every hook one-shot
+   *  (gate check, nudge) wakes up in once any other process has claimed since. Returns the LIVE
+   *  claimant (the adapter that superseded it), whose lease is the thing a reclaim would kill. */
+  async function bindAvaWithStaleLease(): Promise<Awaited<ReturnType<typeof claimedAgent>>> {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'ava', '--kind', 'agent']);
+    const auth = await claimedAgent('dawn', 'ava');
+    // A second claim supersedes the first, revoking the lease we are about to persist — the storm's
+    // steady state, reproduced once.
+    const stale = auth.sessionLease;
+    const live = await claimedAgent('dawn', 'ava');
+    const bindingPath = saveBinding(dir, {
+      version: 2,
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      agent_key: loadConfig().agentKeys['dawn']!,
+      seat_credential: auth.key,
+      session_lease: stale,
+      claim: { mode: 'seat', name: 'ava' },
+    });
+    process.env['MUSTERD_BINDING'] = bindingPath;
+    // The seat credential is minted on the FIRST claim and stable thereafter — a re-claim returns
+    // only a fresh lease — so the live claimant's authority is that credential + the live lease.
+    return { ...live, key: auth.key };
+  }
+
+  it('a hook read (claimSeatPerRequest: false) presents the stale lease and fails closed — it never claims', async () => {
+    await bindAvaWithStaleLease();
+    const { http, explicit } = resolveRead({}, { claimSeatPerRequest: false });
+    expect(explicit).toBe(true);
+    // No reclaim: the stale lease is refused by the server and the read fails — instead of the
+    // hook seizing the seat, evicting the live adapter's presence, and killing ITS lease.
+    await expect(http.inbox('dawn', { unread: true, limit: 1 })).rejects.toThrow(
+      /invalid, expired, or revoked/,
+    );
+  });
+
+  // ADR 337 §4 on the attestation path (lane 01M1F92X69). Measured on seat ryder 2026-09-01: the
+  // stored lease is minted once at claim and lives five minutes, so every SessionStart/SessionEnd
+  // hook after that was refused, the refusal swallowed as "unreachable", and the ledger got no row.
+  it('a session attestation with a refused lease reclaims once and lands on the ledger', async () => {
+    await bindAvaWithStaleLease();
+    const bindingPath = process.env['MUSTERD_BINDING']!;
+    const readBinding = () =>
+      JSON.parse(readFileSync(bindingPath, 'utf8')) as {
+        session_lease?: string;
+        seat_credential?: string;
+        session?: { attested_at?: number };
+      };
+    const captured = () =>
+      server.db
+        .prepare<[], { action: string }>(
+          "SELECT action FROM audit WHERE target = 'ava' AND action LIKE 'residency.session_%' ORDER BY id",
+        )
+        .all()
+        .map((r) => r.action);
+
+    await captureSession('start', { session_id: 'late-hook', cwd: dir });
+    expect(captured()).toEqual(['residency.session_captured']);
+    const after = readBinding();
+    expect(after.session!.attested_at).toBeGreaterThan(0);
+    expect(after.seat_credential).toBeDefined(); // the claim renewed authority, not identity
+
+    // The end hook lands too. It claims again — the lease the start hook minted died with the
+    // Presence its socket released (ws.ts cleanup → held_until), so there is nothing to reuse.
+    await captureSession('end', { session_id: 'late-hook', cwd: dir });
+    expect(captured()).toEqual(['residency.session_captured', 'residency.session_ended']);
+  });
+
+  // Lane 01M1PSY0JX. Found in the first live huddle (01M1PSK8FY): `huddle say` was refused on a
+  // stale session lease and the turn's TEXT was gone — the thread held the root and nothing else.
+  // `claimAgentLease` swallows a failed per-request claim and degrades to the stored lease, so the
+  // request goes out doomed and the composed act dies with the refusal. ADR 337 §4 named this exact
+  // case ("a caller that has just had its stored lease REFUSED and wants exactly one claim in
+  // reply") and nothing called it.
+  // NOTE what this does and does not prove. Here the per-request claim SUCCEEDS, so the stale stored
+  // lease is replaced before the request goes out — this pins ADR 339's happy path for a write, and
+  // it passes with or without the retry. The refusal path, where the per-request claim itself fails
+  // and the request goes out doomed, cannot be reached against a healthy in-process daemon; it is
+  // pinned faithfully in `client.test.ts` with the claim socket failing (red without the retry).
+  it('an opted-in WRITE with a stale stored lease lands — the per-request claim replaces it', async () => {
+    await bindAvaWithStaleLease();
+    const { http } = resolveRead({}, { claimSeatPerRequest: true });
+    const envelope = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'ava',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'the turn a stale stored lease must not eat',
+    });
+    await expect(http.send('dawn', envelope)).resolves.toBeDefined();
+    const landed = server.db
+      .prepare<[string], { body: string }>('SELECT body FROM messages WHERE id = ?')
+      .get(envelope.id);
+    expect(landed?.body).toBe('the turn a stale stored lease must not eat');
+  });
+
+  // The retry must not become the claim storm it was written next to. A caller that opted OUT of
+  // claiming still fails closed on the same refusal — it does not quietly seize the seat because a
+  // write happened to be the thing that failed.
+  it('a caller that opted out of claiming still fails closed on the refusal, write or not', async () => {
+    const live = await bindAvaWithStaleLease();
+    const { http } = resolveRead({}, { claimSeatPerRequest: false });
+    const envelope = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'ava',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'must not land',
+    });
+    await expect(http.send('dawn', envelope)).rejects.toThrow(/invalid, expired, or revoked/);
+    // and the live claimant's authority is untouched — the harm the storm actually did
+    const liveHttp = new HttpClient({
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      key: live.key,
+      seat: 'ava',
+      sessionLease: live.sessionLease,
+      surface: 'cli',
+    });
+    await expect(liveHttp.inbox('dawn', { unread: true, limit: 1 })).resolves.toBeDefined();
+  });
+
+  it('an interactive read still reclaims (ADR 339 / #1130 preserved)', async () => {
+    await bindAvaWithStaleLease();
+    // Opting IN is now explicit. #1138 pinned this as the DEFAULT, and that default is what let the
+    // storm survive it: every read path that did not think about the flag reclaimed, so the two
+    // callsites #1138 opted out were re-claimed anyway by other reads in the same process
+    // (reachabilityNudge, inbox --interrupt-check, infra-gate). Measured on main @ fcb92af8:
+    // 2 claim.superseded rows per hook invocation, 0 once suppressed.
+    const { http } = resolveRead({}, { claimSeatPerRequest: true });
+    const res = await http.inbox('dawn', { unread: true, limit: 1 });
+    expect(Array.isArray(res.messages)).toBe(true);
+  });
+
+  it('DEFAULTS to not reclaiming — a read path that never considered the flag cannot storm', async () => {
+    await bindAvaWithStaleLease();
+    const { http, explicit } = resolveRead({});
+    expect(explicit).toBe(true);
+    await expect(http.inbox('dawn', { unread: true, limit: 1 })).rejects.toThrow(
+      /invalid, expired, or revoked/,
+    );
+  });
+
+  // Folded in from #1140 (closed as superseded by this branch). The three cases above pin the
+  // resolveRead default; this one drives the whole PostToolUse one-shot — `inbox --interrupt-check`,
+  // the probe that fires on EVERY tool call — and asserts the harm the storm actually did: the live
+  // claimant's lease is still valid afterwards. Fails on main @ fcb92af8 with the reclaim default on.
+  it("the interrupt-check one-shot says its lease is dead AND leaves the live claimant's lease intact", async () => {
+    const live = await bindAvaWithStaleLease();
+
+    const probe = await run(inboxCommand, ['--interrupt-check']);
+    expect(probe.code).toBe(0);
+    // It does not reclaim — and it no longer goes SILENTLY deaf about it (lane 01M1QC6XST). The
+    // probe is excluded from both lease heals by design, so a dead lease refuses this route forever;
+    // the one thing it owes the seat is to say so, on the channel it already owns. Not the daemon's
+    // 401 body — a locally composed line, because this rides into a model's context uninspected.
+    expect(probe.out).toMatch(/session lease/i);
+    expect(probe.out).toMatch(/team_join/);
+
+    // Pre-fix, the probe's reclaim seized the seat and evicted the live adapter's presence row —
+    // and a session lease is bound to that row (ADR 337), so this read failed with
+    // "invalid, expired, or revoked agent session lease".
+    const liveHttp = new HttpClient({
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      key: live.key,
+      seat: 'ava',
+      sessionLease: live.sessionLease,
+      surface: 'cli',
+    });
+    const res = await liveHttp.inbox('dawn', { unread: true, limit: 1 });
+    expect(Array.isArray(res.messages)).toBe(true);
   });
 });

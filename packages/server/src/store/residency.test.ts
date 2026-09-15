@@ -11,12 +11,16 @@ import {
   WAKE_DEFER_SNOOZE_MS,
   WAKE_LEASE_TTL_MS,
   WAKE_POLICY_DEFAULTS,
+  WORK_ORDER_CONTINUATION_SUCCESS_CAP,
   buildWakeContext,
   claimWakeLeases,
   effectiveWakePolicy,
   enrollResidency,
   expireWakeLeases,
+  firstWakeLeaseTs,
   getResidency,
+  hostAsleepMs,
+  leaseCapturedSession,
   listWakeableMemberIds,
   parsePolicyOverride,
   recordSessionAttestation,
@@ -186,6 +190,40 @@ describe('buildWakeContext (ADR 209)', () => {
       objective: { action: 'begin_lane' },
     });
   });
+
+  /**
+   * The case the suite above never had: a reviewer is NOT the lane's owner. Every existing
+   * `buildWakeContext` lane assertion used one seat as both owner and recipient, so the owner-only
+   * rule on the lane path read as satisfied and the reviewer's actual experience went untested.
+   *
+   * Measured 2026-09-04: 83 of 87 `residency.context_read` denials were a seat asking about a lane
+   * it did not own, and 38 of 47 review-edge wakes carried one within ±5 minutes of the wake.
+   */
+  it('a REVIEWER is refused the lane path and served by the act path — which is why the wake line names the act', () => {
+    const { db, team, nick, ada, bob } = seed();
+    const lane = openLane(db, team.id, team.slug, ada.name, {
+      title: 'Owned by ada, reviewed by bob',
+      branch: 'feat/reviewed',
+      claim: true,
+    });
+    // The routed acceptance ask (ADR 225): directed at bob, carrying the daemon-set lane_review.
+    msg(db, team, nick, bob, 'ask', 'rev1', 1_000, {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+    });
+
+    // The lane path authorizes by OWNERSHIP, so it must refuse bob — this is correct, not the bug.
+    expect(() => buildWakeContext(db, team, bob, { lane_id: lane.id })).toThrow(/forbidden/i);
+
+    // The act path authorizes by RECIPIENCY and answers with the review packet, lane block attached.
+    // Steering the wake line here is the whole fix: it needs no widened boundary, and unlike the
+    // lane path it does not describe a reviewer's job as `continue_lane`.
+    expect(buildWakeContext(db, team, bob, { act_id: 'rev1' })).toMatchObject({
+      wake: { kind: 'review', act_id: 'rev1' },
+      objective: { action: 'review' },
+      state: { lane: { id: lane.id, owner_seat: ada.name, branch: 'feat/reviewed' } },
+      fetch: ['inbox_thread', 'lane_detail', 'git_artifact', 'seat_memory'],
+    });
+  });
 });
 
 describe('claimWakeLeases — the transactional wake derivation', () => {
@@ -207,12 +245,89 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
     expect(order.composed_line).toContain('"nick"');
     expect(order.composed_line).toContain('"Ada"');
     expect(order.composed_line).not.toContain(' x ');
+    expect(order.composed_line).toContain('team_wake_context');
     expect(order.expires_at).toBeGreaterThan(Date.now());
 
     // The lease decision is audited (actor null — a machine decision).
     const leased = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_leased');
     expect(leased).toHaveLength(1);
     expect(leased[0]!.target).toBe('Ada');
+  });
+
+  it("ignores a peer machine's wake rows: the hourly cap counts what this daemon minted", () => {
+    // ADR 365 §3. The six wake verbs replicate now, so a peer's rows land in THIS `audit`. They
+    // must not decide here: folding them into the rate cap would make wake caps team-wide, which
+    // is a decision crossing the wire (residence 3) and not ADR 365's to make.
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    const now = Date.now();
+    for (let i = 0; i < WAKE_HOURLY_CAP + 3; i += 1) {
+      db.prepare(
+        `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+         VALUES (?, ?, ?, NULL, 'residency.woke', ?, 'allow', ?, ?, 'peer-node', ?)`,
+      ).run(
+        `peer-${i}`,
+        team.id,
+        now - 60_000,
+        'Ada',
+        JSON.stringify({ act: `p${i}` }),
+        now,
+        i + 1,
+      );
+    }
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
+  });
+
+  it("ignores a peer machine's suspension, lease and capture rows: the three ADR 371 §4 deciders are pinned", () => {
+    // ADR 371 §4 widened the ledger set by the residency.* remainder. `hostAsleepMs` feeds the ADR
+    // 236 ceiling, `firstWakeLeaseTs` starts its clock, `leaseCapturedSession` is the ADR 252
+    // join — all three were unpinned deciders. A folded row from a peer must not move any of them.
+    const { db, team } = seed();
+    const now = Date.now();
+    const peer = (id: string, seq: number, action: string, detail: Record<string, unknown>) =>
+      db
+        .prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+           VALUES (?, ?, ?, NULL, ?, 'Ada', 'allow', ?, ?, 'peer-node', ?)`,
+        )
+        .run(id, team.id, now - 30_000, action, JSON.stringify(detail), now, seq);
+    peer('p-1', 1, 'residency.host_suspended', { from: now - 60_000, to: now - 10_000 });
+    peer('p-2', 2, 'residency.wake_leased', { act: 'a1', lease_id: 'L-peer' });
+    peer('p-3', 3, 'residency.session_captured', { wake_lease: 'L-peer' });
+
+    expect(hostAsleepMs(db, team.id, now - 120_000, now)).toBe(0);
+    expect(firstWakeLeaseTs(db, team.id, 'a1')).toBeNull();
+    expect(leaseCapturedSession(db, team.id, 'L-peer')).toBe(false);
+
+    // The same three rows minted HERE (unstamped — the `''` arm) decide as they always did.
+    appendAudit(db, team.id, {
+      actor: null,
+      action: 'residency.host_suspended',
+      target: null,
+      result: 'allow',
+      detail: { from: now - 60_000, to: now - 10_000 },
+    });
+    appendAudit(db, team.id, {
+      actor: null,
+      action: 'residency.wake_leased',
+      target: 'Ada',
+      result: 'allow',
+      detail: { act: 'a1', lease_id: 'L-here' },
+    });
+    appendAudit(db, team.id, {
+      actor: 'Ada',
+      action: 'residency.session_captured',
+      target: 'Ada',
+      result: 'allow',
+      detail: { wake_lease: 'L-here' },
+    });
+    expect(hostAsleepMs(db, team.id, now - 120_000, now)).toBe(50_000);
+    expect(firstWakeLeaseTs(db, team.id, 'a1')).not.toBeNull();
+    expect(leaseCapturedSession(db, team.id, 'L-here')).toBe(true);
   });
 
   it('holds mutual exclusion: a live lease blocks a second order for the same seat', () => {
@@ -456,6 +571,185 @@ describe('claimWakeLeases — a deferred act is not a wake reason (ADR 211 §4)'
     msg(db, team, nick, null, 'wait', 'w2', 2_500, {
       meta: { defer_ref: 'u1', until: { reply: true } },
     });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+});
+
+describe('claimWakeLeases — the poll costs what is due, not seats x window (big-body 2026-09-04)', () => {
+  /**
+   * The daemon wedged ALIVE: the process was up, `/health` timed out, and a 3-second stack sample
+   * spent 2,406 of 2,407 samples inside synchronous `sqlite3_step` (big-body, 2026-09-04). Two
+   * shapes in this poll made cost scale with (enrolled seats x the whole log) instead of with what
+   * was actually due.
+   *
+   * Counted as STATEMENTS, never as wall time: a timing assertion on a shared laptop is a flake
+   * generator, and the defect is a count — the same team-scoped query issued once per seat, and a
+   * 2,000-row read issued for a seat with nothing to filter.
+   */
+  function countingDb(db: Database) {
+    const seen: string[] = [];
+    const realPrepare = db.prepare.bind(db);
+    (db as unknown as { prepare: unknown }).prepare = (sql: string) => {
+      seen.push(sql.replace(/\s+/g, ' ').trim());
+      return realPrepare(sql);
+    };
+    return seen;
+  }
+  const ledgerReads = (sql: string[]) =>
+    sql.filter((q) => q.includes("m.act IN ('request_help','handoff')")).length;
+  const windowReads = (sql: string[]) =>
+    sql.filter((q) => q.includes('FROM messages') && q.includes('LIMIT')).length;
+
+  /** Three enrolled seats on one host, all reaching the batched lane, with one open directed act. */
+  function threeSeats() {
+    const s = seed();
+    const cid = addMember(s.db, s.team, { name: 'cid', kind: 'agent' }).row;
+    enroll(s.db, s.team, s.ada);
+    enroll(s.db, s.team, s.bob);
+    enroll(s.db, s.team, cid);
+    msg(s.db, s.team, s.nick, s.ada, 'request_help', 'rh1', 1_000);
+    return s;
+  }
+
+  it('reads the open directed ledger ONCE for the whole poll, not once per enrolled seat', () => {
+    const { db, team } = threeSeats();
+    const sql = countingDb(db);
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(ledgerReads(sql)).toBe(1);
+  });
+
+  // The ledger is unbounded and correlated; a team where nobody reaches the batched lane should not
+  // pay for it at all. Lazy, not merely hoisted — an eagerly-evaluated argument read it anyway, and
+  // this case is what caught that.
+  it('does not read the ledger when no seat reaches the batched lane', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { lane: 'interrupt' });
+    msg(db, team, nick, ada, 'request_help', 'rh1', 1_000);
+    const sql = countingDb(db);
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(ledgerReads(sql)).toBe(0);
+  });
+
+  // The idle case, which is most of the time: nothing is due, so the deferral window filters an
+  // already-empty list. It was marshalling 2,000 rows per seat per poll to do it.
+  it('does not scan the deferral window for a seat with nothing due', () => {
+    const { db, team, ada } = seed();
+    enroll(db, team, ada);
+    const sql = countingDb(db);
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(windowReads(sql)).toBe(0);
+  });
+
+  // The control: when something IS due the scan must still happen, or the deferral suppression it
+  // exists for (ADR 211 §4) silently stops working.
+  it('still scans the window when something is due, so deferral suppression survives', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+    const sql = countingDb(db);
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(windowReads(sql)).toBeGreaterThan(0);
+  });
+
+  // Behaviour must be identical either way — this is a cost fix, not a semantics change.
+  it('derives the same wakes it always did', () => {
+    const { db, team } = threeSeats();
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.map((o) => o.seat)).toEqual(['Ada']);
+    expect(orders[0]!.act_id).toBe('rh1');
+  });
+});
+
+describe('claimWakeLeases — a huddle OPEN convenes the seats it names (ADR 378 inc 4)', () => {
+  const HUDDLE = {
+    huddle: {
+      topic: { kind: 'design', id: 'doorbells' },
+      room: 'http://127.0.0.1:4851/b/huddle-h1',
+      anchor: 'docs/wiki/huddles.md',
+    },
+  };
+
+  /**
+   * nick opens a huddle naming Ada (offline, enrolled) and bob — the case the lane was opened for.
+   * Two names because `meta.eligible` refuses a set of one: to reach a single seat you address it.
+   *
+   * `convene_huddles` is set explicitly because it ships OFF (ADR 386 — the cross-machine run has
+   * not reported). These tests are about what the rail does WHEN CONVENING IS ON; the default
+   * itself is pinned in `protocol/residency.test.ts` and by the two off-cases below.
+   */
+  function openHuddleNaming(seat: string) {
+    const s = seed();
+    enroll(s.db, s.team, s.ada, HOST, { convene_huddles: true });
+    msg(s.db, s.team, s.nick, null, 'message', 'h1', 1_000, {
+      meta: { ...HUDDLE, eligible: [seat, 'bob'] },
+    });
+    return s;
+  }
+
+  it('orders ONE immediate wake for a named offline seat', () => {
+    const { db, team } = openHuddleNaming('Ada');
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.seat).toBe('Ada');
+    expect(orders[0]!.act_id).toBe('h1');
+    expect(orders[0]!.lane).toBe('immediate');
+  });
+
+  // The shipped default, exercised on the rail rather than only in the schema: an enrolled seat
+  // with no policy of its own is NOT convened. This is the case a two-machine team gets today.
+  it('orders nothing by default — convening ships dark until the cross-machine run reports', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, null, 'message', 'h1', 1_000, {
+      meta: { ...HUDDLE, eligible: ['Ada', 'bob'] },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  // The knob nick asked for, exercised where it actually gates rather than where it is declared.
+  it('orders nothing when the seat has convene_huddles off', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { convene_huddles: false });
+    msg(db, team, nick, null, 'message', 'h1', 1_000, {
+      meta: { ...HUDDLE, eligible: ['Ada', 'bob'] },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('honours the same switch set as a TEAM default', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    setPolicy(db, team.id, { residency: { convene_huddles: false } });
+    msg(db, team, nick, null, 'message', 'h1', 1_000, {
+      meta: { ...HUDDLE, eligible: ['Ada', 'bob'] },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  // The cost property, on the real rail: turns are free. Without this the feature is a per-turn
+  // wake storm wearing an open's clothes.
+  it('does not pay a second wake for the turns that follow', () => {
+    const { db, team, nick, bob } = openHuddleNaming('Ada');
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
+    settleWakeLease(db, team.id, 'Ada', { result: 'woke' });
+    msg(db, team, bob, null, 'message', 't1', 2_000, { thread: 'h1' });
+    msg(db, team, nick, null, 'message', 't2', 3_000, { thread: 'h1' });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  // The blast-radius control. A @team huddle must never bill every enrolled seat on the roster.
+  it('orders nothing for a @team huddle that names nobody', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { convene_huddles: true });
+    msg(db, team, nick, null, 'message', 'h1', 1_000, { meta: HUDDLE });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('orders nothing once the huddle is closed', () => {
+    const { db, team, nick } = openHuddleNaming('Ada');
+    msg(db, team, nick, null, 'resolve', 'c1', 2_000, { thread: 'h1' });
     expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
   });
 });
@@ -807,6 +1101,12 @@ describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () =
     expect(orders[0]!.bounds?.timeout_ms).toBe(WAKE_POLICY_DEFAULTS.work_timeout_ms);
     expect(orders[0]!.composed_line).toContain(lane.id);
     expect(orders[0]!.composed_line).not.toContain(lane.title);
+    expect(orders[0]!.composed_line).toContain('team_wake_context');
+    // The review line must steer to the ACT, not the lane. `buildWakeContext` authorizes the lane
+    // path by OWNERSHIP, and a reviewer never owns the lane it reviews — a line naming only the lane
+    // sends them at the one path that must refuse them (measured 2026-09-04: 38 of 47 review-edge
+    // wakes carried a `residency.context_read` deny within ±5 minutes).
+    expect(orders[0]!.composed_line).toContain('act_id: "ask1"');
     const leased = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_leased');
     expect(JSON.parse(leased[0]!.detail as string)).toMatchObject({
       derivation: 'work_order',
@@ -885,6 +1185,7 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     expect(orders[0]!.composed_line).toContain(lane.id);
     expect(orders[0]!.composed_line).toContain('is yours');
     expect(orders[0]!.composed_line).not.toContain('secret title');
+    expect(orders[0]!.composed_line).toContain('team_wake_context');
   });
 
   it('does not promote handoff to work_order when loops.dispatch is off (reply doorbell remains)', async () => {
@@ -929,6 +1230,43 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
       continuity_requirement: 'portable',
       intended_delivery: 'fresh',
     });
+  });
+
+  // ADR 325 prereq: the "last failure on this edge" pick tie-broke on local `rowid`, an ordering
+  // that exists only on this machine's file. Today appendAudit's ULIDs land in rowid order, so the
+  // two agree — but a replicated log has no shared rowid, and the ULID id is the ordering the
+  // schema actually promises. The tie is constructed raw (same ts, ids opposed to insertion
+  // order): id-order says the still-true failure was superseded; rowid-order says it stands.
+  it("breaks a same-ts tie on the ULID id, not on this file's rowid (ADR 325 prereq)", async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    // The continuation edge: Ada owns a claimed lane and there is no triggering act, so the ONLY
+    // candidate is (lane, 'dispatch_continuation') — the injected failures decide everything.
+    const lane = openLane(db, team.id, team.slug, nick.name, { title: 'tied', claim: true });
+    updateLane(db, team.id, lane.id, team.slug, { owner_seat: ada.name, state: 'claimed' });
+
+    const failRow = (id: string, wakeability: string) =>
+      db
+        .prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+           VALUES (?, ?, 1000, NULL, 'residency.wake_failed', 'Ada', 'deny', ?, 1000)`,
+        )
+        .run(
+          id,
+          team.id,
+          JSON.stringify({ lane_id: lane.id, edge: 'dispatch_continuation', wakeability }),
+        );
+    // Later-by-id row first: the failure that SUPERSEDED the still-true one (not in the closed set).
+    failRow('01ZZZZZZZZZZZZZZZZZZZZZZZZ', 'host_asleep');
+    // Earlier-by-id row second, so rowid points at it: the stale still-true failure.
+    failRow('01AAAAAAAAAAAAAAAAAAAAAAAA', 'not_enrolled');
+
+    // The latest failure by the schema's ordering is not still-true, so the edge leases again.
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({ seat: 'Ada', derivation: 'work_order', lane_id: lane.id });
   });
 
   it('keeps ordinary inbox wakes on the legacy ladder until the portable reply cohort is enabled', () => {
@@ -1294,6 +1632,31 @@ describe('claimWakeLeases — spend breaker + still-true (ADR 262)', () => {
     ).run(ts);
   }
 
+  /** A reported successful wake on one (lane, edge) — the rows the ADR 306 bounds derive from. */
+  function wokeEdge(
+    db: Database,
+    teamId: string,
+    laneId: string,
+    edge: string,
+    ts = Date.now() - WAKE_COOLDOWN_MS - 1,
+  ) {
+    appendAudit(db, teamId, {
+      actor: null,
+      action: 'residency.woke',
+      target: 'Ada',
+      result: 'allow',
+      detail: { act: `lane:${laneId}`, lane_id: laneId, edge },
+    });
+    db.prepare(
+      'UPDATE audit SET ts = ? WHERE rowid = (SELECT rowid FROM audit ORDER BY rowid DESC LIMIT 1)',
+    ).run(ts);
+  }
+
+  /** Move the lane's own clock — the ADR 306 progress signal, without going through a state patch. */
+  function laneTouched(db: Database, laneId: string, ts: number) {
+    db.prepare('UPDATE lanes SET updated_at = ? WHERE id = ?').run(ts, laneId);
+  }
+
   it('skips when last wake_failed wakeability is enrolled_dead_workspace', () => {
     const { db, team, lane } = reviewDue();
     failEdge(db, team.id, {
@@ -1334,25 +1697,129 @@ describe('claimWakeLeases — spend breaker + still-true (ADR 262)', () => {
     });
   });
 
-  it('three woke on dispatch_continuation still derive', () => {
+  /**
+   * ADR 306. This test previously passed only because it enrolled with `attempt_cap: 10`.
+   * Production runs the ADR 131 default of 3, and at 3 the ADR 262 §4.1 guarantee is FALSE:
+   * `attemptsForAct` counts `residency.woke` as well as `wake_failed`, so three SUCCESSFUL
+   * continuations exhaust the lane-keyed cap and the edge never derives again. Measured on the
+   * live ledger 2026-08-21: lanes `01M040DH9X…` and `01KZ4QH585…`, 3 wokes / 0 failures each,
+   * both permanently exhausted. The override configured the defect out of the test that existed
+   * to catch it — so the enrollment here is deliberately left at the default.
+   *
+   * The guarantee is also NARROWED by the ADR 306 progress precondition: three successful
+   * continuations still derive, but only if each one moved the lane. A wake that changed nothing
+   * does not buy the next one (ADR 247, ADR 250 §2).
+   */
+  it('three woke on dispatch_continuation still derive at the DEFAULT attempt cap', () => {
     const { db, team, ada } = seed();
     setPolicy(db, team.id, { loops: { dispatch: true } });
-    enroll(db, team, ada, HOST, { flow: 'auto', attempt_cap: 10, hourly_cap: 10 });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 10 });
     const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
     for (let i = 0; i < 3; i++) {
+      const wokeTs = Date.now() - WAKE_COOLDOWN_MS - 1;
+      wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+      // the seat woke and did work: the lane moves after the wake it answered
+      laneTouched(db, lane.id, wokeTs + 1);
+    }
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.lane_id === lane.id)).toBe(true);
+  });
+
+  it('a success does not write a terminal exhaustion row for an edge-bearing work order', () => {
+    const { db, team, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 10 });
+    const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
+    for (let i = 0; i < 3; i++) {
+      const wokeTs = Date.now() - WAKE_COOLDOWN_MS - 1;
+      wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+      laneTouched(db, lane.id, wokeTs + 1);
+    }
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    const exhausted = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_exhausted');
+    expect(exhausted).toHaveLength(0);
+  });
+
+  /** ADR 306 §2 — no heartbeat that burns spend while nothing changed (ADR 250 §2). */
+  it('continuation does not re-derive when the lane has not moved since the last woke', () => {
+    const { db, team, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 10 });
+    const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
+    const wokeTs = Date.now() - WAKE_COOLDOWN_MS - 1;
+    laneTouched(db, lane.id, wokeTs - 1_000);
+    wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.lane_id === lane.id)).toBe(false);
+  });
+
+  it('continuation derives again once the lane moves after the last woke', () => {
+    const { db, team, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 10 });
+    const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
+    const wokeTs = Date.now() - WAKE_COOLDOWN_MS - 1;
+    wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+    laneTouched(db, lane.id, wokeTs + 1);
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.lane_id === lane.id)).toBe(true);
+  });
+
+  /**
+   * The ceiling is a recorded judgment (ADR 306 §3), not an implementation detail: the test that
+   * exercises it seeds its chain FROM the constant, so it cannot notice the number changing. This
+   * pins the number itself — moving it must be a deliberate edit with an ADR behind it.
+   */
+  it('the continuation ceiling is the number ADR 306 recorded', () => {
+    expect(WORK_ORDER_CONTINUATION_SUCCESS_CAP).toBe(8);
+  });
+
+  /** ADR 306 §3 — a succeeding chain is bounded too; nick rejected indefinite chaining. */
+  it('trips the continuation success cap and records it as a counted event', () => {
+    const { db, team, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 20 });
+    const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
+    // The chain must sit OUTSIDE the hourly window, or the hourly cap — not the ADR 306 ceiling —
+    // is what stops the ninth wake, and the test would pass for the wrong reason.
+    for (let i = 0; i < WORK_ORDER_CONTINUATION_SUCCESS_CAP; i++) {
+      const wokeTs = Date.now() - 2 * 3_600_000 + i;
+      wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+      laneTouched(db, lane.id, wokeTs + 1);
+    }
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.lane_id === lane.id)).toBe(false);
+    const exhausted = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_exhausted');
+    expect(JSON.parse(exhausted.at(-1)!.detail as string)).toMatchObject({
+      reason: 'continuation_cap',
+      edge: 'dispatch_continuation',
+      lane_id: lane.id,
+    });
+  });
+
+  /**
+   * Scope guard for ADR 306 §1: the success-blind counting is restricted to edge-bearing work
+   * orders. An inbox wake (edge NULL) must keep today's semantics exactly — a successful wake
+   * still retires its act, or a delivered doorbell would ring forever.
+   */
+  it('inbox wakes still count successes toward the attempt cap', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    msg(db, team, nick, ada, 'request_help', 'rh1', 1_000);
+    for (let i = 0; i < WAKE_ATTEMPT_CAP; i++) {
       appendAudit(db, team.id, {
         actor: null,
         action: 'residency.woke',
         target: 'Ada',
         result: 'allow',
-        detail: { act: `lane:${lane.id}`, lane_id: lane.id, edge: 'dispatch_continuation' },
+        detail: { act: 'rh1' },
       });
       db.prepare(
         'UPDATE audit SET ts = ? WHERE rowid = (SELECT rowid FROM audit ORDER BY rowid DESC LIMIT 1)',
       ).run(Date.now() - WAKE_COOLDOWN_MS - 1);
     }
     const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
-    expect(orders.some((o) => o.lane_id === lane.id)).toBe(true);
+    expect(orders.some((o) => o.act_id === 'rh1')).toBe(false);
   });
 
   it('review failures do not trip dispatch_handoff on the same lane', () => {
@@ -1373,5 +1840,65 @@ describe('claimWakeLeases — spend breaker + still-true (ADR 262)', () => {
     });
     const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
     expect(orders.some((o) => o.act_id === 'h1')).toBe(true);
+  });
+});
+
+/**
+ * The wake poll runs on the daemon's request path, in one transaction, every 30s per enrolled seat.
+ * Its cost must therefore be a function of what is DUE, never of how long the team has been talking
+ * — otherwise the poll grows without bound against an append-only log and starves the event loop for
+ * every other request (measured on the revive team: 840ms at idle, 8000+ member lookups per poll,
+ * `/health` timing out behind the queue and tripping guardian `daemon_down` false alarms).
+ *
+ * The deferral fold is where that bound was lost: `deferrals` reads only the seat's OWN `wait` acts,
+ * but the scan hydrated every row in the window into a full Envelope — two member lookups each —
+ * before throwing all of them away. This pins the property rather than the fix: a seat that has
+ * deferred nothing must not pay for the timeline.
+ */
+describe('claimWakeLeases — cost is bounded by what is due, not by the timeline (burst starvation)', () => {
+  /** Counts executions of the per-row member hydration the deferral scan used to drive. */
+  function countMemberLookups(db: Database, run: () => void): number {
+    let n = 0;
+    const orig = db.prepare.bind(db);
+    (db as any).prepare = (sql: string) => {
+      const stmt = orig(sql);
+      if (/FROM members WHERE id = \?/.test(sql)) {
+        const get = stmt.get.bind(stmt);
+        (stmt as any).get = (...args: unknown[]) => {
+          n++;
+          return get(...args);
+        };
+      }
+      return stmt;
+    };
+    try {
+      run();
+    } finally {
+      (db as any).prepare = orig;
+    }
+    return n;
+  }
+
+  it('does not hydrate the team timeline for a seat that has deferred nothing', () => {
+    const { db, team, nick, ada, bob } = seed();
+    enroll(db, team, ada);
+    // A long-running team: chatter Ada is a party to, none of it deferred by her.
+    for (let i = 0; i < 400; i++) {
+      msg(db, team, nick, bob, 'message', `c${i}`, 1_000 + i);
+      msg(db, team, bob, null, 'status_update', `s${i}`, 1_400 + i);
+    }
+    // One genuine reason to wake her.
+    msg(db, team, nick, ada, 'message', 'u1', 900_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+
+    let orders: unknown[] = [];
+    const lookups = countMemberLookups(db, () => {
+      orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    });
+
+    expect(orders).toHaveLength(1);
+    // The seat, its sender, and the lease bookkeeping — a handful. NOT one per timeline row.
+    expect(lookups).toBeLessThan(50);
   });
 });

@@ -65,9 +65,9 @@ What your change needs depends entirely on _what you changed_:
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
 | **Web / UI** (`packages/web`)         | **Nothing.** Merge to `main`. Within ~60s the build-publisher rebuilds and republishes, and the daemon serves the new bundle. | **No**                   |
 | **Server / protocol / CLI**           | `musterd service refresh` (sync `main` → build → restart)                                                                     | **Yes** — announce first |
-| **Un-merged WIP you want to eyeball** | `pnpm dev` in your worktree → `http://localhost:5174/live`                                                                    | No                       |
+| **Un-merged WIP you want to eyeball** | `pnpm dev` in your workspace → `http://localhost:5174/live`                                                                    | No                       |
 
-**Do not run `service refresh` to see a UI change.** It restarts the _shared_ daemon and drops your teammates' live sessions for nothing. The UI is **decoupled from the daemon's build**: the served bundle lives in `~/.musterd/live/web`, published from the `agents-live` worktree — **not** in the daemon's checkout. So the daemon's build SHA and the UI's SHA differ routinely, and that is correct, not drift to "fix" with a refresh.
+**Do not run `service refresh` to see a UI change.** It restarts the _shared_ daemon and drops your teammates' live sessions for nothing. The UI is **decoupled from the daemon's build**: the served bundle lives in `~/.musterd/live/web`, published from the `agents-live` workspace — **not** in the daemon's checkout. So the daemon's build SHA and the UI's SHA differ routinely, and that is correct, not drift to "fix" with a refresh.
 
 - To check what the UI is actually serving: `tail ~/.musterd/live/build.log` (it logs `published <sha>`).
 - Impatient? `musterd service refresh --live` forces a rebuild + publish **now** — still no daemon restart.
@@ -75,9 +75,9 @@ What your change needs depends entirely on _what you changed_:
 
 **TRAP — `musterd service install`** embeds whatever `node` runs it into the daemon's plist, and the daemon's native `better-sqlite3` needs **Node ≥22**. Installing from a Node 20 shell used to crashloop the daemon while reporting success; it now refuses with the fix. `service refresh` never rewrites the plist and is always safe.
 
-**`service refresh` self-locates the daemon's checkout** ([issue #289](docs/decisions/118-service-refresh.md)). It reads the daemon's real checkout back from the installed plist and rebuilds **that**, so you can run it from **any** worktree — no `cd` to the daemon's checkout first. When the checkout you invoked from differs, it says so (`targeting the daemon's own checkout <X> …`). Before this fix it silently rebuilt whatever checkout the CLI was invoked from and then bounced the daemon onto its own unchanged dist — a full run of ✓s that deployed nothing; if you see a daemon that "won't update," confirm you're on a build that includes the fix.
+**`service refresh` self-locates the daemon's checkout** ([issue #289](docs/decisions/118-service-refresh.md)). It reads the daemon's real checkout back from the installed plist and rebuilds **that**, so you can run it from **any** workspace — no `cd` to the daemon's checkout first. When the checkout you invoked from differs, it says so (`targeting the daemon's own checkout <X> …`). Before this fix it silently rebuilt whatever checkout the CLI was invoked from and then bounced the daemon onto its own unchanged dist — a full run of ✓s that deployed nothing; if you see a daemon that "won't update," confirm you're on a build that includes the fix.
 
-**Your own runtime can be stale too (ADR 135).** Every `pnpm build` stamps `dist/build.json` with the commit it was built from, and your MCP adapter attests that stamp on connect. If `team_status`/`team_inbox_check` shows "⚠ your musterd adapter (…) differs from the daemon (…)", your session is running stale tools: rebuild this worktree (`pnpm build`) **and** `/mcp` reload — a rebuild alone doesn't reach the running process. The web viewer's SHA differing from the daemon's remains correct (see above); the adapter warning is about _your_ dist only.
+**Your own runtime can be stale too (ADR 135).** Every `pnpm build` stamps `dist/build.json` with the commit it was built from, and your MCP adapter attests that stamp on connect. If `team_status`/`team_inbox_check` shows "⚠ your musterd adapter (…) differs from the daemon (…)", your session is running stale tools: rebuild this workspace (`pnpm build`) **and** `/mcp` reload — a rebuild alone doesn't reach the running process. The web viewer's SHA differing from the daemon's remains correct (see above); the adapter warning is about _your_ dist only.
 
 ## Hard rules (violating these is a bug, not a choice)
 
@@ -95,7 +95,7 @@ What your change needs depends entirely on _what you changed_:
 When you find an error, contradiction, missing field, or a better approach:
 
 1. **Do not silently deviate.**
-2. Write `docs/decisions/NNN-<slug>.md` — **get NNN from `pnpm adr:next`, never by reading `origin/main` yourself** (ADR 220: a number is free only if no _open PR_ claims it either), then **push the branch as a draft PR straight away, before you write the ADR** ([ADR 223](docs/decisions/223-adr-numbers-are-published-not-just-read.md): the number is contested from the moment you take it, and `adr:next` can only see what has been published — an unpushed branch is invisible to every other seat for your whole authoring session). Template in `07-conventions.md`: Context, Problem, Decision, Consequences.
+2. Write `docs/decisions/NNN-<slug>.md` — **get NNN from `pnpm adr:next`, never by reading `origin/main` yourself** (ADR 220: a number is free only if no _open PR_ claims it either), then **push the branch as a draft PR straight away, before you write the ADR** ([ADR 223](docs/decisions/223-adr-numbers-are-published-not-just-read.md): the number is contested from the moment you take it, and `adr:next` can only see what has been published — an unpushed branch is invisible to every other seat for your whole authoring session). Section skeleton in `07-conventions.md`: Context, Problem, Decision, Consequences.
 3. Make the **smallest correct change**.
 4. Update the affected doc(s) **in the same commit**, referencing the ADR in the commit footer (`Refs ADR-00N`).
 
@@ -106,11 +106,11 @@ Pre-flagged ADRs you will likely write: **001** (members table folds memberships
 Every doc has **one job and one lifecycle**, and **one fact has one home** — link, don't duplicate (duplication is what drifts and goes stale). Before adding to a doc, check it's the right home:
 
 - **`SPEC.md`** — the single normative protocol (model, envelope, acts, transport, versioning). **Appendix A** holds _Unreleased_ (designed, not yet specified). Rewritten in place; every change is versioned **and** ADR-gated. There is no separate "draft spec."
-- **`docs/decisions/NNN-*.md` (ADRs)** — the decision spine (_why_, dated). **Once accepted, `## Decision` is frozen — and only `## Decision`.** Record what happened next as a dated note in `## Consequences`; Context / Consequences / Observability stay editable, and in-place amendment there is the prescribed mechanism, not a workaround. Supersede with a new ADR when you are **reversing** a decision, never merely annotating one. `change-adr:check` enforces exactly this line; the full rules (including _never run Prettier on `docs/`_) live in `docs/architecture/07-conventions.md` §ADRs. They are the per-change record; don't re-narrate them elsewhere, link to them.
+- **`docs/decisions/NNN-*.md` (ADRs)** — the decision spine (_why_, dated). **Once accepted, `## Decision` is frozen — and only `## Decision`.** Record what happened next as a dated note in `## Consequences`; Context / Consequences / Observability stay editable, and in-place amendment there is the prescribed mechanism, not a workaround. Supersede with a new ADR when you are **reversing** a decision, never merely annotating one. `change-adr:check` enforces exactly this line; the full rules (including why _Prettier cannot reach `docs/`_ — construction since ADR 284, not discipline) live in `docs/architecture/07-conventions.md` §ADRs. They are the per-change record; don't re-narrate them elsewhere, link to them.
 - **`docs/architecture/00–07`** — how it's built _now_ (impl-facing distillation of SPEC + structure). Rewritten to track code. The ``## File tree `packages/<pkg>/src/` `` blocks are **drift-checked**: `format:check` runs `arch-trees:check` (ADR 043), which fails if a tree omits a real source file or lists a stale one. Add a _described_ line for each new file — the descriptions are hand-authored (the checker enforces the file set, not the prose).
 - **`docs/design/*`** — durable _why_: philosophy, research (Co-Gym, MAST), brand, landscape, deployment topology. Rarely changes; an exploratory design **freezes** once its decisions land in ADRs. **Not** a home for evolving plans or status.
 - **`docs/archive/*`** — completed or superseded docs, kept for history. Do not maintain them.
-- **`ROADMAP.md`** — what's next (reserved-but-unbuilt, out-of-scope-by-principle). Forward-looking; replaced, not accreted. **Its item list is generated** from `packages/web/src/content/roadmap.data.ts` — the single source of truth the web roadmap map also reads — via `pnpm roadmap:gen` (ADR 041). Edit the typed data module and regenerate; never hand-edit between the `<!-- GENERATED ROADMAP -->` markers (`format:check` runs `roadmap:check` to block drift).
+- **`ROADMAP.md`** — what's next (reserved-but-unbuilt, out-of-scope-by-principle). Forward-looking; replaced, not accreted. **Its item list is generated** from `content/roadmap.data.ts` — the single source of truth, which musterd.io's `/roadmap` page also renders at build time — via `pnpm roadmap:gen` (ADR 041). Edit the typed data module and regenerate; never hand-edit between the `<!-- GENERATED ROADMAP -->` markers (`format:check` runs `roadmap:check` to block drift).
 - **`docs/implementation-plan.md`** — where we are _now_: a short, mostly-derived status snapshot + how we deviated (pointers to ADRs). Touch only when the milestone state changes.
 
 New docs use the **canonical work-item vocabulary** (ADR 098): Goal / Lane are the entities, Phase / increment N the prose units — table in `07-conventions.md` §Naming, enforced by `pnpm vocab:check` (mention a banned word by backticking it).
@@ -130,50 +130,53 @@ The three automated scenarios in `06-testing.md` pass: (A) two humans on one tea
 There is exactly one way to land a change. GitHub enforces it (squash-only, `main` protected, required
 checks), so don't improvise a merge method or a catch-up strategy.
 
-1. **Branch from fresh `main`, in your worktree.** `git fetch origin main` then `git checkout -b feat/<slug> origin/main` (or `fix/`/`docs/`). One branch per lane.
-2. **Work and commit normally — as your seat.** Intermediate commits don't matter — the PR is **squash-merged** to one commit. Your worktree's git identity is your seat ([ADR 109](docs/decisions/109-seat-git-attribution.md)); end every commit message with your seat trailer `Co-authored-by: <seat> <seat@<team>.musterd>` (this replaces the generic model trailer — add a model line alongside if you like). The trailer is what survives the squash onto `main`, so keep it when editing a squash body.
+1. **Branch from fresh `main`, in your workspace.** `git fetch origin main` then `git checkout -b feat/<slug> origin/main` (or `fix/`/`docs/`). One branch per lane.
+2. **Work and commit normally — as your seat.** Intermediate commits don't matter — the PR is **squash-merged** to one commit. Your workspace's git identity is your seat ([ADR 109](docs/decisions/109-seat-git-attribution.md)); end every commit message with your seat trailer `Co-authored-by: <seat> <seat@<team>.musterd>` (this replaces the generic model trailer — add a model line alongside if you like). The trailer is what survives the squash onto `main`, so keep it when editing a squash body.
 3. **Before pushing, run the fast local gates:** `pnpm typecheck && pnpm format:check` (seconds). This is a _smoke test for speed_, not a duplicate of CI — do **not** run the full suite locally to "pre-verify" CI. CI is the authority.
 4. **Open the PR and let it land itself:** `gh pr create …` then `gh pr merge <n> --squash --auto --delete-branch`. Auto-merge waits for the required check (`gates` CI) and squash-merges when green. **Don't poll or babysit** — walk away; you'll be notified. This is the technical land path — not blocked on peer acceptance ([ADR 192](docs/decisions/192-outcome-acceptance.md)).
 5. **Fell behind `main`? Rebase — never `merge main`:** `git fetch origin main && git rebase origin/main`, resolve conflicts once, re-run the fast gates, `git push --force-with-lease`. Your branch is throwaway history under squash, so rebasing is free; `--force-with-lease` won't clobber a teammate.
-6. **Submit for outcome acceptance, then close:** after merge, `lane_submit` / `musterd lane submit` with `{pr, sha, authorized_by}` moves the lane to `awaiting_acceptance` and asks an acceptor to judge intent/principles/usable/feel of the **landed** outcome (not a code review). Prefer a counterpart accept over self-`lane_resolve` (self-close is recorded unconfirmed). Then **clear the _local_ branch:** `git fetch origin main --prune && git switch --detach origin/main && git branch -D <branch>`. Auto-delete only removes the **remote** branch; the local one lingers. You can't `git checkout main` (a sibling worktree owns it) and `git branch -d` refuses a squash-merged branch — so **detach to fresh `origin/main`** (which is also step 1's start state) and force-delete. Between lanes your worktree rests detached at `origin/main`, not on a stale branch. `lane resolve` prints this line for you.
+6. **Submit for outcome acceptance, then close:** after merge, `lane_submit` / `musterd lane submit` with `{pr, sha, authorized_by}` moves the lane to `awaiting_acceptance` and asks an acceptor to judge intent/principles/usable/feel of the **landed** outcome (not a code review). Prefer a counterpart accept over self-`lane_resolve` (self-close is recorded unconfirmed). Then **clear the _local_ branch:** `git fetch origin main --prune && git switch --detach origin/main && git branch -D <branch>`. Auto-delete only removes the **remote** branch; the local one lingers. You can't `git checkout main` (a sibling workspace owns it) and `git branch -d` refuses a squash-merged branch — so **detach to fresh `origin/main`** (which is also step 1's start state) and force-delete. Between lanes your workspace rests detached at `origin/main`, not on a stale branch. `lane resolve` prints this line for you.
 
 **Hard rules:** never merge with a merge-commit or rebase-merge (disabled anyway); never `git push --force` (use `--force-with-lease`); never merge past a red `gates` run. Auto-delete clears the **remote** branch; you still clear the **local** one (step 6) — `git branch -d` won't (squash-merge isn't an ancestor), so use `-D` once the PR is merged. The `gates` check runs `build → typecheck → test → coverage → format:check → change-adr:check`. The `review` workflow ([ADR 180](docs/decisions/180-review-after-bugbot.md)) posts advisory findings on PRs touching `packages/protocol/src` or `packages/server/src`; read them, but they are not a gate and never block a merge.
 
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
-
 ## Your musterd team
 
-You are **stanley** on the **revive** team. musterd is your coordination layer: your teammates — other agents _and_ humans — are
+**revive** Team. Member identity is Workspace-local: trust MCP instructions/occupancy or `musterd whoami`. If unwired, repair or ask; never claim from this file. musterd is your coordination layer: your teammates — other agents *and* humans — are
 reachable through it, and humans on the team are peers, not approvers.
 
 **Your channel.** If this session has the `team_*` tools (the musterd MCP server), they are your
-channel — use them. If it does not, coordinate with the `musterd` CLI instead. Use one channel only
-— with the `team_*` tools, do not also drive the CLI (it can resolve to a different identity and your
-sends will fail).
+channel — use them; otherwise coordinate with the `musterd` CLI. Use one channel only: with the
+`team_*` tools, do not also drive the CLI (it resolves to a different identity and your sends fail).
 
 The loop — `team_*` tool form / `musterd` CLI form:
 
-- **Get on the team when you start.** `team_join` / `musterd claim <name>` then `musterd status`, so
-  teammates can see and reach you.
+- **Get on the team when you start.** Your seat auto-claims on your first `team_*` call, so
+  `team_inbox_check` / `musterd claim <name>` is enough; `team_join` only if a tool says otherwise.
 - **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox` — on start, when
   you finish a unit of work, and after being heads-down. Directed acts wait there for a reply.
 - **Report status as you work.** `team_send {act:'status_update'}` / `musterd send --act
-status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
-- **Claim a lane _before_ you build — reading the board is not enough.** `lane_claim` / `musterd lane
-claim` the ONE you will do (`lane_open` if new); **never build in a lane a teammate owns.** Hand off
+  status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
+- **Claim a lane *before* you build — reading the board is not enough.** `lane_claim` / `musterd lane
+  claim` the ONE you will do (`lane_open` if new); **never build in a lane a teammate owns.** Hand off
   with `team_send {act:'handoff'}`; after merge `lane_submit`, then accept or `lane_resolve`.
 - **Ask a human before you act big or stall.** For a costly / irreversible / out-of-scope action, or
   when only a human can unblock you: `team_send {act:'ask'}` / `musterd send --act ask` (`meta.species`
-  - `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
+  + `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
 
 Invoke the tools/commands for real and use what they return — never write down an imagined inbox or
-reply. Keep messages short: use the acts, do not narrate in free text.
+reply. Keep messages short: use the acts, do not narrate in free text. **The daemon refreshes itself
+— never ask a human to:** your merge reaches it without you (`~/.musterd/autorefresh/refresh.log`).
 
-**Going past the basics?** Claiming or adopting a seat, handing off with a branch, lane contention,
-waiting on the inbox without polling, or recovering from an error — read the **musterd skill**
+**Going past the basics?** Adopting a seat, handing off a branch, lane contention, waiting without
+polling, daemon refresh, or recovering from an error — read the **musterd skill**
 (`.claude/skills/musterd/SKILL.md`, `.cursor/rules/musterd.mdc`, or `.musterd/skill/SKILL.md`) or run
 `musterd help` for the full command reference.
-
 <!-- musterd:end -->
 
-<!-- musterd:end -->
+## Your role's skill (outside the managed block — survives a `musterd init` refresh)
+
+A role can carry a charter skill, and it lives in the repo: `.agents/skills/<role>/SKILL.md` is the
+canonical copy (ADR 299). Read your own role's skill before doing that role's work — for a writing
+role, before anything that leaves the repo. The `.claude/` and `.cursor/` copies a provisioned
+workspace carries are thin bridges to that same file; edit the canonical one, never a bridge.

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import {
+  type Envelope,
   FEATURE_EPOCH,
   GENERALIST_CAPABILITIES,
   PROTOCOL_VERSION,
@@ -17,8 +18,9 @@ import { createServer, type RunningServer } from '../index.js';
 import { appendAudit, listAudit } from '../store/audit.js';
 import { openDirectedLedger } from '../store/delivery.js';
 import { getMemberByName, setMemberGovernance } from '../store/members.js';
+import { insertMessage } from '../store/messages.js';
 import { REVIEW_LOOP_BREAKER_N } from '../store/review.js';
-import { getTeamBySlug } from '../store/teams.js';
+import { getTeamBySlug, mintBootstrapCredential } from '../store/teams.js';
 
 let server: RunningServer;
 let base: string;
@@ -27,6 +29,8 @@ let wsUrl: string;
 let db: ReturnType<typeof openDb>;
 
 beforeEach(async () => {
+  teamBootstraps.clear();
+  agentAuthorities.clear();
   db = openDb(':memory:');
   server = createServer({ db, port: 0 });
   const { port } = await server.listen();
@@ -49,33 +53,107 @@ async function pollUntil(pred: () => boolean, ms = 1000): Promise<void> {
 }
 
 /**
- * v0.3 auth descriptor (ADR 077, SPEC A.7 §253). A bare string is a self-identifying secret — a human
- * `mscr_` credential. An `{ key, seat }` is an agent acting as a seat: `Bearer <agent_key>` +
- * `x-musterd-seat`, mirroring the production HttpClient (commit 4d11b35).
+ * A bare string is a self-identifying secret — a human `mscr_` credential. Agent fixtures begin
+ * with the bootstrap `mskey_`, then the transport helper claims their named seat and substitutes
+ * the resulting `msac_` credential plus `msls_` Presence proof (ADR 337).
  */
-type Auth = string | { key: string; seat: string };
+type Auth = string | { key: string; seat: string; sessionLease?: string };
+type TeamBootstrap = { agentKey: string; humanCredential: string };
+const teamBootstraps = new Map<string, TeamBootstrap>();
+const agentAuthorities = new Map<string, Auth>();
+
 function authHeaders(auth?: Auth): Record<string, string> {
   if (!auth) return {};
   if (typeof auth === 'string') return { authorization: `Bearer ${auth}` };
-  return { authorization: `Bearer ${auth.key}`, 'x-musterd-seat': auth.seat };
+  return {
+    authorization: `Bearer ${auth.key}`,
+    ...(auth.sessionLease ? { 'x-musterd-session-lease': auth.sessionLease } : {}),
+    'x-musterd-seat': auth.seat,
+  };
+}
+
+async function resolveAuth(path: string, auth?: Auth): Promise<Auth | undefined> {
+  if (!auth || typeof auth === 'string' || !auth.key.startsWith('mskey_')) return auth;
+  const slug = path.match(/^\/teams\/([^/?]+)/)?.[1];
+  if (!slug) return auth;
+  const bootstrap = teamBootstraps.get(slug);
+  if (!bootstrap || bootstrap.agentKey !== auth.key) return auth;
+  const cacheKey = `${slug}:${auth.seat}`;
+  const cached = agentAuthorities.get(cacheKey);
+  if (cached) {
+    Object.assign(auth, cached);
+    return cached;
+  }
+
+  const grantResponse = await fetch(base + `/teams/${slug}/grants`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${bootstrap.humanCredential}`,
+    },
+    body: JSON.stringify({ scope: 'seat', target: auth.seat, lifetime: 'standing' }),
+  });
+  const grant = (await grantResponse.json()) as { token: string };
+  const claimResponse = await fetch(base + `/teams/${slug}/claim`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      key: auth.key,
+      target: { seat: auth.seat },
+      grant: grant.token,
+      surface: 'cli',
+    }),
+  });
+  const claim = (await claimResponse.json()) as { seat_credential: string; session_lease: string };
+  const authority: Auth = {
+    key: claim.seat_credential,
+    seat: auth.seat,
+    sessionLease: claim.session_lease,
+  };
+  agentAuthorities.set(cacheKey, authority);
+  Object.assign(auth, authority);
+  return authority;
+}
+
+async function reattestAgentModel(slug: string, auth: Exclude<Auth, string>, model: string) {
+  const claim = await post(`/teams/${slug}/claim`, {
+    key: auth.key,
+    target: { seat: auth.seat },
+    surface: 'cli',
+    model,
+  });
+  if (claim.status !== 200) throw new Error(`failed to reattest ${auth.seat}: ${claim.status}`);
+  Object.assign(auth, {
+    key: claim.json.seat_credential ?? auth.key,
+    sessionLease: claim.json.session_lease,
+  });
 }
 
 async function post(path: string, body: unknown, auth?: Auth) {
+  const resolvedAuth = await resolveAuth(path, auth);
   const res = await fetch(base + path, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...authHeaders(auth),
+      ...authHeaders(resolvedAuth),
     },
     body: JSON.stringify(body),
   });
-  return { status: res.status, json: (await res.json()) as any };
+  const json = (await res.json()) as any;
+  if (path === '/teams' && res.status === 201) {
+    teamBootstraps.set(json.team.slug, {
+      agentKey: json.agent_key,
+      humanCredential: json.human_credential,
+    });
+  }
+  return { status: res.status, json };
 }
 
 async function get(path: string, auth?: Auth, extraHeaders?: Record<string, string>) {
+  const resolvedAuth = await resolveAuth(path, auth);
   const res = await fetch(base + path, {
     headers: {
-      ...authHeaders(auth),
+      ...authHeaders(resolvedAuth),
       ...(extraHeaders ?? {}),
     },
   });
@@ -84,9 +162,10 @@ async function get(path: string, auth?: Auth, extraHeaders?: Record<string, stri
 
 /** Like `post` but for a JSON-bodied request of any method; parses JSON only when a body is returned. */
 async function req(method: string, path: string, body: unknown, auth?: Auth) {
+  const resolvedAuth = await resolveAuth(path, auth);
   const res = await fetch(base + path, {
     method,
-    headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+    headers: { 'content-type': 'application/json', ...authHeaders(resolvedAuth) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -174,6 +253,9 @@ class TestWs {
     grant?: string,
     model?: string,
     driver?: string,
+    // Appended LAST on purpose: inserting it beside `model` would have silently re-read the
+    // existing `undefined, 'nick' // driver` caller's driver as a model source.
+    modelSource?: string,
   ) {
     this.send({
       type: 'claim',
@@ -183,6 +265,7 @@ class TestWs {
       target: { seat },
       ...(grant ? { grant } : {}),
       ...(model ? { model } : {}),
+      ...(model && modelSource ? { model_source: modelSource } : {}),
       ...(driver ? { driver } : {}),
       surface,
     });
@@ -421,6 +504,240 @@ describe('HTTP API', () => {
    * has to learn the question was taken, and by whom, so it can drop the work or disagree with what
    * landed. A stand-down that says nothing is the same defect as an instrument going quiet.
    */
+  describe('GET /inbox is bounded even when the caller names no limit', () => {
+    /**
+     * This was the last unbounded read on the request path: a seat returning after time away pulled
+     * its entire unread history in one reply. The bound has to be a PREFIX, not the newest tail —
+     * a reader that advances its cursor to the newest row it received after a tail-truncated read
+     * steps over everything that was cut, which is ADR 287's loss reintroduced as a latency fix.
+     */
+    /**
+     * `tieFrom`: every row from that index on carries the ts of the row before it, so a millisecond
+     * tie straddles the 200-row bound. Every other fixture in this file seeds `ts: Date.now() + i`,
+     * strictly increasing — which makes a tie unconstructible and is exactly why no existing test
+     * can see the defect below.
+     */
+    const teamWithBacklog = async (n: number, tieFrom?: number) => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      const nickTok = team.json.human_credential;
+      const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+      // Pinned ONCE: `Date.now()` per iteration drifts, so tied rows would not actually tie —
+      // the fixture would encode the same strictly-increasing assumption it exists to break.
+      const t0 = Date.now();
+      // Seeded IN PROCESS through the same store function the route calls, not over HTTP. These
+      // tests are about the GET, and the backlog they need is large by construction — the bound
+      // under test is 200, so every fixture must exceed it. Built one POST at a time this block
+      // spent 1830ms of round-trips per test against 33ms in the call it exists to measure
+      // (measured 2026-08-28), because POST /messages is a heavy path — routeEnvelope, delivery
+      // hints, nudge-decision counting, audit rows — and none of it is this describe's subject.
+      // Linear in n and paid six times, that crossed the 30s timeout under a loaded parallel run
+      // while passing alone, which is the shape that teaches people to re-run a suite instead of
+      // reading it. `unreadOnly` filters the caller's cursor against `messages`, so nothing
+      // asserted below depends on the POST route having run; the route keeps its own coverage
+      // elsewhere in this file.
+      const teamRow = getTeamBySlug(server.db, 'dawn')!;
+      const nick = getMemberByName(server.db, teamRow.id, 'nick')!;
+      const boRow = getMemberByName(server.db, teamRow.id, 'bo')!;
+      for (let i = 0; i < n; i++) {
+        const envelope: Envelope = {
+          id: `b${String(i).padStart(4, '0')}`,
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'bo' },
+          act: 'message',
+          body: 'x',
+          ts: t0 + (tieFrom !== undefined && i >= tieFrom ? tieFrom - 1 : i),
+        };
+        // Receipt order is what the cursor walks; pin created_at to the same shape as ts so the
+        // tie the fixture constructs is a tie in the order that matters.
+        insertMessage(server.db, teamRow.id, nick.id, boRow.id, envelope, { now: envelope.ts });
+      }
+      return { boTok: bo.json.human_credential as unknown };
+    };
+
+    it('caps an unbounded read at the default and says it truncated', async () => {
+      const { boTok } = await teamWithBacklog(220);
+      const r = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      expect(r.json.messages).toHaveLength(200);
+      expect(r.json.truncated).toBe(true);
+      expect(r.json.total).toBe(220);
+    });
+
+    it('returns the OLDEST messages, so advancing to the last one seen skips nothing', async () => {
+      const { boTok } = await teamWithBacklog(220);
+      const r = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      const ids = (r.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids[0]).toBe('b0000');
+      expect(ids[199]).toBe('b0199');
+
+      // A reader does the only safe thing after a truncated read: advance to the last row it saw.
+      await post('/teams/dawn/inbox/cursor', { last_read_message_id: 'b0199' }, boTok);
+      const rest = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      const restIds = (rest.json.messages as { id: string }[]).map((m) => m.id);
+      // The remainder is still there, contiguous with what was already read — nothing stepped over.
+      expect(restIds).toHaveLength(20);
+      expect(restIds[0]).toBe('b0200');
+      expect(rest.json.truncated).toBeUndefined();
+    });
+
+    it('says nothing about truncation when everything waiting fits', async () => {
+      const { boTok } = await teamWithBacklog(3);
+      const r = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      expect(r.json.messages).toHaveLength(3);
+      expect(r.json.truncated).toBeUndefined();
+    });
+
+    /**
+     * `unread_remaining` is stated as a count, so it has to be one on every page — not just the
+     * first. A paging caller walks with `since` and does NOT advance its cursor mid-drain (advancing
+     * past a row it has not rendered is the very loss the prefix exists to prevent), so counting
+     * from the cursor alone re-counts everything the earlier pages already delivered.
+     *
+     * Needs page two to be FULL: on a partial last page the field is suppressed entirely, which is
+     * why a 220-message fixture cannot see this and a 420-message one can.
+     */
+    it('counts what remains after the page it is on, not from the cursor', async () => {
+      const { boTok } = await teamWithBacklog(420);
+      const p1 = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      expect(p1.json.messages).toHaveLength(200);
+      expect(p1.json.unread_remaining).toBe(220);
+
+      const last = (p1.json.messages as { received_at: number }[])[199]!.received_at;
+      const p2 = await get(`/teams/dawn/inbox?unread=1&since=${last}`, boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      expect(p2.json.messages).toHaveLength(200);
+      // 420 total − 400 delivered across the two pages. Counting from the cursor says 220 again.
+      expect(p2.json.unread_remaining).toBe(20);
+    });
+
+    /**
+     * The bound is safe; the CURSOR that walks it has to be too. `listInbox` orders by `ts ASC,
+     * id ASC`, but `since` filters `ts >` strictly and `id` — the declared tiebreak — has no
+     * expression in it. A tie straddling the page boundary therefore strands the WHOLE remainder,
+     * not one row: page two comes back empty, the drain loop reads that as "caught up", and the
+     * caller is told nothing. Found by izzo re-reviewing #943 (lane 01M0GT12W8).
+     */
+    it('reaches every message when a ts tie straddles the page boundary', async () => {
+      const { boTok } = await teamWithBacklog(220, 200);
+      const p1 = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      const seen = [...(p1.json.messages as { id: string; received_at: number }[])];
+      let page = p1;
+      while (page.json.truncated && (page.json.messages as unknown[]).length > 0) {
+        const last = seen[seen.length - 1]!;
+        page = await get(`/teams/dawn/inbox?unread=1&since=${last.received_at}`, boTok, {
+          'x-musterd-no-touch': '1',
+        });
+        seen.push(...(page.json.messages as { id: string; received_at: number }[]));
+      }
+      // Nothing may be stranded by the walk: every message, each exactly once.
+      expect(new Set(seen.map((m) => m.id)).size).toBe(220);
+    });
+
+    /**
+     * The same root cause one layer down, and worse: the read cursor is a ts, the unread filter is
+     * `ts > last_read_ts`, so a message sharing the cursor row's millisecond is not merely stranded
+     * mid-walk — it can never appear as unread again. The cursor row already stores
+     * `last_read_message_id`, so the tiebreak is persisted; it just isn't consulted.
+     */
+    it('still shows an unread message that shares the cursor row millisecond', async () => {
+      const { boTok } = await teamWithBacklog(3, 2); // b0002 carries b0001's ts
+      const all = await get('/teams/dawn/inbox', boTok, { 'x-musterd-no-touch': '1' });
+      const ids = (all.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids).toEqual(['b0000', 'b0001', 'b0002']);
+
+      // Read up to b0001 — the honest thing after seeing it, and b0002 shares its ts.
+      await post('/teams/dawn/inbox/cursor', { last_read_message_id: 'b0001' }, boTok);
+      const unread = await get('/teams/dawn/inbox?unread=1', boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      expect((unread.json.messages as { id: string }[]).map((m) => m.id)).toEqual(['b0002']);
+    });
+
+    /**
+     * The tail read has the same boundary, cut from the other end. It does not page (`truncated` is
+     * never set for an explicit limit), so nothing can be stranded — but "the newest 5" must still
+     * be a well-defined five when twenty rows share the newest millisecond, or two identical
+     * requests disagree about what the recent tail is.
+     */
+    it('takes the newest by (ts, id) when a tie sits on an explicit ?limit= boundary', async () => {
+      const { boTok } = await teamWithBacklog(220, 200); // b0199..b0219 all share one ts
+      const r = await get('/teams/dawn/inbox?unread=1&limit=5', boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      const ids = (r.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids).toEqual(['b0215', 'b0216', 'b0217', 'b0218', 'b0219']);
+      const again = await get('/teams/dawn/inbox?unread=1&limit=5', boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      expect((again.json.messages as { id: string }[]).map((m) => m.id)).toEqual(ids);
+    });
+
+    it('leaves an explicit ?limit= alone — that caller asked for the recent tail', async () => {
+      const { boTok } = await teamWithBacklog(220);
+      const r = await get('/teams/dawn/inbox?unread=1&limit=5', boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      const ids = (r.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids).toEqual(['b0215', 'b0216', 'b0217', 'b0218', 'b0219']);
+      expect(r.json.truncated).toBeUndefined();
+    });
+
+    it('pins an old unread handoff into an explicit ?limit= page of newer team broadcasts', async () => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      const nickTok = team.json.human_credential;
+      const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+      const t0 = Date.now();
+      await post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id: 'handoff-old',
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from: 'nick',
+            to: { kind: 'member', name: 'bo' },
+            act: 'handoff',
+            body: 'take this',
+            ts: t0,
+          },
+        },
+        nickTok,
+      );
+      for (let i = 0; i < 20; i++) {
+        await post(
+          '/teams/dawn/messages',
+          {
+            envelope: {
+              id: `t${String(i).padStart(4, '0')}`,
+              v: PROTOCOL_VERSION,
+              team: 'dawn',
+              from: 'nick',
+              to: { kind: 'team' },
+              act: 'message',
+              body: 'noise',
+              ts: t0 + 10 + i,
+            },
+          },
+          nickTok,
+        );
+      }
+      const r = await get('/teams/dawn/inbox?unread=1&limit=5', bo.json.human_credential, {
+        'x-musterd-no-touch': '1',
+      });
+      const ids = (r.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids).toContain('handoff-old');
+      expect(ids).toEqual(expect.arrayContaining(['t0016', 't0017', 't0018', 't0019']));
+    });
+  });
+
   describe('meta.eligible stand-down trace on GET /inbox', () => {
     /** nick (sender) + bo, cy (eligible) + dee (not eligible), each with its own credential. */
     const teamOfFour = async () => {
@@ -481,7 +798,7 @@ describe('HTTP API', () => {
       await answer(t['cy'], 'cy', 'ans-a', 'el-a');
 
       const inbox = await get('/teams/dawn/inbox', t['bo']);
-      expect(inbox.json.discharged).toContainEqual({ id: 'el-a', by: 'cy' });
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-a', by: 'cy', reason: 'answered' });
     });
 
     it('a decline discharges it too — "not me" is an answer', async () => {
@@ -490,7 +807,7 @@ describe('HTTP API', () => {
       await answer(t['cy'], 'cy', 'ans-b', 'el-b', 'decline');
 
       const inbox = await get('/teams/dawn/inbox', t['bo']);
-      expect(inbox.json.discharged).toContainEqual({ id: 'el-b', by: 'cy' });
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-b', by: 'cy', reason: 'answered' });
     });
 
     it('the discharging act is invisible to bo in the timeline — this is why it needs its own read', async () => {
@@ -503,7 +820,7 @@ describe('HTTP API', () => {
       const timeline = await get('/teams/dawn/messages', t['bo']);
       expect(timeline.json.messages.map((m: { id: string }) => m.id)).not.toContain('ans-c');
       const inbox = await get('/teams/dawn/inbox', t['bo']);
-      expect(inbox.json.discharged).toContainEqual({ id: 'el-c', by: 'cy' });
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-c', by: 'cy', reason: 'answered' });
     });
 
     it('reports the FIRST answer when two land', async () => {
@@ -514,7 +831,7 @@ describe('HTTP API', () => {
 
       const inbox = await get('/teams/dawn/inbox', t['bo']);
       const rows = inbox.json.discharged.filter((d: { id: string }) => d.id === 'el-d');
-      expect(rows).toEqual([{ id: 'el-d', by: 'cy' }]);
+      expect(rows).toEqual([{ id: 'el-d', by: 'cy', reason: 'answered' }]);
     });
 
     it('says nothing to a seat outside the set — it never owed the act', async () => {
@@ -554,7 +871,7 @@ describe('HTTP API', () => {
     await get('/teams/dawn/inbox', adaTok);
     const after = await get('/teams/dawn/members', nickTok);
     const adaRow = after.json.members.find((m: any) => m.name === 'Ada');
-    expect(adaRow?.activity).toBe('idle'); // present, but no status_update → not "working"
+    expect(adaRow?.activity).toBe('active'); // present, but no status_update → not "working"
     expect(adaRow?.presence).toBe('online');
     // the ambient row is connectionless and carries the surface header
     expect(adaRow?.presences?.[0]?.surface).toBe('cli');
@@ -565,26 +882,31 @@ describe('HTTP API', () => {
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
-    // A read carrying the no-touch header (a background poller, e.g. notify) must NOT flip Ada present.
-    await get(
-      '/teams/dawn/inbox',
-      { key: team.json.agent_key, seat: 'Ada' },
-      { 'x-musterd-no-touch': '1' },
-    );
+    // Claiming establishes the lease-bound Presence. A later no-touch read must not alter it.
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    await get('/teams/dawn/inbox', ada);
+    const before = await get('/teams/dawn/members', nickTok);
+    const beforeAda = before.json.members.find((m: any) => m.name === 'Ada');
+    await get('/teams/dawn/inbox', ada, { 'x-musterd-no-touch': '1' });
     const after = await get('/teams/dawn/members', nickTok);
-    expect(after.json.members.find((m: any) => m.name === 'Ada')?.activity).toBe('offline');
+    expect(after.json.members.find((m: any) => m.name === 'Ada')?.presences).toEqual(
+      beforeAda.presences,
+    );
   });
 
   it('ambient presence: a status_update reads working, and the surface header is honored (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const ada = (await resolveAuth('/teams/dawn/messages', {
+      key: team.json.agent_key,
+      seat: 'Ada',
+    }))!;
     const res = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${team.json.agent_key}`,
-        'x-musterd-seat': 'Ada',
+        ...authHeaders(ada),
         'x-musterd-surface': 'claude-code',
       },
       body: JSON.stringify({
@@ -845,6 +1167,7 @@ describe('WebSocket', () => {
       'Ada',
       'claude-code',
       await standingGrant(team.json.human_credential, 'Ada'),
+      'claude-opus-4-8',
     );
     expect((await get('/health')).json.connections).toBe(1);
     a.close();
@@ -1267,9 +1590,9 @@ describe('WebSocket', () => {
     expect(by('Ada').activity).toBe('working');
     expect(by('Ada').state).toBe('refactoring auth');
     expect(by('Ada').posture).toBe('working');
-    expect(by('nick').activity).toBe('idle');
+    expect(by('nick').activity).toBe('active');
     expect(by('nick').state).toBeNull();
-    expect(by('nick').posture).toBe('idle');
+    expect(by('nick').posture).toBe('active');
     expect(by('Lin').activity).toBe('offline');
     expect(by('Lin').posture).toBe('offline');
     expect(by('Lin').offline_reason).toBe('unknown');
@@ -1326,13 +1649,13 @@ describe('WebSocket', () => {
     expect(nickRow.presence).toBe('online');
     expect(nickRow.presences[0].surface).toBe('web');
     // Tab open, nothing reported → idle, not working (the ladder's online-but-no-task read).
-    expect(nickRow.activity).toBe('idle');
-    expect(nickRow.posture).toBe('idle');
+    expect(nickRow.activity).toBe('active');
+    expect(nickRow.posture).toBe('active');
 
     tab.close();
   });
 
-  it('a live human decays working → idle past the presence timeout; an agent does not (ADR 155 Inc 3)', async () => {
+  it("working decays to active past each kind's window — presence timeout for humans, agentIdleMs for agents (ADR 155 Inc 3, presence-honesty §2.1)", async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
@@ -1381,15 +1704,25 @@ describe('WebSocket', () => {
       .run(Date.now() - 60_000);
 
     roster = await get('/teams/dawn/members', nickTok);
-    // The human decays to idle — still online, last_status_at kept, no stale working label.
+    // The human decays to active — still online, and the claim is kept with its age
+    // (presence-honesty §2.1): state + last_status_at survive for the `last: …` render.
     expect(by(roster, 'nick').presence).toBe('online');
-    expect(by(roster, 'nick').activity).toBe('idle');
-    expect(by(roster, 'nick').state).toBeNull();
+    expect(by(roster, 'nick').activity).toBe('active');
+    expect(by(roster, 'nick').state).toBe('shipping inc 3');
     expect(by(roster, 'nick').last_status_at).not.toBeNull();
-    expect(by(roster, 'nick').posture).toBe('idle');
-    // The agent keeps the ADR 010 never-silently-revert read.
+    expect(by(roster, 'nick').posture).toBe('active');
+    // The agent's window is minutes, not seconds — 60s stale is still fresh evidence.
     expect(by(roster, 'Ada').activity).toBe('working');
     expect(by(roster, 'Ada').state).toBe('shipping inc 3');
+
+    // Past the agent window (15 min default) the agent decays too, claim kept.
+    server.db
+      .prepare("UPDATE messages SET ts = ? WHERE act = 'status_update'")
+      .run(Date.now() - 16 * 60_000);
+    roster = await get('/teams/dawn/members', nickTok);
+    expect(by(roster, 'Ada').activity).toBe('active');
+    expect(by(roster, 'Ada').state).toBe('shipping inc 3');
+    expect(by(roster, 'Ada').last_status_at).not.toBeNull();
 
     tab.close();
     a.close();
@@ -1472,6 +1805,51 @@ describe('WebSocket', () => {
     expect((reqs.json.requests ?? []).length).toBe(0);
   });
 
+  it('WS claim: a seat-scoped bootstrap credential only claims its recorded seat', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, nickTok);
+    const scoped = mintBootstrapCredential(server.db, {
+      teamId: getTeamBySlug(server.db, 'dawn')!.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+    });
+    expect(scoped.credential.first_used_at).toBeNull();
+
+    const mismatch = new TestWs();
+    await mismatch.open();
+    mismatch.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: scoped.agent_key,
+      target: { seat: 'Lin' },
+      surface: 'cli',
+    });
+    expect((await mismatch.waitFor('refused')).message).toMatch(/only claim.*Ada/i);
+    mismatch.close();
+
+    const matched = new TestWs();
+    await matched.open();
+    await matched.claim(
+      'dawn',
+      scoped.agent_key,
+      'Ada',
+      'cli',
+      await standingGrant(nickTok, 'Ada'),
+    );
+    expect(
+      server.db
+        .prepare<
+          [string],
+          { first_used_at: number | null }
+        >('SELECT first_used_at FROM agent_bootstrap_credentials WHERE id = ?')
+        .get(scoped.credential.id)?.first_used_at,
+    ).toEqual(expect.any(Number));
+    matched.close();
+  });
+
   it('records provenance + workspace from the claim and surfaces them on the roster (ADR 014)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
@@ -1497,6 +1875,58 @@ describe('WebSocket', () => {
     expect(adaRow.presences[0].provenance).toBe('session');
     expect(adaRow.presences[0].workspace).toBe('movetrail@feat/login');
 
+    a.close();
+  });
+
+  // ADR 121/131 §6. `ambientTouch` and (since #1309) the stateless claim both stamp provenance on
+  // AGENT seats only; the WS claim was the last path without that gate, so a human frame could
+  // declare itself `wake` — the word the wake actuators read to decide a seat is their own child.
+  it('a HUMAN seat cannot stamp its own WS occupancy `wake`, while an agent seat records it', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // The human claims their own seat over WS and declares `wake`.
+    const h = new TestWs();
+    await h.open();
+    h.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: nickTok,
+      target: { seat: 'nick' },
+      surface: 'cli',
+      provenance: 'wake',
+      workspace: 'repo@main',
+    });
+    await h.waitFor('occupied');
+
+    // The agent seat declares the same thing, and it IS recorded — the gate is on kind, not on the
+    // word, so this test fails if someone "fixes" it by blanket-dropping provenance.
+    const a = new TestWs();
+    await a.open();
+    a.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(nickTok, 'Ada'),
+      surface: 'cli',
+      provenance: 'wake',
+      workspace: 'repo@main',
+    });
+    await a.waitFor('occupied');
+
+    const roster = await get('/teams/dawn/members', nickTok);
+    const human = roster.json.members.find((m: any) => m.name === 'nick');
+    const agent = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(human.presences[0].provenance).toBeNull();
+    // The workspace is not gated — it is a location, not an assertion about what animates it.
+    expect(human.presences[0].workspace).toBe('repo@main');
+    expect(agent.presences[0].provenance).toBe('wake');
+
+    h.close();
     a.close();
   });
 
@@ -1607,6 +2037,135 @@ describe('WebSocket', () => {
     live.close();
   });
 
+  it('a re-attach whose LABEL changed but whose workspace_key did not is the same workspace (a branch switch must not evict the live session — lane 01M1JQYYAC)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+    const live = new TestWs();
+    await live.open();
+    live.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+      workspace_key: '/Users/x/repo',
+    });
+    expect((await live.waitFor('occupied')).type).toBe('occupied');
+
+    // The seat detaches HEAD to review a merge SHA. Same folder, same session's worktree — but the
+    // label loses its branch qualifier, which is exactly what used to read as a foreign workspace.
+    const afterDetach = new TestWs();
+    await afterDetach.open();
+    afterDetach.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo',
+      workspace_key: '/Users/x/repo',
+    });
+    expect((await afterDetach.waitFor('occupied')).type).toBe('occupied');
+
+    await expect(live.waitFor('error', 300)).rejects.toThrow(/timeout/);
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    expect(
+      listAudit(server.db, teamId).some(
+        (r) => r.action === 'claim.superseded' && JSON.parse(r.detail ?? '{}').via === 'ws',
+      ),
+    ).toBe(false);
+
+    afterDetach.close();
+    live.close();
+  });
+
+  it('two different work trees whose folders share a name are still different workspaces (the key sees the collision the label could not)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+    const first = new TestWs();
+    await first.open();
+    first.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+      workspace_key: '/Users/x/one/repo',
+    });
+    expect((await first.waitFor('occupied')).type).toBe('occupied');
+
+    const second = new TestWs();
+    await second.open();
+    second.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main', // identical label, genuinely different checkout
+      workspace_key: '/Users/x/two/repo',
+    });
+    expect((await second.waitFor('occupied')).type).toBe('occupied');
+
+    const superseded = await first.waitFor('error');
+    expect((superseded as any).code).toBe('superseded');
+
+    first.close();
+    second.close();
+  });
+
+  it("falls back to label equality when a client sends no workspace_key (an old dist keeps exactly today's behaviour)", async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+    const live = new TestWs();
+    await live.open();
+    live.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+    });
+    expect((await live.waitFor('occupied')).type).toBe('occupied');
+
+    const probe = new TestWs();
+    await probe.open();
+    probe.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+    });
+    expect((await probe.waitFor('occupied')).type).toBe('occupied');
+    await expect(live.waitFor('error', 300)).rejects.toThrow(/timeout/);
+
+    probe.close();
+    live.close();
+  });
+
   it('a different-workspace claim still supersedes (newest-wins across real sessions, ADR 017/068)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
@@ -1658,6 +2217,209 @@ describe('WebSocket', () => {
     second.close();
   });
 
+  it.each(['missing', 'invalid', 'wrong-target'] as const)(
+    'a WS claim with a %s grant leaves the live incumbent attached',
+    async (grantCase) => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+      const incumbent = new TestWs();
+      await incumbent.open();
+      await incumbent.claim(
+        'dawn',
+        team.json.agent_key,
+        'Ada',
+        'claude-code',
+        await standingGrant(team.json.human_credential, 'Ada'),
+      );
+
+      let grant: string | undefined;
+      if (grantCase === 'invalid') grant = 'msgr_invalid';
+      if (grantCase === 'wrong-target') {
+        await post(
+          '/teams/dawn/members',
+          { name: 'Bob', kind: 'agent' },
+          team.json.human_credential,
+        );
+        grant = await standingGrant(team.json.human_credential, 'Bob');
+      }
+
+      const challenger = new TestWs();
+      await challenger.open();
+      challenger.send({
+        type: 'claim',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        ...(grant ? { grant } : {}),
+        surface: 'cli',
+      });
+      await challenger.waitFor(grantCase === 'missing' ? 'pending' : 'refused');
+
+      const roster = await get('/teams/dawn/members', team.json.human_credential);
+      const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(adaRow.presences).toHaveLength(1);
+      expect(adaRow.presences[0].surface).toBe('claude-code');
+
+      incumbent.close();
+      challenger.close();
+    },
+  );
+
+  it.each(['missing', 'invalid', 'wrong-target'] as const)(
+    'an HTTP claim with a %s grant leaves the live incumbent attached',
+    async (grantCase) => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+      const incumbent = new TestWs();
+      await incumbent.open();
+      await incumbent.claim(
+        'dawn',
+        team.json.agent_key,
+        'Ada',
+        'claude-code',
+        await standingGrant(team.json.human_credential, 'Ada'),
+      );
+
+      let grant: string | undefined;
+      if (grantCase === 'invalid') grant = 'msgr_invalid';
+      if (grantCase === 'wrong-target') {
+        await post(
+          '/teams/dawn/members',
+          { name: 'Bob', kind: 'agent' },
+          team.json.human_credential,
+        );
+        grant = await standingGrant(team.json.human_credential, 'Bob');
+      }
+
+      const claim = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        ...(grant ? { grant } : {}),
+        surface: 'cli',
+      });
+      expect(claim.status).toBe(grantCase === 'missing' ? 202 : 403);
+
+      const roster = await get('/teams/dawn/members', team.json.human_credential);
+      const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(adaRow.presences).toHaveLength(1);
+      expect(adaRow.presences[0].surface).toBe('claude-code');
+
+      incumbent.close();
+    },
+  );
+
+  it('an approved pending WS claim supersedes a live incumbent', async () => {
+    const team = await post('/teams', {
+      slug: 'dawn',
+      creator: { name: 'nick', kind: 'human' },
+    });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+    const incumbent = new TestWs();
+    await incumbent.open();
+    await incumbent.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+      'claude-opus-4-8',
+    );
+
+    const challenger = new TestWs();
+    await challenger.open();
+    challenger.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    const pending = await challenger.waitFor('pending');
+
+    const decided = await post(
+      `/teams/dawn/requests/${pending.request_id}/decide`,
+      { decision: 'approve', lifetime: 'standing' },
+      team.json.human_credential,
+    );
+    expect(decided.status).toBe(200);
+    expect((await challenger.waitFor('occupied')).type).toBe('occupied');
+    expect(await incumbent.waitFor('error')).toMatchObject({ code: 'superseded' });
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    expect(
+      listAudit(server.db, teamId)
+        .filter((row) => row.action === 'occupancy.model_attested')
+        .map((row) => JSON.parse(row.detail ?? '{}')),
+    ).toContainEqual(
+      expect.objectContaining({ old: 'claude-opus-4-8', new: null, source: 'claim' }),
+    );
+
+    const roster = await get('/teams/dawn/members', team.json.human_credential);
+    const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow.presences).toHaveLength(1);
+    expect(adaRow.presences[0].surface).toBe('cli');
+
+    incumbent.close();
+    challenger.close();
+  });
+
+  it('approving a disconnected pending WS claim preserves the live incumbent', async () => {
+    const team = await post('/teams', {
+      slug: 'dawn',
+      creator: { name: 'nick', kind: 'human' },
+    });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+    const incumbent = new TestWs();
+    await incumbent.open();
+    await incumbent.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+
+    const challenger = new TestWs();
+    await challenger.open();
+    challenger.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    const pending = await challenger.waitFor('pending');
+    challenger.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const decided = await post(
+      `/teams/dawn/requests/${pending.request_id}/decide`,
+      { decision: 'approve', lifetime: 'standing' },
+      team.json.human_credential,
+    );
+    expect(decided.status).toBe(200);
+    await expect(incumbent.waitFor('error', 100)).rejects.toThrow(/timeout/);
+
+    const roster = await get('/teams/dawn/members', team.json.human_credential);
+    const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow.presences).toHaveLength(1);
+    expect(adaRow.presences[0].surface).toBe('claude-code');
+
+    incumbent.close();
+  });
+
   it('an HTTP claim that displaces a live WS session audits the eviction (ADR 237)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
@@ -1687,6 +2449,210 @@ describe('WebSocket', () => {
     expect(detail).toMatchObject({ same_workspace: false, evicted: 1, via: 'http' });
 
     first.close();
+  });
+
+  it('a repeated authorized HTTP claim replaces its stateless Presence and audits it', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+    for (let claim = 0; claim < 2; claim++) {
+      const response = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(team.json.human_credential, 'Ada'),
+        surface: 'cli',
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const roster = await get('/teams/dawn/members', team.json.human_credential);
+    const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow.presences).toHaveLength(1);
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const eviction = listAudit(server.db, teamId).find((row) => row.action === 'claim.superseded');
+    expect(JSON.parse(eviction!.detail ?? '{}')).toMatchObject({
+      same_workspace: false,
+      evicted: 1,
+      via: 'http',
+    });
+  });
+
+  // The stateless mirror records what animates the session, on EVERY branch that occupies.
+  //
+  // Two gaps, one route. The 2026-09-04 workspace repair (#1289) added `workspace`/`workspace_key`
+  // to this body but edited only the FIRST of three `attach` calls, so its own stated consequences
+  // — no location on the roster, and ADR 379's `own_unattested` unable to match a null — survived
+  // on the credential and re-seat branches, the latter being the ordinary path for an agent
+  // re-claiming its own bound seat. `provenance` was never in the body at all, so every row born
+  // here read null while every WS-claimed and ambient-touched row carried a value.
+  describe('the stateless claim records provenance and workspace on every occupy branch (ADR 131 §6)', () => {
+    it('the grant branch records both', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      const claimed = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+        workspace: 'repo@main',
+        provenance: 'wake',
+      });
+      expect(claimed.status).toBe(200);
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(ada.presences[0].provenance).toBe('wake');
+      expect(ada.presences[0].workspace).toBe('repo@main');
+    });
+
+    it('the credential self-authorize branch records both — it used to hardcode workspace null', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      // First claim mints Ada's own seat credential (ADR 337).
+      const first = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+      });
+      expect(first.status).toBe(200);
+
+      // Ada reconnects on her OWN credential — no grant, so this is the self-authorize branch.
+      const again = await post('/teams/dawn/claim', {
+        key: first.json.seat_credential,
+        target: { seat: 'Ada' },
+        surface: 'cli',
+        workspace: 'repo@main',
+        provenance: 'wake',
+      });
+      expect(again.status).toBe(200);
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(ada.presences[0].provenance).toBe('wake');
+      expect(ada.presences[0].workspace).toBe('repo@main');
+    });
+
+    it('the dogfood re-seat branch records both — the ordinary path for an agent re-claiming its own seat (ADR 146)', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      // Bind the seat, then opt the team into re-seat.
+      await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+      });
+      await post('/teams/dawn/policy', { standing_reseat_known_agents: true }, nickCred);
+
+      // A fresh session, team agent key only, no grant and no credential.
+      const reseat = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        surface: 'cli',
+        workspace: 'repo@main',
+        provenance: 'wake',
+      });
+      expect(reseat.status).toBe(200);
+      expect(reseat.json.type).toBe('occupied');
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(ada.presences[0].provenance).toBe('wake');
+      expect(ada.presences[0].workspace).toBe('repo@main');
+    });
+
+    it('a human seat cannot stamp its own occupancy `wake` (the ADR 121 gate the ambient path already applies)', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+
+      // nick self-authorizes on his own credential and claims `wake` — the word the actuators read
+      // to conclude a seat is their own spawned child. A human shell must never be able to say it.
+      const claimed = await post('/teams/dawn/claim', {
+        key: nickCred,
+        target: { seat: 'nick' },
+        surface: 'cli',
+        workspace: 'repo@main',
+        provenance: 'wake',
+      });
+      expect(claimed.status).toBe(200);
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const row = roster.json.members.find((m: any) => m.name === 'nick');
+      expect(row.presences[0].provenance).toBeNull();
+      // The workspace is not gated — it is a location, not an assertion about what animates it.
+      expect(row.presences[0].workspace).toBe('repo@main');
+    });
+
+    it('a client that sends no provenance still lands null — additive, not a new default', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      const claimed = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+      });
+      expect(claimed.status).toBe(200);
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(ada.presences[0].provenance).toBeNull();
+    });
+
+    it('refuses a provenance that is not in the vocabulary', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      const claimed = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+        provenance: 'definitely-not-a-provenance',
+      });
+      expect(claimed.status).toBe(400);
+    });
+  });
+
+  it('a WS claim audits its eviction of a stateless incumbent', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const httpClaim = await post('/teams/dawn/claim', {
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(team.json.human_credential, 'Ada'),
+      surface: 'cli',
+    });
+    expect(httpClaim.status).toBe(200);
+
+    const ws = new TestWs();
+    await ws.open();
+    await ws.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const eviction = listAudit(server.db, teamId).find(
+      (row) => row.action === 'claim.superseded' && JSON.parse(row.detail ?? '{}').via === 'ws',
+    )!;
+    expect(JSON.parse(eviction.detail ?? '{}')).toMatchObject({ evicted: 1 });
+
+    ws.close();
   });
 
   describe('durability-gated same-workspace eviction (ADR 092)', () => {
@@ -1765,6 +2731,87 @@ describe('WebSocket', () => {
       await expect(live.waitFor('error', 400)).rejects.toThrow(/timeout/);
 
       live.close();
+    });
+
+    it('an approved same-workspace pending claim reaps only after the grace', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+      const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+      const incumbent = new TestWs();
+      await incumbent.open();
+      await occupyAda(incumbent, team.json.agent_key, grant, 'repo@main');
+
+      const challenger = new TestWs();
+      await challenger.open();
+      challenger.send({
+        type: 'claim',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        surface: 'claude-code',
+        workspace: 'repo@main',
+      });
+      const pending = await challenger.waitFor('pending');
+
+      const decided = await post(
+        `/teams/dawn/requests/${pending.request_id}/decide`,
+        { decision: 'approve', lifetime: 'standing' },
+        team.json.human_credential,
+      );
+      expect(decided.status).toBe(200);
+      expect((await challenger.waitFor('occupied')).type).toBe('occupied');
+      await expect(incumbent.waitFor('error', 50)).rejects.toThrow(/timeout/);
+      expect(await incumbent.waitFor('error', 1000)).toMatchObject({
+        code: 'superseded',
+        same_workspace: true,
+      });
+
+      incumbent.close();
+      challenger.close();
+    });
+
+    it('preserves the Workspace on an approved pending claim for its next reconnect', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+      const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+      const incumbent = new TestWs();
+      await incumbent.open();
+      await occupyAda(incumbent, team.json.agent_key, grant, 'repo@main');
+
+      const approved = new TestWs();
+      await approved.open();
+      approved.send({
+        type: 'claim',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        surface: 'claude-code',
+        workspace: 'repo@main',
+      });
+      const pending = await approved.waitFor('pending');
+      await post(
+        `/teams/dawn/requests/${pending.request_id}/decide`,
+        { decision: 'approve', lifetime: 'standing' },
+        team.json.human_credential,
+      );
+      expect((await approved.waitFor('occupied')).type).toBe('occupied');
+
+      const reconnect = new TestWs();
+      await reconnect.open();
+      await occupyAda(reconnect, team.json.agent_key, grant, 'repo@main');
+      await expect(approved.waitFor('error', 50)).rejects.toThrow(/timeout/);
+      expect(await approved.waitFor('error', 1000)).toMatchObject({
+        code: 'superseded',
+        same_workspace: true,
+      });
+
+      incumbent.close();
+      approved.close();
+      reconnect.close();
     });
   });
 
@@ -1902,16 +2949,24 @@ describe('WebSocket', () => {
 
     const a = new TestWs();
     await a.open();
-    await a.claim(
+    const occupied = (await a.claim(
       'dawn',
       team.json.agent_key,
       'Ada',
       'claude-code',
       await standingGrant(team.json.human_credential, 'Ada'),
-    );
+    )) as any;
 
     // Ada unbinds herself with her *own* token (self-only — no target name).
-    const r = await post('/teams/dawn/unbind', {}, { key: team.json.agent_key, seat: 'Ada' });
+    const r = await post(
+      '/teams/dawn/unbind',
+      {},
+      {
+        key: occupied.seat_credential,
+        seat: 'Ada',
+        sessionLease: occupied.session_lease,
+      },
+    );
     expect(r.status).toBe(200);
     expect(r.json.member).toBe('Ada');
 
@@ -1923,6 +2978,11 @@ describe('WebSocket', () => {
     // … but the seat is still on the team (declared, not removed) and re-claimable by adoption.
     const roster = await get('/teams/dawn/members', nickTok);
     expect(roster.json.members.some((m: any) => m.name === 'Ada')).toBe(true);
+
+    // The deliberate exit is stamped as seat_released, not crash clothing (presence-honesty §2.3).
+    expect(roster.json.members.find((m: any) => m.name === 'Ada').offline_reason).toBe(
+      'seat_released',
+    );
 
     // Unbind requires a valid token (self-only); an anonymous call is unauthorized.
     const anon = await post('/teams/dawn/unbind', {}, undefined);
@@ -2032,6 +3092,232 @@ describe('WebSocket', () => {
 });
 
 describe('model attestation (ADR 101)', () => {
+  it('the act stamp carries WHICH TIER attested it — observed vs declared, server-controlled, never defaulted', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Bo', kind: 'agent' }, tok);
+
+    const a = new TestWs();
+    const l = new TestWs();
+    const b = new TestWs();
+    await Promise.all([a.open(), l.open(), b.open()]);
+    // Ada: a harness probe SAW this model. Bo: only a provisioning snapshot DECLARED it.
+    // Same id, same confidence on the wire today — the tier is the only thing separating them.
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(tok, 'Ada'),
+      'claude-opus-4-8',
+      undefined,
+      'observed',
+    );
+    await b.claim(
+      'dawn',
+      team.json.agent_key,
+      'Bo',
+      'cursor',
+      await standingGrant(tok, 'Bo'),
+      'grok-4.6',
+      undefined,
+      'binding',
+    );
+    // Lin attests a model but NO tier — an older client. Absence must stay absence.
+    await l.claim(
+      'dawn',
+      team.json.agent_key,
+      'Lin',
+      'codex',
+      await standingGrant(tok, 'Lin'),
+      'gpt-5.6',
+    );
+
+    // `waitFor` returns the FIRST buffered frame of a type and never consumes it, so three delivers
+    // to one socket would all read as the first. Key on the envelope id instead.
+    const deliverOf = async (ws: TestWs, id: string): Promise<any> => {
+      const deadline = Date.now() + 1000;
+      for (;;) {
+        const f = (ws as unknown as { frames: any[] }).frames.find(
+          (x) => x.type === 'deliver' && x.envelope?.id === id,
+        );
+        if (f) return f;
+        if (Date.now() > deadline) throw new Error(`timeout waiting for deliver ${id}`);
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    };
+
+    const say = (ws: TestWs, from: string, id: string) =>
+      ws.send({
+        type: 'send',
+        envelope: {
+          id,
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from,
+          to: { kind: 'member', name: 'Lin' },
+          act: 'status_update',
+          body: 'x',
+          ts: Date.now(),
+        },
+      });
+
+    say(a, 'Ada', 'ada1');
+    const observed = await deliverOf(l, 'ada1');
+    expect(observed.envelope.meta.model).toBe('claude-opus-4-8');
+    expect(observed.envelope.meta.model_source).toBe('observed');
+
+    say(b, 'Bo', 'bo1');
+    const declared = await deliverOf(l, 'bo1');
+    expect(declared.envelope.meta.model).toBe('grok-4.6');
+    expect(declared.envelope.meta.model_source).toBe('binding');
+
+    // The old client's act keeps its model and carries NO tier — never defaulted to `binding`,
+    // because "we do not know which tier" is a different fact from "it was a declaration".
+    //
+    // AND it spoofs one, which is the case that actually needs the strip. Where the occupancy HAS a
+    // tier the server's value overwrites the client's by spread order, so a missing strip is
+    // invisible; here there is nothing to overwrite with, so an unstripped client tier would ride
+    // out untouched and an UNKNOWN tier would arrive downstream labelled `observed`. Found by
+    // mutation: deleting the strip left the earlier spoof assertion green.
+    l.send({
+      type: 'send',
+      envelope: {
+        id: 'lin1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Lin',
+        to: { kind: 'member', name: 'Ada' },
+        act: 'status_update',
+        body: 'x',
+        meta: { model_source: 'observed' },
+        ts: Date.now(),
+      },
+    });
+    const untiered = await deliverOf(a, 'lin1');
+    expect(untiered.envelope.meta.model).toBe('gpt-5.6');
+    expect(untiered.envelope.meta.model_source).toBeUndefined();
+
+    // A seat cannot launder its own declaration into an observation: client-supplied tier is
+    // stripped exactly like a client-supplied model, and the occupancy's real tier is stamped.
+    b.send({
+      type: 'send',
+      envelope: {
+        id: 'bo2',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Bo',
+        to: { kind: 'member', name: 'Lin' },
+        act: 'status_update',
+        body: 'x',
+        meta: { model: 'claude-opus-4-8', model_source: 'observed' },
+        ts: Date.now(),
+      },
+    });
+    const spoofed = await deliverOf(l, 'bo2');
+    expect(spoofed.envelope.meta.model).toBe('grok-4.6');
+    expect(spoofed.envelope.meta.model_source).toBe('binding');
+
+    await Promise.all([a.close(), l.close(), b.close()]);
+  });
+
+  it('the tier SURVIVES the heartbeat — re-affirming the same model must not erase model_source', async () => {
+    // Measured on revive, 2026-09-03: every live presence row had a model and a NULL tier, and 100
+    // of 113 `observed` acts were sent within 16s of a claim. The claim stored the pair; the first
+    // heartbeat (15s) re-attested the id alone and wrote the tier back to NULL. The ADR 301 commit
+    // updated both claim sites and missed the heartbeat re-attest.
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    const a = new TestWs();
+    const l = new TestWs();
+    await Promise.all([a.open(), l.open()]);
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(tok, 'Ada'),
+      'claude-opus-5',
+      undefined,
+      'observed',
+    );
+    await l.claim('dawn', team.json.agent_key, 'Lin', 'codex', await standingGrant(tok, 'Lin'));
+
+    const deliverOf = async (ws: TestWs, id: string): Promise<any> => {
+      const deadline = Date.now() + 1000;
+      for (;;) {
+        const f = (ws as unknown as { frames: any[] }).frames.find(
+          (x) => x.type === 'deliver' && x.envelope?.id === id,
+        );
+        if (f) return f;
+        if (Date.now() > deadline) throw new Error(`timeout waiting for deliver ${id}`);
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    };
+    const say = (id: string) =>
+      a.send({
+        type: 'send',
+        envelope: {
+          id,
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'member', name: 'Lin' },
+          act: 'status_update',
+          body: 'x',
+          ts: Date.now(),
+        },
+      });
+    const teamRow = getTeamBySlug(server.db, 'dawn')!;
+    const attestAudits = () =>
+      listAudit(server.db, teamRow.id).filter((r) => r.action === 'occupancy.model_attested');
+
+    // 1. The steady-state heartbeat: same id, same tier. Nothing changed, so nothing is written
+    //    and nothing audits — and the tier is still on the next act.
+    a.send({ type: 'heartbeat', model: 'claude-opus-5', model_source: 'observed' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(attestAudits().length).toBe(1); // claim-time only
+    say('hb1');
+    const afterSteady = await deliverOf(l, 'hb1');
+    expect(afterSteady.envelope.meta.model).toBe('claude-opus-5');
+    expect(afterSteady.envelope.meta.model_source).toBe('observed');
+
+    // 2. An older client re-affirms the id with no tier. Absent means "no change", never a clear
+    //    (the HeartbeatFrame contract) — the claim-time observation stands.
+    a.send({ type: 'heartbeat', model: 'claude-opus-5' });
+    await new Promise((r) => setTimeout(r, 50));
+    say('hb2');
+    const afterBare = await deliverOf(l, 'hb2');
+    expect(afterBare.envelope.meta.model_source).toBe('observed');
+
+    // 3. A real switch carries its own tier, and the stamp follows the pair.
+    a.send({ type: 'heartbeat', model: 'claude-fable-5-1', model_source: 'environment' });
+    await new Promise((r) => setTimeout(r, 50));
+    say('hb3');
+    const afterSwitch = await deliverOf(l, 'hb3');
+    expect(afterSwitch.envelope.meta.model).toBe('claude-fable-5-1');
+    expect(afterSwitch.envelope.meta.model_source).toBe('environment');
+
+    // 4. A switch with NO tier cannot inherit the old one — that tier described a different id.
+    a.send({ type: 'heartbeat', model: 'claude-sonnet-5' });
+    await new Promise((r) => setTimeout(r, 50));
+    say('hb4');
+    const afterBlindSwitch = await deliverOf(l, 'hb4');
+    expect(afterBlindSwitch.envelope.meta.model).toBe('claude-sonnet-5');
+    expect(afterBlindSwitch.envelope.meta.model_source).toBeUndefined();
+
+    // 5. A heal that only corrects the tier (same id, now observed) is a real change and is written.
+    a.send({ type: 'heartbeat', model: 'claude-sonnet-5', model_source: 'observed' });
+    await new Promise((r) => setTimeout(r, 50));
+    say('hb5');
+    const afterHeal = await deliverOf(l, 'hb5');
+    expect(afterHeal.envelope.meta.model_source).toBe('observed');
+  });
+
   it('claim attests, acts carry the server-side meta.model stamp, heartbeat re-attests + audits', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;
@@ -2131,14 +3417,18 @@ describe('model attestation (ADR 101)', () => {
     });
     expect(claimed.status).toBe(200);
     expect(claimed.json.type).toBe('occupied');
+    const ada = {
+      key: claimed.json.seat_credential as string,
+      seat: 'Ada',
+      sessionLease: claimed.json.session_lease as string,
+    };
 
     // First one-shot while the claim occupancy is still live — stamp from newest-attested.
     const first = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${team.json.agent_key}`,
-        'x-musterd-seat': 'Ada',
+        ...authHeaders(ada),
         'x-musterd-model': 'qwen2.5:3b-instruct',
       },
       body: JSON.stringify({
@@ -2161,14 +3451,19 @@ describe('model attestation (ADR 101)', () => {
     const adaId = getMemberByName(server.db, getTeamBySlug(server.db, 'dawn')!.id, 'Ada')!.id;
     const removed = server.db.prepare('DELETE FROM presence WHERE member_id = ?').run(adaId);
     expect(removed.changes).toBeGreaterThan(0);
+    const renewed = await post('/teams/dawn/claim', {
+      key: ada.key,
+      target: { seat: ada.seat },
+      surface: 'cli',
+    });
+    Object.assign(ada, { sessionLease: renewed.json.session_lease });
 
     // Without the header: ambient attaches a bare row → stamp drops (the #172 hole).
     const bare = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${team.json.agent_key}`,
-        'x-musterd-seat': 'Ada',
+        ...authHeaders(ada),
       },
       body: JSON.stringify({
         envelope: {
@@ -2188,14 +3483,20 @@ describe('model attestation (ADR 101)', () => {
 
     // Clear again so the next touch is a fresh attach (not COALESCE onto the bare row).
     server.db.prepare('DELETE FROM presence WHERE member_id = ?').run(adaId);
+    const renewedAgain = await post('/teams/dawn/claim', {
+      key: ada.key,
+      target: { seat: ada.seat },
+      surface: 'cli',
+      model: 'qwen2.5:3b-instruct',
+    });
+    Object.assign(ada, { sessionLease: renewedAgain.json.session_lease });
 
     // With x-musterd-model the ambient touch re-attests, so the act keeps the stamp.
     const later = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${team.json.agent_key}`,
-        'x-musterd-seat': 'Ada',
+        ...authHeaders(ada),
         'x-musterd-model': 'qwen2.5:3b-instruct',
       },
       body: JSON.stringify({
@@ -2215,12 +3516,12 @@ describe('model attestation (ADR 101)', () => {
     expect(((await later.json()) as any).ack.meta.model).toBe('qwen2.5:3b-instruct');
 
     const teamRow = getTeamBySlug(server.db, 'dawn')!;
-    const ambient = listAudit(server.db, teamRow.id).filter((r) => {
+    const renewedClaim = listAudit(server.db, teamRow.id).filter((r) => {
       if (r.action !== 'occupancy.model_attested') return false;
       const d = JSON.parse(r.detail!) as { source: string };
-      return d.source === 'ambient';
+      return d.source === 'claim';
     });
-    expect(ambient.length).toBeGreaterThanOrEqual(1);
+    expect(renewedClaim.length).toBeGreaterThanOrEqual(1);
   });
 
   it('human credential + x-musterd-model does not attest the human occupancy (ADR 121)', async () => {
@@ -2491,14 +3792,12 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickTok);
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    await get('/teams/dawn/inbox', ada);
     // Strip the only admin → the team has zero admins → governance falls back to v0.2 open behaviour.
     setCaps('dawn', 'nick', { is_admin: false });
 
-    const ok = await post(
-      '/teams/dawn/members/Bob/reclaim',
-      {},
-      { key: team.json.agent_key, seat: 'Ada' },
-    );
+    const ok = await post('/teams/dawn/members/Bob/reclaim', {}, ada);
     expect(ok.status).toBe(200);
     const entry = auditRows('dawn').find((r) => r.action === 'member.reclaim');
     expect(entry?.detail).toContain('no-admin');
@@ -2513,7 +3812,12 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const adminView = await get('/teams/dawn/audit', nickTok);
     expect(adminView.status).toBe(200);
     expect(adminView.json.audit.length).toBeGreaterThan(0);
-    expect(adminView.json.audit[0]).toMatchObject({ action: 'member.reclaim', result: 'allow' });
+    // nick's own touches write replicated `presence.*` rows beside the reclaim; the reclaim is the
+    // entry this case is about.
+    const nonPresence = (adminView.json.audit as { action: string }[]).filter(
+      (r) => !r.action.startsWith('presence.'),
+    );
+    expect(nonPresence[0]).toMatchObject({ action: 'member.reclaim', result: 'allow' });
 
     const nonAdmin = await get('/teams/dawn/audit', { key: team.json.agent_key, seat: 'Ada' });
     expect(nonAdmin.status).toBe(403);
@@ -2638,6 +3942,62 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
       'x-musterd-no-touch': '1',
     });
     expect(check.json.raised).toBe(false); // and so it never reached the interrupt line
+  });
+
+  // ADR 378, lane 01M1PWHGH6. A huddle turn is an ordinary `message` addressed to the room, so it
+  // raised nothing at all before this — a participant learned of it at its next inbox check rather
+  // than its next tool boundary. And when it did raise it borrowed `urgent`, the scarce flag, which
+  // is false twice: the turn is not urgent, and the seat could not tell a huddle from any other act.
+  it('interrupt line: a huddle turn raises on its OWN class and the line names the room, not "urgent"', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'human' }, nickTok);
+
+    const root = {
+      id: 'h-root',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'why we are huddling',
+      meta: {
+        eligible: ['Bob', 'Ada'],
+        huddle: {
+          topic: { kind: 'design', id: 'doorbells' },
+          room: 'http://127.0.0.1:4851/b/huddle-h-root',
+          anchor: 'docs/wiki/huddles.md',
+        },
+      },
+      ts: Date.now(),
+    };
+    await post('/teams/dawn/messages', { envelope: root }, nickTok);
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          ...root,
+          id: 'h-turn',
+          body: 'a turn nobody should have to poll for',
+          thread: 'h-root',
+          meta: undefined,
+          ts: Date.now() + 1,
+        },
+      },
+      nickTok,
+    );
+
+    const raised = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(raised.json.raised).toBe(true);
+    expect(raised.json.act).toMatchObject({ id: 'h-turn', from: 'nick' });
+    expect(raised.json.line).toContain('huddle design:doorbells');
+    expect(raised.json.line).toContain('h-root'); // how to answer, in the room it came from
+    expect(raised.json.line).not.toContain('urgent'); // it borrowed the scarce flag before
+    expect(raised.json.line).not.toContain('nobody should have to poll'); // never the body
   });
 
   it('interrupt line (ADR 088): raises only for a waiting urgent directed act, composes without the body, audits once', async () => {
@@ -2767,6 +4127,11 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(spine).toMatchObject({ wave: 'later', epoch: 1 });
     const next = await get('/teams/dawn/next', nickTok);
     expect(next.json.next_goal?.id).toBe('client');
+    // Lane 01M2GTB0RA: the per-turn summary agrees with the brief it replaces on the hot path.
+    const summary = await get('/teams/dawn/next/summary', nickTok);
+    expect(summary.status).toBe(200);
+    expect(summary.json.carrying).toBe(next.json.in_flight.length);
+    expect(summary.json.incidents).toEqual(next.json.incidents.map((i: any) => i.lane));
 
     // Teeth #2 — targeted invalidation: stan (the stale lane's owner) got a directed stale_plan wake.
     const inbox = await get('/teams/dawn/inbox?unread=1', stanTok);
@@ -2782,6 +4147,86 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(
       board.json.warnings.filter((w: { kind: string }) => w.kind === 'stale_plan'),
     ).toHaveLength(1);
+  });
+
+  // ADR 391 (lane 01M1T424MN). During the 2026-09-05 bell check 26 of 102 interrupt probes were
+  // refused with 401 and nobody could say WHOSE: `authByAgentSeatCredential` resolves the valid
+  // `msac_` credential to a real Member and then throws a generic error on the dead `msls_` lease,
+  // discarding the proven identity before the interrupt route can name it, and the request log
+  // carries only method/path/status/ms. A deaf seat was identifiable only from its own side.
+  describe('a refused interrupt probe names the seat it already proved (ADR 391)', () => {
+    async function deafAda() {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickTok = team.json.human_credential as string;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+      const ada: Auth = { key: team.json.agent_key, seat: 'Ada' };
+      // Claim the seat for real (the helper swaps in Ada's msac_ credential + msls_ lease)…
+      const live = await get('/teams/dawn/inbox/interrupt-check', ada);
+      expect(live.status).toBe(200);
+      // …then kill the lease the way an autorefresh bounce does: the row stays, revoked.
+      const adaRow = getMemberByName(db, getTeamBySlug(db, 'dawn')!.id, 'Ada')!;
+      db.prepare('UPDATE session_leases SET revoked_at = ? WHERE member_id = ?').run(
+        Date.now(),
+        adaRow.id,
+      );
+      const teamId = getTeamBySlug(db, 'dawn')!.id;
+      const refusals = () =>
+        listAudit(db, teamId)
+          .filter((r) => r.action === 'interrupt.refused')
+          .map((r) => ({
+            ...r,
+            detail: typeof r.detail === 'string' ? (JSON.parse(r.detail) as unknown) : r.detail,
+          }));
+      return { nickTok, ada, teamId, refusals };
+    }
+
+    it('a valid credential with a dead lease is refused AND audited under the seat name', async () => {
+      const { ada, refusals } = await deafAda();
+      const probe = await get('/teams/dawn/inbox/interrupt-check', ada);
+      expect(probe.status).toBe(401);
+      // The caller learns nothing new — the body is the same generic sentence as before.
+      expect(probe.json.error.message).toMatch(/agent session lease/);
+      expect(JSON.stringify(probe.json)).not.toContain('msac_');
+      const rows = refusals();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.target).toBe('Ada');
+      expect(rows[0]!.detail).toMatchObject({ lease: 'dead' });
+      // Never the credential, never the lease token — the row names a seat, not a secret.
+      expect(JSON.stringify(rows[0]!.detail)).not.toMatch(/msac_|msls_/);
+    });
+
+    it('deduped: a deaf seat probing at every tool boundary writes one row, not one per probe', async () => {
+      const { ada, refusals } = await deafAda();
+      for (let i = 0; i < 5; i++) {
+        expect((await get('/teams/dawn/inbox/interrupt-check', ada)).status).toBe(401);
+      }
+      expect(refusals()).toHaveLength(1);
+    });
+
+    it('control: a spoofed x-musterd-seat on an INVALID credential names nobody', async () => {
+      const { refusals } = await deafAda();
+      const forged = { key: 'msac_definitely_not_a_real_credential', seat: 'Ada' };
+      const probe = await get('/teams/dawn/inbox/interrupt-check', forged);
+      expect(probe.status).toBe(401);
+      // The header said Ada. The credential proved nothing. No row may take the header's word.
+      expect(refusals()).toHaveLength(0);
+    });
+
+    it('control: a missing lease is refused with its own reason', async () => {
+      const { ada, refusals } = await deafAda();
+      const noLease = { key: ada.key, seat: ada.seat }; // credential valid, no msls_ header at all
+      const probe = await get('/teams/dawn/inbox/interrupt-check', noLease);
+      expect(probe.status).toBe(401);
+      expect(refusals()).toHaveLength(1);
+      expect(refusals()[0]!.detail).toMatchObject({ lease: 'missing' });
+    });
+
+    it('control: only the interrupt route audits — an ordinary read with a dead lease stays a plain 401', async () => {
+      const { ada, refusals } = await deafAda();
+      const read = await get('/teams/dawn/inbox', ada);
+      expect(read.status).toBe(401);
+      expect(refusals()).toHaveLength(0);
+    });
   });
 
   // ADR 231. The #653 fix taught the orientation `why` to skip a handoff whose lane had closed —
@@ -2946,6 +4391,10 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
     await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Mute', kind: 'agent' }, nickTok);
+    const disAuth = { key: team.json.agent_key, seat: 'Dis' };
+    const muteAuth = { key: team.json.agent_key, seat: 'Mute' };
+    await get('/teams/dawn/inbox', disAuth);
+    await get('/teams/dawn/inbox', muteAuth);
 
     setCaps('dawn', 'Dis', {}, 'disabled');
     setCaps('dawn', 'Mute', { can_message: 'none' });
@@ -2963,17 +4412,14 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const disabled = await post(
       '/teams/dawn/messages',
       { envelope: baseEnv('Dis', 'd1') },
-      { key: team.json.agent_key, seat: 'Dis' },
+      disAuth,
     );
     expect(disabled.status).toBe(403);
-    const muted = await post(
-      '/teams/dawn/messages',
-      { envelope: baseEnv('Mute', 'm1') },
-      { key: team.json.agent_key, seat: 'Mute' },
-    );
+    const muted = await post('/teams/dawn/messages', { envelope: baseEnv('Mute', 'm1') }, muteAuth);
     expect(muted.status).toBe(403);
     const audit = auditRows('dawn');
-    expect(audit.filter((r) => r.action === 'send.denied').length).toBe(2);
+    // An inert account is refused at authentication, before the send route has an action to audit.
+    expect(audit.filter((r) => r.action === 'send.denied').length).toBe(1);
   });
 
   it('banned = inert: a disabled/banned seat cannot READ the inbox or firehose either (defense-in-depth)', async () => {
@@ -2990,6 +4436,30 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     setCaps('dawn', 'Dis', {}, 'disabled');
     expect((await get('/teams/dawn/inbox', auth)).status).toBe(403);
     expect((await get('/teams/dawn/messages', auth)).status).toBe(403);
+  });
+
+  it.each(['disabled', 'banned', 'archived'])(
+    'an %s agent credential cannot update availability',
+    async (accountStatus) => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickTok = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
+      const disAuth = { key: team.json.agent_key as string, seat: 'Dis' };
+      await get('/teams/dawn/inbox', disAuth);
+      setCaps('dawn', 'Dis', {}, accountStatus);
+
+      const res = await post('/teams/dawn/availability', { status: 'away' }, disAuth);
+      expect(res.status).toBe(403);
+    },
+  );
+
+  it('a banned admin credential cannot change team policy', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    setCaps('dawn', 'nick', { is_admin: true }, 'banned');
+
+    const res = await post('/teams/dawn/policy', { allow_pre_issued_grants: true }, nickTok);
+    expect(res.status).toBe(403);
   });
 
   it('visibility_level: a non-admin viewer sees its own caps but not other seats’ authority map', async () => {
@@ -3229,6 +4699,74 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(claimedRows().filter((r) => r.target === born.json.lane.id)).toHaveLength(2);
   });
 
+  // ADR 325 prereq: EVERY lane transition leaves a durable row, not just the ownership edges. A
+  // branch/scope/title edit wrote nothing at all, and a non-terminal state move (active↔blocked)
+  // broadcast to the live stream but left no record — so a lane's history could not be folded
+  // back out of the logs, which is exactly what a replicating daemon has to do.
+  it('audits field edits and non-terminal state moves (ADR 325 prereq)', async () => {
+    const team = await post('/teams', { slug: 'ledgr2', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const teamId = getTeamBySlug(server.db, 'ledgr2')!.id;
+    const rows = (action: string) =>
+      listAudit(server.db, teamId)
+        .filter((r) => r.action === action)
+        .map((r) => ({
+          target: r.target,
+          detail: JSON.parse(r.detail!) as {
+            fields?: string[];
+            changes?: Record<string, { from: unknown; to: unknown }>;
+            from?: string;
+            to?: string;
+          },
+        }));
+    const patch = (laneId: string, body: unknown) =>
+      fetch(base + `/teams/ledgr2/lanes/${laneId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+        body: JSON.stringify(body),
+      });
+
+    const lane = await post('/teams/ledgr2/lanes', { title: 'edited', claim: true }, nickTok);
+    const id = lane.json.lane.id as string;
+
+    // A field edit writes lane.updated naming exactly what changed.
+    await patch(id, { branch: 'nick/branch', detail: 'now with detail' });
+    const edit = rows('lane.updated').find((r) => r.target === id);
+    expect(edit).toBeDefined();
+    expect(edit!.detail.fields?.sort()).toEqual(['branch', 'detail']);
+    // …and the values, so a replicating peer can fold the edit rather than only know it happened
+    // (lane-replication spec §Finding 3, hole 2).
+    expect(edit!.detail.changes).toEqual({
+      branch: { from: null, to: 'nick/branch' },
+      detail: { from: null, to: 'now with detail' },
+    });
+
+    // A no-change patch writes nothing.
+    await patch(id, { branch: 'nick/branch' });
+    expect(rows('lane.updated').filter((r) => r.target === id)).toHaveLength(1);
+
+    // A non-terminal state move writes lane.state_changed with the edge.
+    await patch(id, { state: 'active' });
+    const move = rows('lane.state_changed').find((r) => r.target === id);
+    expect(move).toBeDefined();
+    expect(move!.detail.from).toBe('claimed');
+    expect(move!.detail.to).toBe('active');
+
+    // The already-audited edges stay single-rowed: a claim is lane.claimed (no state_changed
+    // double-write), a release is lane.released only.
+    const open = await post('/teams/ledgr2/lanes', { title: 'claim edge' }, nickTok);
+    const openId = open.json.lane.id as string;
+    await patch(openId, { owner_seat: 'nick' });
+    expect(rows('lane.state_changed').filter((r) => r.target === openId)).toHaveLength(0);
+    await patch(openId, { state: 'open' }); // the release verb
+    expect(rows('lane.state_changed').filter((r) => r.target === openId)).toHaveLength(0);
+    expect(
+      listAudit(server.db, teamId).filter(
+        (r) => r.action === 'lane.released' && r.target === openId,
+      ),
+    ).toHaveLength(1);
+  });
+
   it('warns inline + wakes the affected owner exactly once; board reflects live state', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
@@ -3241,7 +4779,7 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
       {
         title: 'P3.1 schema',
         project: 'musterd',
-        surface_globs: ['packages/server/src/store/**'],
+        scope: ['packages/server/src/store/**'],
         claim: true,
       },
       nickTok,
@@ -3260,7 +4798,7 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
       {
         title: 'P3.2 handshake',
         project: 'musterd',
-        surface_globs: ['packages/server/**'],
+        scope: ['packages/server/**'],
         depends_on: [l1.json.lane.id],
         claim: true,
       },
@@ -3460,12 +4998,12 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     // nick claims a surface; bo claims one that overlaps it → nick gets the advisory.
     await post(
       '/teams/dawn/lanes',
-      { title: 'store', surface_globs: ['packages/server/src/store/**'], claim: true },
+      { title: 'store', scope: ['packages/server/src/store/**'], claim: true },
       nickTok,
     );
     await post(
       '/teams/dawn/lanes',
-      { title: 'store too', surface_globs: ['packages/server/src/store/delivery.ts'], claim: true },
+      { title: 'store too', scope: ['packages/server/src/store/delivery.ts'], claim: true },
       boTok,
     );
 
@@ -3533,6 +5071,7 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     const nickTok = team.json.human_credential;
     const ada = { key: team.json.agent_key, seat: 'ada' };
     await post('/teams/dawn/members', { name: 'ada', kind: 'agent' }, nickTok);
+    await get('/teams/dawn/inbox', ada);
 
     // Open unowned (no claim), then ada claims it — the self-claim is a team-visible transition.
     const lane = await post('/teams/dawn/lanes', { title: 'eviction fix' }, nickTok);
@@ -3642,17 +5181,18 @@ describe('two-stage close (ADR 169)', () => {
     const nickTok = team.json.human_credential as string;
     await post('/teams/dawn/members', { name: 'ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'gee', kind: 'agent' }, nickTok);
-    const ada: Auth = { key: team.json.agent_key, seat: 'ada' };
-    const gee: Auth = { key: team.json.agent_key, seat: 'gee' };
-    // Ambient presence + model attestation (ADR 057/119): one authed touch each, model on the header.
-    await fetch(base + '/teams/dawn/inbox', {
-      headers: { ...authHeaders(ada), 'x-musterd-model': 'claude-opus-5' },
-    });
-    await fetch(base + '/teams/dawn/inbox', {
-      headers: { ...authHeaders(gee), 'x-musterd-model': 'gpt-5.2-codex' },
-    });
+    const ada = (await resolveAuth('/teams/dawn/inbox', {
+      key: team.json.agent_key,
+      seat: 'ada',
+    }))!;
+    const gee = (await resolveAuth('/teams/dawn/inbox', {
+      key: team.json.agent_key,
+      seat: 'gee',
+    }))!;
+    await reattestAgentModel('dawn', ada, 'claude-opus-5');
+    await reattestAgentModel('dawn', gee, 'gpt-5.2-codex');
     await get('/teams/dawn/inbox', nickTok); // nick present too (ADR 057 ambient touch)
-    return { nickTok, ada, gee };
+    return { nickTok, ada, gee, agentKey: team.json.agent_key as string };
   }
 
   async function patchLane(id: string, body: unknown, auth: Auth) {
@@ -3779,11 +5319,101 @@ describe('two-stage close (ADR 169)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].detail.merged.pr).toBe(42);
     expect(rows[0].detail.review_grade).toBe('cross_family');
+    // ADR 303: this is the decision-time roster evidence, not a later reconstruction. `ada` was
+    // rejected as self and `nick` was live but excluded from the agents-only peer ladder.
+    expect(rows[0].detail.review_selection).toMatchObject({
+      outcome: 'peer_selected',
+      selected: { reviewer: 'gee', grade: 'cross_family' },
+      candidates: expect.arrayContaining([
+        { member: 'ada', family: 'claude', eligible: false, exclusion: 'self' },
+        { member: 'gee', family: 'gpt', eligible: true, grade: 'cross_family' },
+        { member: 'nick', family: 'human', eligible: false, exclusion: 'not_agent' },
+      ]),
+    });
     expect(ask.meta.lane_review.grade).toBe(rows[0].detail.review_grade);
     expect(ready.json.review.grade).toBe(rows[0].detail.review_grade);
     // No overlap notice when the acceptor never owned the lane — the common case must stay quiet,
     // or the warning becomes wallpaper and the one that matters is not read.
     expect(ask.body).not.toContain('you previously owned this lane');
+  });
+
+  // Lane 01M1T42SBS (ADR 225 amendment, 2026-09-06). The line headlined by RECENCY: with six
+  // pending and a routed acceptance the newest, stanley's huddle turn was "+5 more waiting" — a
+  // count, not a sentence, and the room could not tell he was being spoken to. The headline is
+  // chosen by CLASS (steer > urgent > huddle > acceptance) and recency only breaks ties inside a
+  // class; the plural tail names the mix so the rest of the queue is legible too.
+  it('interrupt line headlines by class, not recency: a huddle turn outranks a newer routed acceptance', async () => {
+    const { nickTok, ada, gee } = await setup();
+
+    // gee is a named participant of an open huddle, and nick takes a turn in it.
+    const root = {
+      id: 'h-root',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'why we are huddling',
+      meta: {
+        eligible: ['gee', 'ada'],
+        huddle: {
+          topic: { kind: 'design', id: 'doorbells' },
+          room: 'http://127.0.0.1:4851/b/huddle-h-root',
+          anchor: 'docs/wiki/huddles.md',
+        },
+      },
+      ts: Date.now() - 1000,
+    };
+    await post('/teams/dawn/messages', { envelope: root }, nickTok);
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          ...root,
+          id: 'h-turn',
+          body: 'gee, are you there',
+          thread: 'h-root',
+          meta: undefined,
+          ts: Date.now() - 500,
+        },
+      },
+      nickTok,
+    );
+
+    // Then ada submits a lane, and the cross-family acceptance routes to gee — NEWER than the turn.
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'fix the store', branch: 'ada/fix', claim: true },
+      ada,
+    );
+    const ready = await patchLane(
+      lane.json.lane.id,
+      { state: 'ready_for_review', merged: { pr: 42, sha: 'abc123', authorized_by: 'nick' } },
+      ada,
+    );
+    expect(ready.json.review.reviewer).toBe('gee');
+
+    const probe = await get('/teams/dawn/inbox/interrupt-check', gee, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(probe.status).toBe(200);
+    expect(probe.json.raised).toBe(true);
+    expect(probe.json.count).toBe(2);
+    // The headline is the huddle turn, though the acceptance is the more recent act.
+    expect(probe.json.act).toMatchObject({ id: 'h-turn', from: 'nick' });
+    expect(probe.json.line).toContain('huddle design:doorbells');
+    expect(probe.json.line).toContain('h-root');
+    // The tail is a sentence: it names what else is waiting, by class, not just how many.
+    expect(probe.json.line).toContain('+1 more waiting (1 acceptance)');
+    expect(probe.json.line).not.toContain('gee, are you there'); // §4: never the body
+
+    // The audit names the headlined act and its class, so "who grabbed the mic" stays legible.
+    const raised = listAudit(server.db, getTeamBySlug(server.db, 'dawn')!.id).filter(
+      (r) => r.action === 'interrupt.raised',
+    );
+    expect(raised).toHaveLength(1);
+    expect(raised[0]).toMatchObject({ actor: 'nick', target: 'gee' });
+    expect(raised[0]!.detail).toContain('"tier":"huddle"');
   });
 
   // ADR 234 increment 1 — the LABEL phase. The entire deliverable is that a declared tier reaches
@@ -3847,7 +5477,7 @@ describe('two-stage close (ADR 169)', () => {
       // (a) policy fired — defaulted.
       const auto = await post(
         '/teams/dawn/lanes',
-        { title: 'a web tweak', claim: true, surface_globs: ['packages/web/src/x.ts'] },
+        { title: 'a web tweak', claim: true, scope: ['packages/web/src/x.ts'] },
         ada,
       );
       expect(auto.json.lane.stakes).toBe('low');
@@ -3860,7 +5490,7 @@ describe('two-stage close (ADR 169)', () => {
         {
           title: 'a web change that asserts a fact',
           claim: true,
-          surface_globs: ['packages/web/src/y.ts'],
+          scope: ['packages/web/src/y.ts'],
           stakes: 'normal',
         },
         ada,
@@ -3989,6 +5619,11 @@ describe('two-stage close (ADR 169)', () => {
       expect(r0.detail.exempt_sampled).toBe(true);
       expect(r0.detail.stakes).toBe('low');
       expect(r0.detail.ask_tier).toBe('standard');
+      // A CLEAN route records the posture too. When it was written only on the degraded paths,
+      // any instrument reading `family_posture` was silently conditioned on routing having
+      // already failed — the estimand defect miley's decline of lane 01M08AMC4F named.
+      expect(r0.detail.family_posture).toBeDefined();
+      expect(['diverse', 'monoculture', 'unknown']).toContain(r0.detail.family_posture.state);
     });
 
     it('a risk tag outranks the declaration — low + risky still routes to a human', async () => {
@@ -4162,10 +5797,11 @@ describe('two-stage close (ADR 169)', () => {
     const nick3 = t.json.human_credential as string;
     const mk = async (name: string, model: string): Promise<Auth> => {
       await post('/teams/coauth/members', { name, kind: 'agent' }, nick3);
-      const auth: Auth = { key: t.json.agent_key as string, seat: name };
-      await fetch(base + '/teams/coauth/inbox', {
-        headers: { ...authHeaders(auth), 'x-musterd-model': model },
-      });
+      const auth = (await resolveAuth('/teams/coauth/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      await reattestAgentModel('coauth', auth, model);
       return auth;
     };
     const first = await mk('first', 'claude-opus-5'); // opens, owns, writes it
@@ -4273,10 +5909,11 @@ describe('two-stage close (ADR 169)', () => {
     const nick2 = t.json.human_credential as string;
     const mk = async (name: string, model: string): Promise<Auth> => {
       await post(`/teams/grade/members`, { name, kind: 'agent' }, nick2);
-      const auth: Auth = { key: t.json.agent_key as string, seat: name };
-      await fetch(base + '/teams/grade/inbox', {
-        headers: { ...authHeaders(auth), 'x-musterd-model': model },
-      });
+      const auth = (await resolveAuth('/teams/grade/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      await reattestAgentModel('grade', auth, model);
       return auth;
     };
     const worker = await mk('worker', 'claude-opus-5');
@@ -4299,7 +5936,10 @@ describe('two-stage close (ADR 169)', () => {
 
     // The close edge derives the grade too (ADR 188): twin (opus-4.8) confirms worker's (opus-5)
     // lane — verified:true with review_grade cross_model beside it, not a bare boolean.
-    const twin: Auth = { key: t.json.agent_key as string, seat: 'twin' };
+    const twin = (await resolveAuth('/teams/grade/lanes', {
+      key: t.json.agent_key as string,
+      seat: 'twin',
+    }))!;
     const closed = await fetch(base + `/teams/grade/lanes/${lane.json.lane.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json', ...authHeaders(twin) },
@@ -4311,15 +5951,78 @@ describe('two-stage close (ADR 169)', () => {
     expect(closedRows[0].detail.review_grade).toBe('cross_model');
   });
 
+  it('an unattested worker is routed at the `ungraded` rung and the close abstains (ADR 351)', async () => {
+    const t = await post('/teams', { slug: 'ungraded', creator: { name: 'nick4', kind: 'human' } });
+    const nick4 = t.json.human_credential as string;
+    const mk = async (name: string, model?: string): Promise<Auth> => {
+      await post(`/teams/ungraded/members`, { name, kind: 'agent' }, nick4);
+      const auth = (await resolveAuth('/teams/ungraded/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      if (model !== undefined) await reattestAgentModel('ungraded', auth, model);
+      return auth;
+    };
+    // The worker is live on a bare claim that attests nothing — the shape a CLI-driven seat has
+    // when no harness binding is present (12 of 129 no_candidate rows to 2026-09-02).
+    const worker = await mk('worker');
+    const twin = await mk('twin', 'claude-opus-4-8');
+
+    const lane = await post('/teams/ungraded/lanes', { title: 'ungraded', claim: true }, worker);
+    const laneId = lane.json.lane.id as string;
+    const ready = await fetch(base + `/teams/ungraded/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(worker) },
+      body: JSON.stringify({ state: 'ready_for_review' }),
+    }).then(async (r) => ({ status: r.status, json: (await r.json()) as Record<string, any> }));
+    expect(ready.status).toBe(200);
+    // Before ADR 351 this was a no_candidate. Now it routes — and the record claims no diversity.
+    expect(ready.json.review).toMatchObject({
+      reviewer: 'twin',
+      route: 'ungraded',
+      grade: 'ungraded',
+    });
+    const rows = await auditRowsFor(nick4, 'ungraded', 'lane.ready_for_review');
+    expect(rows[0].detail.no_candidate).toBeUndefined();
+    expect(rows[0].detail.route).toBe('ungraded');
+    expect(rows[0].detail.review_grade).toBe('ungraded');
+    expect(rows[0].detail.review_selection).toMatchObject({
+      outcome: 'peer_selected',
+      worker_family: 'unknown',
+      selected: { reviewer: 'twin', grade: 'ungraded' },
+    });
+    // The ask the reviewer sees carries the same word, so nobody reads a cross_family it is not.
+    const inbox = await get('/teams/ungraded/inbox?unread=1', twin);
+    const ask = inbox.json.messages.find(
+      (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+        m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+    );
+    expect(ask.meta.lane_review.grade).toBe('ungraded');
+
+    // The close edge grades from live attestations (ADR 188 §3): the worker still attests nothing,
+    // so the grade abstains and the abstention is COUNTED (ADR 173) — verified, ungraded, honest.
+    const closed = await fetch(base + `/teams/ungraded/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(twin) },
+      body: JSON.stringify({ state: 'done' }),
+    }).then(async (r) => ({ status: r.status, json: (await r.json()) as Record<string, any> }));
+    expect(closed.status).toBe(200);
+    const closedRows = await auditRowsFor(nick4, 'ungraded', 'lane.closed');
+    expect(closedRows[0].detail.verified).toBe(true);
+    expect(closedRows[0].detail.review_grade).toBeUndefined();
+    expect(closedRows[0].detail.review_grade_unknown).toBe(true);
+  });
+
   it('a same-model voluntary confirm stays verified but is graded same_model (ADR 188)', async () => {
     const t = await post('/teams', { slug: 'twins', creator: { name: 'n3', kind: 'human' } });
     const n3 = t.json.human_credential as string;
     const mk = async (name: string): Promise<Auth> => {
       await post(`/teams/twins/members`, { name, kind: 'agent' }, n3);
-      const auth: Auth = { key: t.json.agent_key as string, seat: name };
-      await fetch(base + '/teams/twins/inbox', {
-        headers: { ...authHeaders(auth), 'x-musterd-model': 'claude-opus-5' },
-      });
+      const auth = (await resolveAuth('/teams/twins/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      await reattestAgentModel('twins', auth, 'claude-opus-5');
       return auth;
     };
     const a = await mk('alpha');
@@ -4353,10 +6056,11 @@ describe('two-stage close (ADR 169)', () => {
     const n4 = t.json.human_credential as string;
     const mk = async (name: string, model: string): Promise<Auth> => {
       await post('/teams/switch/members', { name, kind: 'agent' }, n4);
-      const auth: Auth = { key: t.json.agent_key as string, seat: name };
-      await fetch(base + '/teams/switch/inbox', {
-        headers: { ...authHeaders(auth), 'x-musterd-model': model },
-      });
+      const auth = (await resolveAuth('/teams/switch/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      await reattestAgentModel('switch', auth, model);
       return auth;
     };
     const worker = await mk('worker', 'claude-opus-5');
@@ -4433,6 +6137,202 @@ describe('two-stage close (ADR 169)', () => {
     expect(merged[0].detail.attested_by).toBe('ada');
   });
 
+  it('counterpart close with a partial merged patch keeps the worker attestation (ADR 305)', async () => {
+    const { nickTok, ada } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'keep the submit stamp', branch: 'ada/keep-stamp', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    await patchLane(
+      laneId,
+      {
+        state: 'ready_for_review',
+        merged: {
+          pr: 42,
+          sha: 'abc123',
+          authorized_by: 'nick',
+          verification: 'ancestor',
+        },
+      },
+      ada,
+    );
+
+    // The MCP/CLI counterpart-resolve shape: re-sends pr/sha/authorized_by and drops verification.
+    const closed = await patchLane(
+      laneId,
+      { state: 'done', merged: { pr: 42, sha: 'abc123', authorized_by: 'nick' } },
+      nickTok,
+    );
+    expect(closed.status).toBe(200);
+    expect(closed.json.lane.merged).toEqual({
+      pr: 42,
+      sha: 'abc123',
+      authorized_by: 'nick',
+      verification: 'ancestor',
+    });
+
+    const merged = await auditRows(nickTok, 'git.pr_merged');
+    expect(merged[0].detail.pr).toBe(42);
+    expect(merged[0].detail.sha).toBe('abc123');
+    expect(merged[0].detail.authorized_by).toBe('nick');
+    expect(merged[0].detail.attested_by).toBe('ada');
+  });
+
+  it('owner close may still rewrite merged — ADR 305 is counterpart-only', async () => {
+    const { ada } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'worker may re-attest', branch: 'ada/re-attest', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    await patchLane(
+      laneId,
+      {
+        state: 'ready_for_review',
+        merged: {
+          pr: 42,
+          sha: 'abc123',
+          authorized_by: 'nick',
+          verification: 'ancestor',
+        },
+      },
+      ada,
+    );
+    const closed = await patchLane(
+      laneId,
+      { state: 'done', merged: { pr: 42, sha: 'abc123', authorized_by: 'nick' } },
+      ada,
+    );
+    expect(closed.status).toBe(200);
+    expect(closed.json.lane.merged).toEqual({
+      pr: 42,
+      sha: 'abc123',
+      authorized_by: 'nick',
+    });
+  });
+
+  it('counterpart close on a never-submitted lane ESTABLISHES the attestation — ADR 305 strips only what stands (amendment 1)', async () => {
+    const { nickTok, ada } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'never submitted', branch: 'ada/never-submitted', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    // The worker was told to skip lane_submit; the lane landed and the acceptor closes it as a
+    // non-owner with the flags the tool description tells them to pass. Measured 2026-09-06 on
+    // 01M1VEMAKX / #1370: the row closed `done` with `merged` null and git.pr_merged carrying only
+    // the lane id — the only attestation anyone would ever offer, silently discarded.
+    const closed = await patchLane(
+      laneId,
+      { state: 'done', merged: { pr: 1370, sha: 'd2a0f0fe', authorized_by: 'nick' } },
+      nickTok,
+    );
+    expect(closed.status).toBe(200);
+    expect(closed.json.lane.merged).toEqual({ pr: 1370, sha: 'd2a0f0fe', authorized_by: 'nick' });
+
+    const merged = await auditRows(nickTok, 'git.pr_merged');
+    expect(merged[0].detail.pr).toBe(1370);
+    expect(merged[0].detail.sha).toBe('d2a0f0fe');
+    expect(merged[0].detail.authorized_by).toBe('nick');
+  });
+
+  // Lane 01M2GR0434 (stanley, 2026-09-14): a merge attestation could not be CLEARED through any
+  // exposed path — `updateLane` honours `merged: null`, but `UpdateLaneSchema.merged` was
+  // `.optional()` without `.nullable()`, so the wire rejected the clear (measured: 400 "merged:
+  // Expected object, received null") and a lane that acquired a wrong stamp kept it for good.
+  it('the owner (or an admin) clears a wrong attestation with merged: null; a counterpart may not (ADR 305 amendment 2)', async () => {
+    const { nickTok, ada, gee } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'wrong stamp', branch: 'ada/wrong-stamp', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    const stamped = await patchLane(laneId, { merged: { pr: 1, sha: 'aaaa0001' } }, ada);
+    expect(stamped.json.lane.merged).toEqual({ pr: 1, sha: 'aaaa0001' });
+    // A counterpart's clear is a replacement-with-nothing of the worker's stamp — ADR 305's rule.
+    const byCounterpart = await patchLane(laneId, { merged: null }, gee);
+    expect(byCounterpart.status).toBe(403);
+    expect(byCounterpart.json.error.code).toBe('forbidden');
+    const byOwner = await patchLane(laneId, { merged: null }, ada);
+    expect(byOwner.status).toBe(200);
+    expect(byOwner.json.lane.merged).toBeNull();
+    // The clear is a recorded transition, so a replicating peer folds it (changes.merged.to null).
+    const updated = (await auditRows(nickTok, 'lane.updated')).filter(
+      (r: any) => r.detail.lane === laneId && r.detail.fields.includes('merged'),
+    );
+    // Newest first, as `auditRows` returns them: the clear is the latest merged change.
+    expect(updated.some((r: any) => r.detail.changes.merged.to === null)).toBe(true);
+    // An admin may clear too: the row is the team's record, and the owner may be gone.
+    const again = await patchLane(laneId, { merged: { pr: 1, sha: 'aaaa0001' } }, ada);
+    expect(again.status).toBe(200);
+    const byAdmin = await patchLane(laneId, { merged: null }, nickTok);
+    expect(byAdmin.status).toBe(200);
+    expect(byAdmin.json.lane.merged).toBeNull();
+  });
+
+  // The guard that would have caught 01M2GBGA03: delta closed their lane from the VM with stanley's
+  // PR 1376 / 23ae48bb — ancestor-verified, because the SHA IS on main — and nothing asked whether
+  // that SHA already attested a different seat's lane. Measured on the live db 2026-09-14: 657
+  // distinct attested SHAs, 10 on two lanes, nine of them the same owner's twin lanes closed by one
+  // PR (legitimate, and must stay so) and the tenth this defect. So the rule is cross-OWNER.
+  it("a SHA that already attests a DIFFERENT seat's lane is refused naming that lane; a seat's own twin lanes may share one PR", async () => {
+    const { nickTok, ada, gee } = await setup();
+    const first = await post(
+      '/teams/dawn/lanes',
+      { title: "ada's landed work", branch: 'ada/landed', claim: true },
+      ada,
+    );
+    const firstId = first.json.lane.id as string;
+    const submitted = await patchLane(
+      firstId,
+      { state: 'ready_for_review', merged: { pr: 1376, sha: '23ae48bb', authorized_by: 'nick' } },
+      ada,
+    );
+    expect(submitted.status).toBe(200);
+
+    // gee's lane, closed with ada's merge: refused, and the refusal names the lane that owns it.
+    const other = await post(
+      '/teams/dawn/lanes',
+      { title: "gee's unrelated lane", branch: 'gee/unrelated', claim: true },
+      gee,
+    );
+    const otherId = other.json.lane.id as string;
+    const wrong = await patchLane(
+      otherId,
+      { state: 'done', merged: { pr: 1376, sha: '23ae48bb', authorized_by: 'nick' } },
+      gee,
+    );
+    expect(wrong.status).toBe(409);
+    expect(wrong.json.error.code).toBe('conflict');
+    expect(wrong.json.error.message).toContain(firstId);
+    expect(wrong.json.error.message).toContain('ada');
+    const untouched = await get(`/teams/dawn/lanes`, nickTok);
+    expect(
+      (untouched.json.lanes as { id: string; state: string; merged: unknown }[]).find(
+        (l) => l.id === otherId,
+      ),
+    ).toMatchObject({ state: 'claimed', merged: null });
+
+    // ada's own second lane, landed by the same PR: allowed — one PR may close two of one seat's lanes.
+    const twin = await post(
+      '/teams/dawn/lanes',
+      { title: "ada's twin, same PR", branch: 'ada/landed', claim: true },
+      ada,
+    );
+    const twinDone = await patchLane(
+      twin.json.lane.id as string,
+      { state: 'done', merged: { pr: 1376, sha: '23ae48bb', authorized_by: 'nick' } },
+      ada,
+    );
+    expect(twinDone.status).toBe(200);
+    expect(twinDone.json.lane.merged).toMatchObject({ sha: '23ae48bb' });
+  });
+
   /**
    * ADR 202 — the verdict moves the lane it judges. Before this, an `accept` answering an acceptance
    * ask wrote telemetry and left the lane sitting in awaiting_acceptance; the acceptor had to
@@ -4490,6 +6390,10 @@ describe('two-stage close (ADR 169)', () => {
 
       const sent = await verdict(auth, reviewer, askId, 'accept');
       expect(sent.status).toBe(201);
+      // Lane 01M2GQFJXG (stanley, 2026-09-14): the accept's ack said nothing about the lane it had
+      // just closed, so a reviewer who sent `accept` as an ANNOUNCEMENT ("taking this review")
+      // learned only later that the announcement was the verdict. The ack names the move.
+      expect(sent.json.lane_verdict).toEqual({ lane: laneId, state: 'done' });
 
       const lane = await get(`/teams/dawn/lanes`, nickTok);
       const closed = (lane.json.lanes as { id: string; state: string }[]).find(
@@ -4510,6 +6414,289 @@ describe('two-stage close (ADR 169)', () => {
       const merged = await auditRows(nickTok, 'git.pr_merged');
       expect(merged[0].detail.pr).toBe(7);
       expect(merged[0].detail.attested_by).toBe('ada');
+    });
+
+    // The acceptance a human routes by hand had no door into the ledger. Measured 2026-09-01 on
+    // lane 01M1F9QVG6XCFQAZSH7XSZ13JT: nick routed acceptance to `ghost`, ghost reviewed and sent a
+    // real `accept`, and the close still recorded `verified: false` / self_close — because the
+    // accept auto-targeted a plain `request_help` (meta NULL), `applyAcceptanceVerdict` returns at
+    // its `!replied?.meta` guard, and the lane never left awaiting_acceptance for the owner to do
+    // it themselves. The ask is the only binding, so an ask nobody composed is an acceptance the
+    // ledger cannot see — understating review in exactly the field ADR 056 counts from.
+    it('a submit naming its acceptor routes the ask there, and that seat’s accept closes it verified', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const lane = await post(
+        '/teams/dawn/lanes',
+        { title: 'named acceptor', branch: 'ada/named', claim: true },
+        ada,
+      );
+      const laneId = lane.json.lane.id as string;
+
+      const ready = await patchLane(
+        laneId,
+        {
+          state: 'ready_for_review',
+          acceptor: 'gee',
+          merged: { pr: 11, sha: 'cafe11', authorized_by: 'nick' },
+        },
+        ada,
+      );
+      expect(ready.status).toBe(200);
+      expect(ready.json.review.reviewer).toBe('gee');
+      // `named` is its own route, never folded into a pick. The daemon's picker is what enforces
+      // cross-family eligibility, so recording a hand-routed acceptor as if it had been picked
+      // would feed a diversity claim nobody made into the ADR 056 counts.
+      expect(ready.json.review.route).toBe('named');
+
+      // The named seat gets a real, server-composed lane_review ask — the only thing an accept
+      // can bind to.
+      const inbox = await get('/teams/dawn/inbox?unread=1', gee);
+      const ask = inbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      expect(ask).toBeDefined();
+      expect(ask.meta.lane_review.route).toBe('named');
+
+      expect((await verdict(gee, 'gee', ask.id as string, 'accept')).status).toBe(201);
+
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      const closed = (lanes.json.lanes as { id: string; state: string }[]).find(
+        (l) => l.id === laneId,
+      );
+      expect(closed!.state).toBe('done');
+
+      const rows = await auditRows(nickTok, 'lane.closed');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].detail.closed_by).toBe('gee');
+      expect(rows[0].detail.owner_at_close).toBe('ada');
+      // The whole point: a routed-by-hand acceptance is a confirmed close, not a self_close.
+      expect(rows[0].detail.verified).toBe(true);
+      expect(rows[0].detail.reason).toBe('counterpart_confirm');
+
+      // …and the submit row says the routing was named, so the two reads never disagree.
+      const submitted = await auditRows(nickTok, 'lane.ready_for_review');
+      expect(submitted[0].detail.route).toBe('named');
+      expect(submitted[0].detail.reviewer).toBe('gee');
+    });
+
+    // A refused acceptor must not leave the lane submitted. The name is validated after the state
+    // row is written, so if the refusal did not roll back, the owner would get a 400 telling them
+    // nothing was routed while the lane sat in awaiting_acceptance with no ask — the exact silent
+    // limbo this whole lane exists to remove, reintroduced by the fix for it.
+    it('refuses an unknown acceptor and leaves the lane where it was', async () => {
+      const { nickTok, ada } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 'bad acceptor', claim: true }, ada);
+      const laneId = lane.json.lane.id as string;
+      const bad = await patchLane(laneId, { state: 'ready_for_review', acceptor: 'nobody' }, ada);
+      expect(bad.status).toBe(400);
+      expect(JSON.stringify(bad.json)).toContain('no such seat');
+
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      const still = (lanes.json.lanes as { id: string; state: string }[]).find(
+        (l) => l.id === laneId,
+      );
+      expect(still!.state).toBe('claimed');
+    });
+
+    // Lane 01M1QYHJFY. Two seats in one hour named an acceptor on a lane ALREADY awaiting
+    // acceptance and got a 200 with no ask: the routing block is edge-triggered on entering
+    // awaiting_acceptance, so a re-route fell through it, and the hint then sanctioned self-close.
+    // Mutation control, run by hand before this landed: with the re-route arm removed from
+    // http.ts this test fails at the first `expect(ask).toBeDefined()` — the old edge guard alone
+    // mints nothing here.
+    it('re-routes an already-awaiting lane to a named seat: new ask, old ask closed, old verdict inert', async () => {
+      const { nickTok, ada, gee, agentKey } = await setup();
+      // A third agent to re-route to, attested on a third model so the pairing grades honestly.
+      await post('/teams/dawn/members', { name: 'hal', kind: 'agent' }, nickTok);
+      const hal = (await resolveAuth('/teams/dawn/inbox', { key: agentKey, seat: 'hal' }))!;
+      await reattestAgentModel('dawn', hal, 'gemini-3-pro');
+
+      const lane = await post(
+        '/teams/dawn/lanes',
+        { title: 'reroute me', branch: 'ada/reroute', claim: true },
+        ada,
+      );
+      const laneId = lane.json.lane.id as string;
+      const first = await patchLane(
+        laneId,
+        {
+          state: 'ready_for_review',
+          acceptor: 'gee',
+          merged: { pr: 12, sha: 'cafe12', authorized_by: 'nick' },
+        },
+        ada,
+      );
+      expect(first.status).toBe(200);
+      expect(first.json.review.reviewer).toBe('gee');
+      const geeInbox = await get('/teams/dawn/inbox?unread=1', gee);
+      const oldAsk = geeInbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      expect(oldAsk).toBeDefined();
+
+      // The re-route: same state, a different name. Before the fix this was the silent no-op.
+      const again = await patchLane(laneId, { state: 'awaiting_acceptance', acceptor: 'hal' }, ada);
+      expect(again.status).toBe(200);
+      expect(again.json.review.rerouted).toBe(true);
+      expect(again.json.review.reviewer).toBe('hal');
+      expect(again.json.review.route).toBe('named');
+      expect(again.json.review.superseded).toBe('gee');
+      expect(again.json.review.standing).toBeUndefined();
+
+      // hal holds a real, server-composed ask — the only thing an accept can bind to.
+      const halInbox = await get('/teams/dawn/inbox?unread=1', hal);
+      const ask = halInbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      expect(ask).toBeDefined();
+      expect(ask.meta.lane_review.route).toBe('named');
+
+      // gee was TOLD: a daemon-composed resolve on the old ask's thread, naming where it went.
+      const geeAfter = await get('/teams/dawn/inbox?unread=1', gee);
+      const closed = geeAfter.json.messages.find(
+        (m: { act: string; thread?: string | null }) =>
+          m.act === 'resolve' && m.thread === oldAsk.id,
+      );
+      expect(closed).toBeDefined();
+      expect(closed.body).toContain('re-routed to hal');
+      // …and the old ask is off gee's interrupt line — an obligation nobody holds must not ring.
+      const probe = await get('/teams/dawn/inbox/interrupt-check', gee);
+      expect(probe.status).toBe(200);
+      expect(JSON.stringify(probe.json)).not.toContain(laneId);
+
+      // The audit says what happened, in its own verb — NOT a second submit row.
+      const rerouted = await auditRows(nickTok, 'lane.review_rerouted');
+      expect(rerouted).toHaveLength(1);
+      expect(rerouted[0].detail.reviewer).toBe('hal');
+      expect(rerouted[0].detail.from_reviewer).toBe('gee');
+      expect(rerouted[0].detail.superseded_ask).toBe(oldAsk.id);
+      expect(await auditRows(nickTok, 'lane.ready_for_review')).toHaveLength(1);
+
+      // A late verdict from gee on the superseded ask binds to nothing: the lane stays awaiting.
+      expect((await verdict(gee, 'gee', oldAsk.id as string, 'accept')).status).toBe(201);
+      const lanesMid = await get('/teams/dawn/lanes', nickTok);
+      expect(
+        (lanesMid.json.lanes as { id: string; state: string }[]).find((l) => l.id === laneId)!
+          .state,
+      ).toBe('awaiting_acceptance');
+      expect(await auditRows(nickTok, 'lane.closed')).toHaveLength(0);
+
+      // hal's accept is the one that closes it — verified, counterpart_confirm, closed_by hal.
+      expect((await verdict(hal, 'hal', ask.id as string, 'accept')).status).toBe(201);
+      const lanesEnd = await get('/teams/dawn/lanes', nickTok);
+      expect(
+        (lanesEnd.json.lanes as { id: string; state: string }[]).find((l) => l.id === laneId)!
+          .state,
+      ).toBe('done');
+      const rows = await auditRows(nickTok, 'lane.closed');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].detail.closed_by).toBe('hal');
+      expect(rows[0].detail.verified).toBe(true);
+      expect(rows[0].detail.reason).toBe('counterpart_confirm');
+    });
+
+    it('re-routing to the seat that already holds the ask mints nothing and reports it standing', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 'same seat', claim: true }, ada);
+      const laneId = lane.json.lane.id as string;
+      await patchLane(laneId, { state: 'ready_for_review', acceptor: 'gee' }, ada);
+      const again = await patchLane(laneId, { state: 'awaiting_acceptance', acceptor: 'gee' }, ada);
+      expect(again.status).toBe(200);
+      expect(again.json.review.standing).toBe(true);
+      expect(again.json.review.reviewer).toBe('gee');
+      const inbox = await get('/teams/dawn/inbox?unread=1', gee);
+      const asks = inbox.json.messages.filter(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      expect(asks).toHaveLength(1);
+      expect(await auditRows(nickTok, 'lane.review_rerouted')).toHaveLength(0);
+    });
+
+    // Lane 01M1VF8166 (2026-09-06). A re-route by name is a routing request, not a second
+    // attestation — but the MCP tool sends `merged: { verification }` on every submit, and with no
+    // SHA that verification is `unattested`. Measured on the live daemon: five ancestor-verified
+    // lanes re-routed by name each lost {pr, sha, authorized_by} to {verification:"unattested"}
+    // in one lane.updated row. The guard lives in decideLanePatch so the hub arbitration and the
+    // local path agree: a patch that carries no attestation cannot downgrade one that stands.
+    it('a re-route that carries no attestation keeps the standing merge attestation', async () => {
+      const { nickTok, ada, agentKey } = await setup();
+      await post('/teams/dawn/members', { name: 'hal', kind: 'agent' }, nickTok);
+      const hal = (await resolveAuth('/teams/dawn/inbox', { key: agentKey, seat: 'hal' }))!;
+      await reattestAgentModel('dawn', hal, 'gemini-3-pro');
+      const lane = await post('/teams/dawn/lanes', { title: 'keep my sha', claim: true }, ada);
+      const laneId = lane.json.lane.id as string;
+      const attested = { pr: 77, sha: 'facade77', authorized_by: 'nick', verification: 'ancestor' };
+      const first = await patchLane(
+        laneId,
+        { state: 'ready_for_review', acceptor: 'gee', merged: attested },
+        ada,
+      );
+      expect(first.status).toBe(200);
+      expect(first.json.lane.merged).toEqual(attested);
+
+      // Exactly what the MCP tool sends for `lane_submit {id, acceptor}` with no pr/sha.
+      const again = await patchLane(
+        laneId,
+        { state: 'awaiting_acceptance', acceptor: 'hal', merged: { verification: 'unattested' } },
+        ada,
+      );
+      expect(again.status).toBe(200);
+      expect(again.json.review.rerouted).toBe(true);
+      expect(again.json.lane.merged).toEqual(attested);
+      const rerouted = await auditRows(nickTok, 'lane.review_rerouted');
+      expect(rerouted).toHaveLength(1);
+      expect(rerouted[0].detail.merged).toEqual(attested);
+      // The ledger never saw a downgrade: the only lane.updated row touching `merged` is the first
+      // submit's (null → attested); the re-route wrote no merged change at all.
+      const updated = await auditRows(nickTok, 'lane.updated');
+      const mergedRows = updated.filter((r) =>
+        (r.detail.fields as string[] | undefined)?.includes('merged'),
+      );
+      expect(mergedRows).toHaveLength(1);
+      expect((mergedRows[0].detail.changes as { merged: { to: unknown } }).merged.to).toEqual(
+        attested,
+      );
+
+      // A patch that DOES carry a SHA still replaces the block — re-attesting is allowed.
+      const reattest = { pr: 78, sha: 'facade78', authorized_by: 'nick', verification: 'ancestor' };
+      const third = await patchLane(
+        laneId,
+        { state: 'awaiting_acceptance', acceptor: 'gee', merged: reattest },
+        ada,
+      );
+      expect(third.status).toBe(200);
+      expect(third.json.lane.merged).toEqual(reattest);
+    });
+
+    // The other door into the same limbo: `acceptor` on a patch that does not leave the lane
+    // awaiting acceptance validates the name and has nowhere to route it. Refused before the write.
+    it('refuses an acceptor on a patch that is not a submit, and applies none of the patch', async () => {
+      const { nickTok, ada } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 'not a submit', claim: true }, ada);
+      const laneId = lane.json.lane.id as string;
+      const bad = await patchLane(laneId, { state: 'active', acceptor: 'gee' }, ada);
+      expect(bad.status).toBe(400);
+      expect(JSON.stringify(bad.json)).toContain('rides a submit');
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      expect(
+        (lanes.json.lanes as { id: string; state: string }[]).find((l) => l.id === laneId)!.state,
+      ).toBe('claimed');
+    });
+
+    it('refuses an owner who names themselves — that close could only ever be unverified', async () => {
+      const { ada } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 'self named', claim: true }, ada);
+      const bad = await patchLane(
+        lane.json.lane.id as string,
+        { state: 'ready_for_review', acceptor: 'ada' },
+        ada,
+      );
+      expect(bad.status).toBe(400);
+      expect(JSON.stringify(bad.json)).toContain('unverified close');
     });
 
     it('sends the lane back to active on decline, and audits the rejection', async () => {
@@ -4672,6 +6859,11 @@ describe('two-stage close (ADR 169)', () => {
     const readyRows = await auditRowsFor(solTok, 'solo', 'lane.ready_for_review');
     const r0 = readyRows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
     expect(r0.detail.no_candidate).toBe(true);
+    expect(r0.detail.review_selection).toMatchObject({
+      outcome: 'no_candidate',
+      selected: null,
+      candidates: [{ member: 'sol', family: 'human', eligible: false, exclusion: 'self' }],
+    });
     // ADR 172: the audit row carries the posture compactly (wake_pool as a COUNT, not names), so a
     // series of no_candidate rows is analyzable later without replaying presence history.
     expect(r0.detail.family_posture.state).toBe('unknown');
@@ -4716,6 +6908,14 @@ describe('two-stage close (ADR 169)', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(Date.now() + 5 * 60_000 + 1_000));
     try {
+      // The 5-minute proof is intentionally expired at this boundary; a real adapter reclaims to
+      // mint a fresh lease before it may close the lane.
+      const refreshed = await post('/teams/dawn/claim', {
+        key: ada.key,
+        target: { seat: ada.seat },
+        surface: 'cli',
+      });
+      Object.assign(ada, { sessionLease: refreshed.json.session_lease });
       await patchLane(lane.json.lane.id, { state: 'done' }, ada);
     } finally {
       vi.useRealTimers();
@@ -4816,14 +7016,16 @@ describe('two-stage close (ADR 169)', () => {
         body: JSON.stringify({ name, kind: 'agent' }),
       });
     }
-    const ada: Auth = { key: team.json.agent_key, seat: 'ada' };
-    const gee: Auth = { key: team.json.agent_key, seat: 'gee' };
-    await fetch(base + '/teams/risky/inbox', {
-      headers: { ...authHeaders(ada), 'x-musterd-model': 'claude-opus-5' },
-    });
-    await fetch(base + '/teams/risky/inbox', {
-      headers: { ...authHeaders(gee), 'x-musterd-model': 'gpt-5.2-codex' },
-    });
+    const ada = (await resolveAuth('/teams/risky/inbox', {
+      key: team.json.agent_key,
+      seat: 'ada',
+    }))!;
+    const gee = (await resolveAuth('/teams/risky/inbox', {
+      key: team.json.agent_key,
+      seat: 'gee',
+    }))!;
+    await reattestAgentModel('risky', ada, 'claude-opus-5');
+    await reattestAgentModel('risky', gee, 'gpt-5.2-codex');
     const mk = await fetch(base + '/teams/risky/lanes', {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders(ada) },
@@ -4994,13 +7196,13 @@ describe('two-stage close (ADR 169)', () => {
     const { nickTok, ada } = await setup();
     const l1 = await post(
       '/teams/dawn/lanes',
-      { title: 'store work', project: 'p', surface_globs: ['packages/server/**'], claim: true },
+      { title: 'store work', project: 'p', scope: ['packages/server/**'], claim: true },
       ada,
     );
     await patchLane(l1.json.lane.id, { state: 'ready_for_review' }, ada);
     const l2 = await post(
       '/teams/dawn/lanes',
-      { title: 'also store', project: 'p', surface_globs: ['packages/server/src/**'], claim: true },
+      { title: 'also store', project: 'p', scope: ['packages/server/src/**'], claim: true },
       nickTok,
     );
     expect(l2.json.warnings.map((w: { kind: string }) => w.kind)).toContain('surface_overlap');
@@ -5099,9 +7301,10 @@ describe('releasing a lane — open ⟺ unowned', () => {
     };
   }
   async function patchLane(id: string, body: unknown, auth: Auth) {
+    const resolvedAuth = await resolveAuth('/teams/dusk/lanes', auth);
     const r = await fetch(base + `/teams/dusk/lanes/${id}`, {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+      headers: { 'content-type': 'application/json', ...authHeaders(resolvedAuth) },
       body: JSON.stringify(body),
     });
     return { status: r.status, json: (await r.json()) as Record<string, any> };
@@ -5112,12 +7315,12 @@ describe('releasing a lane — open ⟺ unowned', () => {
     // gee holds an overlapping surface, so the board has something to contend with.
     await post(
       '/teams/dusk/lanes',
-      { title: 'geeʼs work', surface_globs: ['packages/server/**'], claim: true },
+      { title: 'geeʼs work', scope: ['packages/server/**'], claim: true },
       gee,
     );
     const mine = await post(
       '/teams/dusk/lanes',
-      { title: 'parked work', surface_globs: ['packages/server/src/store/**'], claim: true },
+      { title: 'parked work', scope: ['packages/server/src/store/**'], claim: true },
       ada,
     );
     const id = mine.json.lane.id as string;
@@ -5365,25 +7568,39 @@ describe('seat memory endpoints + occupy envelope (ADR 093)', () => {
     )) as any;
     expect(occ1.memory).toBeNull();
     w1.close();
+    await w1.closed();
 
-    // Save a note, then a fresh claim carries the envelope (headline + size, never a body).
-    await req('PUT', '/teams/dawn/memory', { headline: 'left off at eviction', body: '€€' }, ada);
+    // Reclaim first: closing w1 revoked its Presence-bound lease. The new claim mints a lease that
+    // authorizes the memory save, and the following claim must carry the saved envelope.
+    Object.assign(ada as Exclude<Auth, string>, {
+      key: occ1.seat_credential,
+      sessionLease: occ1.session_lease,
+    });
     const w2 = new TestWs();
     await w2.open();
-    const occ2 = (await w2.claim(
-      'dawn',
-      team.json.agent_key,
-      'Ada',
-      'cli',
-      await standingGrant(nickTok, 'Ada'),
-    )) as any;
-    expect(occ2.memory).toEqual({
+    const occ2 = (await w2.claim('dawn', (ada as Exclude<Auth, string>).key, 'Ada', 'cli')) as any;
+    Object.assign(ada as Exclude<Auth, string>, {
+      key: occ2.seat_credential ?? (ada as Exclude<Auth, string>).key,
+      sessionLease: occ2.session_lease,
+    });
+    const saved = await req(
+      'PUT',
+      '/teams/dawn/memory',
+      { headline: 'left off at eviction', body: '€€' },
+      ada,
+    );
+    expect(saved.status).toBe(204);
+    const w3 = new TestWs();
+    await w3.open();
+    const occ3 = (await w3.claim('dawn', (ada as Exclude<Auth, string>).key, 'Ada', 'cli')) as any;
+    expect(occ3.memory).toEqual({
       headline: 'left off at eviction',
       saved_at: expect.any(Number),
       size_bytes: 6, // '€€' = 6 UTF-8 bytes
     });
-    expect(occ2.memory.body).toBeUndefined();
     w2.close();
+    expect(occ3.memory.body).toBeUndefined();
+    w3.close();
   });
 
   it('oversize body → 400 naming the 8192 limit; missing headline → 400', async () => {
@@ -5401,7 +7618,11 @@ describe('seat memory endpoints + occupy envelope (ADR 093)', () => {
     expect(noHeadline.status).toBe(400);
   });
 
-  it('audit rows for memory.save carry sizes only — never the headline or body text', async () => {
+  it('a save writes ONE stamped continuity.memory_saved row that carries the note (ADR 366 overturns ADR 093 hard rule 5)', async () => {
+    // Until ADR 366 this test asserted the opposite — `memory.save` with sizes only, never the
+    // text. That rule was overturned by decision (nick, 2026-09-03): a headline is not continuity,
+    // and a human on a second machine (ADR 358) needs the note itself, so the replicated row IS the
+    // note. Daemon-side only, never git; bounded by the 8 KiB cap. The old verbs write nothing now.
     const { ada } = await dawn();
     await req(
       'PUT',
@@ -5411,17 +7632,22 @@ describe('seat memory endpoints + occupy envelope (ADR 093)', () => {
     );
 
     const teamId = getTeamBySlug(server.db, 'dawn')!.id;
-    const rows = listAudit(server.db, teamId).filter((r) => r.action === 'memory.save');
+    expect(listAudit(server.db, teamId).filter((r) => r.action === 'memory.save')).toHaveLength(0);
+    const rows = listAudit(server.db, teamId).filter((r) => r.action === 'continuity.memory_saved');
     expect(rows).toHaveLength(1);
     const detail = JSON.parse(rows[0]!.detail!);
-    expect(detail).toEqual({ size_bytes: 16, headline_len: 17 });
-    // the content itself never appears in the audit row
-    expect(rows[0]!.detail).not.toContain('hunter2');
-    expect(rows[0]!.detail).not.toContain('sensitive subject');
+    expect(detail).toMatchObject({ headline: 'sensitive subject', body: 'PASSWORD=hunter2' });
+    expect(typeof detail.saved_at).toBe('number');
+    // Stamped for replication — the whole point of carrying the body.
+    expect(rows[0]!.origin_seq).toBeGreaterThan(0);
 
     await req('DELETE', '/teams/dawn/memory', undefined, ada);
-    const clears = listAudit(server.db, teamId).filter((r) => r.action === 'memory.clear');
+    expect(listAudit(server.db, teamId).filter((r) => r.action === 'memory.clear')).toHaveLength(0);
+    const clears = listAudit(server.db, teamId).filter(
+      (r) => r.action === 'continuity.memory_cleared',
+    );
     expect(clears).toHaveLength(1);
+    expect(JSON.parse(clears[0]!.detail!)).toMatchObject({ had_memory: true });
   });
 });
 
@@ -6671,6 +8897,20 @@ describe("local sign-in identity: this machine's CLI seat, and nobody else's (AD
     expect(res.json.credential).toBe(team.json.human_credential);
   });
 
+  it('refuses a cross-origin browser request even from a loopback peer', async () => {
+    const team = await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
+    writeFileSync(
+      configPath,
+      JSON.stringify({ identities: { dusk: { name: 'nick', key: team.json.human_credential } } }),
+    );
+
+    const res = await get('/teams/dusk/local-identity', undefined, {
+      origin: 'https://evil.example',
+    });
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.json)).not.toContain(team.json.human_credential);
+  });
+
   it('refuses an agent-keyed vault entry — an agent key is a harness fact, not a person', async () => {
     await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
     writeFileSync(
@@ -6886,6 +9126,27 @@ describe('goal outcome + ship nudge (value-layer design)', () => {
     expect(res.json.goal.outcome.by).toBe('nick');
     const goals = await get('/teams/valyr/goals', nickTok);
     expect(goals.json.goals[0].outcome.text).toBe('users can now X');
+  });
+
+  it('POST /goals/retract withdraws the goal and a re-declaration revives it', async () => {
+    const nickTok = await setup();
+    await post('/teams/valyr/goals', { id: 'gr1', title: 'Scratch' }, nickTok);
+    const res = await post('/teams/valyr/goals/retract', { goal_id: 'gr1' }, nickTok);
+    expect(res.status).toBe(201);
+    expect(res.json.goal.retracted.by).toBe('nick');
+    const goals = await get('/teams/valyr/goals', nickTok);
+    expect(goals.json.goals[0].retracted.by).toBe('nick');
+    // Re-declaring the same id un-retracts — the signal fold, not a delete.
+    await post('/teams/valyr/goals', { id: 'gr1', title: 'Back on' }, nickTok);
+    const after = await get('/teams/valyr/goals', nickTok);
+    expect(after.json.goals[0].retracted).toBeUndefined();
+  });
+
+  it('POST /goals/retract for an undeclared goal returns goal: null (queued, not lost)', async () => {
+    const nickTok = await setup();
+    const res = await post('/teams/valyr/goals/retract', { goal_id: 'ghost' }, nickTok);
+    expect(res.status).toBe(201);
+    expect(res.json.goal).toBeNull();
   });
 
   it('closing the last lane on a goal appends the ship nudge to the closer result only', async () => {

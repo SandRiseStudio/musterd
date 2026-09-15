@@ -35,3 +35,30 @@ describe('command catalog', () => {
     expect(HELP).toBe(renderPlainHelp());
   });
 });
+
+describe('toolkit is a first-class command (ADR 296)', () => {
+  it('has its own catalog entry, separate from role', () => {
+    expect(CATALOG.some((c) => c.name === 'toolkit')).toBe(true);
+  });
+
+  it("role's entry no longer advertises two worlds under one name", () => {
+    const role = CATALOG.find((c) => c.name === 'role');
+    expect(role).toBeTruthy();
+    expect(`${role?.summary} ${role?.detail ?? ''}`).not.toContain('Two worlds');
+  });
+});
+
+describe('integration doctor help (ADR 385)', () => {
+  it('publishes the exact optional read-only contract and all four combinations', () => {
+    const command = CATALOG.find((entry) => entry.name === 'integration');
+    expect(command?.signature).toBe('doctor [--tailscale] [--aperture <https-url>] [--json]');
+    expect(`${command?.summary} ${command?.detail}`).toMatch(/read-only/i);
+    expect(`${command?.detail}`).toMatch(/does not manage devices|no device management/i);
+    expect(command?.examples).toEqual([
+      'musterd integration doctor',
+      'musterd integration doctor --tailscale',
+      'musterd integration doctor --aperture https://aperture.tailnet.ts.net',
+      'musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net',
+    ]);
+  });
+});

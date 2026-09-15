@@ -29,6 +29,7 @@ import {
   chromeDefault,
   compositorHz,
   stagePixels,
+  cdpTimeoutFor,
   ffmpegArgs,
   killGroup,
   makeFramePump,
@@ -220,6 +221,34 @@ describe('resolveSink (stream-key resolution)', () => {
   });
 });
 
+// 2026-09-03: machine 8799e4b0267668 logged `streaming (rtmps)` at 18:44:40 and died 27s later on
+// `✗ Chrome did not answer Page.navigate in time` — fatal, `--restart no`, and the supervisor spent a
+// flap slot relaunching. One deadline covered every CDP call, but the calls are not alike:
+// Page.enable / Runtime.enable / Emulation.* are local bookkeeping that answer in microseconds,
+// while Page.navigate resolves only when the navigation COMMITS — Chrome reaching the laptop daemon
+// across Tailscale, on a cold box, beside a running encoder. The run that SUCCEEDED took 16s from
+// `streaming` to `◉ live`, and that span contains navigate plus waitBroadcastReady's own poll, so
+// navigate alone was close enough to the 15s bar that the margin was a coin flip.
+describe('cdpTimeoutFor', () => {
+  it('keeps the short default for the local bookkeeping calls', () => {
+    expect(cdpTimeoutFor('Page.enable')).toBe(15_000);
+    expect(cdpTimeoutFor('Runtime.enable')).toBe(15_000);
+    expect(cdpTimeoutFor('Emulation.setDeviceMetricsOverride')).toBe(15_000);
+  });
+
+  it('gives Page.navigate a network-sized budget, because it crosses the tailnet', () => {
+    expect(cdpTimeoutFor('Page.navigate')).toBeGreaterThan(cdpTimeoutFor('Page.enable'));
+    expect(cdpTimeoutFor('Page.navigate')).toBeGreaterThanOrEqual(45_000);
+  });
+
+  // The 15s default is what makes a wedged compositor detectable. Raising it globally would trade a
+  // startup flake for an undetectable hang, so the exception must stay an exception.
+  it('does not blunt the default for calls it was not asked about', () => {
+    expect(cdpTimeoutFor('Page.startScreencast')).toBe(15_000);
+    expect(cdpTimeoutFor('Runtime.evaluate')).toBe(15_000);
+  });
+});
+
 describe('ffmpegArgs', () => {
   const opts = parseOptions({ team: 't', out: 'proof.mp4', duration: '10' }, 'darwin');
 
@@ -248,6 +277,25 @@ describe('ffmpegArgs', () => {
     const args = ffmpegArgs(linux, { kind: 'file', target: 'p.mp4' }).join(' ');
     expect(args).toContain('-c:v libx264');
     expect(args).not.toContain('videotoolbox');
+  });
+
+  // 2026-09-03, the live run: ffmpeg logged `Thread message queue blocking; consider raising the
+  // thread_queue_size option (current value: 8)` against BOTH inputs within a second of going live.
+  // The default queue is 8 packets, so a brief producer hiccup — Chrome missing a frame deadline on
+  // a box already at ~3.1 of 4 cores — blocks the input thread instead of being absorbed, and the
+  // viewer sees the stutter. ffmpeg names its own remedy in the warning; this is it. The queue must
+  // sit BEFORE the -i it belongs to, which is why the assertions check order, not just presence.
+  it('gives both inputs a thread queue, before their own -i (ffmpeg option order)', () => {
+    const args = ffmpegArgs(parseOptions({ team: 't', out: 'p.mp4', audio: true }, 'linux'), {
+      kind: 'rtmp',
+      target: 'rtmps://x/app/k',
+    });
+    const joined = args.join(' ');
+    expect(joined).toContain('-thread_queue_size');
+    // video: the queue precedes the image2pipe input
+    expect(joined).toMatch(/-thread_queue_size \d+ -f image2pipe/);
+    // audio: and the pulse one gets its own
+    expect(joined).toMatch(/-thread_queue_size \d+ -f pulse/);
   });
 
   it('no -t when duration is 0 (run until stopped)', () => {

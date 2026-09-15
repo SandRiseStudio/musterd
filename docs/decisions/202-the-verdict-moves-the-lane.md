@@ -113,6 +113,22 @@ adapter's wording, so a reviewer meets the same refusal whichever surface they a
   knows the closer and only guesses the authorizer. The grade stays honest and the ask stays worth
   sending — this only ensures the weaker evidence is still evidence, instead of nothing.
 
+- _Dated note, 2026-09-14 — the verdict must announce itself (lane `01M2GQFJXG`)._ The
+  `musterd-orient` skill told a seat to "announce before you start" a review with
+  `team_send {act:'accept', reply_to:<ask>}` — a clause written for the eligible-set `request_help`
+  (ADR 254), where the first accept stands the co-addressees down — and prescribed it for "an
+  acceptance or review request" too. A `lane_review` ask is minted to **one** seat, so there is
+  nobody to stand down, and by this ADR its `accept` is the verdict: stanley's announcement on
+  ryder's lane `01M2GNYGEY` closed it `done` / `counterpart_confirm` before a line of the diff was
+  read. The verdict reached the merits anyway; that was luck, not the mechanism. Two changes: the
+  skill now scopes the announce clause to acts that carry an eligible set and says outright that a
+  review ask's accept IS the verdict (guidance v23); and the send ack carries `lane_verdict`
+  `{lane, state}` whenever an accept/decline moved a lane, which the MCP and CLI replies say in
+  words — so a seat that meant "on it" learns what it did at the moment it did it, not from the
+  board. Not built, on purpose: a stand-down act for review asks. There is no second addressee to
+  stand down, and a flag on `accept` meaning "not really" would make the verdict act ambiguous
+  where this ADR made it definite.
+
 ## Observability & Evaluation
 
 - **Traces.** No new audit actions — `lane.closed`, `lane.review_sent_back` and `git.pr_merged` are

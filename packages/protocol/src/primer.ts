@@ -1,10 +1,8 @@
 /**
  * The agent primer (ADR 012 / docs/design/agent-primer.md) — the standing context that teaches a
- * fresh agent it is on a team and how to coordinate. The **pure renderer** lives here in
- * `@musterd/protocol` so both surfaces share one source of truth without a package cycle: the CLI
- * (`onboard/primer.ts`) wraps it with the `AGENTS.md` file I/O, and the MCP server (`@musterd/mcp`)
- * feeds it as the server `instructions` returned on initialize. Channel-aware (`team_*` tools *or* the
- * `musterd` CLI) and self-claim-aware (named seat *or* "claim one first").
+ * fresh agent it is on a Team and how to coordinate. The delivery-specific pure renderers live here
+ * in `@musterd/protocol` so the repository and runtime identity boundaries stay explicit without a
+ * package cycle. Both compose the same channel-aware working loop (ADR 307).
  */
 
 export const PRIMER_START =
@@ -14,30 +12,8 @@ export const PRIMER_END = '<!-- musterd:end -->';
 export const PRIMER_START_PREFIX = '<!-- musterd:start';
 export const PRIMER_END_MARKER = '<!-- musterd:end -->';
 
-/**
- * Render the managed primer block (including the start/end markers). `member` is optional: when a seat
- * is already assigned (a provisioned agent), the primer names it; when it isn't (a fresh agent that must
- * onboard itself), the primer tells it to claim a seat first. The playbook is **channel-aware** — it
- * works whether the session has the `team_*` MCP tools or only the `musterd` CLI (the dev-repo /
- * unprovisioned case), instead of assuming the tools and banning the CLI.
- */
-export function renderPrimer(opts: {
-  member?: string;
-  team: string;
-  role?: string;
-  charter?: string;
-}): string {
-  const role = opts.role?.trim();
-  const identity = opts.member
-    ? `You are ${role ? `**${opts.member}**, the ${role},` : `**${opts.member}**`} on the **${opts.team}** team.`
-    : `You are a member of the **${opts.team}** team — **claim your seat first** (\`team_join\`, or \`musterd claim <name>\` then \`musterd status\`; a seat is claimed with the team **agent key** — set \`MUSTERD_AGENT_KEY\` or pass \`--key mskey_…\`, and an admin approves if no grant was pre-issued) so teammates can see and reach you.`;
-  // A role template's charter (the *lens*, ADR 026 / human-agent-dynamics.md §3) is injected
-  // additively inside the managed block, so a re-claim updates it in place without clobbering the
-  // user's own prose outside the markers. Generalist (no charter) leaves the playbook unchanged.
-  const charter = opts.charter?.trim();
-  const charterBlock = charter
-    ? ['', `## Your charter${role ? ` (${role})` : ''}`, '', charter, '']
-    : [];
+/** Render the marker-delimited, identity-neutral loop shared by both delivery contexts. */
+function renderPrimer(identity: string): string {
   // The primer is the **loop kernel** (ADR 085): the standing context an agent carries every session.
   // The depth — seat claiming, handoff-with-branch, lane contention, the wait loop, recovery — lives in
   // the on-demand **skill** (`renderSkillBody` in `guidance.ts`), which this block points at. Keep this
@@ -48,7 +24,6 @@ export function renderPrimer(opts: {
     '',
     `${identity} musterd is your coordination layer: your teammates — other agents *and* humans — are`,
     'reachable through it, and humans on the team are peers, not approvers.',
-    ...charterBlock,
     '',
     '**Your channel.** If this session has the `team_*` tools (the musterd MCP server), they are your',
     'channel — use them; otherwise coordinate with the `musterd` CLI. Use one channel only: with the',
@@ -79,4 +54,24 @@ export function renderPrimer(opts: {
     '`musterd help` for the full command reference.',
     PRIMER_END,
   ].join('\n');
+}
+
+/**
+ * Render the primer safe to commit in `AGENTS.md`. A Team is repository intent; the Member target is
+ * Workspace-local and must come from runtime instructions, authenticated occupancy, or `whoami`.
+ */
+export function renderRepositoryPrimer(opts: { team: string }): string {
+  const identity = `**${opts.team}** Team. Member identity is Workspace-local: trust MCP instructions/occupancy or \`musterd whoami\`. If unwired, repair or ask; never claim from this file.`;
+  return renderPrimer(identity);
+}
+
+/**
+ * Render process-local MCP instructions. A configured Member is an intended target until the
+ * server's authenticated `occupied` response confirms it; unresolved policies keep claim-first help.
+ */
+export function renderRuntimePrimer(opts: { team: string; member?: string }): string {
+  const identity = opts.member
+    ? `You are **${opts.member}** on the **${opts.team}** Team.`
+    : `You are a Member of the **${opts.team}** Team — **claim your seat first** (\`team_join\`, or \`musterd claim <name>\` then \`musterd status\`; a seat is claimed with the Team **agent key** — set \`MUSTERD_AGENT_KEY\` or pass \`--key mskey_…\`, and an admin approves if no grant was pre-issued) so teammates can see and reach you.`;
+  return renderPrimer(identity);
 }

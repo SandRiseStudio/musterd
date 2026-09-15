@@ -21,9 +21,15 @@ function stubOkFetch() {
   return fn;
 }
 
-async function headersOf(key: string): Promise<Record<string, string>> {
+async function headersOf(key: string, sessionLease?: string): Promise<Record<string, string>> {
   const fn = stubOkFetch();
-  await new HttpClient({ server: 'http://x', key, seat: 'a', surface: 'cli' }).roster('dawn');
+  await new HttpClient({
+    server: 'http://x',
+    key,
+    seat: 'a',
+    sessionLease,
+    surface: 'cli',
+  }).roster('dawn');
   return (fn.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
 }
 
@@ -33,9 +39,11 @@ describe('HttpClient x-musterd-build forwarding (ADR 135)', () => {
     stampedBuild = undefined;
   });
 
-  it('forwards x-musterd-build for an agent key', async () => {
+  it('forwards x-musterd-build for an agent-seat credential', async () => {
     stampedBuild = 'a'.repeat(40);
-    expect((await headersOf('mskey_team'))['x-musterd-build']).toBe('a'.repeat(40));
+    expect((await headersOf('msac_agent', 'msls_presence'))['x-musterd-build']).toBe(
+      'a'.repeat(40),
+    );
   });
 
   it('forwards x-musterd-build for a HUMAN credential too — no ADR 121 gate (build attests the binary, not the actor)', async () => {
@@ -45,6 +53,12 @@ describe('HttpClient x-musterd-build forwarding (ADR 135)', () => {
 
   it('omits the header entirely when the dist is unstamped', async () => {
     stampedBuild = undefined;
-    expect((await headersOf('mskey_team'))['x-musterd-build']).toBeUndefined();
+    expect((await headersOf('msac_agent', 'msls_presence'))['x-musterd-build']).toBeUndefined();
+  });
+
+  it('forwards the Presence-bound lease beside an agent-seat credential', async () => {
+    const headers = await headersOf('msac_agent', 'msls_presence');
+    expect(headers.authorization).toBe('Bearer msac_agent');
+    expect(headers['x-musterd-session-lease']).toBe('msls_presence');
   });
 });

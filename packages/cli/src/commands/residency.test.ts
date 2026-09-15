@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { HostRegistryEntry } from '../host/registry.js';
-import { harnessDrift, registryDrift } from './residency.js';
+import { ensureHostKey, harnessDrift, registryDrift } from './residency.js';
 
 /**
  * The drift lines are the remediation, so their wording is the contract (ADR 131 §1). Both faults
@@ -104,5 +104,30 @@ describe('harnessDrift — can this host actually actuate what it is enrolled fo
       { seat: 'b', host: 'mac.lan', harness: 'codex' },
     ];
     expect(harnessDrift(two, 'mac.lan', () => false)).toHaveLength(1);
+  });
+});
+
+describe('ensureHostKey (ADR 395)', () => {
+  const binding = {
+    version: 2 as const,
+    server: 'http://s1',
+    team: 'revive',
+    claim: { mode: 'seat' as const, name: 'delta' },
+    agent_key: 'mskey_claim_seat',
+  };
+
+  it('reuses an existing host_key and does not mint', async () => {
+    const mint = vi.fn(async () => 'mskey_should_not_mint');
+    await expect(
+      ensureHostKey({ ...binding, host_key: 'mskey_host' }, 'delta-host', mint),
+    ).resolves.toBe('mskey_host');
+    expect(mint).not.toHaveBeenCalled();
+  });
+
+  it('mints a host-scoped credential when the binding has none', async () => {
+    const mint = vi.fn(async () => 'mskey_host_minted');
+    await expect(ensureHostKey(binding, 'delta-host', mint)).resolves.toBe('mskey_host_minted');
+    expect(mint).toHaveBeenCalledTimes(1);
+    expect(mint).toHaveBeenCalledWith('delta-host');
   });
 });

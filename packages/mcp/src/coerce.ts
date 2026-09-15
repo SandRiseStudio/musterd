@@ -190,9 +190,10 @@ function stringToList(field: string): Rule {
  * `coerced` counter now measures whether the wrong guess persists — if it does, a later increment
  * can rename on evidence. That is the measure-then-craft order; renaming first would be the guess.
  *
- * `surface` → `surface_globs` has the same cause and a worse symptom: `fmtLane` renders a lane as
- * `surface=[…]` and the tool description said "state, surface, dependencies", so `surface` is the
- * name the surface itself teaches — while the schema wants `surface_globs`. Unlike a wrong lane id
+ * `surface` → `scope` (`surface_globs` pre-ADR-296) has the same cause and a worse symptom:
+ * `fmtLane` renders a lane as `scope=[…]` and the tool description said "state, surface,
+ * dependencies", so `surface` is a name the surface itself taught — while the schema wants
+ * `scope`. Unlike a wrong lane id
  * that bounces, an unknown key was *dropped* by the schema and the call SUCCEEDED with an empty
  * surface, so the caller believed it had declared paths it had not (reproduced 2026-07-27). The
  * alias makes the natural name work; {@link unknownKeys} makes every other near-miss loud.
@@ -205,8 +206,9 @@ const RULES: Record<string, Rule[]> = {
   // (On lane_resolve there is no prose field to alias onto; that demand is a closing-note design
   // question for the ADR 192/202 acceptance flow, recorded in ADR 144, not a schema bolt-on here.)
   lane_open: [
-    alias('surface', 'surface_globs'),
-    stringToList('surface_globs'),
+    alias('surface', 'scope'),
+    alias('surface_globs', 'scope'),
+    stringToList('scope'),
     alias('note', 'detail'),
     alias('notes', 'detail'),
     alias('summary', 'detail'),
@@ -214,8 +216,9 @@ const RULES: Record<string, Rule[]> = {
   lane_update: [
     alias('lane', 'id'),
     alias('lane_id', 'id'),
-    alias('surface', 'surface_globs'),
-    stringToList('surface_globs'),
+    alias('surface', 'scope'),
+    alias('surface_globs', 'scope'),
+    stringToList('scope'),
     alias('note', 'detail'),
     alias('notes', 'detail'),
     // `summary` belongs here too, not only on lane_open: the comment above and ADR 144 both name all
@@ -279,7 +282,7 @@ export function coerceToolArgs(
  * near-miss the alias table doesn't cover is not an error at all: the SDK validates the call,
  * silently discards the key, and the handler succeeds having ignored what the caller asked for.
  * That is strictly worse than a bounce — the caller gets a success result and a false belief (the
- * reproduced case: `lane_update {surface:[…]}` returned `surface_globs=[]`, twice, with no signal).
+ * reproduced case: `lane_update {surface:[…]}` returned an empty scope, twice, with no signal).
  *
  * So after coercion has had its say, an argument key that no registered field accepts stops the
  * call here, in the same in-band bounce shape the SDK uses, carrying the ADR 144 inc-3 repair line

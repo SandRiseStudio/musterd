@@ -5,6 +5,7 @@ import {
   BINDING_DIR,
   BINDING_FILE,
   bindingSeat,
+  type Binding,
   type PolicyOverride,
   type Residency,
   type ResidencyPolicy,
@@ -22,6 +23,7 @@ import {
   removeHostEntry,
   upsertHostEntry,
 } from '../host/registry.js';
+import { opencodeCapability } from '../opencodeBin.js';
 import { clock, theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 import { findWorkspaceDir, resolve, resolveRead } from './helpers.js';
@@ -29,10 +31,12 @@ import { findWorkspaceDir, resolve, resolveRead } from './helpers.js';
 /**
  * `musterd residency on|off|status` (ADR 131) — enroll this workspace's seat into harness
  * residency so a directed act can wake it while offline. `on` is the authorization event
- * (admin-authorized server-side): one verb, three writes — the server enrollment row + a
+ * (admin-authorized server-side): one verb, four writes — the server enrollment row + a
  * **standing** resume grant landed in this workspace's `binding.grant` (so woken sessions occupy
- * via the seat's own credential), and the machine-local host registry entry (seat → workspace
- * path) that `musterd host` actuates from. `off` reverses all three — the kill switch. `status`
+ * via the seat's own credential), a host-scoped bootstrap credential in `binding.host_key` (so the
+ * actuator can poll after a claim rewrites `agent_key`, ADR 395), and the machine-local host
+ * registry entry (seat → workspace path) that `musterd host` actuates from. `off` reverses all
+ * four — the kill switch. `status`
  * cross-checks the three stores and names drift (the `init --check` idiom).
  *
  * The two identities in play are deliberately different flags: `--seat` names *what gets
@@ -146,6 +150,19 @@ export function registryDrift(
     );
   }
   return lines;
+}
+
+/**
+ * The actuator credential (ADR 395): reuse `binding.host_key` when present, otherwise mint a
+ * host-scoped bootstrap credential for this host label. Claim paths never see this field.
+ */
+export async function ensureHostKey(
+  binding: Binding,
+  host: string,
+  mint: (host: string) => Promise<string>,
+): Promise<string> {
+  if (binding.host_key) return binding.host_key;
+  return mint(host);
 }
 
 export async function residencyCommand(parsed: Parsed): Promise<number> {
@@ -265,7 +282,9 @@ async function onCommand(parsed: Parsed): Promise<number> {
   const { team, http } = resolve(parsed.flags);
   const seat = resolveSeat(parsed);
   const binding = findBinding();
-  const harness = flagStr(parsed.flags, 'harness') ?? binding?.surface;
+  // Identity declares no surface since ADR 281; the captured session's harness is the evidence-backed
+  // default (a claude-code hook only fires under claude-code). `--harness` stays the explicit choice.
+  const harness = flagStr(parsed.flags, 'harness') ?? binding?.session?.harness;
   if (!harness) {
     throw new CliError('no harness — pass --harness <class> (e.g. claude-code)', 2);
   }
@@ -274,6 +293,15 @@ async function onCommand(parsed: Parsed): Promise<number> {
     if (!capability.supported) {
       throw new CliError(
         `Codex can coordinate manually but cannot enroll for daemon wake: ${capability.reason}`,
+        2,
+      );
+    }
+  }
+  if (harness === 'opencode') {
+    const capability = await opencodeCapability();
+    if (!capability.supported) {
+      throw new CliError(
+        `OpenCode can coordinate manually but cannot enroll for daemon wake: ${capability.reason}`,
         2,
       );
     }
@@ -295,8 +323,32 @@ async function onCommand(parsed: Parsed): Promise<number> {
   const dir = findWorkspaceDir();
   let grantSaved = false;
   let registered = false;
+  let hostKeyMinted = false;
   if (dir && binding && bindingSeat(binding) === seat) {
-    saveBinding(dir, { ...binding, grant: res.grant });
+    let hostKey = binding.host_key;
+    try {
+      hostKey = await ensureHostKey(binding, res.residency.host, async (label) => {
+        const minted = await http.mintBootstrapCredential(team, {
+          use: 'host',
+          target: label,
+          label: `residency:${label}`,
+        });
+        return minted.agent_key;
+      });
+      hostKeyMinted = hostKey !== binding.host_key;
+    } catch (err) {
+      process.stdout.write(
+        theme.warn(
+          `  ! could not mint a host-scoped wake credential — the actuator keeps using ` +
+            `binding.agent_key until the next residency on (${(err as Error).message})`,
+        ) + '\n',
+      );
+    }
+    saveBinding(dir, {
+      ...binding,
+      grant: res.grant,
+      ...(hostKey !== undefined ? { host_key: hostKey } : {}),
+    });
     grantSaved = true;
     upsertHostEntry({
       server: binding.server,
@@ -349,6 +401,11 @@ async function onCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(
       theme.meta(`  host registry: ${seat} → ${dir} (\`musterd host\` actuates from it)`) + '\n',
     );
+    if (hostKeyMinted) {
+      process.stdout.write(
+        theme.meta('  host-scoped wake credential saved to .musterd/binding.json (ADR 395)') + '\n',
+      );
+    }
   } else {
     process.stdout.write(
       theme.warn(
@@ -377,9 +434,14 @@ async function offCommand(parsed: Parsed): Promise<number> {
   // *and* hold nothing for it.
   const dir = findWorkspaceDir();
   const binding = findBinding();
-  if (dir && binding && bindingSeat(binding) === seat && binding.grant !== undefined) {
-    const { grant: _dead, ...rest } = binding;
-    saveBinding(dir, rest);
+  if (
+    dir &&
+    binding &&
+    bindingSeat(binding) === seat &&
+    (binding.grant !== undefined || binding.host_key !== undefined)
+  ) {
+    const { grant: _dead, host_key: _host, ...rest } = binding;
+    saveBinding(dir, rest, { drop: { host_key: true } });
   }
   removeHostEntry({ ...(binding ? { server: binding.server } : {}), team, seat });
 
@@ -448,7 +510,7 @@ async function policyCommand(parsed: Parsed): Promise<number> {
 }
 
 async function statusCommand(parsed: Parsed): Promise<number> {
-  const { team, http } = resolveRead(parsed.flags);
+  const { team, http } = resolveRead(parsed.flags, { claimSeatPerRequest: true });
   const { residency, policy_defaults } = await http.residency(team);
 
   if (parsed.flags['json']) {

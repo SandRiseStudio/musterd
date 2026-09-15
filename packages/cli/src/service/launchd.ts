@@ -57,6 +57,9 @@ export const SWEEP_LABEL = 'studio.sandrise.musterd-sweep';
  *  which it watches. */
 export const GUARDIAN_LABEL = 'studio.sandrise.musterd-guardian';
 
+/** Stream supervisor (ADR 293) — reconciles the broadcast machine against the desired-state file. */
+export const STREAMWATCH_LABEL = 'studio.sandrise.musterd-streamwatch';
+
 /** Is process lifecycle management implemented for this platform yet? */
 export function serviceSupported(platform: NodeJS.Platform): boolean {
   return platform === 'darwin';
@@ -168,6 +171,10 @@ export interface AgentPlistOpts {
   startInterval?: number;
   /** Crash-loop damper (seconds); paired with `keepAlive`. */
   throttleInterval?: number;
+  /** launchd `ProcessType`: `Interactive` ranks the job with foreground apps (the daemon). */
+  processType?: 'Interactive' | 'Standard' | 'Background';
+  /** launchd `Nice`: negative raises priority; launchd applies it before dropping to the user. */
+  nice?: number;
 }
 
 /** The shared LaunchAgent XML template. Every dynamic value is XML-escaped — a path with `&` can't
@@ -223,6 +230,9 @@ function renderPlist(o: AgentPlistOpts): string {
     parts.push(`  <key>StartInterval</key>\n  <integer>${o.startInterval}</integer>`);
   if (typeof o.throttleInterval === 'number')
     parts.push(`  <key>ThrottleInterval</key>\n  <integer>${o.throttleInterval}</integer>`);
+  if (o.processType !== undefined)
+    parts.push(`  <key>ProcessType</key>\n  <string>${o.processType}</string>`);
+  if (typeof o.nice === 'number') parts.push(`  <key>Nice</key>\n  <integer>${o.nice}</integer>`);
   // PATH and any extra env share ONE EnvironmentVariables dict: launchd keeps the last key of a
   // duplicated one, so emitting two dicts would silently drop PATH and leave the daemon's shellouts
   // with launchd's minimal default. PATH first, then the rest in sorted order so the plist is
@@ -268,6 +278,13 @@ export function buildPlist(o: PlistOpts): string {
     keepAlive: true,
     runAtLoad: true,
     throttleInterval: 10,
+    // Lane 01M2GTB0RA (2026-09-14): six guardian pages in one afternoon were this daemon starved
+    // by seat tooling on the same laptop — tsc at 150% CPU, vitest forks, load 16–29 on 8 cores.
+    // A single-threaded daemon whose every db call is synchronous loses every scheduling contest
+    // at the default posture. Rank it with foreground apps and above default-nice work; the
+    // actuator, refresher and viewer keep the default — they are the work that should yield.
+    processType: 'Interactive',
+    nice: -5,
   });
 }
 
@@ -341,6 +358,26 @@ export function buildSweepPlist(
       o.scriptPath,
       ...o.scriptArgs,
     ],
+    workingDir: o.workingDir,
+    stdoutPath: o.stdoutPath,
+    stderrPath: o.stderrPath,
+    path: o.path,
+    runAtLoad: true,
+    startInterval: o.intervalSeconds,
+  });
+}
+
+/**
+ * The ADR 293 stream-supervisor plist. StartInterval like the sweep — one `stream ensure`
+ * reconcile pass (~1s: read a JSON file, one `fly machine list`) and exit; a KeepAlive would
+ * spin. The program is the CLI verb itself, the auto-refresher's shape.
+ */
+export function buildStreamwatchPlist(
+  o: Omit<PlistOpts, 'serveArgs'> & { intervalSeconds: number },
+): string {
+  return renderPlist({
+    label: o.label,
+    programArguments: [o.node, o.binJs, 'stream', 'ensure'],
     workingDir: o.workingDir,
     stdoutPath: o.stdoutPath,
     stderrPath: o.stderrPath,

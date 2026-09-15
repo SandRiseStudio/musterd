@@ -2,10 +2,12 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION } from '@musterd/protocol';
+import { makeEnvelope, PROTOCOL_VERSION } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
+import { ulid } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bind } from './bind.js';
+import { findBinding } from './binding.js';
 import { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
 import { notReadyMessage } from './tools/format.js';
@@ -20,6 +22,21 @@ import {
 let server: RunningServer;
 let base: string;
 let tokens: Record<string, string> = {};
+/**
+ * Where the fixture pretends its seat lives — an EMPTY temp dir, never `process.cwd()`.
+ *
+ * ADR 275 made occupancy follow capture: `refreshAttestation` re-reads `config.bindingDir`'s
+ * binding on every heartbeat and rewrites `config.surface` from `session.harness` (else
+ * `model_observed.harness`). With `bindingDir: process.cwd()` this suite therefore read the
+ * binding of whichever SEAT WORKTREE happened to run it, and the declared `claude-code` below
+ * survived only on a claude-code machine.
+ *
+ * Measured 2026-08-15 at 90af772a: gptbot (codex capture) failed the lifecycle assertion while
+ * dolly (claude-code capture) passed it, on the same commit. Anchoring to a dir with no binding
+ * makes the declaration stand everywhere, which is what these assertions were always about.
+ * Capture-following itself is ADR 275's behaviour and is tested for real in surface-drift.test.ts.
+ */
+let seatDir: string;
 
 async function api(method: string, path: string, body?: unknown, token?: string) {
   const res = await fetch(base + path, {
@@ -57,6 +74,19 @@ beforeEach(async () => {
     { name: 'Ada', kind: 'agent', role: 'backend' },
     tokens['nick'],
   );
+  // Occupancy, not the Workspace primer, is the authority for Ada's Team Role charter (ADR 307).
+  // Seed the role projection directly: this fixture injects its database and intentionally has no
+  // roster root for the normal file reconciler to project.
+  const teamId = server.db
+    .prepare<[], { id: string }>("SELECT id FROM teams WHERE slug = 'dawn'")
+    .get()!.id;
+  const now = Date.now();
+  server.db
+    .prepare(
+      `INSERT INTO roles (team_id, name, capabilities, charter, summary, created_at, updated_at)
+       VALUES (?, 'backend', '{}', 'Own the rails.', NULL, ?, ?)`,
+    )
+    .run(teamId, now, now);
   // Issue a standing grant for Ada's seat so the claim occupies immediately (no admin-approval lane).
   const grant = await api(
     'POST',
@@ -65,11 +95,13 @@ beforeEach(async () => {
     tokens['nick'],
   );
   tokens['ada_grant'] = grant.json.token;
+  seatDir = mkdtempSync(join(tmpdir(), 'musterd-mcp-seat-'));
 });
 
 afterEach(async () => {
   await server.close();
   tokens = {};
+  rmSync(seatDir, { recursive: true, force: true });
 });
 
 function adaConfig(): McpConfig {
@@ -84,9 +116,20 @@ function adaConfig(): McpConfig {
     claim: { mode: 'seat', name: 'Ada' },
     connId: 'conn-ada',
     claimCode: 'AD12',
-    bindingDir: process.cwd(),
+    bindingDir: seatDir,
   };
 }
+
+/**
+ * The fixture invariant, asserted rather than trusted: this suite's seat must be anchored somewhere
+ * with NO capture on disk. Re-point `bindingDir` at `process.cwd()` and this fails immediately on
+ * any developer machine — which is the failure mode it exists to stop, because the assertions that
+ * depend on it (roster surface, attested model) would otherwise silently answer a question about
+ * the runner's own worktree instead of about the code.
+ */
+it('anchors its seat where nothing is captured — or these assertions read the runner, not the code', () => {
+  expect(findBinding(adaConfig().bindingDir!, {})).toBeNull();
+});
 
 async function rosterMember(name: string) {
   const roster = await api('GET', '/teams/dawn/members', undefined, tokens['nick']);
@@ -102,6 +145,7 @@ describe('MCP adapter', () => {
 
     await client.join();
     expect(client.joined).toBe(true);
+    expect(client.charter).toBe('Own the rails.');
     const ada = await rosterMember('Ada');
     expect(ada.presence).toBe('online');
     expect(ada.presences.some((p: any) => p.surface === 'claude-code')).toBe(true);
@@ -150,6 +194,106 @@ describe('MCP adapter', () => {
     await expect(client.join()).rejects.toThrow(/pending approval/i);
     expect(client.joined).toBe(false);
     client.close();
+  }, 10_000);
+
+  // ADR 095: `wait: 0` returns the pending handle immediately and KEEPS the socket parked, so a
+  // later approval still occupies in the background. This is the mode the launch-autojoin path could
+  // not provide — it closes the socket and gives up (the test above pins that it still does).
+  it('a wait:0 join returns pending at once, stays parked, and occupies when the approval lands', async () => {
+    const client = new MusterdClient({ ...adaConfig(), grant: undefined });
+    const started = Date.now();
+    const outcome = await client.join(0, { parkOnPending: true });
+    expect(outcome).toBe('pending');
+    // Returned on the pending frame, not after any wait budget.
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(client.joined).toBe(false);
+    const requestId = client.awaitingRequestId;
+    expect(requestId).toBeTruthy();
+
+    // The socket is still parked: approving now occupies in the background with no second join call.
+    await api(
+      'POST',
+      `/teams/dawn/requests/${requestId}/decide`,
+      { decision: 'approve', lifetime: 'ttl', ttl_hours: 24 },
+      tokens['nick'],
+    );
+    for (let i = 0; i < 50 && !client.joined; i++) await delay(50);
+    expect(client.joined).toBe(true);
+    expect(client.member).toBe('Ada');
+    client.close();
+  }, 10_000);
+
+  // The treadmill ADR 087 closed must stay closed: the server collapses one claim request per seat,
+  // so an eager non-blocking caller cannot spam an admin with duplicates.
+  it('repeated wait:0 joins reuse the one open request rather than opening another', async () => {
+    const client = new MusterdClient({ ...adaConfig(), grant: undefined });
+    expect(await client.join(0, { parkOnPending: true })).toBe('pending');
+    const first = client.awaitingRequestId;
+    client.close();
+
+    const again = new MusterdClient({ ...adaConfig(), grant: undefined });
+    expect(await again.join(0, { parkOnPending: true })).toBe('pending');
+    expect(again.awaitingRequestId).toBe(first);
+    const open = await api('GET', '/teams/dawn/requests?status=pending', undefined, tokens['nick']);
+    expect(open.json.requests).toHaveLength(1);
+    again.close();
+  }, 10_000);
+
+  // Lane 01M1PV8MFA. The adapter's HTTP tools present a lease minted at claim; when that lease dies
+  // mid-session the only recovery armed was the ADR 164 liveness ladder, and the deferred autojoin
+  // fires once per process — so every later act threw and its body was discarded. Measured live
+  // 2026-09-04: `lane_open` refused twice through the adapter while the CLI succeeded from the same
+  // folder. Deleting the presence row is what a daemon bounce or a reap does to the lease
+  // (`hasValidSessionLease` joins on it) without touching this session's intent to hold the seat.
+  it('an act whose lease died mid-session re-joins once and LANDS, instead of being thrown away', async () => {
+    const client = new MusterdClient(adaConfig());
+    await client.join();
+    expect(client.joined).toBe(true);
+
+    server.db
+      .prepare(
+        "DELETE FROM presence WHERE member_id IN (SELECT id FROM members WHERE name = 'Ada')",
+      )
+      .run();
+
+    const envelope = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'team' },
+      act: 'status_update',
+      body: 'the act a dead lease used to eat',
+    });
+    await expect(client.sendEnvelope(envelope)).resolves.toBeDefined();
+    const landed = server.db
+      .prepare<[string], { body: string }>('SELECT body FROM messages WHERE id = ?')
+      .get(envelope.id);
+    expect(landed?.body).toBe('the act a dead lease used to eat');
+    client.close();
+  }, 10_000);
+
+  // The safety argument, pinned: a session that legitimately LOST the seat must stay down. Otherwise
+  // newest-wins becomes two adapters re-claiming each other forever on every refused call.
+  it('a superseded session does NOT re-join on a refusal — newest-wins is not a ping-pong', async () => {
+    const first = new MusterdClient(adaConfig());
+    await first.join();
+    const second = new MusterdClient({ ...adaConfig(), workspace: 'other-repo' });
+    await second.join();
+    for (let i = 0; i < 50 && first.holdsSeat; i++) await delay(20);
+    expect(first.holdsSeat).toBe(false); // superseded — wantPresence is false
+
+    const envelope = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'team' },
+      act: 'status_update',
+      body: 'must not land',
+    });
+    await expect(first.sendEnvelope(envelope)).rejects.toThrow();
+    expect(second.holdsSeat).toBe(true); // the live one keeps the seat
+    first.close();
+    second.close();
   }, 10_000);
 
   it('a second session for the same member takes over; the first is superseded (ADR 017)', async () => {
@@ -256,10 +400,10 @@ describe('MCP adapter', () => {
       // Occupy once so the seat is held (bound_at) — the reseat policy's "known" signal.
       const boot = { ...adaConfig(), bindingDir: tmp };
       saveBinding(tmp, {
+        version: 2,
         server: boot.server,
         team: boot.team,
         agent_key: boot.agent_key!,
-        surface: boot.surface,
         claim: { mode: 'seat', name: 'Ada' },
         grant: boot.grant!,
       });
@@ -387,9 +531,10 @@ describe('MCP adapter', () => {
     s1.leave();
     expect(s1.memory).toBeNull(); // occupy-scoped: released with the seat
 
+    const authority = (s1 as unknown as { config: { seatCredential?: string } }).config;
     s1.close();
 
-    const s2 = new MusterdClient(adaConfig());
+    const s2 = new MusterdClient({ ...adaConfig(), seatCredential: authority.seatCredential });
     await s2.join();
     expect(s2.memory).toEqual({
       headline: 'mid-refactor, tests red',
@@ -681,12 +826,94 @@ describe('MCP adapter', () => {
     });
   });
 
+  // ADR 164 amendment 2 (2026-09-05, lane 01M1T41YRA). "The next tool call re-joins" was true and
+  // not enough: the interrupt probe (ADR 088) is a PostToolUse hook that runs at EVERY tool boundary
+  // and authenticates with the lease in binding.json — a lease the ladder's release just killed. So
+  // a session that resumes after a dormant stretch makes N ordinary tool calls, each probe is
+  // refused, and the seat is deaf until the model happens to call a team_* tool. Measured in the
+  // 2026-09-05 bell check: 26 of 102 probes 401; every adapter-HELD binding was valid, the deaf
+  // seats were dormant adapters (dolly evicted at 09:40, schmidt released ~18:52 and still down at
+  // 19:40). The way back must not wait for a tool that reaches this process — activity in the
+  // transcript is the same first-hand evidence, and the adapter can read it on its own clock.
+  describe('a dormant-by-liveness adapter re-joins on transcript activity, not only on a team_* call', () => {
+    const toolCb = (mcp: ReturnType<typeof buildMcpServer>, name: string) =>
+      (
+        mcp as unknown as {
+          _registeredTools: Record<string, { handler: (...a: unknown[]) => unknown }>;
+        }
+      )._registeredTools[name]!.handler;
+    async function demoted() {
+      const cfg = adaConfig();
+      const client = new MusterdClient(cfg);
+      const mcp = buildMcpServer(client, cfg, { onFirstToolCall: () => autojoin(client, cfg) });
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      await delay(150);
+      expect(client.joined).toBe(true);
+      const fake = { verdict: 'dormant' as string, rung: 'stale' as string | undefined };
+      (client as unknown as { session: { check: () => unknown } }).session = {
+        check: () => ({ verdict: fake.verdict, rung: fake.rung }),
+      };
+      (client as unknown as { lastActivityAt: number }).lastActivityAt = Date.now() - 60_000;
+      expect((client as unknown as { attestSession: () => boolean }).attestSession()).toBe(true);
+      expect(client.joined).toBe(false);
+      expect(client.releasedByLiveness).toBe(true);
+      return { client, fake };
+    }
+
+    it('re-occupies when the ladder reads live again — no tool call involved', async () => {
+      const { client, fake } = await demoted();
+      // Still quiet: the tick must NOT re-join on a stale verdict (that would undo the ladder).
+      expect(await client.rejoinIfSessionResumed()).toBe(false);
+      expect(client.joined).toBe(false);
+      // The transcript moves — the model is back. One tick, and the seat is held again, so the
+      // very next hook probe presents a live lease.
+      fake.verdict = 'live';
+      fake.rung = undefined;
+      expect(await client.rejoinIfSessionResumed()).toBe(true);
+      await delay(100);
+      expect(client.joined).toBe(true);
+      expect(client.releasedByLiveness).toBe(false);
+      client.close();
+    });
+
+    it('a deliberate team_leave is NOT re-armed by activity — that seat was meant to stay left', async () => {
+      const { client, fake } = await demoted();
+      client.leave(); // the agent said so; the ladder's flag is cleared by design
+      fake.verdict = 'live';
+      expect(await client.rejoinIfSessionResumed()).toBe(false);
+      expect(client.joined).toBe(false);
+      client.close();
+    });
+
+    it('the watch is armed by the release itself and disarmed by the re-join', async () => {
+      const { client, fake } = await demoted();
+      const priv = client as unknown as { dormantWatch: NodeJS.Timeout | null };
+      expect(priv.dormantWatch).not.toBeNull();
+      fake.verdict = 'live';
+      await client.rejoinIfSessionResumed();
+      await delay(100);
+      expect(priv.dormantWatch).toBeNull();
+      client.close();
+    });
+  });
+
   it('serves the primer as MCP instructions — file-free onboarding (ADR 012 follow-up)', () => {
     // A provisioned session names its seat.
     const named = primerInstructions(adaConfig());
     expect(named).toContain('## Your musterd team');
-    expect(named).toContain('**Ada** on the **dawn** team');
+    expect(named).toContain('**Ada** on the **dawn** Team');
     expect(named).toContain('team_inbox_check');
+
+    // Before occupancy, a fixed seat policy is still a process-local Member target.
+    const targeted = primerInstructions({
+      server: base,
+      team: 'dawn',
+      claim: { mode: 'seat', name: 'Lin' },
+    });
+    expect(targeted).toContain('**Lin** on the **dawn** Team');
+    for (const forbidden of ['backend', 'own the data layer', 'supabase']) {
+      expect(targeted).not.toContain(forbidden);
+    }
 
     // An unclaimed session (no member) is told to claim a seat first.
     const unclaimed = primerInstructions({ server: base, team: 'dawn' });
@@ -707,8 +934,8 @@ describe('MCP adapter', () => {
  * adapter refuses an operation that would have succeeded, and blames the agent's identity for a
  * transport blip. miley lost a handoff note to exactly this.
  */
-describe('seat drop — a closed socket is not a lost seat', () => {
-  it('acts still work over HTTP while the socket is down, so refusing them is gratuitous', async () => {
+describe('seat drop — agent HTTP authority renews with its Presence', () => {
+  it('renews through a fresh claim before sending after the socket is down', async () => {
     const client = new MusterdClient(adaConfig());
     await bind(client);
     await client.join();
@@ -724,7 +951,7 @@ describe('seat drop — a closed socket is not a lost seat', () => {
     // adapter says you never joined.
     expect(client.member).toBe('Ada');
 
-    // And the act the tool would have refused succeeds over HTTP, with the socket still down.
+    // The lease is Presence-bound, so the reconnect claim renews it before the HTTP act.
     const envelope = {
       id: '01JZZZZZZZZZZZZZZZZZZZZZZZ',
       v: PROTOCOL_VERSION,
@@ -735,6 +962,7 @@ describe('seat drop — a closed socket is not a lost seat', () => {
       body: 'sent while the websocket was closed',
       ts: Date.now(),
     };
+    await client.join();
     await expect(client.sendEnvelope(envelope as never)).resolves.toBeDefined();
 
     client.close();

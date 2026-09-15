@@ -60,5 +60,39 @@
 // Epoch 11 — value layer (ADR 258): team_goal_outcome + Goal.outcome, lane_claim {goal_id},
 // stale_acceptance warning, review_debt in the brief, notices on lane mutations. An epoch-10 seat
 // reads goals/briefs as before (all fields additive) but cannot record an outcome or claim-link.
-export const FEATURE_EPOCH = 11 as const;
+// Epoch 12 — ADR 315: offline-reason deliberate-exit split (presence-honesty §2.3). `offline_reason`
+// gains `left_team` / `seat_released` / `session_ended`; `signed_off` is legacy — accepted on read,
+// resolved as `seat_released`, never newly stamped. An older web bundle drops the row it cannot
+// parse (per-row tolerance, ADR 232's lesson) and the roster's `behind` hint is the cue.
+// Epoch 13 — ADR 316: `idle` → `active` on the wire (activity + posture), and the working→active
+// decay now applies to agents (agentIdleMs, default 15 min). Legacy `idle` accepted on read and
+// normalized; decayed reads keep state + last_status_at so the claim renders aged, never erased.
+// An older seat renders what it receives and the roster's `behind` hint is the cue.
+// Epoch 14 — ADR 296 tier 2: a lane's paths are its `scope` on the wire (was `surface_globs`).
+// Legacy accepted on read everywhere (schema preprocess), and the full Lane shape mirrors the old
+// key so an epoch-13 client parses a new daemon's lanes unchanged; it simply keeps writing the
+// legacy token, which the daemon adopts. The mirror drops in a later epoch, on-touch.
+// Epoch 15 — ADR 321: `opencode` joins the Surface enum as a first-class harness. The daemon at
+// this epoch stores opencode presences (migration 44 widens the CHECK); an older daemon refuses
+// the presence INSERT server-side — the exact enum-vs-storage drift shape migration 39 closed for
+// `musterd` — so an opencode seat must not attest that surface against one. An older web bundle
+// renders the row under the generic label.
+// Epoch 16 — ADR 322 (ADR 296 tier 2 mirror drop): `surface_globs` leaves the wire entirely
+// (dual-send, dual-populate, and legacy read adoption all removed). The binding precondition was
+// the RENAME epoch, not the previous number: the fleet was verified at 14+ on 2026-08-25, and any
+// epoch-14+ counterpart already reads and writes canonical `scope` (14 dual-sends it), so both
+// skew directions hold regardless of the ADR 321 epoch landing in between.
+// Epoch 17 — ADR 352: `grok` joins the Surface enum as a first-class harness. The daemon at this
+// epoch stores grok presences (migration 57 widens the CHECK); an older daemon refuses the
+// presence INSERT server-side — the same enum-vs-storage drift v39/v44 closed for `musterd` /
+// `opencode` — so a grok seat must not attest that surface against one. An older web bundle
+// renders the row under the generic label.
+// Epoch 18 — presence replication (spec 2026-09-02, ADR 356): presence.* is the third replicated
+// kind and `presence.node` exists (migration 61). An older hub refuses a `kind: 'presence'` push
+// (422); an older joiner stops on the unknown kind. Hub before joiners, as every federation
+// increment.
+// Epoch 19 — `team_availability` (surface survey #1245, item 6): the MCP twin of `musterd
+// availability`. A seat at this epoch can set its own availability from an MCP session; an older
+// seat's tool list does not carry it and it keeps shelling out.
+export const FEATURE_EPOCH = 19 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

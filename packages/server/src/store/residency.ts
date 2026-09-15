@@ -1,4 +1,7 @@
 import type {
+  ActDelivery,
+  WakeabilityFacts,
+  Envelope,
   LoopEdge,
   Residency,
   ResidencyPolicy,
@@ -21,12 +24,12 @@ import { MusterdError } from '../errors.js';
 import { appendAudit } from './audit.js';
 import { getCursor } from './cursors.js';
 import { openDirectedLedger } from './delivery.js';
+import { listInterruptCandidates } from './interruptCandidates.js';
 import { getLane, listLanes } from './lanes.js';
 import { getMemberById } from './members.js';
 import { memoryEnvelope } from './memory.js';
 import {
   deferrals,
-  listInbox,
   listTeamMessages,
   pendingInterrupts,
   raisedDeferrals,
@@ -86,6 +89,20 @@ export const STILL_TRUE_WAKEABILITIES: readonly string[] = [
   'enrolled_dead_workspace',
   'not_enrolled',
 ];
+/**
+ * ADR 306: the ceiling on a SUCCEEDING continuation chain, per (lane, edge). The ADR 262 breaker
+ * bounds failure; nothing bounded success, because `dueDispatchContinuationWorkOrders` re-derives a
+ * candidate for every claimed/active owned lane on every poll, forever.
+ *
+ * This number is a JUDGMENT, not a measurement, and the ledger cannot currently improve it: every
+ * chain in the corpus was truncated at three by the very cap ADR 306 removes, so the observation is
+ * censored — no lane was ever permitted to run longer. Eight is comfortably above the three that
+ * provably strangles real chains (measured 2026-08-21: two lanes dead at 3 wokes / 0 failures) and
+ * low enough that a runaway costs single-digit sessions. The trip is a counted event, so the first
+ * real one is visible; re-measure once trips exist. Deliberately not a policy knob yet — a knob
+ * nobody can calibrate is worse than a constant that says why.
+ */
+export const WORK_ORDER_CONTINUATION_SUCCESS_CAP = 8;
 /**
  * How far back the wake derivation scans for deferring `wait`s (ADR 211 §4). Matches the inbox
  * read's bound: past this a deferral stops suppressing, and the act becomes a wake reason again —
@@ -394,6 +411,49 @@ export function revokeResidency(
   return row;
 }
 
+/**
+ * Project a folded `residency.enrolled` (ADR 393). Same upsert as `enrollResidency`, except the
+ * standing grant never crosses — grants are local secrets — so `grant_id` is left as it is on a
+ * re-enroll (a hub that also enrolled this seat keeps its own grant) and null on a first insert.
+ * Wake derivation still filters `host === this host`, so the hub holding the row does not become
+ * the actuator.
+ */
+export function applyFoldedEnrollment(
+  db: Database,
+  teamId: string,
+  input: {
+    member_id: string;
+    harness: string;
+    host: string;
+    authorized_by: string | null;
+    policy?: Record<string, unknown>;
+  },
+  now = Date.now(),
+): void {
+  const previous = getResidency(db, teamId, input.member_id);
+  if (previous) {
+    const policyJson =
+      input.policy === undefined
+        ? previous.policy
+        : Object.keys(input.policy).length === 0
+          ? null
+          : JSON.stringify(input.policy);
+    db.prepare(
+      `UPDATE residency SET harness = ?, host = ?, authorized_by = ?, policy = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(input.harness, input.host, input.authorized_by, policyJson, now, previous.id);
+    return;
+  }
+  enrollResidency(db, teamId, {
+    member_id: input.member_id,
+    harness: input.harness,
+    host: input.host,
+    grant_id: null,
+    authorized_by: input.authorized_by,
+    ...(input.policy !== undefined ? { policy: input.policy } : {}),
+  });
+}
+
 export function getResidency(db: Database, teamId: string, memberId: string): ResidencyRow | null {
   return (
     db
@@ -412,6 +472,154 @@ export function listResidency(db: Database, teamId: string): ResidencyRow[] {
       ResidencyRow
     >('SELECT * FROM residency WHERE team_id = ? ORDER BY created_at ASC, id ASC')
     .all(teamId);
+}
+
+/**
+ * How long a host may go silent before its seats read `enrolled_host_stale` (ADR 357).
+ *
+ * ~~60 s — six missed 10 s polls~~ CORRECTED 2026-09-02 by the first live falsifier: the actuator
+ * polls every 10 s only while IDLE. `pollHostOnce` is serial — an actuation suspends polling for
+ * its whole verify window, and the first codex wake after #1197 went 94 s between requests
+ * (15:50:02 → 15:51:36) while doing exactly what it should. At 60 s every enrolled seat read
+ * `enrolled_host_stale` during a healthy wake. Five minutes is above the longest silence a serial
+ * actuation can produce (a 30 s resume window plus a lease-TTL fresh window) and still shows a
+ * dead LaunchAgent inside the time an ADR 191 ask would otherwise wait on it. Every
+ * host-authenticated residency request (poll, progress, turn, report) now stamps the sighting, so a
+ * busy host refreshes at report time even mid-actuation.
+ */
+export const HOST_STALE_MS = 300_000;
+
+/**
+ * The host's poll IS its heartbeat (ADR 357). Every `POST /residency/wake-leases` names the host;
+ * the daemon received that every 10 s since ADR 131 and never wrote it down, which is why
+ * `enrolled_host_stale` could only ever appear on a wake report after the wake had failed. Newest
+ * wins; an out-of-order old poll never moves a sighting backwards.
+ */
+export function recordHostSeen(db: Database, teamId: string, host: string, now: number): void {
+  db.prepare(
+    `INSERT INTO host_liveness (team_id, host, seen_at) VALUES (?, ?, ?)
+     ON CONFLICT(team_id, host) DO UPDATE SET seen_at = MAX(seen_at, excluded.seen_at)`,
+  ).run(teamId, host, now);
+}
+
+/** Every host this team has ever heard from, and when — nearest reading of "is the actuator up". */
+export function listHostSeen(db: Database, teamId: string): Map<string, number> {
+  const rows = db
+    .prepare<
+      [string],
+      { host: string; seen_at: number }
+    >('SELECT host, seen_at FROM host_liveness WHERE team_id = ?')
+    .all(teamId);
+  return new Map(rows.map((r) => [r.host, r.seen_at]));
+}
+
+/**
+ * The facts `wakeabilityFromFacts` (ADR 189) needs, per enrolled member — the two it was never given
+ * (ADR 357): `host_reachable` from the host's last poll, `workspace_readable` from the last wake
+ * report. Absent from the map ⇒ not enrolled.
+ *
+ * `workspace_readable` is false only when the newest `residency.wake_failed` for the seat carries a
+ * still-true wakeability (`enrolled_dead_workspace` — the ADR 262 set) AND no `residency.woke` has
+ * landed since. The daemon cannot stat a path on the host's filesystem; it can read what the host
+ * last reported and whether anything newer contradicts it.
+ */
+/**
+ * ADR 365 §3 — the deciding readers of the wake ledger stay on rows THIS machine minted.
+ *
+ * The six wake verbs now cross the wire as `ledger` events so `musterd report` can count a team's
+ * whole wake economy (ADR 365 §1). But those same rows are the rate policy's state (ADR 131 §4):
+ * the hourly cap, the attempt cap, ADR 262's re-spend breaker and ADR 357's `workspace_readable`
+ * all COUNT them. Folding a peer's rows into those counts would make wake caps team-wide — a
+ * decision crossing the wire, which is residence 3, and not this ADR's to make. So every deciding
+ * read carries this predicate and behaves exactly as it did before replication existed.
+ *
+ * `''` is a row minted here before the stamp existed (every pre-v58 row, and any row whose stamp
+ * failed); the subquery is this daemon's node id for the team, absent on a machine that has never
+ * enrolled — which is then simply the `''` case. A folded row matches neither.
+ *
+ * Falsifier: fold a peer's `residency.woke` rows past the hourly cap and poll for a wake here — it
+ * must still be ordered. `residency.test.ts` "ignores a peer machine's wake rows" pins it; drop the
+ * predicate from `wakesSince` and that case fails.
+ */
+const MINTED_HERE = `AND origin_node IN ('', COALESCE((SELECT node_id FROM local_node l WHERE l.team_id = audit.team_id), ''))`;
+
+export interface SeatWakeabilityFacts {
+  enrolled: true;
+  host: string;
+  /** Undefined when this daemon has never heard from the host at all — unknown, not stale (ADR
+   *  236: absence is not an assertion). A host that HAS polled and stopped is `false`. */
+  host_reachable: boolean | undefined;
+  workspace_readable: boolean;
+  resumable_at: number | null;
+}
+
+/**
+ * The `wakeabilityFromFacts` inputs for one seat's facts, omitting `host_reachable` when it is
+ * unknown — the enum function treats an absent fact as "no evidence to demote on", which is
+ * exactly what never-heard-from means (ADR 236).
+ */
+export function wakeabilityInputs(
+  facts: SeatWakeabilityFacts | undefined,
+): Pick<WakeabilityFacts, 'host_reachable' | 'workspace_readable'> {
+  if (!facts) return {};
+  return {
+    workspace_readable: facts.workspace_readable,
+    ...(facts.host_reachable !== undefined ? { host_reachable: facts.host_reachable } : {}),
+  };
+}
+
+export function seatWakeabilityFacts(
+  db: Database,
+  teamId: string,
+  now: number,
+): Map<string, SeatWakeabilityFacts> {
+  const hosts = listHostSeen(db, teamId);
+  const lastFailure = db.prepare<[string, string], { detail: string; ts: number }>(
+    `SELECT detail, ts FROM audit
+      WHERE team_id = ? AND action = 'residency.wake_failed' AND target = ?
+        ${MINTED_HERE}
+      ORDER BY ts DESC, id DESC LIMIT 1`,
+  );
+  const lastWoke = db.prepare<[string, string], { ts: number }>(
+    `SELECT ts FROM audit
+      WHERE team_id = ? AND action = 'residency.woke' AND target = ?
+        ${MINTED_HERE}
+      ORDER BY ts DESC, id DESC LIMIT 1`,
+  );
+  const out = new Map<string, SeatWakeabilityFacts>();
+  for (const r of listResidency(db, teamId)) {
+    const member = getMemberById(db, r.member_id);
+    const seen = hosts.get(r.host);
+    // Never heard from ⇒ unknown, and unknown never demotes: a fresh install, an older host build,
+    // or a registry entry nobody has polled for yet all read exactly as they did before this table
+    // existed. Only a host that HAS polled and then stopped for HOST_STALE_MS is stale — that is
+    // an observed silence, not an assumed one.
+    const host_reachable = seen === undefined ? undefined : now - seen < HOST_STALE_MS;
+    let workspace_readable = true;
+    if (member) {
+      const failed = lastFailure.get(teamId, member.name);
+      if (failed) {
+        let wakeability: string | undefined;
+        try {
+          wakeability = (JSON.parse(failed.detail) as { wakeability?: string }).wakeability;
+        } catch {
+          /* unreadable detail is not evidence of anything */
+        }
+        if (wakeability === 'enrolled_dead_workspace') {
+          const woke = lastWoke.get(teamId, member.name);
+          workspace_readable = woke !== undefined && woke.ts > failed.ts;
+        }
+      }
+    }
+    out.set(r.member_id, {
+      enrolled: true,
+      host: r.host,
+      host_reachable,
+      workspace_readable,
+      resumable_at: r.resumable_at,
+    });
+  }
+  return out;
 }
 
 /** Member ids enrolled in residency — the roster's `wakeable` flag (`offline · wakeable`). */
@@ -441,7 +649,7 @@ function wakesSince(db: Database, teamId: string, seatName: string, sinceTs: num
     .prepare<[string, string, number], { n: number }>(
       `SELECT COUNT(*) AS n FROM audit
         WHERE team_id = ? AND action IN ('residency.woke','residency.wake_failed')
-          AND target = ? AND ts > ?`,
+          AND target = ? AND ts > ? ${MINTED_HERE}`,
     )
     .get(teamId, seatName, sinceTs);
   return row?.n ?? 0;
@@ -455,7 +663,7 @@ function deferredSince(db: Database, teamId: string, seatName: string, sinceTs: 
     .prepare<[string, string, number], { one: number }>(
       `SELECT 1 AS one FROM audit
         WHERE team_id = ? AND action = 'residency.wake_deferred'
-          AND target = ? AND ts > ? LIMIT 1`,
+          AND target = ? AND ts > ? ${MINTED_HERE} LIMIT 1`,
     )
     .get(teamId, seatName, sinceTs);
   return row != null;
@@ -467,7 +675,7 @@ function attemptsForAct(db: Database, teamId: string, actId: string): number {
     .prepare<[string, string], { n: number }>(
       `SELECT COUNT(*) AS n FROM audit
         WHERE team_id = ? AND action IN ('residency.woke','residency.wake_failed')
-          AND json_extract(detail, '$.act') = ?`,
+          AND json_extract(detail, '$.act') = ? ${MINTED_HERE}`,
     )
     .get(teamId, actId);
   return row?.n ?? 0;
@@ -479,7 +687,7 @@ function isExhausted(db: Database, teamId: string, actId: string): boolean {
     .prepare<[string, string], { one: number }>(
       `SELECT 1 AS one FROM audit
         WHERE team_id = ? AND action = 'residency.wake_exhausted'
-          AND json_extract(detail, '$.act') = ? LIMIT 1`,
+          AND json_extract(detail, '$.act') = ? ${MINTED_HERE} LIMIT 1`,
     )
     .get(teamId, actId);
   return row != null;
@@ -493,26 +701,43 @@ function isExhausted(db: Database, teamId: string, actId: string): boolean {
 function composeWakeLine(seat: string, teamSlug: string, act: string, sender: string): string {
   return (
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": a ${act} from "${sender}" is ` +
-    `waiting. Read it now via team_inbox_check (or 'musterd inbox') and respond.`
+    `waiting. Orient via team_wake_context, read it via team_inbox_check (or 'musterd inbox'), ` +
+    `and respond.`
   );
 }
 
-/** Work-order line (ADR 179 / 191 / 199): lane id only — never a title, never free text. */
+/**
+ * Work-order line (ADR 179 / 191 / 199): ids only — never a title, never free text.
+ *
+ * **The review line names the ACT, not just the lane.** `team_wake_context` has two paths and they
+ * are not interchangeable: `lane_id` authorizes the lane's OWNER and answers `work_order` /
+ * `continue_lane`, while `act_id` authorizes the act's RECIPIENT and answers `review` with the lane
+ * block already attached. A reviewer never owns the lane it reviews, so a line naming only the lane
+ * sent them at the one path that must refuse them — measured 2026-09-04: 38 of 47 review-edge wakes
+ * had a `residency.context_read` deny within ±5 minutes of the wake, 83 of 87 lane-target denials
+ * being a seat asking about a lane it does not own. Every one of those 47 wakes carried an act, and
+ * every one of those acts carried `meta.lane_review`, so the act path serves all of them. Widening
+ * the lane path instead would have handed reviewers a packet that calls their job `continue_lane`.
+ */
 function composeWorkOrderLine(
   seat: string,
   teamSlug: string,
   laneId: string,
   kind: 'review' | 'dispatch',
+  actId?: string,
 ): string {
   if (kind === 'review') {
-    return (
-      `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
-      `review. Orient via team_next / team_inbox_check and begin.`
-    );
+    // `act_id` is present on every review work order the picker builds; the lane-only phrasing is
+    // kept as the honest fallback rather than inventing an id we were not given (ADR 236).
+    return actId !== undefined
+      ? `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
+          `review. Orient via team_wake_context {act_id: "${actId}"} (then team_next) and begin.`
+      : `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
+          `review. Orient via team_next and begin.`;
   }
   return (
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} is yours — ` +
-    `orient via team_next and begin.`
+    `orient via team_wake_context (then team_next) and begin.`
   );
 }
 
@@ -536,10 +761,60 @@ function workOrderEdgeFailureCount(
       `SELECT COUNT(*) AS n FROM audit
         WHERE team_id = ? AND action = 'residency.wake_failed'
           AND json_extract(detail, '$.lane_id') = ?
-          AND json_extract(detail, '$.edge') = ?`,
+          AND json_extract(detail, '$.edge') = ? ${MINTED_HERE}`,
     )
     .get(teamId, laneId, edge);
   return row?.n ?? 0;
+}
+
+/** ADR 306: successful wakes already spent on this (lane, edge) — the succeeding-chain bound. */
+function workOrderEdgeWokeCount(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  edge: LoopEdge,
+): number {
+  const row = db
+    .prepare<[string, string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM audit
+        WHERE team_id = ? AND action = 'residency.woke'
+          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.edge') = ? ${MINTED_HERE}`,
+    )
+    .get(teamId, laneId, edge);
+  return row?.n ?? 0;
+}
+
+/**
+ * ADR 306: has the lane moved since the last successful wake on this edge? A continuation wake that
+ * changed nothing does not buy the next one (ADR 247 — progress is not an outcome; ADR 250 §2 — no
+ * heartbeat that burns spend while nothing changed). No prior woke ⇒ nothing to have stalled since,
+ * so the first firing is always permitted.
+ */
+function laneMovedSinceLastWoke(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  edge: LoopEdge,
+): boolean {
+  const last = db
+    .prepare<[string, string, string], { ts: number }>(
+      `SELECT ts FROM audit
+        WHERE team_id = ? AND action = 'residency.woke'
+          AND json_extract(detail, '$.lane_id') = ? ${MINTED_HERE}
+          AND json_extract(detail, '$.edge') = ?
+        ORDER BY ts DESC, id DESC LIMIT 1`,
+    )
+    .get(teamId, laneId, edge);
+  if (!last) return true;
+  const lane = db
+    .prepare<
+      [string, string],
+      { updated_at: number }
+    >('SELECT updated_at FROM lanes WHERE team_id = ? AND id = ?')
+    .get(teamId, laneId);
+  if (!lane) return false;
+  return lane.updated_at > last.ts;
 }
 
 function workOrderEdgeStillTrue(
@@ -552,9 +827,9 @@ function workOrderEdgeStillTrue(
     .prepare<[string, string, string], { detail: string }>(
       `SELECT detail FROM audit
         WHERE team_id = ? AND action = 'residency.wake_failed'
-          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.lane_id') = ? ${MINTED_HERE}
           AND json_extract(detail, '$.edge') = ?
-        ORDER BY ts DESC, rowid DESC LIMIT 1`,
+        ORDER BY ts DESC, id DESC LIMIT 1`,
     )
     .get(teamId, laneId, edge);
   if (!row) return false;
@@ -644,7 +919,7 @@ function dueReviewWorkOrders(
             SELECT 1 FROM messages v
              WHERE v.team_id = m.team_id AND v.act = 'resolve'
                AND v.thread_id = COALESCE(m.thread_id, m.id))
-        ORDER BY m.ts ASC`,
+        ORDER BY m.created_at ASC`,
     )
     .all(teamId, member.id);
   const out: WakeCandidate[] = [];
@@ -700,7 +975,7 @@ function dueDispatchHandoffWorkOrders(
             SELECT 1 FROM messages v
              WHERE v.team_id = m.team_id AND v.act = 'resolve'
                AND v.thread_id = COALESCE(m.thread_id, m.id))
-        ORDER BY m.ts ASC`,
+        ORDER BY m.created_at ASC`,
     )
     .all(teamId, member.id);
   const out: WakeCandidate[] = [];
@@ -784,21 +1059,64 @@ function dueCandidates(
   db: Database,
   teamSlug: string,
   member: MemberRow,
-  lanes: { immediate: boolean; batched: boolean; raisedDeferralWakes: boolean },
+  lanes: {
+    immediate: boolean;
+    batched: boolean;
+    raisedDeferralWakes: boolean;
+    /** ADR 378 inc 4: does a huddle OPEN that names this seat summon it? Effective seat policy. */
+    conveneHuddles: boolean;
+  },
+  /**
+   * The team's open directed ledger, computed ONCE for the whole poll — as a THUNK, so a team where
+   * no seat reaches the batched lane pays nothing at all.
+   *
+   * It used to be read here, which meant `openDirectedLedger(db, member.team_id)` — a TEAM-scoped
+   * query whose answer is identical for every seat in the poll — ran once per enrolled seat. It is
+   * three correlated `NOT EXISTS` subqueries over the whole `messages` table on unindexed
+   * `json_extract`, unbounded, and then `actDeliveryOf` per returned row, which queries again per
+   * row and per recipient. Measured 2026-09-04 by big-body on the wedged daemon: a 3-second stack
+   * sample spent 2,406 of 2,407 samples inside synchronous `sqlite3_step` while `/health` timed out
+   * and the process stayed alive.
+   *
+   * Passed in rather than memoised behind a module-level cache on purpose: the lifetime that is
+   * correct here is exactly one poll transaction, and a parameter cannot outlive it or go stale.
+   */
+  ledger: () => ActDelivery[],
 ): WakeCandidate[] {
   const immediate: WakeCandidate[] = [];
   const batched: WakeCandidate[] = [];
   const seen = new Set<string>();
 
+  // A team has tens of members and a window has thousands of rows, so the per-row `getMemberById`
+  // asked the same few questions over and over — 800 statements to learn 31 names. Memoised for the
+  // life of this derivation only: membership cannot change inside the poll's transaction, and the
+  // map dies with the call, so there is no cache to invalidate.
+  const names = new Map<string, string | undefined>();
+  const nameOf = (id: string): string | undefined => {
+    if (!names.has(id)) names.set(id, getMemberById(db, id)?.name);
+    return names.get(id);
+  };
+
   if (lanes.immediate || lanes.batched) {
     const cursor = getCursor(db, member.id);
-    const rows = listInbox(db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
-    const envelopes = rows.map((r) => {
-      const from = getMemberById(db, r.from_member);
-      const to = r.to_member ? getMemberById(db, r.to_member) : null;
-      return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
-    });
-    for (const env of pendingInterrupts(envelopes, member.name)) {
+    // Only the shapes `pendingInterrupts` can use — the seat's unread depth is not this poll's
+    // business, and it is the last term that still grew with it.
+    const rows = listInterruptCandidates(db, member, { cursorTs: cursor.last_read_ts });
+    const envelopes = rows.map((r) =>
+      rowToEnvelope(
+        r,
+        teamSlug,
+        nameOf(r.from_member) ?? '?',
+        r.to_member ? (nameOf(r.to_member) ?? null) : null,
+      ),
+    );
+    // The ONLY opt-in this rail makes to the shared predicate. `obligations` and `huddles` stay off
+    // here on purpose (ADR 225, ADR 378): both admit acts by the handful and would route paid wakes
+    // around their own policy gates. `huddleOpens` admits exactly one act per huddle and is gated by
+    // the seat's own effective policy, which is what makes it affordable on this side.
+    for (const env of pendingInterrupts(envelopes, member.name, {
+      huddleOpens: lanes.conveneHuddles,
+    })) {
       if (seen.has(env.id)) continue;
       seen.add(env.id);
       const demoted = sentFromWake(db, env.id);
@@ -822,7 +1140,7 @@ function dueCandidates(
   }
 
   if (lanes.batched) {
-    for (const delivery of openDirectedLedger(db, member.team_id)) {
+    for (const delivery of ledger()) {
       if (seen.has(delivery.id)) continue;
       const mine = delivery.recipients.find((r) => r.seat === member.name);
       if (!mine || mine.state === 'answered') continue;
@@ -844,16 +1162,40 @@ function dueCandidates(
   // The fold reads the party-scoped team timeline, not the inbox: `listInbox` excludes the member's
   // own sends and a deferring `wait` IS the member's own send.
   const due = [...immediate, ...batched];
-  const scan = listTeamMessages(db, member.team_id, {
+  // Nothing is due, so there is nothing to suppress — and the only use of the scan below is
+  // `due.flatMap`, which returns [] over an empty array whatever the deferrals say. Before this the
+  // 2,000-row window was marshalled per seat per poll to filter a list that was already empty: the
+  // common case at idle, and pure cost. An earlier fix narrowed the HYDRATION of this window (see
+  // the note below) but left the query itself running unconditionally.
+  if (due.length === 0) return due;
+  const window = listTeamMessages(db, member.team_id, {
     forMemberId: member.id,
     limit: DEFERRAL_SCAN_LIMIT,
-  }).map((r) => {
-    const from = getMemberById(db, r.from_member);
-    const to = r.to_member ? getMemberById(db, r.to_member) : null;
-    return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
   });
-  const held = deferrals(scan, member.name);
+  // Hydration costs two member lookups a row, so it is spent per row only where a name is actually
+  // read. This poll runs in one transaction on the request path every 30s per enrolled seat: a cost
+  // that scales with the window rather than with what is due starves the event loop for every other
+  // request as the log grows (measured: 840ms and 8000+ lookups at idle, `/health` timing out behind
+  // it). Same window, same limit, same order — only the hydration is narrowed.
+  const hydrate = (rows: MessageRow[]): Envelope[] =>
+    rows.map((r) =>
+      rowToEnvelope(
+        r,
+        teamSlug,
+        nameOf(r.from_member) ?? '?',
+        r.to_member ? (nameOf(r.to_member) ?? null) : null,
+      ),
+    );
+  // `deferrals` reads exactly one shape — the seat's OWN `wait` acts — so the rest of the window is
+  // hydrated for nothing on the overwhelmingly common path where the seat has deferred nothing.
+  const held = deferrals(
+    hydrate(window.filter((r) => r.act === 'wait' && r.from_member === member.id)),
+    member.name,
+  );
   if (held.size === 0) return due;
+  // A deferral IS held: `raisedDeferrals` reads the whole window (it needs every act on the deferred
+  // subjects, and their threads), so the full hydration is paid here — where it is load-bearing.
+  const scan = hydrate(window);
 
   // ADR 214 (ADR 211 inc 2): once a deferral's condition fires the act is pending again, and
   // `raised_deferral_wakes`
@@ -912,6 +1254,11 @@ export function claimWakeLeases(
     const reclaimable = listReclaimableMemberIds(db, teamId, now);
     const enrollments = listResidency(db, teamId).filter((r) => r.host === host);
     const teamPolicy = getPolicy(db, teamId);
+    // One ledger read for the whole poll, and only if some seat actually reaches the batched lane —
+    // a team where every enrolled seat is on the interrupt lane, or is inside its cooldown, pays
+    // nothing. Lazy rather than eager for exactly that case; memoised for exactly this transaction.
+    let ledgerMemo: ActDelivery[] | null = null;
+    const teamLedger = (): ActDelivery[] => (ledgerMemo ??= openDirectedLedger(db, teamId));
     const teamDefaults = teamPolicy.residency;
     const reviewLoopOn = teamPolicy.loops?.review === true;
     const dispatchLoopOn = teamPolicy.loops?.dispatch === true;
@@ -928,11 +1275,18 @@ export function claimWakeLeases(
       if (wakesSince(db, teamId, member.name, now - 3_600_000) >= policy.hourly_cap) continue;
 
       const cooled = wakesSince(db, teamId, member.name, now - policy.cooldown_ms) === 0;
-      const candidates = dueCandidates(db, teamSlug, member, {
-        immediate: policy.lane !== 'batched',
-        batched: cooled && policy.lane !== 'interrupt',
-        raisedDeferralWakes: policy.raised_deferral_wakes,
-      });
+      const candidates = dueCandidates(
+        db,
+        teamSlug,
+        member,
+        {
+          immediate: policy.lane !== 'batched',
+          batched: cooled && policy.lane !== 'interrupt',
+          raisedDeferralWakes: policy.raised_deferral_wakes,
+          conveneHuddles: policy.convene_huddles,
+        },
+        teamLedger,
+      );
       // ADR 199: dispatch work-orders (continuation then handoff — handoff unshifted last so it
       // leads). ADR 191: review work-orders prefer ahead of both + inbox.
       if (dispatchLoopOn && policy.flow === 'auto' && cooled) {
@@ -944,24 +1298,42 @@ export function claimWakeLeases(
       }
       for (const candidate of candidates) {
         const exhKey = wakeExhaustionKey(candidate.act_id, candidate.lane_id);
-        if (isExhausted(db, teamId, exhKey)) continue;
-        if (attemptsForAct(db, teamId, exhKey) >= policy.attempt_cap) {
-          appendAudit(db, teamId, {
-            actor: null,
-            action: 'residency.wake_exhausted',
-            target: member.name,
-            result: 'deny',
-            detail: {
-              act: exhKey,
-              sender: candidate.sender ?? 'board',
-              attempts: policy.attempt_cap,
-              derivation: candidate.derivation,
-              ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
-            },
-          });
-          continue;
-        }
         const edge = loopEdgeOf(candidate);
+        /**
+         * ADR 306 §1. An edge-bearing work order is bounded by the ADR 262 (lane, edge) rules
+         * below and by nothing else. The per-act cap does NOT apply to it, for two reasons the
+         * live ledger showed on 2026-08-21:
+         *
+         *  - it counts `residency.woke` alongside `wake_failed` against a LIFETIME terminal row,
+         *    so three SUCCESSFUL continuations exhausted a lane forever — the exact case ADR 262
+         *    §4.1 promised would keep deriving, dead on two real lanes;
+         *  - keyed `act_id` else `lane:<id>`, it is coarser than (lane, edge) at the same
+         *    threshold of 3 while counting a SUPERSET of the rows. A subset counter behind a
+         *    superset counter at an equal threshold is unreachable: the ADR 262 breaker fired
+         *    zero times in eight days while five (lane, edge) pairs reached its threshold.
+         *
+         * Inbox wakes (edge NULL) are untouched — there a success SHOULD retire the act.
+         */
+        const edgeBound = edge !== null && candidate.lane_id !== undefined;
+        if (!edgeBound) {
+          if (isExhausted(db, teamId, exhKey)) continue;
+          if (attemptsForAct(db, teamId, exhKey) >= policy.attempt_cap) {
+            appendAudit(db, teamId, {
+              actor: null,
+              action: 'residency.wake_exhausted',
+              target: member.name,
+              result: 'deny',
+              detail: {
+                act: exhKey,
+                sender: candidate.sender ?? 'board',
+                attempts: policy.attempt_cap,
+                derivation: candidate.derivation,
+                ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
+              },
+            });
+            continue;
+          }
+        }
         if (edge && candidate.lane_id) {
           if (
             workOrderEdgeFailureCount(db, teamId, candidate.lane_id, edge) >=
@@ -984,6 +1356,33 @@ export function claimWakeLeases(
             continue;
           }
           if (workOrderEdgeStillTrue(db, teamId, candidate.lane_id, edge)) continue;
+          if (edge === 'dispatch_continuation') {
+            // ADR 306 §3 — the succeeding chain has a ceiling too.
+            if (
+              workOrderEdgeWokeCount(db, teamId, candidate.lane_id, edge) >=
+              WORK_ORDER_CONTINUATION_SUCCESS_CAP
+            ) {
+              appendAudit(db, teamId, {
+                actor: null,
+                action: 'residency.wake_exhausted',
+                target: member.name,
+                result: 'deny',
+                detail: {
+                  act: exhKey,
+                  edge,
+                  lane_id: candidate.lane_id,
+                  reason: 'continuation_cap',
+                  attempts: WORK_ORDER_CONTINUATION_SUCCESS_CAP,
+                  derivation: candidate.derivation,
+                },
+              });
+              continue;
+            }
+            // ADR 306 §2 — a wake that moved nothing does not buy the next one. Silent, like the
+            // still-true skip: a stalled lane is the normal resting state of a claimed board, not
+            // an event worth a row on every poll.
+            if (!laneMovedSinceLastWoke(db, teamId, candidate.lane_id, edge)) continue;
+          }
         }
         const lease: WakeLeaseRow = {
           id: ulid(),
@@ -1036,7 +1435,13 @@ export function claimWakeLeases(
           ...(candidate.sender !== undefined ? { sender: candidate.sender } : {}),
           lane: candidate.lane,
           composed_line: isWorkOrder
-            ? composeWorkOrderLine(member.name, teamSlug, candidate.lane_id!, kind)
+            ? composeWorkOrderLine(
+                member.name,
+                teamSlug,
+                candidate.lane_id!,
+                kind,
+                candidate.act_id,
+              )
             : composeWakeLine(
                 member.name,
                 teamSlug,
@@ -1229,6 +1634,11 @@ export function listResidencyTeamIds(db: Database): string[] {
  * `residency.host_suspended` interval clipped to that window (ADR 236). Derived from the ledger, in
  * the ADR 131 §4 shape: the audit rows ARE the state, and they survive a daemon restart, which
  * in-memory tick bookkeeping does not.
+ *
+ * Pinned to rows THIS machine minted (ADR 371 §4): `residency.host_suspended` replicates now, and a
+ * suspension is a fact about the host that slept — folding a peer's into this ceiling would make
+ * the hub believe it was asleep while a laptop's lid was shut. The same pin on `firstWakeLeaseTs`
+ * and `leaseCapturedSession` below: a lease is host-scoped by construction (ADR 361).
  */
 export function hostAsleepMs(db: Database, teamId: string, from: number, to: number): number {
   const row = db
@@ -1236,7 +1646,7 @@ export function hostAsleepMs(db: Database, teamId: string, from: number, to: num
       `SELECT COALESCE(SUM(MAX(0,
                 MIN(json_extract(detail, '$.to'), ?) - MAX(json_extract(detail, '$.from'), ?))), 0) AS ms
          FROM audit
-        WHERE team_id = ? AND action = 'residency.host_suspended' AND ts >= ?`,
+        WHERE team_id = ? AND action = 'residency.host_suspended' AND ts >= ? ${MINTED_HERE}`,
     )
     .get(to, from, teamId, from);
   return row?.ms ?? 0;
@@ -1253,7 +1663,7 @@ export function firstWakeLeaseTs(db: Database, teamId: string, actKey: string): 
     .prepare<[string, string], { ts: number }>(
       `SELECT MIN(ts) AS ts FROM audit
         WHERE team_id = ? AND action = 'residency.wake_leased'
-          AND json_extract(detail, '$.act') = ?`,
+          AND json_extract(detail, '$.act') = ? ${MINTED_HERE}`,
     )
     .get(teamId, actKey);
   return row?.ts ?? null;
@@ -1274,7 +1684,7 @@ export function leaseCapturedSession(db: Database, teamId: string, leaseId: stri
     .prepare<[string, string], { n: number }>(
       `SELECT COUNT(*) AS n FROM audit
         WHERE team_id = ? AND action = 'residency.session_captured'
-          AND json_extract(detail, '$.wake_lease') = ?`,
+          AND json_extract(detail, '$.wake_lease') = ? ${MINTED_HERE}`,
     )
     .get(teamId, leaseId);
   return (row?.n ?? 0) > 0;

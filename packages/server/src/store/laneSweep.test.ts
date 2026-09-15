@@ -34,6 +34,103 @@ function stranded(db: ReturnType<typeof openDb>, teamId: string, agedMs: number,
   return lane;
 }
 
+/**
+ * Plant the `lane.ready_for_review` row the submit would have written, so a swept close has the
+ * routing facts to report. `stranded()` alone writes none — which is itself the abstaining case.
+ */
+function readyRow(
+  db: ReturnType<typeof openDb>,
+  teamId: string,
+  laneId: string,
+  detail: Record<string, unknown>,
+) {
+  db.prepare(
+    `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+     VALUES (?, ?, ?, ?, 'lane.ready_for_review', ?, 'allow', ?, ?)`,
+  ).run(
+    `ready-${laneId}`,
+    teamId,
+    Date.now() - 1000,
+    'dolly',
+    laneId,
+    JSON.stringify({ lane: laneId, owner: 'dolly', ...detail }),
+    Date.now() - 1000,
+  );
+}
+
+/**
+ * A swept lane must say whether anyone was ever ASKED — the question `review_swept` alone cannot
+ * answer (lane 01M042GWK3).
+ *
+ * The seat-closed ladder in laneClose.ts already separates "nobody was asked" from "asked and
+ * nobody answered", with an ADR behind each rung. The sweep short-circuited ahead of all of it, so
+ * the ONE path where no human is watching recorded the least. Measured 2026-08-15: lane 01M016D5GA
+ * (44 files joining typecheck, every CI-deciding gate among them) was swept at exactly 24h with
+ * `reason: review_swept` — and no ask had ever been sent, because the roster was an all-claude
+ * monoculture and `pickReviewCounterpart` returned null. Nothing in the close row could say so.
+ *
+ * Only one of the two is anyone's fault, and a retrospective query cannot tell which without this.
+ */
+describe('a swept close reports whether an ask was ever sent', () => {
+  it('names the absent ask when the picker found no counterpart', () => {
+    const { db, team } = seed();
+    const lane = stranded(db, team.id, SWEEP_GRACE_MS + 1);
+    readyRow(db, team.id, lane.id, { no_candidate: true, human_required: false });
+
+    sweepAbandonedAcceptance(db, team.id, 'revive', Date.now());
+
+    const row = closeRow(db, lane.id);
+    // The ADR 229 fact is untouched: the clock closed it, not a seat.
+    expect(row?.detail['reason']).toBe('review_swept');
+    // …and the orthogonal fact it could not carry before.
+    expect(row?.detail['ask_outcome']).toBe('no_candidate');
+  });
+
+  it('distinguishes a lane whose reviewer WAS asked and never answered', () => {
+    const { db, team } = seed();
+    const lane = stranded(db, team.id, SWEEP_GRACE_MS + 1);
+    readyRow(db, team.id, lane.id, { reviewer: 'nick', review_grade: 'cross_family' });
+
+    sweepAbandonedAcceptance(db, team.id, 'revive', Date.now());
+
+    const row = closeRow(db, lane.id);
+    expect(row?.detail['reason']).toBe('review_swept');
+    expect(row?.detail['ask_outcome']).toBe('routed');
+  });
+
+  it('reports a by-design exemption as its own thing, not as a degradation', () => {
+    const { db, team } = seed();
+    const lane = stranded(db, team.id, SWEEP_GRACE_MS + 1);
+    readyRow(db, team.id, lane.id, { acceptance_exempt: true });
+
+    sweepAbandonedAcceptance(db, team.id, 'revive', Date.now());
+
+    expect(closeRow(db, lane.id)?.detail['ask_outcome']).toBe('acceptance_exempt');
+  });
+
+  it('names a REQUIRED human who was never live, above the plain no-candidate', () => {
+    const { db, team } = seed();
+    const lane = stranded(db, team.id, SWEEP_GRACE_MS + 1);
+    readyRow(db, team.id, lane.id, { no_candidate: true, human_required: true });
+
+    sweepAbandonedAcceptance(db, team.id, 'revive', Date.now());
+
+    expect(closeRow(db, lane.id)?.detail['ask_outcome']).toBe('human_review_missed');
+  });
+
+  it('ABSTAINS when no ready row exists — a lane from before the field invents no verdict', () => {
+    const { db, team } = seed();
+    const lane = stranded(db, team.id, SWEEP_GRACE_MS + 1);
+
+    sweepAbandonedAcceptance(db, team.id, 'revive', Date.now());
+
+    const row = closeRow(db, lane.id);
+    expect(row?.detail['reason']).toBe('review_swept');
+    // Absent, not a guess: the same discipline every other rung in this ladder follows.
+    expect(row?.detail).not.toHaveProperty('ask_outcome');
+  });
+});
+
 describe('sweepAbandonedAcceptance — the backstop (ADR 229)', () => {
   it('closes a lane that has waited past the grace, and says the system did it', () => {
     const { db, team } = seed();

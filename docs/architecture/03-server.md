@@ -25,15 +25,18 @@ src/
     schema.ts         // SCHEMA_V1_SQL: the DDL from 01-data-model.md as a TS constant (ADR 003)
     seed.ts           // seedDawn(db) test helper
   store/
-    teams.ts          // createTeam, getTeamBySlug, listMembers, archiveTeam
+    teams.ts          // Team CRUD/policy + scoped bootstrap credential lifecycle, legacy exchange/readiness, transactional cutover (ADR 344/350)
     members.ts        // addMember (issues token), getMember, authMember(token), leaveMember (releases in-flight claims — ADR 196), reapStaleObservers + reapExcessIdleObservers
     messages.ts       // insertMessage, listInbox(memberId, since), listTeamMessages
     presence.ts       // attach, heartbeat, detach/release, listPresence, reapStale, reattestModel (ADR 101), reattestSurface (ADR 275) (kind-scoped single-active, ADR 042)
     activity.ts       // resolveActivity: the two-clocks rule → offline/idle/working (v0.2 M2; ADR 140)
     quiescence.ts     // decision-grade busy/quiet/unknown from newest audited action; /health quietest_busy_ms (2026-08-03 design; split from display activity)
     cursors.ts        // getCursor, setCursor, unreadCount
+    hydrate.ts        // rowsToEnvelopes: message rows -> Envelopes, one member lookup per DISTINCT member (#903 follow-on: the per-row shape cost 800 statements to learn 31 names)
+    interruptCandidates.ts // listInterruptCandidates: the unread rows pendingInterrupts can actually use (urgent/steer/obligation + resolve/accept/decline/eligible), plus this seat's own suppress acts (the inbox omits them) — keep in step with the fold (ADR 088/225/254)
+    deferralFold.ts   // deferralFold: held + raised + the seat's own sends, hydrating the 2000-row window ONLY when a deferral is actually held (ADR 211 §3)
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
-    lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084)
+    lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084); counterpart close does not rewrite merged (ADR 305, stripped at HTTP)
     incidents.ts      // incident convergence inc 1 (ADR 266): recordBlockedReport pools blocked_by reports per (team, gate), opens ONE unowned kind:'incident' lane at 2 distinct seats, appends after; openIncidents/incidentReporters feed the team_next banner and the route hook's fan-out
     laneClose.ts      // recordLaneClose: the terminal edge's audit (verified/reason/grade + the ADR 109 merge join), shared by the board PATCH and an acceptor's accept (ADR 169/188/192/202)
     laneSweep.ts      // sweepAbandonedAcceptance: the backstop — closes a lane parked past the 24h grace in awaiting_acceptance as `review_swept`, never verified, since the ADR 217 reasons label a close and never cause one (ADR 229)
@@ -45,16 +48,20 @@ src/
     delivery.ts       // the per-recipient delivery ledger, derived from log + cursors + audit: actDelivery + openDirectedLedger (ADR 090) + handoffNamedLaneOutOfPlay (#745: named-lane out of play — shared with orientation why)
     mast.ts           // the MAST failure detectors: timeToUnblock + stalledThreads + circularHandoffs → deriveMast (ADR 091)
     memory.ts         // seat memory: saveMemory/getMemory/memoryEnvelope/clearMemory — daemon-private continuity blob, LWW, caps (ADR 093)
+    seeds.ts          // shared Seed persistence + authorized lifecycle transitions; atomic retry-safe promotion to one ordinary Lane (ADR 291/311); captureRepoSeed — a document-recorded intention as a Seed, idempotent on ref, lane_id links (ADR 373 inc 2)
+    teamMemory.ts     // team-memory retrieval: searchInsights over the insights_fts fold + rebuildInsightsFts (the cache property) (ADR 327)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (+ authorized_by filter, ADR 071/127)
     signinHandoff.ts  // sign-in handoff relay: stageHandoff/redeemHandoff — memory-only, single-use 60s nonces so `musterd board` hands the browser a handle, never a credential (ADR 170)
     gateAsk.ts        // Gate B (ADR 150) ask-lifecycle reads: findGateAsk (fingerprint dedup — one ask per re-attempted costly action) + gateAskHumanAnswer (human-only accept/decline release); pure reads over the ADR 147 ask-stream log
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
+    session-leases.ts // Presence-bound agent HTTP lease mint/verification/revocation; only hashes persist (ADR 337)
     reachability.ts   // ADR 153 unblocker-reachable projection: adminHumanReachable (present-or-notifiable settle term) OR liveTeammateExists × teammateRouteOpen (item-2-gated route-around term); pure read of members + presence + enforcement policy, gates the top-tier hold's terminal (held vs stranded)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
-    review.ts         // outcome-acceptance picker (ADR 169 mechanics / ADR 192 vocab): pickReviewCounterpart is agents-only (ADR 253) and drops busy agents (ADR 260, quiescence 120s, unknown kept) — non-risky never asks a human; risk-tagged → peer first, then pickHumanReviewer (ADR 188/172). Ask body carries intent/principles/usable/feel checklist. Also pickWakeReviewer / reviewLoopBounceCount (ADR 191: offline wakeable pick + circuit breaker; non-risky breaker does not fall through to a human, ADR 253) + memberFamily/workerFamily + teamFamilyPosture (ADR 172/187/189: idle wake_pool carries family + wakeability mark from residency — mark-not-filter)
-    residency.ts      // the wake ledger: residency enrollment + wake leases — claimWakeLeases (transactional derivation: immediate/batched inbox + ADR 191/199 work_order when loops.review|dispatch ∧ flow:auto — typed handoff/review/work-order wakes select portable fresh; ordinary inbox wakes join only under the default-off policy cohort, ADR 209; a recent directed threaded reply may also be marked resume_eligible under the default-off ADR 210 switch — permission for a local exact-match resume, never an instruction, carrying the thread_id the host's registry is keyed by (the reverse direction — session id, transcript path, workspace — never travels); defer-snoozed) / buildWakeContext (recipient-authorized, body-free portable index for reply/handoff/review/work_order, ADR 209) / settleWakeLease / expireWakeLeases / recordSessionAttestation (harness-class-only, inc 4); rate policy derived from residency.* audit rows (ADR 131); edge+spawned_at (ADR 262); markWakeSpawned; claimWakeLeases skips still-true wakeability / WORK_ORDER_EDGE_BREAKER_N failed edges
+    review.ts         // outcome-acceptance picker (ADR 169 mechanics / ADR 192 vocab): selectReviewCounterpart captures decision-time candidate evidence for the ready audit (ADR 303); pickReviewCounterpart is its compatibility wrapper, agents-only (ADR 253), and drops busy agents (ADR 260, quiescence 120s, unknown kept) — non-risky never asks a human; risk-tagged → peer first, then pickHumanReviewer (ADR 188/172). Ask body carries intent/principles/usable/feel checklist. Also pickWakeReviewer / reviewLoopBounceCount (ADR 191: offline wakeable pick + circuit breaker; non-risky breaker does not fall through to a human, ADR 253) + memberFamily/workerFamily + teamFamilyPosture (ADR 172/187/189: idle wake_pool carries family + wakeability mark from residency — mark-not-filter)
+    residency.ts      // the wake ledger: residency enrollment + wake leases — claimWakeLeases (transactional derivation: immediate/batched inbox + ADR 191/199 work_order when loops.review|dispatch ∧ flow:auto — typed handoff/review/work-order wakes select portable fresh; ordinary inbox wakes join only under the default-off policy cohort, ADR 209; a recent directed threaded reply may also be marked resume_eligible under the default-off ADR 210 switch — permission for a local exact-match resume, never an instruction, carrying the thread_id the host's registry is keyed by (the reverse direction — session id, transcript path, workspace — never travels); defer-snoozed) / buildWakeContext (recipient-authorized, body-free portable index for reply/handoff/review/work_order, ADR 209; wake templates name team_wake_context first, ADR 326) / settleWakeLease / expireWakeLeases / recordSessionAttestation (harness-class-only, inc 4) / applyFoldedEnrollment (ADR 393: folded enroll/revoke, grant stays local); rate policy derived from residency.* audit rows (ADR 131); edge+spawned_at (ADR 262); markWakeSpawned; claimWakeLeases skips still-true wakeability / WORK_ORDER_EDGE_BREAKER_N failed edges
     footprint.ts      // seat-footprint samples (ADR 242): insertFootprintTick / latestFootprint / pruneFootprint over footprint_stacks + footprint_machine (schema v35)
     roles.ts          // roles table: role defaults (capabilities + charter), projected from roles/*.toml (ADR 070)
+    nodes.ts          // machine-credential store (ADR 328, federation 3a): mintInvite/consumeInvite (single-use msinv_, 15-min TTL) + bindNode (ON CONFLICT DO NOTHING — the hub refuses ANY id it already knows, which is what closes the cross-team capture of an unbound row) + rotateNode (same row, so origin stamps survive) / revokeNode (history stays) / authenticateNode / listNodes (credential masked to its kind)
     rows.ts           // raw DB row shapes (TeamRow/MemberRow/PresenceRow/MessageRow) + toMember (resolves account_status + capabilities, ADR 070)
   protocol/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
@@ -64,9 +71,10 @@ src/
   notify/
     slack.ts          // ask-stream Slack delivery: formatAskSlackText + postSlackWebhook — the daemon's one outbound call, fire-and-forget, opt-in via policy ask_slack_webhook (ADR 149)
   transport/
-    http.ts           // HTTP route table (02-protocol HTTP API), including POST /wake-context's recipient-only body-free index (ADR 209; allow+deny `residency.context_read` audit); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121) + x-musterd-build for all credentials (ADR 135)
+    http.ts           // HTTP route table (02-protocol HTTP API), including POST /wake-context's recipient-only body-free index (ADR 209; allow+deny `residency.context_read` audit); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121) + x-musterd-build for all credentials (ADR 135); counterpart terminal PATCH strips merged (ADR 305)
     ws.ts             // WS upgrade, handshake state machine, frame dispatch
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
+    test-auth.ts      // HTTP-test fixture: claim a named agent seat and return its msac_ credential plus msls_ Presence proof (ADR 337)
   presence/
     reaper.ts         // setInterval: presence timeout, request/wake expiry, departed-seat claim release + observer TTL/cap (ADR 064/196); emit offline events
   footprint/
@@ -74,8 +82,16 @@ src/
     scan.ts           // darwin scanners: ps → ProcSample[], sysctl vm.swapusage + vm_stat → MachineSample; throw-on-failure (callers own skip policy), non-darwin throws
     sampler.ts        // setInterval tick (60s default): scan → classify → insertFootprintTick + retention prune; any throw = one skipped tick, never a crashed daemon
     reap.ts           // reapOrphans: the daemon's only kill path — per-pid re-verification at kill time (allowlist + still orphaned), SIGTERM→grace→SIGKILL, footprint.reaped audit row
+  node/
+    state.ts          // ~/.musterd/node.json (ADR 328 §2): this machine's msnode_ per enrolled team, mode 0600 and chmod'd on overwrite (writeFileSync's mode applies only at create). The DAEMON owns it — `musterd node join` asks its own daemon to enroll, so one process holds the nodes row, the credential, and the file. Keyed by team SLUG while the db keys team_id: a rename orphans the entry, and re-enrolling is the repair
   seeds/
-    ingest.ts         // setInterval poll (60s): pull raw seeds from the policy-named relay, deterministic title/detail cleanup, one unowned open lane per seed + seed.ingested audit; cursor advanced transactionally with the lane insert (ADR 248)
+    ingest.ts         // setInterval poll (60s): parse Slack-only relay records, resolve human Member attribution, persist shared Seeds, and advance the cursor atomically; never opens a Lane (ADR 291/311)
+  sync/
+    push.ts           // the daemon's half (ADR 325 inc 3b-i): pushTeam / startSyncPush / SYNC_PUSH_INTERVAL_MS, a 60s loop shaped after seeds/ingest.ts (running flag, per-team try/catch, unref'd handle, offline as the expected state). Selects this node's own unpushed messages by `origin_node`, joins the seat NAME in rather than shipping the daemon-private `from_member`, and advances `sync_push_cursor` ONLY past a batch the hub ACKED — a cursor moved on send would make every unreachable hub permanent silent loss. A 409 rewinds the cursor to the hub's `expected_seq - 1`, because the hub is the authority on what it holds
+    log.ts            // the hub's staging log for pushed events (ADR 325 inc 3b-i): highestContiguousSeq / hubHead / ingestBatch, plus the two refusals — SyncOriginError (the batch's origin is not the authenticated node, or that node is not on this team: `nodes.id` is global, so identity is not entitlement) and SyncGapError (carrying the resume seq, because a pusher that cannot self-correct retries forever). hub_seq is allocated from `sync_meta.next_hub_seq` in the insert's own transaction, pre-increment, so the first event gets 1. Writes NOTHING to `messages` and moves no `nodes.next_seq` — the fold is 3b-ii, and containment.test.ts holds that line
+    fold.ts           // the fold (ADR 325 inc 3b-ii): foldBatch / readPullCursor — the ONE foreign-origin writer into `messages`, run by hub and puller alike. Per event in hub_seq order inside one transaction: skip own origin, skip a held (origin_node, origin_seq) pair (the idempotence key, v54 unique index — never messages.id), refuse a read-side origin gap, resolve from AND to by seat NAME or block the cursor AT that event with the prefix committed, refuse an act this build's ActSchema does not know, refuse an id held under another origin. Never reads or writes nodes.next_seq (fold.test.ts's first case is the falsifier); created_at is THIS daemon's clock, never envelope.ts; ledger `residency.enrolled`/`revoked` project into the `residency` table (ADR 393)
+    pull.ts           // the pull loop (ADR 325 inc 3b-ii): pullTeam / startSyncPull / SYNC_PULL_INTERVAL_MS — two feeders, one fold. An enrolled daemon pages GET /sync/pull by hub_seq cursor; a daemon hosting enrolled joiners (the hub, even one that has never sent) reads its own sync_log. Every fold stop has its own error line, reported once per distinct blocker and cleared when the fold moves; a 409 (hub head below our cursor) is logged as impossible and thrown, never re-anchored downward
+    claim.ts          // federation 3c (ADR 355): the hub-authoritative claim. arbitrateClaim runs ON THE HUB — seat resolved, lane folded, ADR 203 live-incumbent rule against the hub's presence, then the guarded updateLane, writing lane.claimed with `node` (the seat→node residence binding); claimAtHub runs ON A JOINER and never writes — the row converges from the fold. ClaimRefusedError carries holder/state; HubUnreachableError is its own code, never a provisional claim
   projection/
     load.ts           // read .musterd/team.toml + seats/*.toml -> TeamSpec; fail-closed per seat (ADR 058)
     reconcile.ts      // match-by-name delta: ADD/UPDATE/REVIVE/REMOVE the projection from the files
@@ -115,11 +131,12 @@ export function routeEnvelope(ctx: Ctx, team: TeamRow, sender: Member, env: Enve
 //         -> return RouteResult
 
 // store/presence.ts
-export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014) + { driver } (ADR 021) + { model } (ADR 101) + { build } (ADR 135)
+export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014) + { driver } (ADR 021) + { model } (ADR 101) + { model_source } (ADR 301) + { build } (ADR 135)
 export function heartbeat(db, presenceId): void;                          // bumps last_seen_at
-export function reattestModel(db, presenceId, model): {previous}|void;    // ADR 101: mid-occupancy model switch; writes + returns previous only on a real change
+export function reattestModel(db, presenceId, model, modelSource?): {previous}|void;    // ADR 101/301: mid-occupancy model switch; writes + returns previous only on a real change of id or tier
 export function reattestSurface(db, presenceId, surface): {previous}|void; // ADR 275: occupancy follows capture; writes only on a real change; no audit row
 export function currentAttestedModel(db, memberId, presenceId?): string|null; // ADR 101: the per-act model stamp source — the sending occupancy's attestation (presenceId), else newest-attested
+export function currentAttestation(db, memberId, presenceId?): {model, source}; // ADR 301: the pair — source is null when the occupancy does not know its tier
 export function detach(db, presenceId): void;                             // removes row
 export function listPresence(db, teamId): PresenceSummary[];              // for status/roster (incl. provenance/workspace/driver/model)
 export function reapStale(db, timeoutMs): { offlined: string[] };         // presence ids removed
@@ -129,6 +146,8 @@ export function insertMessage(db, env: Envelope, fromMemberId, toMemberId|null):
 export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolean; limit?:number }): StoredMessage[];
 //   inbox(member) = messages WHERE team=member.team AND (to_member=member OR to_kind IN ('team','broadcast'))
 //                   AND from_member != member  [AND ts > cursor.last_read_ts if unreadOnly]
+//   limit = newest N; when unreadOnly, also pin action-needed unread (request_help/ask/directed
+//   non-message) so MCP's always-on limit cannot hide a waiting handoff behind team broadcasts.
 ```
 
 ## Startup sequence (`createServer().listen()`)
@@ -158,7 +177,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 
 - **Single-active is kind-scoped (ADR 042).** It binds **agent** seats; **human** seats fan out.
   - **Agents — one live Presence, newest wins.** On a WS `claim` for an _agent_ Member that already holds a live Presence, the handler **displaces** the existing session: it sends each old connection a `superseded` error frame, force-closes it (`Connection.close`), evicts it from the hub, clears the member's presence rows, then attaches the new Presence. The newest session is the one live occupant. (ADR 017 replaced ADR 010's _refuse with `member_busy`_ — refusing locked a Member out of its own seat after a reload/orphaned adapter; the dogfood deadlock.) The displaced adapter treats `superseded` as terminal and does not reconnect, so there's no ping-pong and orphans self-heal.
-    - **Displacement is workspace-scoped (ADR 068), with a durability gate (ADR 092).** A claim from a _different_ workspace displaces immediately (a genuinely different session). A _same_-workspace claim does **not** supersede at claim time — a transient ~90s health-check probe spawns from the same workspace and must not flap the seat. Instead, once the successor proves durable (still attached after `supersedeGraceMs`, default 5s), it **reaps** the same-workspace predecessor(s) it found: sends them `superseded` with `same_workspace:true`, closes and clears them. A probe disconnects before the grace, so the reap timer finds the successor gone (`hub.getConn`) and keeps the incumbent. The reap arms a warn-level `claim.duplicate_workspace` audit row at schedule time (drift signal); the successor's own close cancels its pending reap. This is the fix for the orphaned-adapter war (#118) without regressing ADR 068's anti-flap.
+    - **Displacement is workspace-scoped (ADR 068), with a durability gate (ADR 092), and the workspace is the WORK TREE, not the label (ADR 368).** The claim frame's `workspace_key` is held on the live hub `Connection` (`workspaceKey`), **not** persisted on the presence row — it answers "is this claim my own session" for connections the hub can still see, which is the only question displacement asks; the roster keeps showing the ADR 014 label. `sameWorkspace(old, frame)` compares `frame.workspace_key` with the incumbent Connection's `workspaceKey` when **both** are non-null, and falls back to exact `workspace` **label** equality when either is null (an un-rebuilt client dist ⇒ exactly the pre-ADR-368 behaviour; the mixed-version window is a rebuild, not a release). The label may not be the key: it is ADR 014's where-on-attach seed, qualified with the git branch, so a branch switch or a detached HEAD renames it under the session holding it — the seat's own re-attach then compared unequal, took the cross-workspace path, and evicted the live session with `claim.superseded {same_workspace:false, via:'ws'}`, leaving the dormant orphan ADR 092 exists to reap (measured 2026-09-02). A claim from a _different_ workspace displaces immediately (a genuinely different session). A _same_-workspace claim does **not** supersede at claim time — a transient ~90s health-check probe spawns from the same workspace and must not flap the seat. Instead, once the successor proves durable (still attached after `supersedeGraceMs`, default 5s), it **reaps** the same-workspace predecessor(s) it found: sends them `superseded` with `same_workspace:true`, closes and clears them. A probe disconnects before the grace, so the reap timer finds the successor gone (`hub.getConn`) and keeps the incumbent. The reap arms a warn-level `claim.duplicate_workspace` audit row at schedule time (drift signal); the successor's own close cancels its pending reap. This is the fix for the orphaned-adapter war (#118) without regressing ADR 068's anti-flap.
   - **Humans — fan out.** A `hello` for a _human_ Member skips the displace loop and the `clearMemberPresence` clear: it attaches an _additional_ Presence and `hub.add`s the new connection alongside any existing ones, so a person can watch on a phone while acting on a laptop. `hub.deliver` already pushes to **all** of a member's connections and `broadcastTeam` iterates every connection, so a directed `deliver` and a `@team` broadcast both reach every human surface; the durable inbox cursor dedupes (at-least-once). The roster collapses the N Presences to one member row via `listPresence` (the `presences[]` array carries the surfaces). The single-active rule exists to stop _parallel autonomous minds_ wearing one agent identity — an agent hazard, not a human one (`docs/design/deployment-topology.md` §7).
 - **Reclaim grace (both kinds).** On detach (clean close or reap), the _that_ Presence is held for `PRESENCE_TIMEOUT_MS` (45s) via a `held_until` marker (presence schema v2) so the _same_ Member can rejoin without being refused. The reaper sweeps expired holds **per Presence**, and a Member only goes offline when its **last** live Presence drops. This makes a flaky reconnect or a quick restart seamless while still freeing the seat promptly.
 
@@ -184,8 +203,50 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - **A daemon-private, seat-scoped continuity blob.** `store/memory.ts` backs the `seat_memory` table (schema v13): one row per member (`member_id` PK/FK `ON DELETE CASCADE`), `headline`/`body`/`saved_at`, **last-write-wins** — no history, no versions. It is deliberately **not** in the git seat-file: this is live working state (presence's side of the ADR 058 durable/live line), and half-done context or a pasted secret must never land in repo history.
 - **Store API:** `saveMemory(db, memberId, { headline, body })` upserts and stamps `saved_at = Date.now()`, enforcing `MEMORY_HEADLINE_MAX_CHARS` (120, by character count) and `MEMORY_BODY_MAX_BYTES` (8192, by **UTF-8 byte** length) — an oversize/empty input throws `bad_request` with the limit named. `getMemory` is the explicit body read; `memoryEnvelope` returns `{ headline, saved_at, size_bytes }` (`size_bytes` = `Buffer.byteLength(body)`) and **never the body** — it is what rides the occupied frame (ADR 093 §3). `clearMemory` deletes, returning whether a row existed (idempotent).
 - **HTTP surface — seat-authenticated, own-seat only.** `PUT /teams/:slug/memory` (`{ headline, body? }` → `saveMemory` → `204`), `GET …/memory` (`200 { headline, body, saved_at }` or `404` when none; `?envelope=1` returns the headline-only envelope instead — the `musterd status` one-liner read, never the body), `DELETE …/memory` (`clearMemory` → `204`, idempotent). All three resolve the seat from the presented token (`authMember`), apply the banned-=-inert gate (`assertSeatCanRead` — a `disabled`/`banned`/`archived` seat can't touch memory either), and act on **the caller's own seat** — the URL carries no member name, so there is deliberately **no cross-seat read path** (team admins included, ADR 093 §4): an admin hitting `/memory` reads its _own_ note, never another's. The save schema (`MemorySaveBody`) shapes types only; the caps live in `saveMemory` so the 400 names the exact limit.
-- **Envelope on occupy.** The four occupied-frame sites (WS `ws.ts`; HTTP admin-approve + grant + credential self-authorize) now emit `memory: memoryEnvelope(db, member.id)` instead of the old `memory: null` — a returning occupant's join frame carries the headline/age/size line, and the body travels only over the explicit `GET`.
+- **Envelope on occupy.** All five occupied-frame sites (WS; HTTP admin-approve, grant, credential self-authorize, and standing reseat) emit `memory: memoryEnvelope(db, member.id)` and the Member's Team Role `charter` when the role library declares one. A returning occupant's join frame carries the memory headline/age/size line plus authenticated Role context; the memory body travels only over the explicit `GET`.
 - **Audit sizes-only.** `memory.save`/`memory.clear` audit actions carry `size_bytes`/`headline_len` in `detail`, never the headline or body text (hard rule 5).
+
+## Shared Seeds (ADR 291/311/312, unreleased)
+
+- **Authenticated Team reads.** `GET /teams/:slug/seeds` returns every Team Seed and
+  `GET /teams/:slug/seeds/:id` returns one. Both use `authTouch`; an unauthenticated caller learns
+  nothing about Seed existence. Responses are parsed through `SeedListSchema` / `SeedResultSchema`.
+- **The stateless claim is workspace-scoped too (2026-09-04).** `POST /teams/:slug/claim` accepts
+  `workspace` + `workspace_key` and records the label on the Presence. Displacement applies the same
+  identity-first comparison as `ws.ts` (key when both sides carry one, label otherwise — ADR 368): a
+  LIVE same-workspace session is spared (ADR 092), socketless rows are cleared because this claim
+  succeeds them, and the `claim.superseded` audit reports the comparison it actually made. Until this
+  landed the route attached `workspace: null` and evicted unconditionally, so `claim --detach` in a
+  folder killed the session sitting in it.
+- **…and it records provenance, on every branch that occupies (2026-09-05).** The repair above edited
+  ONE of the route's three `attach` calls, so the credential self-authorize and dogfood re-seat
+  branches kept hardcoding `workspace: null` — and the re-seat branch is the ordinary path for an
+  agent re-claiming its own bound seat. The three literals are now one `claimAttachContext`, which
+  cannot drift branch to branch. It also carries `provenance` (ADR 131 §6), which the body schema
+  had never accepted at all: every row born here read `provenance: null` while every WS-claimed and
+  every ambient-touched row carried a value — the two paths were exact opposites, the HTTP claim
+  recording a workspace and no provenance, the ambient touch a provenance and no workspace. It costs
+  a wake: the actuators judge `verified.provenance !== 'wake'` to tell their own spawned child from a
+  stranger holding the seat. `provenance` is stamped on **agent** seats only, the same ADR 121 gate
+  `ambientTouch` applies — a human shell must not be able to label its own occupancy `wake`.
+- **Recorded intentions in the brief (ADR 373 inc 4).** `GET /teams/:slug/next` carries
+  `up_next_seeds` (open Seeds, oldest first, compact: id/source/ref/summary/submitted_by) and
+  `up_next_seeds_total`, projected by `openSeedsForBrief` and rendered above `up_next` on both
+  surfaces.
+- **Repo capture (ADR 373 inc 2).** `POST /teams/:slug/seeds/repo` `{ref, body, captured_at?,
+  lane_id?}` — a document-recorded intention as a Seed with `source: 'repo'`, idempotent on `ref`
+  (201 created / 200 already held); `lane_id` links + promotes. Any seated Member.
+- **Parsed lifecycle mutations.** `POST …/seeds/:id/claim`, `/clarification`, `/answer`, `/brief`,
+  and `/promote` parse their bodies through the corresponding protocol schemas before calling the
+  store. Only agents claim, only the active explorer asks or submits the final brief, only the
+  submitting Member answers, and any Member may manually promote. Store transitions return the
+  existing `forbidden`, `not_found`, or `conflict` errors.
+- **Promotion activity.** The first automatic or manual promotion emits the normal Team
+  `lane_open` message with `seed_id` and `brainstorm_recommended:true`. A retry returns the same linked
+  Lane and emits no duplicate audit or activity row.
+- **Content boundary.** Lifecycle audit rows carry only actor, Seed/Lane ids, state edges, result
+  kind, and skipped-research metadata. Raw Seed bodies, Slack user ids, clarification/answer text,
+  final briefs, and conclusions appear in neither audit details nor HTTP request logs.
 
 ## Inbox delivery semantics
 
@@ -197,6 +258,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 ## Auth
 
 - `authMember(token)`: `sha256(token)` → lookup `members.token_hash`. Returns the Member or throws `unauthorized`. WS `hello.token` and HTTP `Authorization: Bearer` both go through this. The `unauthorized` message points at the likely cause — a token minted against a _different_ db than this daemon serves (ADR 016).
+- **Scoped bootstrap credentials (ADR 344/350):** HTTP and WS claim resolve an active, unexpired `mskey_` record by hash before target authorization. `claim_seat` and `claim_role` records fail closed unless the requested target matches the server-held target; `host` records cannot claim. Residency wake lease, progress, turn, and report routes accept a `host` record only when its target matches the request's host or the lease's stored host. Successful scoped claim/host authentication records `first_used_at`; legacy authentication never does. `POST /agent-bootstrap-migrations` derives Team and seat from a legacy key plus independent `msac_` proof and returns one shown-once successor without creating Presence. Admin-only cutover GET/POST routes derive readiness from held agent Members, active residency hosts, and observed scoped use, then atomically revoke legacy records, clear the Team hash, stamp cutover, and append mandatory audit evidence. Mint/list/revoke remain admin-only and hashes never cross the transport.
 
 ## Diagnostics (ADR 016)
 
@@ -212,7 +274,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - `routeEnvelope` persists + returns correct recipients for member/team/broadcast; bad act → `422 validation`.
 - Two WS clients on team `dawn`: a `send` from Ada to Lin yields a `deliver` to Lin and an `ack` to Ada; Lin offline → message appears in Lin's `inbox` fetch with correct unread count.
 - Presence: attach → online in roster; stop heartbeats → reaper offlines within ~`timeout+interval`; clean close → immediate offline.
-- Single-active newest-wins (agents, ADR 017): a second concurrent `claim` for the same _agent_ Member takes over and the first receives `superseded`; after detach, a re-attach within the 45s grace succeeds (the `held_until` seat is reclaimed). Kind-scoped (ADR 042): two concurrent claims for the same _human_ Member both occupy (neither superseded), a directed message and a `@team` broadcast both deliver to both human sessions, and the roster lists the human once with both surfaces. Workspace-scoped + durability-gated (ADR 068/092): a same-workspace probe that disconnects within the grace never supersedes the incumbent, while a durable same-workspace successor reaps its predecessor with `same_workspace:true` after `supersedeGraceMs`; a different-workspace claim still supersedes immediately (no `same_workspace` flag).
+- Single-active newest-wins (agents, ADR 017): a second concurrent `claim` for the same _agent_ Member takes over and the first receives `superseded`; after detach, a re-attach within the 45s grace succeeds (the `held_until` seat is reclaimed). Kind-scoped (ADR 042): two concurrent claims for the same _human_ Member both occupy (neither superseded), a directed message and a `@team` broadcast both deliver to both human sessions, and the roster lists the human once with both surfaces. Workspace-scoped + durability-gated (ADR 068/092/368): a re-attach whose `workspace` label changed but whose `workspace_key` did not is the SAME workspace (a branch switch must not evict the live session), two distinct keys are two workspaces even under one folder name, and a claim carrying no key falls back to label equality; a same-workspace probe that disconnects within the grace never supersedes the incumbent, while a durable same-workspace successor reaps its predecessor with `same_workspace:true` after `supersedeGraceMs`; a different-workspace claim still supersedes immediately (no `same_workspace` flag).
 - Activity: a present Member with a recent `status_update` resolves to `working` (with `state`/`last_status_at`); present without one → `idle` (ADR 140); no fresh presence → `offline`. Offline seats also project `offline_reason` (ADR 141).
 - Availability (ADR 044): `POST /availability` sets the caller's seat; the roster reflects `away`+`until` / `dnd` / `available`; `until` is kept only for `away`; an unknown status → `400 bad_request`; unauthenticated → `401`.
 - `seedDawn` produces the exact fixture in `01-data-model.md`.

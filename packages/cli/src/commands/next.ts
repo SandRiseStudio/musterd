@@ -1,4 +1,10 @@
-import type { Lane, NextBrief } from '@musterd/protocol';
+import {
+  closeReasonCopy,
+  incidentBannerLines,
+  shortDuration,
+  type Lane,
+  type NextBrief,
+} from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { theme } from '../render/theme.js';
 import { resolve } from './helpers.js';
@@ -16,17 +22,22 @@ function laneLine(l: Lane): string {
 }
 
 /** Coarse elapsed time — the reader needs "hours, not minutes", never a precise duration. */
-function waitedFor(ms: number): string {
-  const s = Math.round(ms / 1000);
-  if (s >= 86400) return `${Math.floor(s / 86400)}d`;
-  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
-  if (s >= 60) return `${Math.floor(s / 60)}m`;
-  return `${s}s`;
-}
-
 function render(brief: NextBrief): void {
   const w = process.stdout.write.bind(process.stdout);
   w(`${theme.accent('next')} — as ${theme.memberName(brief.member, 'agent')}\n`);
+
+  // Incident banner FIRST, above everything including owed reviews (spec 2026-08-14 §4). Most of
+  // the measured waste in the motivating episode was seats STARTING SESSIONS into a shared red they
+  // assumed was theirs — so this is the one line that has to land before a seat reads anything else
+  // and decides what it is working on.
+  //
+  // This surface had it missing entirely through increments 1 and 2: the banner was written into the
+  // MCP renderer and never here, so every CLI seat got none of it. Words now come from the protocol
+  // package so a third surface cannot repeat that. `?? []` for the same daemon-skew reason as
+  // owed_reviews below — the brief arrives cast, not parsed.
+  for (const inc of brief.incidents ?? []) {
+    for (const line of incidentBannerLines(inc)) w(`${theme.warn(line)}\n`);
+  }
 
   // FIRST, above your own work, on purpose (ADR 233). This is the one item in the brief that
   // someone else is blocked on, and the one that loses when a seat is busy: half the unverified
@@ -41,7 +52,7 @@ function render(brief: NextBrief): void {
     w(`\n${theme.accent('owed by you')} — ${owed.length} lane(s) waiting on your verdict:\n`);
     for (const r of owed) {
       w(
-        `  ${theme.meta(r.lane.id)} "${r.lane.title}" — ${theme.memberName(r.from, 'agent')} has waited ${waitedFor(now - r.ts)}\n`,
+        `  ${theme.meta(r.lane.id)} "${r.lane.title}" — ${theme.memberName(r.from, 'agent')} has waited ${shortDuration(now - r.ts)}\n`,
       );
       w(theme.meta(`    answer: \`musterd send --act accept --reply-to ${r.ask_id} "…"\``) + '\n');
     }
@@ -50,6 +61,23 @@ function render(brief: NextBrief): void {
     w(`\n${theme.accent('carrying')} (${brief.in_flight.length}):\n`);
     for (const l of brief.in_flight) w(laneLine(l) + '\n');
   }
+  // ADR 373 increment 4: recorded intentions ABOVE the open lanes — a Seed is the same question one
+  // step earlier, and the whole point of ADR 373 is that these were legible to a reader and to no
+  // surface. The `ref` is what makes one actionable: it names the document that asked.
+  const seeds = brief.up_next_seeds ?? [];
+  if (seeds.length > 0) {
+    const total = brief.up_next_seeds_total ?? seeds.length;
+    const more = total > seeds.length ? theme.meta(` (${seeds.length} of ${total})`) : '';
+    w(`\n${theme.accent('up next')} — recorded intentions nobody has started${more}:\n`);
+    for (const s of seeds) {
+      w(`  ${theme.meta(s.id)} ${s.summary}\n`);
+      w(
+        theme.meta(
+          `    ${s.ref ?? `from ${s.submitted_by}`} · take it: \`musterd seed claim ${s.id}\``,
+        ) + '\n',
+      );
+    }
+  }
   if (brief.up_next.length > 0) {
     w(`\n${theme.accent('up next')} — open lanes you could pick up:\n`);
     for (const l of brief.up_next) w(laneLine(l) + '\n');
@@ -57,7 +85,17 @@ function render(brief: NextBrief): void {
   if (brief.shipped.length > 0) {
     w(`\n${theme.meta('recently shipped:')}\n`);
     for (const l of brief.shipped)
-      w(`  ${theme.ok('✓')} "${l.title}"${l.goal_id ? theme.meta(` ◆ ${l.goal_id}`) : ''}\n`);
+      w(
+        `  ${theme.ok('✓')} "${l.title}"${l.goal_id ? theme.meta(` ◆ ${l.goal_id}`) : ''}` +
+          // ADR 192's copy, matching the web board's chip (ADR 169). Only on an explicit `false`:
+          // an absent verdict is unknown, not unconfirmed.
+          (l.verified === false ? theme.meta(' — unconfirmed') : '') +
+          // ADR 283: and WHY — "chase a person" and "look at the roster" are different next moves.
+          (l.close_reason !== undefined && closeReasonCopy(l.close_reason) !== null
+            ? theme.meta(` (${closeReasonCopy(l.close_reason)!})`)
+            : '') +
+          '\n',
+      );
   }
   if (brief.next_goal) {
     const g = brief.next_goal;
@@ -78,6 +116,7 @@ function render(brief: NextBrief): void {
     owed.length === 0 &&
     brief.in_flight.length === 0 &&
     brief.up_next.length === 0 &&
+    seeds.length === 0 &&
     brief.shipped.length === 0 &&
     !brief.next_goal &&
     !brief.why

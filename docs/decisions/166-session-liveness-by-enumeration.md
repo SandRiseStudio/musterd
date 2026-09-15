@@ -250,6 +250,127 @@ comparison of two judgements against the same wake decisions, with the incumbent
 separate arm because both conditions are computed for every decision, and it risks nothing because
 the challenger cannot act until it has evidence.
 
+### Amendment 2026-08-21 — eval item 3 is BREACHED and was never inspected
+
+Recorded by izzo (lane `01M0ER03RJ2WZRD377FTNQCDP5`), posting back the resolution of
+[`docs/watches/2026-08-21-adr-166-demoted.md`](../watches/2026-08-21-adr-166-demoted.md) under ADR
+297.
+
+Item 3 above sets `demoted` at target **ZERO** and calls any instance a finding requiring inspection
+of the workspace. Over 5,687 sweeps from 2026-07-27 to 2026-08-21, `demoted` is **109**, across 105
+samples on 6 days:
+
+| date | demoted | | workspace | demoted |
+| --- | --- | --- | --- | --- |
+| 2026-08-03 | 2 | | `agents-wanderer` | 75 |
+| 2026-08-04 | 18 | | `agents-gptbot` | 20 |
+| 2026-08-12 | 37 | | `agents-kimi` | 8 |
+| 2026-08-13 | 43 | | `agents` | 5 |
+| 2026-08-14 | 1 | | `agents-ryder` | 1 |
+| 2026-08-20 | 8 | | | |
+
+**Not one was inspected, and the instrument was not silent.** The sweep sets `process.exitCode = 1`
+on any demote, wrote **214** `DEMOTED` lines to `~/.musterd/research/sweep.log`, raises
+`adr166-demoted-*` into `musterd report` until it clears, and fires an OS push on a repeat. The
+escalation path fired for 25 days into a channel with no owner.
+
+**What this does and does not establish.** Each case reads `slot=live shadow=none sessions=0`.
+Whether enumeration was *right* to demote (a stale slot) or *wrong* (a live session it cannot see,
+leaving the wake guard free to spawn beside it) is the per-case inspection this ADR required, and
+counting is not inspecting. That work is lane `01M0JNYJ4KHAM6FMEV5BZTQ7FW`; its instrument is
+[`docs/watches/2026-08-21-adr-166-demoted-successor.md`](../watches/2026-08-21-adr-166-demoted-successor.md),
+which pins the population by name so the next window cannot rot the same way.
+
+**The rate half of this ADR's observability cannot be read at all.** Mean workspaces per sweep moved
+from 7.4 to 196.0 inside the window, so any disagreement percentage over it spans three populations.
+Recorded, with no numbers published, at
+[`docs/watches/2026-08-21-adr-166-disagreement-rate.md`](../watches/2026-08-21-adr-166-disagreement-rate.md).
+The target-zero count above survived that same instability; the rate did not. That contrast is the
+evidence behind ADR 297 rule 4.
+
+### Amendment 2026-08-21 — the inspection: every resolvable demote was a live session enumeration could not see
+
+Recorded by ryder (lane `01M0JNYJ4KHAM6FMEV5BZTQ7FW`), performing the per-case inspection item 3
+mandated and resolving
+[`docs/watches/2026-08-21-adr-166-demoted-successor.md`](../watches/2026-08-21-adr-166-demoted-successor.md).
+Method: each demote window (sample timestamps from the JSONL) was correlated against what the
+harnesses actually recorded — transcript trees, entry timestamps, file birth times, and the host
+log's wake leases (ULID-dated).
+
+**Correction to the amendment above** (invalidate-dated, per the wiki's own rule): each case does
+NOT read `slot=live shadow=none sessions=0`. Only the 28 gptbot/kimi cases do; the other 81 read
+`shadow=resumable` with 3–68 enumerated transcripts, none warm. The distinction matters because it
+rules out "no projects tree" as a cause for the majority.
+
+**Per-cluster verdicts, all 109 cases:**
+
+- **`agents-gptbot` ×20** (08-03 16:53–18:21, 08-04 09:49–10:57 PT) — live **cursor-agent**
+  sessions: `~/.cursor/projects/Users-nick-agents-gptbot` shows agent-tools/terminal writes inside
+  both windows, and no other harness was active there. The deployed sweep predated ADR 265's Cursor
+  scanner, so selection fell through to the Claude scanner, which truthfully found nothing.
+  **Wrongly demoted while live.** Cause fixed by #826 (2026-08-13).
+- **`agents-wanderer` ×75** (08-12, 08-13 ≤11:58) — same cause, live cursor-agent sessions
+  (`grok-4.6`); ADR 265 was measured on this very workspace and merged 08-13 18:19, hours after the
+  last wanderer demote. **Wrongly demoted while live.** No wanderer demote since.
+- **`agents-kimi` ×8** (08-20 09:19–09:54) — live Cursor **desktop** session `5ba9ec45`, running
+  08:42–16:01 with the post-ADR-265 scanner deployed. `.workspace-trusted` was born **09:55:57**;
+  the demotes stop at the next sweep. The scanner (rightly) refuses to guess an untrusted project's
+  workspace — so a live session is unattributable until Cursor writes that file: **74 minutes
+  here**. **Wrongly demoted while live, and the cause is still open**: any not-yet-trusted Cursor
+  project reproduces it.
+- **`agents` ×5** (08-13 09:59–10:19) and **`agents-ryder` ×1** (08-14 11:00:14) — **unresolved**:
+  the warm transcript the slot pointed at is no longer on disk (the `agents` Claude tree held 6
+  transcripts at sweep time, 4 remain), and no surviving transcript shows entries in either window.
+  Direction unrecoverable; the shape matches the other clusters.
+
+**The structural finding, worth more than the tally.** `slot=live` requires the slot's own
+transcript written within the last `LOCAL_SESSION_LIVE_MS` and no `ended_at` — the same clock and
+threshold enumeration uses. A demote therefore asserts "no warm transcript here" about a workspace
+that demonstrably has one being written right now. The demote direction is enumeration blindness
+essentially by construction; "a stale slot rightly demoted" is close to unrealizable. Falsifier: a
+demote whose slot transcript's warmth came from a non-session writer (nothing in 109 cases did).
+
+**Guard exposure and acted harm.** The claude-code and native backends carried increment 3's
+"either side says live ⇒ refuse" belt since #414 (07-27, before every demote). The **host loop and
+the codex backend checked only the enumerated verdict**. Exactly one wake landed inside a demote
+window — gptbot, 08-04 10:51, lease `01KZ6YDCBSYT304ZVS7QEBJCA4`, through the codex backend — and
+it failed on "codex CLI not found" before spawning. **Zero wrongly-permitted spawns in 25 days; the
+margin was an uninstalled CLI, not the guard.** The same diff as this amendment adds the belt to
+both remaining call sites.
+
+**Item 3 disposition: 109 of 109 explained.** 103 confirmed wrong-direction demotes of live
+sessions, 6 unresolved for lost evidence, 0 confirmed-correct demotes. The count stays watched —
+[`docs/watches/2026-08-21-adr-166-demoted-successor-2.md`](../watches/2026-08-21-adr-166-demoted-successor-2.md)
+scopes the question around the one known-open cause so a recurrence of the Cursor trust gap cannot
+wallpaper a novel finding.
+
+
+- _Dated note (2026-09-14) — the second successor watch voided on population, and its one
+  in-population demote is a new shape._
+  [2026-08-21-adr-166-demoted-successor-2](../watches/2026-08-21-adr-166-demoted-successor-2.md)
+  reached `revisit_by` void on its own first `void_if`: five workspaces joined the registry inside
+  the window, so "the nine named" was never the sampled set. Read anyway as the count over those
+  nine (present in all 3,890 samples): ONE demote, agents-dolly, 2026-08-26T05:38:51Z, one sample,
+  self-corrected five minutes later. Inspected per case, it is NOT the Cursor trust gap the watch
+  excluded — no Cursor session existed there until 2026-09-06. It was a Claude Code session, alive
+  (same session id writes at 05:09Z and 15:59Z) and idle at the prompt for 29 minutes, which the slot
+  called `live` and enumeration called `resumable`; at the next sample both said `live` with no
+  transcript write between. Fifteen further demotes (agents-big-body, 2026-08-25T18:37–20:59Z, outside the nine)
+  are a third shape, not the trust gap: a codex workspace (rollouts 17:34–18:26Z, no Claude or
+  Cursor transcript until 08-31) demoted slot `live` / enumeration `none` from eleven minutes after
+  it first entered the sweep. `localSessionLiveness` picks its scanner from the CAPTURED session's
+  harness and falls back to the Claude scanner when there is none, so a new non-Claude seat with no
+  capture yet is enumerated by a scanner that cannot see it — that fits the shape, and so does a
+  slot that simply outlived its codex process. Not settled here, and out of population.
+  Follows-up: deferred — stand up a codex, opencode or grok workspace with no capture and run
+  the sweep once; if it demotes against a live slot, the fallback is a defect and gets its lane
+  (2026-09-14). The demote reached no wake decision: the guard belt
+  defers whenever the slot says live, which is why no successor watch is opened — a five-minute
+  demote of an idle session is now an enumerator question (a verdict flipped with no new evidence),
+  not a wake-safety one. Follows-up: none — the guard belt defers on slotState live, so this demote
+  shape cannot open the wake guard; if a demote is ever observed to reach a wake decision, that is a
+  new lane (2026-09-14).
+
 ## Consequences
 
 - Wake decisions stop being fooled by a foreign capture — the guard sees live sessions, and resume

@@ -137,9 +137,36 @@ host nobody rebuilt: `packages/protocol/src/residency.test.ts` — a fractional 
 neither of which has existed since 2026-08-12. Supporting read, unchanged from ADR 252:
 `unpriced_sessions + cost_reported ≤ leases`.
 
+*Observed 2026-08-14, read off `~/.musterd/musterd.db` on 2026-08-17.* The re-observation above is
+no longer pending. A wake came due on its own — nobody forced one, because forcing one spends real
+money for evidence that arrives free — and the ledger kept the receipt:
+
+```
+2026-08-14 16:08:44  residency.woke       act=01M016K97DRWJEER256HBY674W  sender=dolly
+                                          lease=01M018HPMPT2R9RR4QCNQ13WRJ
+2026-08-14 16:09:54  residency.wake_cost  same lease, cost_usd=1.034257, duration_ms=70912
+```
+
+Both halves of the discriminating pair, on one lease. It is the first `residency.wake_cost` row
+since 2026-08-12 13:35 — the count moved 37 → 38 across the fix, with the whole gap sitting exactly
+where the rejections were. `musterd report` now reads **cost $1.46 total, 4 of 5 wakes reported**,
+against the 2-of-12 in the Context above; the supporting read holds (`unpriced 10 + reported 4 ≤ 52
+leases`).
+
+Corroborated from the other side by ADR 273, which landed after this one: `residency.wake_report_rejected`
+stands at **0** and `musterd report` prints no `refused` line. That counter only counts from the
+daemon bounce that deployed it, so it is weak evidence about the wakes above and strong evidence
+about everything since — the instrument built to catch this rejection has had nothing to catch.
+
 **Failure to watch:** `residency.wake_cost` rows still absent after the host is rebuilt and
-restarted. That would mean the rejection was never the only thing standing between a measured cost
-and the ledger, and this ADR's diagnosis is incomplete rather than merely narrow.
+restarted. ~~Open.~~ **Discharged 2026-08-14** by the row above. The narrower live failure that
+replaces it: a `residency.woke` row with no `wake_cost` beside it and no
+`residency.wake_report_rejected` row either — a wake that paid, was never refused, and still went
+unpriced. That would put the missing receipt somewhere neither this ADR nor ADR 273 is looking. The
+other two `residency.woke` rows since the fix (18:19:17 and 21:33:40, same day) have no `wake_cost`
+beside them, so this is a live shape and not a hypothetical — but both predate the bounce that armed
+ADR 273's counter, so they cannot yet be told apart from a plain refusal. The `unpriced 10` line has
+not gone to zero, and this ADR does not claim it should.
 
 **Experiment.** None. There is no arm worth running: the alternative is a boundary that discards
 receipts it can read, which is the state being corrected.

@@ -104,3 +104,34 @@ within one tool call. Baseline: this 2026-08-13 wanderer session (`resumable`, `
 by ~6h, newest file `365e3420-….txt`).
 
 **Experiment.** n/a — closes a measured lie mode; no A/B.
+
+## Amendment 2026-08-21 — a warm transcript nobody can place blinds the scan, it does not vanish
+
+Recorded by ryder (lane `01M0JVED68K0VDRSQ0DCGR02EC`), from the ADR 166 demoted-metric inspection
+(ADR 166 amendment "the inspection", same date).
+
+**The measured gap.** Attribution rests on `.workspace-trusted`, and Cursor writes that file late
+or never. On the measured machine (2026-08-21), only 2 of ~35 non-temp Cursor projects carry it —
+`agents-kimi` got its file 74 minutes into a live desktop session, during which the ADR 166 sweep
+demoted the workspace 8 times while the session was demonstrably live; `agents-ryder`,
+`agents-gptbot`, `agents-izzo`, `agents` and the rest have transcripts and no trust file at all,
+so their desktop sessions were invisible to enumeration with no expiry.
+
+**The rule.** `enumerateCursorSessions` now returns `undefined` — cannot tell — whenever any
+scanned project without a readable `.workspace-trusted` holds a transcript written within
+`LOCAL_SESSION_LIVE_MS`. A session being written right now that nobody can place might be the
+queried workspace's; answering `[]` would launder cannot-tell into "no sessions", which is the
+exact laundering this ADR's parent forbids. Liveness then falls back to the slot verdict
+(`source: 'slot'`), and the guard defers on a live slot as before.
+
+**What deliberately did not change.** Cold orphans stay uncounted — they cannot affect the live
+judgement, and claiming them by folder name is the slug-decoding trap. The encode-direction
+fallback (generate the folder name from a registered path and compare) was considered and
+declined: it rests on the same undocumented encoding, and the cannot-tell rule covers the
+liveness question without it. The cost is honest bluntness: while an unplaceable Cursor session
+is live, every cursor-harness workspace judges by its slot rather than by enumeration.
+
+**Falsifier.** Open a Cursor desktop window on a workspace whose project has no
+`.workspace-trusted`; while it writes, `musterd session show` on any cursor-bound workspace must
+report the slot-sourced verdict, not `none` — and the ADR 166 sweep must record no `demoted` row
+for the live workspace (its watch: `docs/watches/2026-08-21-adr-166-demoted-successor-2.md`).

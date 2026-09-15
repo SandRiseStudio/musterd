@@ -1,10 +1,13 @@
+import { deriveHuddles, describeSyncWedge } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
+import { huddleMarks, TIMELINE_WINDOW } from '../render/huddles.js';
 import {
   renderMachineLine,
   renderPendingSummary,
   renderRoster,
   renderStatusHeader,
 } from '../render/rows.js';
+import { theme } from '../render/theme.js';
 import { cliBuild } from '../version.js';
 import { pendingActionSummary, resolveRead } from './helpers.js';
 import { renderMemoryLine } from './memory.js';
@@ -13,7 +16,9 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   // `status` is a read: it shows the (auth-free) roster anywhere, even from an unbound folder with
   // no active identity (ADR 036). The per-member comeback summary needs a genuine actor, so it only
   // runs when someone is explicitly active here.
-  const { config, team, identity, explicit, http } = resolveRead(parsed.flags);
+  const { config, team, identity, explicit, http } = resolveRead(parsed.flags, {
+    claimSeatPerRequest: true,
+  });
   const res = await http.roster(team);
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify(res.members) + '\n');
@@ -31,8 +36,22 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   // failure all stay silent. Compact here — the header has five other things to say.
   const memory =
     explicit && identity ? await http.getMemoryEnvelope(team).catch(() => undefined) : undefined;
-  // Surface which daemon + db we're reading, so a wrong-db ("everyone offline") is obvious.
-  const health = await http.health().catch(() => undefined);
+  // Two reads that do not need each other, so they do not queue: `health` surfaces which daemon +
+  // db we are on (a wrong-db "everyone offline" is otherwise a mystery), and the timeline carries
+  // who is in a room (ADR 378) — a huddle is derived, never stored, so the mark
+  // costs the one thing the roster read does not already carry: the recent envelope window. Paid
+  // deliberately, and only when it can be spent — that route is seat-authed and recipient-scoped, so
+  // an ambient identity gets no huddles rather than a failed command, exactly like `pending` and
+  // `memory` above.
+  const [health, timeline] = await Promise.all([
+    http.health().catch(() => undefined),
+    explicit && identity
+      ? http.messages(team, { limit: TIMELINE_WINDOW }).catch(() => undefined)
+      : undefined,
+  ]);
+  const marks = timeline
+    ? huddleMarks(deriveHuddles(timeline.messages, identity?.name ?? ''))
+    : undefined;
 
   // `Identity` carries no kind — the roster is the authority on it, so read it back from there.
   const mine = identity ? res.members.find((m) => m.name === identity.name) : undefined;
@@ -50,8 +69,11 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
     }) + '\n',
   );
   process.stdout.write(
-    '\n' + renderRoster(res.members, undefined, undefined, health?.build) + '\n',
+    '\n' + renderRoster(res.members, undefined, undefined, health?.build, marks) + '\n',
   );
+  // ADR 360 follow-on: a wedged push says so here, on the surface a human on this machine reads.
+  if (res.sync?.wedged)
+    process.stdout.write('\n' + theme.warn(describeSyncWedge(res.sync.wedged)) + '\n');
   // The machine cost line (ADR 242): the footprint sampler's latest tick, best-effort — an older
   // daemon, an unbound folder, or a non-darwin host all read as null and render as absence.
   const machineLine = renderMachineLine(await http.footprint(team).catch(() => null));

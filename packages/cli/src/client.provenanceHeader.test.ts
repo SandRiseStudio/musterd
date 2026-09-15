@@ -24,13 +24,14 @@ describe('HttpClient x-musterd-provenance forwarding (ADR 131 §6, inc 5)', () =
     delete process.env['MUSTERD_PROVENANCE'];
   });
 
-  it('forwards x-musterd-provenance for an agent key when the env declares one — the wake path', async () => {
+  it('forwards x-musterd-provenance for an agent-seat credential when the env declares one — the wake path', async () => {
     process.env['MUSTERD_PROVENANCE'] = 'wake';
     const fn = stubOkFetch();
     await new HttpClient({
       server: 'http://x',
-      key: 'mskey_team',
+      key: 'msac_agent',
       seat: 'Ada',
+      sessionLease: 'msls_presence',
       surface: 'cli',
     }).roster('dawn');
     const headers = (fn.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
@@ -39,12 +40,22 @@ describe('HttpClient x-musterd-provenance forwarding (ADR 131 §6, inc 5)', () =
 
   it('sends nothing when unset, for junk values, or for a human credential (mirrors the model gate)', async () => {
     const fn = stubOkFetch();
-    await new HttpClient({ server: 'http://x', key: 'mskey_team', seat: 'Ada' }).roster('dawn');
+    await new HttpClient({
+      server: 'http://x',
+      key: 'msac_agent',
+      seat: 'Ada',
+      sessionLease: 'msls_presence',
+    }).roster('dawn');
     let headers = (fn.mock.calls[0]?.[1] as RequestInit).headers as Record<string, string>;
     expect(headers['x-musterd-provenance']).toBeUndefined();
 
     process.env['MUSTERD_PROVENANCE'] = 'root'; // not a known provenance
-    await new HttpClient({ server: 'http://x', key: 'mskey_team', seat: 'Ada' }).roster('dawn');
+    await new HttpClient({
+      server: 'http://x',
+      key: 'msac_agent',
+      seat: 'Ada',
+      sessionLease: 'msls_presence',
+    }).roster('dawn');
     headers = (fn.mock.calls[1]?.[1] as RequestInit).headers as Record<string, string>;
     expect(headers['x-musterd-provenance']).toBeUndefined();
 

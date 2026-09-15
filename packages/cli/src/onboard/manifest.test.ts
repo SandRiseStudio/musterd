@@ -1,11 +1,13 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BINDING_DIR } from '@musterd/protocol';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  loadProvisioning,
   PROVISION_MANIFEST_FILE,
   readProvisionManifest,
+  saveProvisioning,
   writeProvisionManifest,
 } from './manifest.js';
 
@@ -17,14 +19,14 @@ describe('provision manifest', () => {
   it('writes a versioned manifest and reads it back', () => {
     const dir = tmp();
     const path = writeProvisionManifest(dir, {
-      role: 'backend',
+      profile: 'backend',
       harness: 'claude-code',
       mcpServers: ['supabase'],
     });
     expect(path).toBe(join(dir, BINDING_DIR, PROVISION_MANIFEST_FILE));
     const m = readProvisionManifest(dir)!;
     expect(m.version).toBe(1);
-    expect(m.role).toBe('backend');
+    expect(m.profile).toBe('backend');
     expect(m.harness).toBe('claude-code');
     expect(m.mcpServers).toEqual(['supabase']);
     expect(typeof m.provisionedAt).toBe('string');
@@ -33,13 +35,13 @@ describe('provision manifest', () => {
   it('records and unions provisioned permissions across re-provisions', () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'reviewer',
+      profile: 'reviewer',
       harness: 'claude-code',
       mcpServers: [],
       permissions: { allow: ['read'], ask: ['bash'], deny: [] },
     });
     writeProvisionManifest(dir, {
-      role: 'backend',
+      profile: 'backend',
       harness: 'claude-code',
       mcpServers: [],
       permissions: { allow: ['edit', 'read'], ask: [], deny: [] },
@@ -51,31 +53,31 @@ describe('provision manifest', () => {
 
   it('defaults permissions to empty when omitted (back-compatible manifest)', () => {
     const dir = tmp();
-    writeProvisionManifest(dir, { role: 'x', harness: 'h', mcpServers: ['s'] });
+    writeProvisionManifest(dir, { profile: 'x', harness: 'h', mcpServers: ['s'] });
     expect(readProvisionManifest(dir)!.permissions).toEqual({ allow: [], ask: [], deny: [] });
   });
 
   it('unions server names across re-provisions (stays a complete removal set)', () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'backend',
+      profile: 'backend',
       harness: 'claude-code',
       mcpServers: ['supabase'],
     });
     writeProvisionManifest(dir, {
-      role: 'frontend',
+      profile: 'frontend',
       harness: 'claude-code',
       mcpServers: ['figma'],
     });
     const m = readProvisionManifest(dir)!;
     expect(m.mcpServers).toEqual(['figma', 'supabase']); // sorted union
-    expect(m.role).toBe('frontend'); // latest provision
+    expect(m.profile).toBe('frontend'); // latest provision
   });
 
-  it('records the guidance surface and preserves it across a role-only re-provision (ADR 085)', () => {
+  it('records the guidance surface and preserves it across a profile-only re-provision (ADR 085)', () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'backend',
+      profile: 'backend',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: ['.musterd/skill/SKILL.md'], contentVersion: 1 },
@@ -86,7 +88,7 @@ describe('provision manifest', () => {
     });
     // A later provision that doesn't touch guidance must not drop it.
     writeProvisionManifest(dir, {
-      role: 'frontend',
+      profile: 'frontend',
       harness: 'claude-code',
       mcpServers: ['figma'],
     });
@@ -99,11 +101,102 @@ describe('provision manifest', () => {
 
   it('returns null for a corrupt or invalid manifest', () => {
     const dir = tmp();
-    writeProvisionManifest(dir, { role: 'x', harness: 'h', mcpServers: [] });
+    writeProvisionManifest(dir, { profile: 'x', harness: 'h', mcpServers: [] });
     const path = join(dir, BINDING_DIR, PROVISION_MANIFEST_FILE);
     writeFileSync(path, '{ not json');
     expect(readProvisionManifest(dir)).toBeNull();
     writeFileSync(path, JSON.stringify({ version: 2 }));
     expect(readProvisionManifest(dir)).toBeNull();
+  });
+});
+
+describe('loadProvisioning — classified v3 loads (ADR 281/282/296)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-prov-'));
+  });
+
+  const v3 = {
+    version: 3,
+    toolkit: 'backend',
+    desired: ['claude-code', 'musterd'],
+    contributions: { 'claude-code': ['folder:/w#hooks'] },
+    provisionedAt: '2026-08-19T12:00:00.000Z',
+  };
+  const v2 = {
+    version: 2,
+    profile: 'backend',
+    desired: ['claude-code', 'musterd'],
+    contributions: { 'claude-code': ['folder:/w#hooks'] },
+    provisionedAt: '2026-08-19T12:00:00.000Z',
+  };
+  const v1 = {
+    version: 1,
+    role: 'backend',
+    harness: 'claude-code',
+    mcpServers: ['musterd'],
+    permissions: { allow: [], ask: [], deny: [] },
+    provisionedAt: '2026-08-01T00:00:00.000Z',
+  };
+  const writeRaw = (value: unknown) => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'provisioned.json'),
+      typeof value === 'string' ? value : JSON.stringify(value),
+    );
+  };
+
+  it('absent → missing', () => {
+    expect(loadProvisioning(dir).kind).toBe('missing');
+  });
+
+  it('strict v3 → valid; saveProvisioning round-trips it', () => {
+    saveProvisioning(dir, v3 as Parameters<typeof saveProvisioning>[1]);
+    const got = loadProvisioning(dir);
+    expect(got.kind).toBe('valid');
+    if (got.kind === 'valid') {
+      expect(got.value.toolkit).toBe('backend');
+      expect(got.value.desired).toEqual(['claude-code', 'musterd']);
+    }
+  });
+
+  it('a well-formed version-1 manifest → legacy (recognized, never consumed)', () => {
+    writeRaw(v1);
+    expect(loadProvisioning(dir).kind).toBe('legacy');
+  });
+
+  it('a well-formed version-2 manifest → legacy, never invalid (ADR 296 tier 2)', () => {
+    writeRaw(v2);
+    const got = loadProvisioning(dir);
+    expect(got.kind).toBe('legacy');
+    if (got.kind === 'legacy') {
+      expect((got.value as Record<string, unknown>)['profile']).toBe('backend');
+    }
+  });
+
+  it('unknown versions, invalid JSON, and unknown keys → invalid, never legacy', () => {
+    writeRaw({ ...v3, version: 4 });
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+    writeRaw('{ nope');
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+    writeRaw({ ...v3, extra: 1 });
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+    // A malformed v2 is invalid too — legacy is reserved for the RECOGNIZED previous shapes.
+    writeRaw({ ...v2, extra: 1 });
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+    // Duplicate desired ids violate the uniqueness refinement.
+    writeRaw({ ...v3, desired: ['codex', 'codex'] });
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+  });
+
+  it('saveProvisioning refuses an invalid object before any byte moves', () => {
+    saveProvisioning(dir, v3 as Parameters<typeof saveProvisioning>[1]);
+    const before = readFileSync(join(dir, '.musterd', 'provisioned.json'), 'utf8');
+    expect(() =>
+      saveProvisioning(dir, { ...v3, desired: ['Not An Id'] } as Parameters<
+        typeof saveProvisioning
+      >[1]),
+    ).toThrow(/worktree-provisioning/);
+    expect(readFileSync(join(dir, '.musterd', 'provisioned.json'), 'utf8')).toBe(before);
   });
 });

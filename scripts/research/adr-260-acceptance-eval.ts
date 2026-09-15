@@ -60,14 +60,19 @@ interface Submit {
   ts: number;
   d: ReadyDetail;
   close?: { ts: number; d: ClosedDetail };
+  /** The lane's acceptance was later re-routed by hand (`lane.review_rerouted`, ADR 348
+   *  amendment 2026-09-04). The submit row's `reviewer` is then no longer the seat that holds
+   *  the ask, so `jumped` would misread the re-routed seat's honest accept as a route jump. */
+  rerouted?: true;
 }
 
 function load(dbPath = process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 'musterd.db')) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   const rows = (action: string) =>
-    db
-      .prepare('select ts, detail from audit where action = ? order by ts')
-      .all(action) as { ts: number; detail: string }[];
+    db.prepare('select ts, detail from audit where action = ? order by ts').all(action) as {
+      ts: number;
+      detail: string;
+    }[];
   const closes = new Map<string, { ts: number; d: ClosedDetail }[]>();
   for (const r of rows('lane.closed')) {
     const d = JSON.parse(r.detail) as ClosedDetail;
@@ -76,19 +81,50 @@ function load(dbPath = process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 
   }
   const seatFamily = new Map<string, string>();
   for (const r of db
-    .prepare("select actor, detail from audit where action = 'occupancy.model_attested' order by ts")
+    .prepare(
+      "select actor, detail from audit where action = 'occupancy.model_attested' order by ts",
+    )
     .all() as { actor: string; detail: string }[]) {
     const j = JSON.parse(r.detail) as { new?: string };
     if (r.actor && j.new) seatFamily.set(r.actor, familyOf(j.new));
   }
+  // Dated amendment, 2026-09-05, written at count 0 of its own rows (falsify: `select count(*)
+  // from audit where action='lane.review_rerouted'` on a daemon built before cd138abd is 0 by
+  // construction; on one built after, the exclusion below predates every row). A lane re-routed
+  // by hand leaves the population the same way a `named` submit does and for the same reason:
+  // the seat that answered was chosen by a person, not the ladder, and the submit row names the
+  // seat the person replaced. Without this, `jumped` counts the re-routed seat's accept as a
+  // route jump (closer ≠ asked reviewer, closer ≠ owner) — a miss charged to a ladder that was
+  // overruled. Excluded on arrival, before the first row, per the rule beside CONCENTRATION_PREDICTION.
+  const rerouted = new Set(
+    rows('lane.review_rerouted').map((r) => (JSON.parse(r.detail) as { lane: string }).lane),
+  );
   const submits: Submit[] = rows('lane.ready_for_review').map((r) => {
     const d = JSON.parse(r.detail) as ReadyDetail;
     const close = (closes.get(d.lane) ?? []).find((c) => c.ts >= r.ts);
-    return close ? { ts: r.ts, d, close } : { ts: r.ts, d };
+    const base: Submit = close ? { ts: r.ts, d, close } : { ts: r.ts, d };
+    return rerouted.has(d.lane) ? { ...base, rerouted: true } : base;
   });
   return { db, submits, seatFamily };
 }
 
+/**
+ * The population this instrument is entitled to reason about: submits the LADDER routed.
+ *
+ * `route: 'named'` (dolly's #1152, 2026-09-01) is excluded, and the exclusion is the load-bearing
+ * line rather than a tidy-up. Every other filter here removes a submit the picker could not act on
+ * — exempt, human-required, no candidate, queued to a wake. A named row is the opposite case: the
+ * picker was ABLE and was overruled, because a human named the acceptor by hand. Counting it would
+ * grade the ladder on a decision the ladder did not make, in both directions at once — a person
+ * repeatedly routing to one trusted seat reads as the picker concentrating (the primary
+ * pre-registered metric), and the honest `same_model` abstention a named route records would drag
+ * `crossFamilyShare` down as if the ladder had settled for it.
+ *
+ * The general rule, which outlives this instance: an experimenter's hand in the population is not
+ * data. Any future route value that means "chosen by something other than the ladder" belongs on
+ * this exclusion list on arrival, BEFORE its first row lands — see the dated amendment beside
+ * CONCENTRATION_PREDICTION.
+ */
 const liveRouted = (rs: Submit[]) =>
   rs.filter(
     (r) =>
@@ -96,6 +132,14 @@ const liveRouted = (rs: Submit[]) =>
       !r.d.human_required &&
       !r.d.no_candidate &&
       !r.d.wake_queued &&
+      r.d.route !== 'named' &&
+      // ADR 351: an unattested worker is routed at the `ungraded` rung. The ladder DID choose, but
+      // it chose among pairings it could not grade, so the row is no evidence about decorrelation
+      // in either direction — out of the population on arrival, before its first row landed.
+      r.d.route !== 'ungraded' &&
+      // 2026-09-05: a lane whose acceptance was later re-routed by hand — see the amendment in
+      // `load()`. Out before its first row, like `named` and `ungraded`.
+      !r.rerouted &&
       r.d.reviewer,
   );
 
@@ -106,6 +150,17 @@ export interface WindowResult {
   wakeQueued: number;
   noCandidate: number;
   exempt: number;
+  /** Hand-routed submits (ADR 348). Out of `liveRouted` by design — but counted, because a bucket
+   *  that leaves the population without appearing in the mix makes the mix stop summing, and a
+   *  reader then attributes the gap to whichever bucket they already suspect. dolly's catch on
+   *  #1156, and the same ADR 234 shape this PR flagged in her report.ts. */
+  named: number;
+  /** Submits routed at the `ungraded` rung (ADR 351): out of `liveRouted`, counted for the same
+   *  reason `named` is — a bucket that leaves the mix silently makes the mix stop summing. */
+  ungraded: number;
+  /** Lanes re-routed by hand after submit (ADR 348 amendment, 2026-09-04): out of `liveRouted`,
+   *  counted so the mix keeps summing. */
+  rerouted: number;
   good: number;
   confirms: number;
   jumped: number;
@@ -152,9 +207,7 @@ export function evaluate(name: string, rs: Submit[]): WindowResult {
   for (const r of lr) reviewers.set(r.d.reviewer!, (reviewers.get(r.d.reviewer!) ?? 0) + 1);
   const top = [...reviewers.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
 
-  const spanDays = rs.length
-    ? Math.max((rs[rs.length - 1]!.ts - rs[0]!.ts) / 86_400_000, 1e-9)
-    : 1;
+  const spanDays = rs.length ? Math.max((rs[rs.length - 1]!.ts - rs[0]!.ts) / 86_400_000, 1e-9) : 1;
 
   return {
     name,
@@ -163,6 +216,9 @@ export function evaluate(name: string, rs: Submit[]): WindowResult {
     wakeQueued: rs.filter((r) => r.d.wake_queued).length,
     noCandidate: rs.filter((r) => r.d.no_candidate).length,
     exempt: rs.filter((r) => r.d.acceptance_exempt).length,
+    named: rs.filter((r) => r.d.route === 'named' && !r.d.acceptance_exempt).length,
+    ungraded: rs.filter((r) => r.d.route === 'ungraded').length,
+    rerouted: rs.filter((r) => r.rerouted === true).length,
     good,
     confirms,
     jumped,
@@ -191,7 +247,9 @@ function wakeVolume(db: DatabaseSync, lo: number, hi: number) {
   // leases-per-act ran 2.7 (baseline) → 5.2 (post-#785). Reporting leases alone is what let this
   // Eval's item 5 claim a 5x rise that was mostly the same handful of acts failing to settle.
   const leaseRows = db
-    .prepare("select detail from audit where action = 'residency.wake_leased' and ts >= ? and ts < ?")
+    .prepare(
+      "select detail from audit where action = 'residency.wake_leased' and ts >= ? and ts < ?",
+    )
     .all(lo, hi) as { detail: string }[];
   const actIds = new Set(
     leaseRows.map((r) => {
@@ -434,9 +492,14 @@ export function concentration(
       boundarySeat,
       periods: [
         describe('all history (context only)', rows),
-        describe('trailing 14d (context only — straddles the 08-12 regime change)',
-          rows.filter((r) => r.ts >= now - 14 * 86_400_000)),
-        describe('trailing 7d — THE BEFORE ARM', rows.filter((r) => r.ts >= now - LOOKBACK_MS)),
+        describe(
+          'trailing 14d (context only — straddles the 08-12 regime change)',
+          rows.filter((r) => r.ts >= now - 14 * 86_400_000),
+        ),
+        describe(
+          'trailing 7d — THE BEFORE ARM',
+          rows.filter((r) => r.ts >= now - LOOKBACK_MS),
+        ),
       ],
     };
   }
@@ -448,7 +511,10 @@ export function concentration(
         'BEFORE (7d up to the boundary)',
         rows.filter((r) => r.ts < boundary! && r.ts >= boundary! - LOOKBACK_MS),
       ),
-      describe('AFTER', rows.filter((r) => r.ts >= boundary!)),
+      describe(
+        'AFTER',
+        rows.filter((r) => r.ts >= boundary!),
+      ),
     ],
   };
 }
@@ -466,8 +532,44 @@ export function concentration(
  *       claim in ADR 260 is wrong, and the next suspect is the quiescence filter or grading, not
  *       the sort. A FAIL is the informative outcome and must be recorded as a disproof.
  * INCONCLUSIVE: fewer than 20 submits after the boundary, or the second seat never accepts.
+ *
+ * ---
+ * AMENDED 2026-09-01, before any affected row exists — the thresholds above are UNCHANGED and the
+ * population they range over is narrowed by one value.
+ *
+ * dolly's #1152 gives a human a way to route an acceptance to a named seat, recorded as
+ * `route: 'named'`. That row satisfies every clause of `liveRouted` as it stood — not exempt, not
+ * human-required, has a reviewer, no candidate-failure flag — so it would have entered the very
+ * population this prediction ranges over, and the prediction is about what the LADDER does with
+ * the asks. Two ways it would have broken, both measured against the code rather than supposed:
+ *
+ *   - CONCENTRATION (primary). A person hand-routing repeatedly to one trusted seat drives
+ *     top-reviewer share up with no involvement from the sort. That is indistinguishable, in this
+ *     number, from the ladder failing to disperse the asks — so the FAIL arm could have fired on
+ *     a mechanism claim that was never tested.
+ *   - crossFamilyShare (secondary, the context line printed beside it). A named route grades
+ *     `same_model` when the pairing cannot be proved better, honestly, so each one would have
+ *     lowered a figure that claims to describe the picker's achieved diversity.
+ *
+ * `liveRouted` therefore excludes `named`, and this note is the pre-registration of that exclusion.
+ * It is written while the count of named rows in the ledger is ZERO (#1152 unmerged as of writing),
+ * which is the only condition under which such a narrowing is not a fitted result: after the first
+ * named submit lands, no amendment can distinguish "excluded because it is not ladder data" from
+ * "excluded because it moved the number the wrong way", and the window would be contaminated
+ * permanently. Falsifier for that claim of zero: `select count(*) from audit where action =
+ * 'lane.ready_for_review' and detail like '%"route":"named"%'` — a non-zero count at this commit
+ * means this amendment was written too late and the window must be restarted, not patched.
+ *
+ * What this amendment does NOT do: it does not remove hand-routed acceptances from the ledger, and
+ * it takes no position on whether naming an acceptor is good practice. They are recorded, they are
+ * real reviews, and ADR 056 diversity claims read the CLOSE row, not this one. They are simply not
+ * evidence about a picker that did not pick them.
  */
-export const CONCENTRATION_PREDICTION = { passAtOrBelow: 0.4, failAtOrAbove: 0.5, minN: 20 } as const;
+export const CONCENTRATION_PREDICTION = {
+  passAtOrBelow: 0.4,
+  failAtOrAbove: 0.5,
+  minN: 20,
+} as const;
 
 export function judgeConcentration(after: ConcentrationPeriod): 'PASS' | 'FAIL' | 'INCONCLUSIVE' {
   if (after.n < CONCENTRATION_PREDICTION.minN) return 'INCONCLUSIVE';
@@ -524,7 +626,7 @@ function main() {
   for (const r of results) {
     console.log(`\n=== ${r.name} — ${r.submits} submits ===`);
     console.log(
-      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt}`,
+      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt} | hand-routed ${r.named} | ungraded ${r.ungraded} | re-routed ${r.rerouted}`,
     );
     console.log(
       `  [1] good <=10m ${r.good}/${r.liveRouted} = ${pct(r.goodRate)}   (any confirm ${r.confirms}/${r.liveRouted})`,
@@ -571,7 +673,10 @@ export function rerun(
       .all('policy.change', lo, now) as { ts: number }[]
   ).map((r) => r.ts);
   const guard = windowGuard(policyChanges, routingCommitsSince(lo, now, run), lo, now);
-  const r = evaluate(`re-run, last ${windowDays}d`, submits.filter((s) => s.ts >= lo && s.ts < now));
+  const r = evaluate(
+    `re-run, last ${windowDays}d`,
+    submits.filter((s) => s.ts >= lo && s.ts < now),
+  );
   const share = r.liveRouted ? (r.topReviewer?.[1] ?? 0) / r.liveRouted : 0;
   const head =
     `ADR 260 re-run, ${windowDays}d to ${new Date(now).toISOString().slice(0, 10)}: ` +
@@ -652,7 +757,10 @@ async function rerunMain() {
   const windowDays = daysArg > -1 ? Number(process.argv[daysArg + 1]) : 7;
   const { execFileSync } = await import('node:child_process');
   const run = (args: string[]) =>
-    execFileSync('git', args, { cwd: new URL('../..', import.meta.url).pathname, encoding: 'utf8' });
+    execFileSync('git', args, {
+      cwd: new URL('../..', import.meta.url).pathname,
+      encoding: 'utf8',
+    });
   const { verdict, body } = rerun(Date.now(), windowDays, db, submits, run);
   const text = `[${verdict}] ${body}`;
   console.log(text);

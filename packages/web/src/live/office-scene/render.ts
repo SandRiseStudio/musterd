@@ -51,8 +51,9 @@ import {
 } from './layout';
 import { STICKY_CAP, type WallBoard } from './wallboard';
 import { DAY_ENV, type LightEnv } from './lighting';
+import { CANVAS_EASE } from './motion';
 import { deskMoodFor, deskMoodStyle } from './moods';
-import type { Placement } from './seating';
+import { workingAtDesk, type Placement } from './seating';
 import { chairShift, chairYaw, GESTURE, handsInLap, seedOf, solveSkeleton, typingBurst } from './skeleton';
 import type { Dir, OfficeNode, Pose } from './types';
 import { formatWorkingHours } from './workingHours';
@@ -200,6 +201,69 @@ function roundRect(
   ctx.fill();
 }
 
+/**
+ * The pool of shade where a solid meets the surface it stands on.
+ *
+ * Until this existed the room had exactly ONE contact shadow — `drawGroundShadow`, which grounds the
+ * whole floor slab on the panel — plus a handful of hand-placed pools under the plants and the dog.
+ * Every desk, chair, cabinet, printer and monitor had nothing underneath it, which is the difference
+ * between an object resting ON a surface and an object floating a millimetre above one. It reads as
+ * weightlessness even when you cannot say why: the eye takes contact shade as the evidence that two
+ * things touch, and without it a flat-shaded solid is just a shape pasted at that coordinate.
+ *
+ * Drawn at `baseUp` rather than at the floor, so it lands on whatever the solid actually stands on —
+ * the floor for a desk, the desk top for the monitor on it. That is the whole reason this takes the
+ * same parameters as the caller's own footprint instead of a floor position.
+ *
+ * WARM, not cool, and deliberately so even though the room just gained a cool counterweight: the
+ * scene's standing rule (stated at `drawGroundShadow` and again in the roundness pass) is that a
+ * neutral or cold shade on a warm floor reads as dirt. The counterweight belongs to the walls, which
+ * are lit; this is contact, which is not.
+ *
+ * Cost: `box`/`frustum` run at BAKE time only — the room is drawn once into an offscreen buffer and
+ * re-baked on resize or a veil/lamp step, not per frame (ADR 085's two-tier render). So this is paid
+ * on a rebake, never on the 20fps ambient loop.
+ */
+export function contactPool(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  lx: number,
+  ly: number,
+  w: number,
+  d: number,
+  baseUp: number,
+): void {
+  const span = (w + d) / 2;
+  /* A desk is not one box. It is a top, four legs, a monitor, a keyboard and a mug, and EVERY one of
+     them comes through here — so the first cut of this compounded: a dozen overlapping pools per pod
+     turned the desks into a dark brown mass and took the light out of the middle of the room. Two
+     guards, both about the fact that a contact pool is a per-OBJECT effect being applied per-solid:
+       · below `MIN_SPAN` nothing is drawn at all. A keyboard does not have a shadow you would notice,
+         and twenty of them do have one you cannot miss.
+       · the alpha is a fraction of what a lone pool would want, because these are meant to be READ in
+         aggregate. Tuned by eye against the muddied version, not by picking a round number. */
+  const MIN_SPAN = 9;
+  if (span < MIN_SPAN) return;
+  const c = project(lx, ly, fit);
+  const cy = c.y - baseUp * fit.scale;
+  // The penumbra spills a little past the footprint, and the pool is offset a touch toward the
+  // viewer — the room's light comes from the windows behind, so shade falls to the front.
+  const rx = span * KX * fit.scale * 0.78;
+  const ry = span * KY * fit.scale * 0.92;
+  ctx.save();
+  ctx.translate(c.x, cy + ry * 0.18);
+  ctx.scale(1, ry / rx);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, 'rgba(58, 34, 12, 0.13)');
+  g.addColorStop(0.45, 'rgba(58, 34, 12, 0.07)');
+  g.addColorStop(1, 'rgba(58, 34, 12, 0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 /** An iso block: three faces (top lightest, front medium, right darkest), footprint w×d (logical),
  * height hPx (screen px at scale 1), floated `baseUp` px off the floor. */
 function box(
@@ -220,6 +284,7 @@ function box(
   const lo = baseUp * fit.scale;
   const hi = (baseUp + hPx) * fit.scale;
   const dn = (p: Pt, u: number): Pt => ({ x: p.x, y: p.y - u });
+  contactPool(ctx, fit, lx, ly, w, d, baseUp);
   quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], shade(base, 0.72));
   quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], shade(base, 0.86));
   quad(ctx, [dn(A, hi), dn(B, hi), dn(C, hi), dn(D, hi)], base);
@@ -256,6 +321,7 @@ function frustum(
   // destructure aligned with `at`'s corner order rather than renaming the three that are drawn.
   const [, B0, C0, D0] = at(w0, d0, baseUp * fit.scale);
   const [A1, B1, C1, D1] = at(w1, d1, (baseUp + hPx) * fit.scale);
+  contactPool(ctx, fit, lx, ly, w0, d0, baseUp);
   quad(ctx, [B0!, C0!, C1!, B1!], shade(base, 0.72));
   quad(ctx, [D0!, C0!, C1!, D1!], shade(base, 0.86));
   quad(ctx, [A1!, B1!, C1!, D1!], base);
@@ -1562,6 +1628,9 @@ const RECEPTIONIST_LOOK: Appearance = {
 const RECEPTIONIST_NODE: OfficeNode = {
   name: 'receptionist',
   kind: 'human',
+  service: false,
+  // The house's own staff — nobody wakes the receptionist.
+  woken: false,
   presence: 'online',
   activity: 'working',
   posture: 'working',
@@ -1574,6 +1643,9 @@ const RECEPTIONIST_NODE: OfficeNode = {
   workSource: null,
   laneState: null,
   moreLanes: 0,
+  dnd: false,
+  offline_reason: null,
+  last_seen_at: null,
 };
 
 function drawReceptionist(ctx: CanvasRenderingContext2D, fit: Fit, r: ReceptionistState, t: number): void {
@@ -1648,7 +1720,7 @@ const SLEEPING_RECEPTIONIST: ReceptionistState = {
   mode: 'asleep',
   modeT: 0,
   aloneT: 0,
-  nextBeat: 0,
+  lastSlot: -1,
   beatLen: 0,
 };
 
@@ -2855,6 +2927,9 @@ function skelFor(pose: Pose, node: OfficeNode, t: number) {
   // And no typing *through a gesture* — a member mid-stretch or mid-sip has their hands anywhere but the keys.
   const typing = node.posture === 'working' && pose.sit > 0.9 && pose.gesture === 0 ? typingBurst(seed, t) : 0;
   return solveSkeleton({
+    // A deskless seat poses the hands in the lap instead of on a keyboard (nick, 2026-08-31): the
+    // couch, the meeting chairs and reception's waiting chair have nothing in front of them.
+    seat: pose.casual ? 'casual' : 'desk',
     phase: pose.phase,
     sit: pose.sit,
     stride: pose.stride,
@@ -2950,9 +3025,8 @@ const CHAIR_BACK_OFF = 14; // how far behind the seat centre the backrest stands
 // here, a wheeled office chair there, an armed exec seat, the odd high-backed gamer chair. The variation
 // never touches the two load-bearing invariants: the cushion top stays at SEAT_TOP (where `skeleton.ts`
 // lands a seated pelvis) and the backrest keeps its footprint (so a sitter still sorts between the two).
-type ChairKind = 'stool' | 'wheeled' | 'exec' | 'gamer';
+type ChairKind = 'task' | 'wheeled' | 'exec' | 'gamer';
 interface ChairStyle {
-  caster: boolean; // a 5-star wheeled base instead of four splayed legs
   backH: number; // backrest height
   backW: number; // backrest width along the shoulders
   arms: boolean; // a low armrest each side
@@ -2960,33 +3034,41 @@ interface ChairStyle {
   wings: boolean; // racing-style side bolsters on the backrest
 }
 const CHAIR_ARM_SALT = 22;
-const TASK_CHAIR: ChairStyle = { caster: false, backH: 26, backW: 34, arms: false, headrest: false, wings: false };
+/* Every chair in this office rolls (nick, 2026-09-14). It used to be a `caster` flag with the plain
+   task chair — and with it the meeting-room set, which takes this same default — standing on four
+   splayed legs. A room where three desks out of twelve cannot swivel is a room where the ambient
+   chair beats are unevenly distributed for a reason nobody can see, and the four-leg base was the
+   weaker drawing anyway: the star base has arms AND wheels, which is what makes it read as a chair
+   rather than as dots under a cushion. The flag is gone rather than set to true everywhere, so there
+   is no second state to keep working. */
+const TASK_CHAIR: ChairStyle = { backH: 26, backW: 34, arms: false, headrest: false, wings: false };
 
 // The office is a *fixed* set of 12 desks (three pods of four). A probability hash over so few ids doesn't
 // guarantee coverage — it can (and did) bucket all 12 into one variant, so the variety never shows. Instead
 // each desk's chair/monitor is a curated spread: every kind appears, and every pod shows a mix (adjacent
 // desks differ), which is exactly what makes the variety read. Still fully deterministic + stable per frame.
 const CHAIR_KINDS_BY_ID: readonly ChairKind[] = [
-  'gamer', 'wheeled', 'exec', 'stool', // pod 0 (top — two desks face the camera)
-  'exec', 'gamer', 'stool', 'wheeled', // pod 1 (centre)
-  'wheeled', 'exec', 'gamer', 'stool', // pod 2 (left)
+  'gamer', 'wheeled', 'exec', 'task', // pod 0 (top — two desks face the camera)
+  'exec', 'gamer', 'task', 'wheeled', // pod 1 (centre)
+  'wheeled', 'exec', 'gamer', 'task', // pod 2 (left)
 ];
 
-/** Exported for the ambient scheduler: the chair beats (swivel/roll) need casters — a stool can't. */
-export function chairKindFor(id: number): ChairKind {
+/** The ambient scheduler used to import this so it could skip the one kind with no casters. Every kind
+ *  has them now, so its question collapsed to "is there a desk chair" and this went back to private. */
+function chairKindFor(id: number): ChairKind {
   return CHAIR_KINDS_BY_ID[id % CHAIR_KINDS_BY_ID.length]!;
 }
 function chairStyleFor(id: number): ChairStyle {
   const arms = deskRnd(id, CHAIR_ARM_SALT) < 0.5;
   switch (chairKindFor(id)) {
-    case 'stool':
+    case 'task':
       return TASK_CHAIR;
     case 'wheeled':
-      return { caster: true, backH: 27, backW: 34, arms, headrest: false, wings: false };
+      return { backH: 27, backW: 34, arms, headrest: false, wings: false };
     case 'exec':
-      return { caster: true, backH: 35, backW: 36, arms: true, headrest: false, wings: false };
+      return { backH: 35, backW: 36, arms: true, headrest: false, wings: false };
     case 'gamer':
-      return { caster: true, backH: 43, backW: 38, arms: true, headrest: true, wings: true };
+      return { backH: 43, backW: 38, arms: true, headrest: true, wings: true };
   }
 }
 
@@ -3002,7 +3084,7 @@ function chairBase(
 ): void {
   const sn = FWD[dir][1] !== 0;
   const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-seat unit
-  if (style.caster) {
+  {
     // A 5-star caster base: a central column, five ARMS radiating from it, and a wheel at each tip.
     //
     // The arms are the whole point of this block. Without them the base was five ellipses and a post
@@ -3045,15 +3127,6 @@ function chairBase(
       );
     }
     box(ctx, fit, lx, ly, 6, 6, CHAIR_LIFT, dim(color, 0.55));
-  } else {
-    for (const [sx, sy] of [
-      [-1, -1],
-      [1, -1],
-      [1, 1],
-      [-1, 1],
-    ] as const) {
-      box(ctx, fit, lx + sx * 10, ly + sy * 10, 4, 4, CHAIR_LIFT, dim(color, 0.6));
-    }
   }
   // The cushion top is SEAT_TOP — the exact height `skeleton.ts` puts a seated pelvis at, so a member lands
   // on the chair rather than near it.
@@ -3100,15 +3173,16 @@ function chairBack(
 // guarantee coverage, and did collapse to all-single). Every pod gets a mix, and the two camera-facing
 // desks (ids 0,1) carry the boldest setups so the variety actually reads. Every panel still lights teal
 // when its member is `working` and stays dim otherwise — the load-bearing work cue is intact.
-type MonitorSetup = 'single' | 'dual' | 'ultrawide' | 'laptopRiser' | 'laptopDock';
-// Two laptop rigs, from real desk hardware: `laptopRiser` = an open laptop raised on an aluminium stand
-// beside the monitor; `laptopDock` = a *closed* laptop stood vertically in a wooden dock. Both sit on
-// N/W-facing desks — the rows whose faces point at the camera — so the riser's lit screen and the dock's
-// silver body read. ids 2 (pod 0, N), 7/10/11 (W).
+type MonitorSetup = 'single' | 'dual' | 'ultrawide';
+// The two decorative laptop rigs (`laptopRiser`, `laptopDock`) were removed on 2026-09-04. They were
+// furniture variety and belonged to nobody — which stopped being harmless the moment a laptop started
+// meaning *this person is in the building*: four desks were telling that lie every frame, on desks whose
+// owner might be away or offline. Every desk now carries the same dock instead (see `deskDock`), empty
+// until its owner is working. Monitor variety is monitors.
 const MONITOR_SETUPS_BY_ID: readonly MonitorSetup[] = [
-  'single', 'dual', 'laptopRiser', 'ultrawide', // pod 0 (top — 2,3 face the camera)
-  'single', 'dual', 'ultrawide', 'laptopDock', // pod 1 (centre — 6,7 face the camera)
-  'single', 'dual', 'laptopRiser', 'laptopDock', // pod 2 (left — 10,11 face the camera)
+  'single', 'dual', 'single', 'ultrawide', // pod 0 (top — 2,3 face the camera)
+  'single', 'dual', 'ultrawide', 'single', // pod 1 (centre — 6,7 face the camera)
+  'single', 'dual', 'ultrawide', 'dual', // pod 2 (left — 10,11 face the camera)
 ];
 function monitorSetupFor(id: number): MonitorSetup {
   return MONITOR_SETUPS_BY_ID[id % MONITOR_SETUPS_BY_ID.length]!;
@@ -3248,11 +3322,14 @@ function screenPanel(
   t = 0,
 ): void {
   const sn = dir === 'S' || dir === 'N';
-  const pw = sn ? wAcross : 5;
-  const pd = sn ? 5 : wAcross;
-  box(ctx, fit, mx, my, pw, pd, h, '#2a2e33', up + 8);
-  const lo = (up + 8) * fit.scale;
-  const hi = (up + 8 + h) * fit.scale;
+  // 3 deep, not 5: at this camera angle the panel's own side face is what made a monitor read as a
+  // chunky all-in-one PC rather than a thin screen on a stand. Paired with the slim `monitorStand`
+  // below — the depth and the foot were both doing it, and fixing one alone leaves the tower.
+  const pw = sn ? wAcross : 3;
+  const pd = sn ? 3 : wAcross;
+  box(ctx, fit, mx, my, pw, pd, h, '#2a2e33', up + PANEL_UP);
+  const lo = (up + PANEL_UP) * fit.scale;
+  const hi = (up + PANEL_UP + h) * fit.scale;
   const dn = (p: Pt, u: number): Pt => ({ x: p.x, y: p.y - u });
   // The camera-facing face's bottom corners (BL→BR left-to-right on canvas); vertical is a straight lift.
   let BL: Pt | null = null;
@@ -3312,6 +3389,18 @@ function screenPanel(
   }
 }
 
+/** How far above the desk the panel's bottom edge floats — the height of the stand's neck. */
+const PANEL_UP = 8;
+
+/** A monitor stand: a flat base plate on the desk and a slim neck up to the panel. It replaces the
+ * 8×6×8 solid block that used to sit under every panel, which at this camera angle read as a tower —
+ * a full PC with a screen stuck to it, which is exactly the thing nick said these should stop being.
+ * `across` is the base plate's width along the shoulders (an ultrawide or a dual arm needs more foot). */
+function monitorStand(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: number, sn: boolean, up: number, across: number): void {
+  box(ctx, fit, mx, my, sn ? across : 11, sn ? 11 : across, 1.5, '#22262b', up); // base plate
+  box(ctx, fit, mx, my, sn ? 5 : 3, sn ? 3 : 5, PANEL_UP, '#33383f', up + 1.5); // neck
+}
+
 function monitor(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -3324,106 +3413,64 @@ function monitor(
   t = 0,
 ): void {
   const setup = id == null ? 'single' : monitorSetupFor(id);
+  const sn = dir === 'S' || dir === 'N';
   const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-desk unit
   if (setup === 'dual') {
     // Two full-size panels (each the size of a single monitor) on a shared dual-arm stand, sat side by
     // side so they read as two real screens, not two half-screens. `[-1,1]` order paints the nearer last.
-    box(ctx, fit, mx, my, 12, 8, 8, '#33272b', surfaceUp); // shared dual-arm foot
+    monitorStand(ctx, fit, mx, my, sn, surfaceUp, 22); // shared dual-arm foot, wide enough for two
     for (const s of [-1, 1] as const) {
       screenPanel(ctx, fit, mx + p[0] * s * 18, my + p[1] * s * 18, dir, working, surfaceUp, 34, 22, false, t);
     }
   } else if (setup === 'ultrawide') {
-    box(ctx, fit, mx, my, 10, 6, 8, '#33272b', surfaceUp);
+    monitorStand(ctx, fit, mx, my, sn, surfaceUp, 20);
     screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 54, 20, true, t);
-  } else if (setup === 'laptopRiser' || setup === 'laptopDock') {
-    // A single monitor with a laptop rig to one side (side alternates by desk id): either an open laptop
-    // raised on an aluminium stand, or a closed laptop stood in a wooden vertical dock.
-    box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
-    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false, t);
-    const side = id != null && id % 2 === 0 ? 1 : -1;
-    const lxp = mx + p[0] * side * 30;
-    const lyp = my + p[1] * side * 30;
-    if (setup === 'laptopRiser') laptopRiser(ctx, fit, lxp, lyp, dir, working, surfaceUp, t);
-    else laptopDock(ctx, fit, lxp, lyp, dir, surfaceUp);
   } else {
-    box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
+    monitorStand(ctx, fit, mx, my, sn, surfaceUp, 15);
     screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false, t);
   }
 }
 
+/** The closed laptop's aluminium and its logo dot — shared by the desk dock and the slab under an
+ * arm (`character.ts` `drawCarry`), which must be the same object to the eye. */
 const LAPTOP_SILVER = '#c7ccd2';
+const LAPTOP_LOGO = '#a3a9b1';
 
-/** An **open** laptop raised on an aluminium stand (the elevated-riser kind): a slim column lifts a top
- * plate to near monitor height, with the silver keyboard base + a dark key deck on it and the open lid
- * standing at the back, its screen lit on the camera-facing face. Silver so it reads as a laptop, not a
- * second monitor. Placed only on N/W desks so the lid's lit face shows. */
-function laptopRiser(
-  ctx: CanvasRenderingContext2D,
-  fit: Fit,
-  mx: number,
-  my: number,
-  dir: Dir,
-  working: boolean,
-  up: number,
-  t = 0,
-): void {
+/** Every desk's dock — the one piece of furniture this floor added when a laptop started meaning
+ * *this member is in the building*. A small walnut cradle with a slot, always drawn; and, when its
+ * owner is working, the closed laptop standing in it: a thin silver slab, broad face to the room,
+ * hinge down. It is deliberately the same silver, seam and logo dot as the slab `drawCarry` tucks
+ * under an arm, so the object you watched walk through the door is the object that lands here.
+ *
+ * `docked` is `workingAtDesk(owner, sit)` — the same boolean, on the same frame, that lights the
+ * monitor two props away. That is the whole model (design §0): the dock is a second reading of the
+ * work cue, not a new fact plumbed through the scene, so an empty dock and a dark screen cannot
+ * disagree — and the member sitting down is the single event that turns both on. */
+function deskDock(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: number, dir: Dir, up: number, docked: boolean): void {
   const sn = dir === 'S' || dir === 'N';
-  const f = FWD[dir];
-  box(ctx, fit, mx, my, sn ? 20 : 14, sn ? 14 : 20, 2, '#aeb4bc', up); // stand base plate on the desk
-  box(ctx, fit, mx, my, 7, 7, 12, '#b6bcc4', up + 2); // slim support column (laptop reads as lifted)
-  const plateUp = up + 14;
-  box(ctx, fit, mx, my, sn ? 22 : 15, sn ? 15 : 22, 2, '#bcc2ca', plateUp); // top plate
-  const deckUp = plateUp + 2;
-  box(ctx, fit, mx - f[0] * 3, my - f[1] * 3, sn ? 22 : 15, sn ? 15 : 22, 2, LAPTOP_SILVER, deckUp); // keyboard base
-  box(ctx, fit, mx - f[0] * 3, my - f[1] * 3, sn ? 17 : 10, sn ? 10 : 17, 1, '#2b2f36', deckUp + 2); // dark key deck
-  // Open lid standing at the back of the base, with a lit screen on the camera-facing face.
-  const lw = sn ? 22 : 5;
-  const ld = sn ? 5 : 22;
-  const cx = mx + f[0] * 5;
-  const cy = my + f[1] * 5;
-  const lidUp = deckUp + 1;
-  box(ctx, fit, cx, cy, lw, ld, 16, dim(LAPTOP_SILVER, 0.9), lidUp); // silver lid
-  const lo = (lidUp + 2) * fit.scale;
-  const hi = (lidUp + 14) * fit.scale;
-  const dn = (pt: Pt, u: number): Pt => ({ x: pt.x, y: pt.y - u });
-  let BL: Pt | null = null;
-  let BR: Pt | null = null;
-  if (dir === 'N') {
-    BL = project(cx - lw / 2, cy + ld / 2, fit);
-    BR = project(cx + lw / 2, cy + ld / 2, fit);
-  } else if (dir === 'W') {
-    BL = project(cx + lw / 2, cy + ld / 2, fit);
-    BR = project(cx + lw / 2, cy - ld / 2, fit);
-  }
-  if (BL && BR) {
-    const bl = BL;
-    const br = BR;
-    if (working) {
-      // The laptop's little screen runs the same living desktop as the monitor — one pane, chunky details.
-      const map: FaceMap = (u, v) => ({ x: bl.x + u * (br.x - bl.x), y: bl.y + u * (br.y - bl.y) - lo - v * (hi - lo) });
-      drawScreenLife(ctx, map, Math.abs(br.x - bl.x), fit.scale, Math.abs(Math.round(cx * 7 + cy * 13)), t, 1);
-    } else {
-      quad(ctx, [dn(bl, lo), dn(br, lo), dn(br, hi), dn(bl, hi)], SCREEN_IDLE);
-    }
-  }
-  const g = project(cx, cy, fit);
-  ellipse(ctx, { x: g.x, y: g.y - (lidUp + 16) * fit.scale }, 7 * fit.scale, 3 * fit.scale, working ? '#59c3a3' : '#33504c');
-}
-
-/** A **closed** laptop stood vertically in a wooden dock: a walnut cradle with a slot, and the laptop as a
- * thin, tall silver slab rising out of it (its broad aluminium back to the room, hinge down). A quiet logo
- * dot sells the "back of a closed laptop" read. No lit screen — it's shut. */
-function laptopDock(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: number, dir: Dir, up: number): void {
-  const sn = dir === 'S' || dir === 'N';
-  box(ctx, fit, mx, my, sn ? 22 : 14, sn ? 14 : 22, 7, '#7c5230', up); // walnut cradle
-  box(ctx, fit, mx, my, sn ? 8 : 4, sn ? 4 : 8, 2, '#5f3f24', up + 7); // dark slot groove on top
-  // The closed laptop: broad (screen width) along the shoulders, thin (closed thickness) front-to-back,
-  // tall (the laptop's depth, now vertical). Its wide silver face turns toward the camera.
-  const w = sn ? 28 : 6;
-  const d = sn ? 6 : 28;
-  box(ctx, fit, mx, my, w, d, 30, LAPTOP_SILVER, up + 6);
+  // Cradle and slot are sized to the slab they hold — a dock visibly narrower than its laptop reads
+  // as the wrong furniture, so these three numbers move together or not at all.
+  box(ctx, fit, mx, my, sn ? 21 : 12, sn ? 12 : 21, 4, '#7c5230', up); // walnut cradle
+  box(ctx, fit, mx, my, sn ? 17 : 3, sn ? 3 : 17, 1.5, '#54371f', up + 4); // the slot, dark down its length
+  if (!docked) return; // nobody has sat down here to work — the slot is empty, and that is the point
+  /*
+   * The docked slab, standing on its long edge with the broad face to the room.
+   *
+   * It was 20 long × 22 tall, i.e. TALLER than wide — which is not a laptop on its long edge, it is a
+   * tablet. A closed 16-inch MacBook Pro is ~35.6cm × ~24.8cm, so stood on the long edge the face to
+   * the room is 1.44 times as wide as it is tall. 24 × 17 is 1.41, and it grew by the same ~1.2 the
+   * carried slab did (character.ts `drawCarry`, nick 2026-09-14) — because these two must stay one
+   * object to the eye: the thing you watched walk through the door is the thing that lands here, and
+   * that promise breaks the moment one of them is resized alone.
+   */
+  const w = sn ? DOCK_LAPTOP_W : 5;
+  const d = sn ? 5 : DOCK_LAPTOP_W;
+  const hL = 17;
+  box(ctx, fit, mx, my, w, d, hL, LAPTOP_SILVER, up + 3);
   const g = project(mx, my, fit);
-  ellipse(ctx, { x: g.x, y: g.y - (up + 22) * fit.scale }, 4 * fit.scale, 3 * fit.scale, dim(LAPTOP_SILVER, 0.82)); // logo dot
+  // The logo rides the centre of the standing face — derived from the slab's own height rather than a
+  // hand-tuned constant, so it cannot drift off-centre the next time the lid changes size.
+  ellipse(ctx, { x: g.x, y: g.y - (up + 3 + hL / 2) * fit.scale }, 3 * fit.scale, 2.4 * fit.scale, LAPTOP_LOGO);
 }
 
 // ── desk-surface props: a keyboard + mouse on every desk, plus a deterministic personal mix ──────────
@@ -3536,6 +3583,163 @@ function deskFan(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number
   ellipse(ctx, { x: g.x, y: cy }, 2.4 * fit.scale, 1.8 * fit.scale, '#5a646e'); // hub
 }
 
+/** A desk lamp: base + slim pole + a shade that glows warm when lit. Re-introduced from #304's removal
+ * under that PR's own objection: the fixture draws ONLY at an occupied desk now (the sitter brought it,
+ * the sitter takes it), so an unattended lamp can never float over an empty desk again — and it lights
+ * only when it's dark enough out to want it (`LightEnv.lampsOn`), with its floor pool cast in
+ * `drawInteriorLight`. */
+function deskLamp(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number, lit: boolean): void {
+  box(ctx, fit, ix, iy, 10, 10, 3, '#3d4650', up); // base
+  box(ctx, fit, ix, iy, 3, 3, 22, '#4a545f', up + 3); // pole
+  const g = project(ix, iy, fit);
+  const ty = g.y - (up + 26) * fit.scale;
+  ellipse(ctx, { x: g.x, y: ty }, 9 * fit.scale, 5 * fit.scale, lit ? '#e9c46a' : '#aab0b8');
+  if (lit) ellipse(ctx, { x: g.x, y: ty + 2 * fit.scale }, 6 * fit.scale, 3 * fit.scale, '#fff1c2'); // warm glow
+  // The bulb *itself* is not drawn here. Everything in this function is furniture, and furniture is
+  // painted before `drawInteriorLight` lays the night veil over the whole canvas — so a shade painted
+  // '#fff1c2' here comes out veiled, and the lamp reads as an unlit fixture standing in a warm puddle
+  // it cannot be the source of (nick, 2026-09-03: "those seem to be emitting a light around them but I
+  // don't see the actual desk lamps lit up"). The emissive core is painted additively *after* the veil,
+  // by `lampHead` — this shade is only the object the light comes out of.
+}
+
+/** Where a desk lamp's shade sits on screen, for the emissive pass — the same anchor `deskLamp` draws
+ * its shade at (`up + 26`), so the light and the fixture can never drift apart. */
+function lampHeadPoint(slot: { lx: number; ly: number; dir: Dir }, fit: Fit): Pt {
+  const [ix, iy] = deskPoint(slot, LAMP_ALONG, LAMP_ACROSS);
+  const g = project(ix, iy, fit);
+  return { x: g.x, y: g.y - (DESK_UP + 26) * fit.scale };
+}
+
+/** Where the lamp stands on an occupied desk (desk-relative along/across — the old #222 prop spot). */
+const LAMP_ALONG = 8;
+const LAMP_ACROSS = 42;
+
+/**
+ * Where the dock stands, and why it is the one prop whose across is computed rather than written.
+ *
+ * **A docked laptop must never cover the front of a screen** (nick, 2026-09-04), and on this floor
+ * that is two conditions, not one — outboard of the widest panel, AND behind it in the painter's
+ * order, so an overlap that survives the first still cannot paint over the glass.
+ *
+ * Outboard is the easy half: `DOCK_ACROSS` sits past 35, which is as far as any setup reaches (a
+ * dual's two 34-wide panels centred at ±18).
+ *
+ * Behind is the half that cannot be a constant. `at()` sorts by `(f[0]+f[1])·along + (p[0]+p[1])·across`,
+ * and the sign of the ACROSS term flips between the two camera-facing rows — +1 on an N desk, −1 on a
+ * W one. So one fixed across puts the dock behind the monitor on one row and in front of it on the
+ * other, which is exactly how a prop ends up covering a screen on half the floor and looking fine on
+ * the half you happened to check. Sending it to `-j · DOCK_ACROSS` makes the across term subtract at
+ * every facing, so "behind the monitor" is a property of the geometry rather than of the desk id.
+ *
+ * `dockAcross` and `deskPropSort` are exported so that property can be a TEST rather than a claim —
+ * see render.test.ts, which walks every facing against the widest setup on the floor.
+ */
+const DOCK_ALONG = 26;
+/* 40 → 38. The dock sits outboard, and `|dockAcross| + DOCK_HALF_ACROSS` must stay within the slab's
+   half-width (DESK_W / 2 = 50) or the cradle hangs off the desk edge. When the docked laptop grew from
+   20 to 24 across (#1394) that sum went to 52 and the stands started reading as though they were in
+   front of the monitors, out over nothing (nick, on the broadcast, 2026-09-14). 38 + 12 = 50 exactly. */
+const DOCK_ACROSS = 38;
+
+/** The docked slab's width across the shoulders — the ONE place it is written.
+ *
+ *  `DOCK_HALF_ACROSS` below is derived from it rather than restated, because the pair already drifted
+ *  once: the constant said "20 across" in a comment while `deskDock` drew 24, so every test that
+ *  reasoned about clearance was reasoning about a laptop that is not on the floor. A number used by
+ *  both the painter and the invariant has to have a single home. */
+const DOCK_LAPTOP_W = 24;
+
+/** Where the monitor sits along the desk — the back of the slab, `at(Df / 2 - 12, 0)`. */
+export const MONITOR_ALONG = DESK_D / 2 - 12;
+
+/** How far a panel reaches from the desk's centreline, across the shoulders: a dual's outer edge —
+ *  two 34-wide panels centred at ±18 — which is wider than an ultrawide's 54. */
+export const WIDEST_PANEL_HALF = 35;
+
+/** Half the dock's footprint across the shoulders. The LAPTOP is the widest piece, not the cradle
+ *  under it — `DOCK_LAPTOP_W` against the cradle's 21, because the slab stands with its broad face to
+ *  the room. Getting this wrong understates the overlap by the exact amount that matters, which is
+ *  precisely what happened when the slab was widened and this stayed at 10. */
+export const DOCK_HALF_ACROSS = DOCK_LAPTOP_W / 2;
+
+/** The dock's across for a given facing: outboard, and on the side whose sort term SUBTRACTS. */
+export function dockAcross(dir: Dir): number {
+  const f = FWD[dir];
+  return -(-f[1] + f[0]) * DOCK_ACROSS; // p = [-f[1], f[0]], so j = p[0] + p[1] = -f[1] + f[0]
+}
+
+/** The painter's key `drawWorkstation`'s `at()` gives a desk-relative prop — larger paints later,
+ *  i.e. nearer the viewer. Exported so the dock's "behind the monitor" claim can be falsified. */
+export function deskPropSort(dir: Dir, along: number, across: number): number {
+  const f = FWD[dir];
+  const p: [number, number] = [-f[1], f[0]];
+  return f[0] * along + p[0] * across + (f[1] * along + p[1] * across);
+}
+
+/**
+ * The desk's ROOM-SIDE HALF, redrawn as its own depth item so a member standing in front of a desk
+ * is not painted behind it.
+ *
+ * The problem this solves, and the two failed attempts before it (#1394, #1400). `depth(lx,ly) =
+ * lx + ly` gives one scalar per item, and a desk anchored at its centre sits (w + d) / 2 behind the
+ * edge the viewer sees — 84 units on a 100x68 desk. A member plainly in FRONT of that edge still
+ * keys lower than the desk and paints behind it. Moving the whole desk's key forward fixes that and
+ * breaks the opposite case: a desk facing N or W puts its CHAIR on the near side, so its own sitter
+ * keys higher than the desk centre, and a forward slab buries their head and torso. One key cannot
+ * answer both questions, because the passer-by and the sitter are asking opposite ones.
+ *
+ * So the desk keeps its centre key and everything that depends on it — the whole workstation, every
+ * prop, the seated arms overlay — is untouched, which is what makes this safe. What is ADDED is the
+ * front half of the slab and its two front legs, drawn again at the FRONT EDGE's depth. Same pixels,
+ * same colours: on an empty stretch of floor the second pass is invisible, because it repaints
+ * exactly what the first pass already put there. It only changes anything where a body has landed in
+ * between, and there it is the correct answer — the near lip of the desk is in front of you.
+ *
+ * `render.test.ts` pins the ordering at all four facings, which is the check #1394 did not have.
+ */
+function deskNearHalf(ctx: CanvasRenderingContext2D, fit: Fit, slot: DeskSlot): void {
+  const { lx, ly, dir } = slot;
+  const sn = dir === 'S' || dir === 'N';
+  const wx = sn ? DESK_W : DESK_D;
+  const dy = sn ? DESK_D : DESK_W;
+  // The half NEAREST THE CAMERA, which is +lx / +ly — a property of the projection, not of the facing.
+  // Getting that wrong is what the tests caught on the first cut of this function: on an N or W desk
+  // `FWD` points AWAY from the viewer, so "the side the desk faces" and "the side the viewer sees" are
+  // opposite, and a room-side half is the far half on half the floor.
+  for (const side of [-1, 1] as const) {
+    box(ctx, fit, lx + side * (wx / 2 - 6), ly + (dy / 2 - 6), 8, 8, DESK_LEG_H, dim(PAL.wood, 0.9));
+  }
+  box(ctx, fit, lx, ly + dy / 4, wx, dy / 2, DESK_SLAB, PAL.wood, DESK_LEG_H);
+}
+
+/**
+ * The depth key for that near half — and why it is not a constant.
+ *
+ * The near half wants to key at the desk's NEAR CORNER, so it beats a member standing in front of the
+ * desk. But on an N or W desk the CHAIR is on the near side too, so that desk's own sitter also keys
+ * past the desk centre — and a near-corner key would paint the desk over them, which is exactly the
+ * regression #1394 shipped and #1400 reverted.
+ *
+ * Both cases are satisfiable, just not by one number: key at the near corner, EXCEPT never past the
+ * member seated at this desk. An empty desk has no such constraint and takes the corner.
+ *
+ * That is the piece the first attempt was missing. It went looking for a better ANCHOR, when what the
+ * geometry needs is for the anchor to depend on who is sitting there — which the render loop knows
+ * and `nearDepth` never could.
+ */
+export function deskNearDepth(
+  slot: { lx: number; ly: number; dir: Dir },
+  seatedAt: { lx: number; ly: number } | null,
+): number {
+  const sn = slot.dir === 'S' || slot.dir === 'N';
+  const wx = sn ? DESK_W : DESK_D;
+  const dy = sn ? DESK_D : DESK_W;
+  const corner = depth(slot.lx + wx / 2, slot.ly + dy / 2);
+  if (!seatedAt) return corner;
+  return Math.min(corner, depth(seatedAt.lx, seatedAt.ly) - 0.2);
+}
+
 /** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
  * keyboard + mouse and a deterministic mix of personal props. The task chair and the seated member are
  * NOT drawn here — the chair is its own depth item at its own footprint (see renderScene) and members are
@@ -3548,9 +3752,24 @@ function drawWorkstation(
   slot: { lx: number; ly: number; dir: Dir; id: number },
   node: OfficeNode | null,
   teamName: string,
+  /** This desk is a kept, bodiless desk — an offline owner's or a stepped-away member's (§4). */
+  owned = false,
   t = 0,
   /** Props to skip this frame — a prop currently "in the owner's hand" (sip mug) isn't on the desk. */
   hide?: Set<PropKind>,
+  /** Is it dark enough out for desk lamps to be on? (`LightEnv.lampsOn`, threaded from the scene.) */
+  lampsLit = false,
+  /**
+   * `workingAtDesk(owner, pose.sit)` — the owner is working AND has sat down here.
+   *
+   * ONE boolean for the screen and the dock, because they are one event: the member sits, the laptop
+   * goes in the dock, and the monitor wakes (nick, 2026-09-04). It is not `audiblyWorking` alone —
+   * that is true from the instant a posture flips, so a seat that came online already `working` lit
+   * its screen and filled its dock while its body was still crossing the floor. The room's typing
+   * sound and the loop's park check read the same predicate, so the E2 §2 contract holds: eyes, ears
+   * and loop cannot disagree.
+   */
+  atWork = false,
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -3563,11 +3782,18 @@ function drawWorkstation(
   const wx = sn ? W : Df;
   const dy = sn ? Df : W;
   const up = DESK_UP; // desk-surface height — where every prop sits (DH + ST)
-  // `posture`, not `activity` — a lit screen full of scrolling code is the strongest "this seat is working"
-  // signal in the room, so it must follow the same source of truth as placement. An idle member who spilled
-  // onto a desk, or a stale member still carrying `activity: working`, gets a dark screen like any empty desk.
-  const working = node?.posture === 'working';
+  // A lit screen full of scrolling code is the strongest "this seat is working" signal in the room, so
+  // it follows `workingAtDesk` — posture (never `activity`, which lags) AND a body in this chair. An
+  // idle member who spilled onto a desk, a stale member still carrying `activity: working`, and a
+  // working member still walking in from the door all get a dark screen, like any empty desk.
+  const working = atWork;
   const mood = node ? deskMoodStyle(deskMoodFor(teamName, node.name)) : null;
+  // Owned empty desk (presence-honesty §4): the offline owner keeps the desk — chair in, monitor
+  // dark, their name baked on a small plate. The lamp is off (nobody switched it on), a warm screen
+  // glow fades over the first hour since they left, and a disconnected seat gets an amber glint.
+  const ownedEmpty = node != null && owned;
+  // A stepped-away owner is present-but-absent (declared): same bodiless desk, different words.
+  const steppedAway = ownedEmpty && node.presence !== 'offline';
 
   for (const [sx, sy] of [
     [-1, -1],
@@ -3578,6 +3804,21 @@ function drawWorkstation(
     box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, dim(PAL.wood, 0.9));
   }
   box(ctx, fit, lx, ly, wx, dy, ST, PAL.wood, DH);
+  // Bevelled front lip (Delight D): a soft rim light along the slab's two viewer-facing top edges,
+  // so the worktop reads as a finished edge rather than a raw extrusion.
+  {
+    const e = project(lx - wx / 2, ly + dy / 2, fit);
+    const s2 = project(lx + wx / 2, ly + dy / 2, fit);
+    const e2 = project(lx + wx / 2, ly - dy / 2, fit);
+    const yUp = up * fit.scale;
+    ctx.strokeStyle = 'rgba(255, 238, 205, 0.32)';
+    ctx.lineWidth = Math.max(1, 1.1 * fit.scale);
+    ctx.beginPath();
+    ctx.moveTo(e.x, e.y - yUp);
+    ctx.lineTo(s2.x, s2.y - yUp);
+    ctx.lineTo(e2.x, e2.y - yUp);
+    ctx.stroke();
+  }
 
   // Surface props, placed in desk-relative (along-facing, across) coords and self-sorted back-to-front so
   // overlaps paint correctly regardless of the desk's facing. `along` +toward the monitor, −toward the seat.
@@ -3596,9 +3837,42 @@ function drawWorkstation(
   // land (`KEYBOARD_ALONG`; `skeleton.ts` reaches for exactly this spot).
   const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
   const mouseColor = MOUSE_COLORS[Math.floor(deskRnd(id, KB_SALT + 1) * MOUSE_COLORS.length)]!;
+  // Felt desk mat under the keyboard + mouse (Delight D) — a deep-green pad that gives the work
+  // gear a home and breaks up the bare slab. Flat paint sorted a hair before the keyboard so it
+  // never covers what sits on it.
+  if (node)
+    at(KEYBOARD_ALONG - 1, 6, (ix, iy) => {
+      const quad = (a: number, cr: number): Pt =>
+        project(ix + f[0] * a + p[0] * cr, iy + f[1] * a + p[1] * cr, fit);
+      const yUp = up * fit.scale;
+      const c1 = quad(-11, -30);
+      const c2 = quad(11, -30);
+      const c3 = quad(11, 30);
+      const c4 = quad(-11, 30);
+      ctx.fillStyle = 'rgba(38, 66, 54, 0.85)';
+      ctx.beginPath();
+      ctx.moveTo(c1.x, c1.y - yUp);
+      ctx.lineTo(c2.x, c2.y - yUp);
+      ctx.lineTo(c3.x, c3.y - yUp);
+      ctx.lineTo(c4.x, c4.y - yUp);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 238, 205, 0.14)';
+      ctx.lineWidth = Math.max(1, fit.scale);
+      ctx.stroke();
+    });
   at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id, t));
+  // The dock, beside and behind the monitor on every desk — not a hashed personality prop and not
+  // owner-dependent: the cradle is always there, and the laptop in it is there exactly when its owner
+  // is working AND sitting at it. An empty dock on a desk with a body at it is honest, not a gap —
+  // that member is not working, and the room says so in three places at once (dark screen, empty
+  // dock, laptop in their lap).
+  at(DOCK_ALONG, dockAcross(dir), (ix, iy) => deskDock(ctx, fit, ix, iy, dir, up, atWork));
   at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up, kbShoulder));
   at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
+  // The desk lamp is work gear, not a hashed personality prop: every OCCUPIED desk has one (the
+  // sitter brought it), no empty desk ever does — see deskLamp for the #304 story. Lit only after dark.
+  if (node) at(LAMP_ALONG, LAMP_ACROSS, (ix, iy) => deskLamp(ctx, fit, ix, iy, up, lampsLit && !ownedEmpty));
 
   // optional personal props — each present-or-not per desk by a stable hash, at its own station
   for (const kind of PROP_KINDS) {
@@ -3619,6 +3893,20 @@ function drawWorkstation(
           return deskFan(ctx, fit, ix, iy, up);
       }
     });
+  }
+
+  // The owned-desk plate + texture (presence-honesty §4) ride the same prop pipeline so they
+  // depth-sort with the desk. All static paint keyed to data refreshes — no new rAF.
+  if (ownedEmpty && node) {
+    const age = node.last_seen_at != null ? Date.now() - node.last_seen_at : Infinity;
+    // warm desk: screen afterglow fades over ~1h; a stepped-away desk keeps it (they just left)
+    const warmth = steppedAway ? 0.6 : Math.max(0, 1 - age / 3_600_000);
+    if (warmth > 0)
+      at(Df / 2 - 12, 0, (ix, iy) => {
+        const b = project(ix, iy, fit);
+        ctx.fillStyle = `rgba(122, 148, 156, ${(0.18 * warmth).toFixed(3)})`;
+        ctx.fillRect(b.x - 15 * fit.scale, b.y - (up + 23) * fit.scale, 30 * fit.scale, 18 * fit.scale);
+      });
   }
 
   props.sort((a, b) => a.sum - b.sum);
@@ -3649,10 +3937,20 @@ function benchStation(
   slot: DeskSlot,
   node: OfficeNode | null,
   t: number,
+  /** Owner working AND sitting here — see the note on `drawWorkstation`'s parameter of the same name. */
+  atWork = false,
 ): void {
-  const working = node?.posture === 'working';
   const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(slot.id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
-  monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, working, DESK_UP, slot.id, t);
+  monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, atWork, DESK_UP, slot.id, t);
+  // A bench seat is a workstation like any other, so it docks like one — same cradle, same rule. The
+  // bench faces N, so the across term subtracts at −DOCK_ACROSS (see the note on the constant).
+  {
+    const f = FWD[slot.dir];
+    const c = dockAcross(slot.dir);
+    const dx = slot.lx + f[0] * DOCK_ALONG - f[1] * c;
+    const dy = slot.ly + f[1] * DOCK_ALONG + f[0] * c;
+    deskDock(ctx, fit, dx, dy, slot.dir, DESK_UP, atWork);
+  }
   deskKeyboard(ctx, fit, slot.lx, slot.ly - KEYBOARD_ALONG, true, DESK_UP, kbShoulder);
 }
 
@@ -3692,9 +3990,11 @@ function drawInteriorLight(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   env: LightEnv,
-  slotMember: Map<number, string>,
   poses: Map<string, Pose>,
   byName: Map<string, OfficeNode>,
+  /** Desk-slot ids whose lamp is actually switched on — a real sitter's desk, after dark. Built at the
+   * same place the workstation decides to draw the lit fixture, so the light and the object agree. */
+  litLamps: ReadonlySet<number>,
 ): void {
   if (env.veilAlpha > 0.01) {
     ctx.save();
@@ -3717,15 +4017,44 @@ function drawInteriorLight(
     warmPool(ctx, { x: b.x, y: b.y + 24 * fit.scale }, 52 * fit.scale, 0.95, '255, 200, 120', 0.2 * night);
   }
 
-  // A personal glow travelling with each present (online) member — just enough to keep the character work
-  // (faces, cheeks, the round body) from dissolving into the veil away from a lamp. Kept subtle on purpose.
+  // Desk lamps emit, in two parts, and the order of them is the whole point. `litLamps` is the set of
+  // desks with a real sitter (never a bench seat, which has no lamp fixture, and never an offline
+  // owner's kept desk — nobody is there to have switched it on), which is exactly the set
+  // `drawWorkstation` drew a lit shade for.
+  for (const slot of DESK_SLOTS) {
+    if (!litLamps.has(slot.id)) continue;
+    const head = lampHeadPoint(slot, fit);
+    // (a) The floor pool: light landing on the desk corner and the floor beside it, cast from under the
+    // shade rather than from the shade itself, so it reads as spill and not as a second bulb.
+    warmPool(ctx, { x: head.x, y: head.y + (DESK_UP + 20) * fit.scale }, 74 * fit.scale, 0.6, '255, 194, 112', 0.3 * night);
+    // (b) The bulb: a small, bright, unmistakably warm core right at the shade, painted additively over
+    // the veil so the fixture reads as ON. Two stops — a tight near-white filament inside a warm halo —
+    // because a single soft blob at this size reads as a smudge, and what has to survive the veil is the
+    // sense that there is a *source* here. This is the half that was missing: the room had lamplight
+    // with no visible lamps in it.
+    warmPool(ctx, head, 26 * fit.scale, 0.85, '255, 186, 96', 0.5 * night);
+    warmPool(ctx, head, 10 * fit.scale, 0.8, '255, 238, 198', 0.72 * night);
+  }
+
+  // A personal glow travelling with each present (online) member. Still two layers — the glow stays, it
+  // is how a member reads as *present* after dark (nick, 2026-09-03: "I don't want to get rid of the
+  // member's glow at night, I just want to tone it down so it doesn't wash out the members").
+  //
+  // What washed them out was the second layer: a 52px core at 0.25 centred 30px UP the body, i.e. on the
+  // face. It is painted additively over the finished character, so at full night it did not light the
+  // member, it bleached them — the cheeks, the visor, the hue that says who this is, all flattened
+  // toward white. Two changes, and only one of them is the opacity: the core drops 0.25 → 0.09, and it
+  // drops DOWN the body (30 → 16) so its bright centre sits at the torso and the face catches only the
+  // falloff. Light on someone is fine; a light source centred on their face is not.
   for (const [name, pose] of poses) {
     const node = byName.get(name);
     if (!node || node.presence !== 'online') continue;
     const b = project(pose.lx, pose.ly, fit);
     const scale = pose.small ? 0.7 : 1;
-    // centred a little up the body so it warms the face/torso, not just the floor at the feet
-    warmPool(ctx, { x: b.x, y: b.y - 30 * fit.scale * scale }, 48 * fit.scale * scale, 0.9, '255, 214, 158', 0.22 * night);
+    // the halo: wide, flat, on the floor — it separates a body from the floor behind it.
+    warmPool(ctx, { x: b.x, y: b.y - 8 * fit.scale * scale }, 88 * fit.scale * scale, 0.6, '255, 206, 140', 0.1 * night);
+    // the core: the member's own presence, at a tenth of the alpha it used to bleach them with.
+    warmPool(ctx, { x: b.x, y: b.y - 16 * fit.scale * scale }, 50 * fit.scale * scale, 0.8, '255, 214, 158', 0.09 * night);
   }
 
   ctx.restore();
@@ -3871,11 +4200,19 @@ export function renderScene(
   if (pet) items.push({ d: depth(pet.lx, pet.ly) + 0.08, fn: () => drawDog(ctx, fit, pet, t) });
 
   // The bench's shared counter, once — its seats' gear rides per-slot below.
+  // 300 long: the widest footprint on the floor, so the centre-vs-edge error is largest here.
   items.push({ d: depth(BENCH.lx, BENCH.ly), fn: () => benchCounter(ctx, fit) });
+
+  // Desks whose lamp is switched on: a real sitter's desk, after dark. Filled from the same three facts
+  // `drawWorkstation` uses to draw the lit shade (a node, not a bench seat, not an offline owner's kept
+  // desk) so the emissive pass in `drawInteriorLight` can never light a lamp the room did not draw.
+  const litLamps = new Set<number>();
 
   for (const [slotIndex, slot] of DESK_SLOTS.entries()) {
     const name = slotMember.get(slotIndex) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
+    const deskPl = name ? placements.get(name) : undefined;
+    const deskOwned = deskPl?.kind === 'desk' && deskPl.owned === true;
     const ownerPose = name ? poses.get(name) : undefined;
     // Sip beat: while the owner's mug is in their hand, the desk copy vanishes — one mug, not two.
     const sipping =
@@ -3889,12 +4226,47 @@ export function renderScene(
     if (sipping) hidden.push('coffee');
     if (name && fx?.bottleCarriers.has(name)) hidden.push('water');
     const hide = hidden.length ? new Set<PropKind>(hidden) : undefined;
+    // The desk comes to life only once its owner has actually walked over and sat down — screen,
+    // dock and the room's typing all off this one fact (`workingAtDesk`). Same `sit > 0.9` the chair
+    // pieces use two blocks below, so it lands on the frame the body settles into the chair, not the
+    // frame the roster changed.
+    const seatedWorking = workingAtDesk(node ?? undefined, ownerPose?.sit);
+    /* Where this desk's own sitter sorts, or null for an empty desk — the one input `deskNearDepth`
+       cannot get from geometry. Same `actorSortAnchor` the member's own item uses, so the desk and
+       the body cannot disagree about where the body is. */
+    const seatedHere = (() => {
+      if (!ownerPose) return null;
+      const a = actorSortAnchor(ownerPose, slot, undefined);
+      return a.seatedAtDesk ? { lx: a.lx, ly: a.ly } : null;
+    })();
     if (slot.kind === 'bench') {
       // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
-      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t) });
+      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t, seatedWorking) });
     } else {
-      items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t, hide) });
+      if (node && !deskOwned && env.lampsOn) litLamps.add(slot.id);
+      items.push({
+        /* CENTRE, not the near corner. #1394 moved this to `nearDepth` to stop a member standing in
+           front of a desk painting behind it. That reasoning was incomplete: a desk facing N or W puts
+           its CHAIR on the near side, so its own seated member legitimately keys HIGHER than the desk
+           centre and paints in front of it. Pushing the slab 84 units forward beat them, and a sitter
+           at such a desk lost their head and torso into it — not merely their legs, which is the only
+           part a desk is supposed to take (nick, on the broadcast, 2026-09-14).
+
+           A single scalar key per item cannot say both "in front of this desk's front edge" and
+           "behind its back edge" — the passer-by and the sitter want opposite answers out of the same
+           comparison. The fix is to split the desk into front and back items, the way the chair
+           already splits into base and back, not to pick a different constant. Reverted here; the
+           split is lane 01M2GP6CZ1's neighbour, not a hotfix. */
+        d: depth(slot.lx, slot.ly),
+        fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
+      });
+      // The room-side half again, at the FRONT EDGE's depth — so a member standing in front of this
+      // desk paints in front of it. Additive by construction: the same pixels in the same colours, so
+      // on empty floor the second pass is invisible. It changes the picture only where a body has
+      // landed between the two keys, and there it is the right answer. See `deskNearHalf` for why
+      // the desk's own key cannot simply move (#1394, #1400).
+      items.push({ d: deskNearDepth(slot, seatedHere), fn: () => deskNearHalf(ctx, fit, slot) });
     }
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
@@ -3904,10 +4276,17 @@ export function renderScene(
     // desk; swivel swings the backrest around the seat centre — the same pure curves the actor system
     // applies to the body, so chair and member can never drift apart.
     const f = FWD[slot.dir];
-    const shift = ownerPose && ownerPose.sit > 0.9 ? chairShift(ownerPose.gesture, ownerPose.gestureT) : 0;
-    const yaw = ownerPose && ownerPose.sit > 0.9 ? chairYaw(ownerPose.gesture, ownerPose.gestureT) : 0;
-    const cx = slot.lx - f[0] * (CHAIR_OFF + shift);
-    const cy = slot.ly - f[1] * (CHAIR_OFF + shift);
+    const seated = !!ownerPose && ownerPose.sit > 0.9;
+    const shift = seated ? chairShift(ownerPose.gesture, ownerPose.gestureT) : 0;
+    const yaw = seated ? chairYaw(ownerPose.gesture, ownerPose.gestureT) : 0;
+    // A vacant chair at a desk that faces the viewer is parked BEHIND the slab in this projection —
+    // fully hidden, so the desk reads as chairless (nick, 2026-08-31: the kimi desk). Roll it back
+    // far enough to emerge past the desk's far edge, the way a real chair sits pushed out when its
+    // owner is away. Facing is measured on screen, not guessed from the dir name.
+    const fScreen = project(slot.lx + f[0] * 10, slot.ly + f[1] * 10, fit).y - project(slot.lx, slot.ly, fit).y;
+    const vacantPeek = !seated && fScreen > 0 ? 16 : 0;
+    const cx = slot.lx - f[0] * (CHAIR_OFF + shift + vacantPeek);
+    const cy = slot.ly - f[1] * (CHAIR_OFF + shift + vacantPeek);
     const bdx = -f[0] * CHAIR_BACK_OFF;
     const bdy = -f[1] * CHAIR_BACK_OFF;
     const bx = cx + bdx * Math.cos(yaw) - bdy * Math.sin(yaw);
@@ -3916,6 +4295,30 @@ export function renderScene(
     const chairStyle = chairStyleFor(slot.id);
     items.push({ d: depth(cx, cy) - 0.2, fn: () => chairBase(ctx, fit, cx, cy, slot.dir, chairColor, chairStyle) });
     items.push({ d: depth(bx, by), fn: () => chairBack(ctx, fit, bx, by, slot.dir, chairColor, chairStyle) });
+    // Stepped-away texture (§4 lane 4): a jacket in the owner's colour draped over the chair back —
+    // the visual half of the plate's "stepped away"; offline owners get no jacket (they went home).
+    if (deskOwned && node && node.presence !== 'offline') {
+      const jx = bx;
+      const jy = by;
+      const jc = hslL(node.color, 0.42);
+      items.push({
+        d: depth(jx, jy) + 0.01,
+        fn: () => {
+          const b = project(jx, jy, fit);
+          const wJ = 16 * fit.scale;
+          const hJ = 13 * fit.scale;
+          const top = b.y - 30 * fit.scale;
+          ctx.fillStyle = jc;
+          ctx.beginPath();
+          ctx.moveTo(b.x - wJ / 2, top);
+          ctx.lineTo(b.x + wJ / 2, top);
+          ctx.lineTo(b.x + wJ / 2 - 2 * fit.scale, top + hJ);
+          ctx.lineTo(b.x - wJ / 2 + 2 * fit.scale, top + hJ);
+          ctx.closePath();
+          ctx.fill();
+        },
+      });
+    }
   }
 
   // Queue lane: a faint pad under each overflow (strip) member so the entrance line reads as a designated
@@ -3948,6 +4351,9 @@ export function renderScene(
     // hands into the lap — lap arms painted over the slab would float on the desk.
     if (seated && !handsInLap(pose.gesture, pose.gestureT)) {
       items.push({
+        /* Tracks the slab's key — both are `depth(slot)` again after the #1394 revert. They stay one
+           expression apart by a constant on purpose: when the slab moved and this did not, the desk
+           painted over the forearms that rest on it (#1397). */
         d: depth(slot.lx, slot.ly) + 0.05,
         fn: () => drawActor(ctx, fit, pose, node, t, true, mug),
       });
@@ -3964,7 +4370,7 @@ export function renderScene(
   for (const it of items) it.fn();
 
   // Interior lighting: veil the room to the night level, then let occupied desks' lamps glow through.
-  drawInteriorLight(ctx, fit, env, slotMember, poses, byName);
+  drawInteriorLight(ctx, fit, env, poses, byName, litLamps);
 
   // Collapse any queue/nook members past the render cap into a single "+N" pill, so a very large roster
   // stays bounded. Hidden count = placed-but-not-drawn (capped members get no pose in homePoses).
@@ -4032,8 +4438,9 @@ export function coffeeAnchor(fit: Fit): Pt {
   return { x: s.x, y: s.y - (LOUNGE.counter.h + MACHINE_H + 2) * fit.scale };
 }
 
-/** A transient act cue: a tinted ring + optional glyph (`ring`), a broadcast sweep (`wave`), or a glow
- * at the entrance when someone comes or goes (`door`). */
+/** A transient act cue: a tinted ring + optional glyph (`ring`), a broadcast sweep (`wave`), a glow
+ * at the entrance when someone comes or goes (`door`), or a celebration burst over an accepted
+ * member's head (`confetti`). */
 export interface Cue {
   at: Pt;
   to?: Pt;
@@ -4042,7 +4449,27 @@ export interface Cue {
   glyph: '' | '?' | '!' | '📣' | '✓' | '↦' | '↪';
   t: number;
   urgent: boolean;
-  kind?: 'ring' | 'wave' | 'door' | 'thread';
+  kind?: 'ring' | 'wave' | 'door' | 'thread' | 'confetti';
+}
+
+/** The celebration palette — the cue-family literals the scene already speaks (accept green, the
+ * accent mustard, handoff violet, danger coral), cycled per particle. */
+const CONFETTI_COLORS = ['#5cd49a', '#f4cf52', '#c6a3ff', '#f3776a'] as const;
+const CONFETTI_COUNT = 18;
+
+/**
+ * One confetti particle's whole flight, derived from its index alone — deterministic, so a cue
+ * draws identically for a given `t` (no per-frame randomness to make tests flaky or frames shear).
+ * A ballistic puff: up and out from the head, gravity pulling the tail down, spinning as it goes.
+ */
+function confettiParticle(i: number, t: number, scale: number, at: Pt) {
+  // Golden-angle fan: spreads the launch directions without two particles ever sharing one.
+  const angle = -Math.PI / 2 + Math.sin(i * 2.399963) * 1.1;
+  const speed = (34 + ((i * 7919) % 23)) * scale;
+  const x = at.x + Math.cos(angle) * speed * t * 1.6;
+  const y = at.y + Math.sin(angle) * speed * t * 1.9 + 52 * scale * t * t; // gravity
+  const spin = t * (4 + (i % 5)) + i;
+  return { x, y, spin, color: CONFETTI_COLORS[i % CONFETTI_COLORS.length]! };
 }
 
 export function drawCue(ctx: CanvasRenderingContext2D, cue: Cue, scale: number): void {
@@ -4056,7 +4483,7 @@ export function drawCue(ctx: CanvasRenderingContext2D, cue: Cue, scale: number):
       x: at.x + dx / 2,
       y: at.y + dy / 2 - lift * scale,
     };
-    const eased = 1 - Math.pow(1 - t, 2);
+    const eased = CANVAS_EASE.out(t);
     ctx.globalAlpha = (1 - t) * 0.58;
     ctx.strokeStyle = color;
     ctx.lineWidth = 2 * scale;
@@ -4067,6 +4494,26 @@ export function drawCue(ctx: CanvasRenderingContext2D, cue: Cue, scale: number):
     ctx.quadraticCurveTo(control.x, control.y, cue.to.x, cue.to.y);
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  if (cue.kind === 'confetti') {
+    // The acceptance celebration: a one-shot ballistic puff of paper over the celebrant's head.
+    // Fully derived from `t` — nothing stored per frame, nothing re-arms, so it costs exactly one
+    // cue lifetime and holds still under ?still like every other event cue.
+    ctx.globalAlpha = Math.max(0, 1 - t * t * 1.15);
+    for (let i = 0; i < CONFETTI_COUNT; i++) {
+      const p = confettiParticle(i, t, scale, at);
+      ctx.save();
+      ctx.translate(p.x, p.y - 26 * scale);
+      ctx.rotate(p.spin);
+      ctx.fillStyle = p.color;
+      // Fleck size is stream-tested: 4.8×2.8 read as noise at room zoom (2026-08-19 eyeball),
+      // and the 720p encode eats another third — these proportions are the floor, not a taste call.
+      ctx.fillRect(-3.6 * scale, -2.1 * scale, 7.2 * scale, 4.2 * scale);
+      ctx.restore();
+    }
     ctx.globalAlpha = 1;
     return;
   }

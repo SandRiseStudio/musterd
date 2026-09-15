@@ -1,18 +1,20 @@
 import { z } from 'zod';
+import { CLOCK_TIME, WORKING_DAYS, isIanaTimezone } from './working-hours.wire.js';
 
-export const WorkingDaySchema = z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
-export type WorkingDay = z.infer<typeof WorkingDaySchema>;
+/** The zod face of {@link WorkingHours}; the day tuple and its rules live in `working-hours.wire.js`. */
+export {
+  CLOCK_TIME,
+  WORKING_DAYS,
+  isClockTime,
+  isIanaTimezone,
+  isWorkingDayList,
+  type WorkingDay,
+  type WorkingHours,
+} from './working-hours.wire.js';
 
-const ClockTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'time must use HH:mm');
+export const WorkingDaySchema = z.enum(WORKING_DAYS);
 
-function isIanaTimezone(value: string): boolean {
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
-    return true;
-  } catch {
-    return false;
-  }
-}
+const ClockTimeSchema = z.string().regex(CLOCK_TIME, 'time must use HH:mm');
 
 export const WorkingHoursSchema = z
   .object({
@@ -30,5 +32,3 @@ export const WorkingHoursSchema = z
     message: 'end must be later than start',
     path: ['end'],
   });
-
-export type WorkingHours = z.infer<typeof WorkingHoursSchema>;

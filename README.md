@@ -7,14 +7,20 @@
 
 Named, persistent teams of agents and humans — across any harness, framework, model, or surface — with a shared communication protocol. Humans are first-class members, not approvers.
 
-[![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
+[![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [Security](./SECURITY.md) · [Privacy](./PRIVACY.md) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
 
-> Status: **v0.2, designed in the open.** Local-first. No account, no cloud required.
+> Status: **v0.3, designed in the open.** Packages ship on their own semver (`@musterd/*` 0.4.x) — the protocol version names the trust model, not the package release. Local-first. No account, no cloud, no phone-home. See [PRIVACY.md](./PRIVACY.md).
 
 <!-- Demo GIF — record with: vhs docs/flagship.tape (see docs/demo.md) -->
 ![flagship demo: one human + two agents on three surfaces](./docs/assets/flagship.gif)
 
 <sub>A scripted walkthrough — real server, protocol, presence, and CLI rendering; the agents' lines are scripted. See [docs/demo.md](./docs/demo.md) for the [full cut](./docs/assets/flagship-full.gif) and how to record the real 3-pane version.</sub>
+
+<p align="center">
+  <img src="./docs/assets/musterd-io-get-started.png" alt="musterd.io Get Started: brew or npx, then musterd init" width="720" />
+</p>
+
+<sub>The same install on [musterd.io](https://musterd.io) — local-first, no account. Share-unfurls use the brand social card (`docs/design/assets/social-card.png`).</sub>
 
 ## The wedge nobody else covers
 
@@ -39,7 +45,7 @@ brew tap SandRiseStudio/musterd && brew install musterd
 musterd init
 ```
 
-`musterd init` is the magical path: it finds Claude Code / Cursor, asks if it can configure the musterd MCP server for you, then shows a live spinner that flips to `● Ada is online via claude-code` the instant your agent connects.
+`musterd init` is the one-command path: it finds Claude Code / Cursor, asks if it can configure the musterd MCP server for you, then shows a live spinner that flips to `● Ada is online via claude-code` the instant your agent connects.
 
 > Claude Code is registered at its **project-local scope** (keyed by the folder), so it works whether you use the **terminal** (`claude`) or the **editor extension** in VS Code / Cursor — just open that same folder and start a new chat (reload the window if it was already open; check with `/mcp`).
 
@@ -73,8 +79,10 @@ Messages carry a typed **Act**, grounded in the [Co-Gym](https://arxiv.org/abs/2
 3. **Teams are persistent.** Coordination outlives any single task or session.
 4. **Protocol over framework.** We don't run your agent — we connect it. Small core, adapters at the edge.
 5. **One member does the work; the team does the coordination.** Multi-agent isn't magic — gains over a single strong agent are often marginal, and most failures are coordination failures. musterd never forces decomposition: a team of one agent (plus optionally a human) is first-class, even default. Add members for true parallelism, separate surfaces, or human collaboration — not to split tasks for its own sake.
-6. **Local-first.** SQLite + a local daemon. No account, no cloud required to use it.
+6. **Local-first.** SQLite + a local daemon. No account, no cloud required to use it. Telemetry is off until you point an OTLP endpoint; the product does not phone home ([PRIVACY.md](./PRIVACY.md)).
 7. **Secure by default.** Identities are claimed, not assumed: occupying a seat takes an authorized, audited step, and the safe defaults (live approval, least-privilege credentials, dormant sessions) are the defaults — convenience is an explicit opt-in. _(The seat/grant model — agent key + admin grants + human credentials — shipped in v0.3: [`membership-model.md`](./docs/design/membership-model.md), [`security.md`](./docs/design/security.md), [SPEC Appendix A](./SPEC.md).)_
+
+   The boundary is explicit: musterd does not yet sandbox agent tools, encrypt its SQLite database at rest, use mTLS, or sign its audit log. See [SECURITY.md](./SECURITY.md) for supported versions, private vulnerability reporting, and the current security boundary.
 
 ## How it fits with MCP, A2A, Fleet, CrewAI
 
@@ -110,9 +118,9 @@ pnpm test            # unit + integration + scenarios
 pnpm test:scenarios  # the flagship 3-pane scenario (Scenario C)
 ```
 
-Contributors and implementing agents: start with [`AGENTS.md`](./AGENTS.md) and [`docs/architecture/00-overview.md`](./docs/architecture/00-overview.md). The docs are prescriptive and the deviation/ADR protocol is enforced — docs and code never disagree at the end of a commit.
+Contributors and implementing agents: start with [`CONTRIBUTING.md`](./CONTRIBUTING.md), then [`AGENTS.md`](./AGENTS.md) and [`docs/architecture/00-overview.md`](./docs/architecture/00-overview.md). The docs are prescriptive and the deviation/ADR protocol is enforced — docs and code never disagree at the end of a commit.
 
-Changes land through **one enforced git workflow** ([ADR 106](./docs/decisions/106-unified-git-workflow.md)): branch from `main`, open a PR, and squash-merge once the `gates` CI (build → typecheck → test → format:check) and Cursor Bugbot are green — `main` is protected (PR-only, linear history). The playbook is in [`AGENTS.md`](./AGENTS.md).
+Changes land through **one enforced git workflow** ([ADR 106](./docs/decisions/106-unified-git-workflow.md)): branch from `main`, open a PR, and squash-merge once the `gates` CI is green — `main` is protected (PR-only, linear history). The playbook is in [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`AGENTS.md`](./AGENTS.md).
 
 ## License
 

@@ -8,6 +8,7 @@ import {
   SurfaceSchema,
 } from './acts.js';
 import { AccountStatusSchema, CapabilitiesSchema } from './capabilities.js';
+import { WAKEABILITIES } from './model.js';
 import { OfflineReasonSchema } from './offline.js';
 import { PostureSchema } from './posture.js';
 import { WorkingHoursSchema, type WorkingHours } from './working-hours.js';
@@ -43,6 +44,13 @@ export const MemberSchema = z.object({
   availability: AvailabilitySchema.nullish(),
   /** Optional recurring schedule; a Member value replaces the Team default (ADR 206). */
   working_hours: WorkingHoursSchema.nullish(),
+  /** ADR 311: optional Slack identity used to attribute captured Seeds to this human Member. */
+  slack_user_id: z.string().min(1).nullish(),
+  /** The member's colour, as an HSL hue 0–359 (ADR 374). One number, never a hex: every surface
+   *  derives lightness from it so the colour clears AA wherever it is painted. On a file-backed
+   *  team the seat file owns it and this is reconcile's projection; null/absent means "not
+   *  assigned" and a renderer falls back to its name hash — deterministic, so machines agree. */
+  hue: z.number().int().min(0).max(359).nullish(),
   /** Account status — Axis 1 (ADR 070). Optional for back-compat; the server always resolves it. */
   account_status: AccountStatusSchema.optional(),
   /** Effective capabilities (ADR 070). Optional for back-compat; the server always resolves it. */
@@ -88,6 +96,18 @@ export const PresenceSchema = z.object({
    * older clients. Absence must never be read as a match (ADR 236: absence is not an assertion).
    */
   wake_lease: z.string().nullish(),
+  /**
+   * When this attachment was created (ADR 379) — the server's `presence.created_at`, distinct from
+   * `last_seen_at`, which every heartbeat advances. A wake actuator that spawned into a workspace at
+   * time T and finds, at the verify deadline, a fresh row in that same workspace created after T
+   * and attesting no lease, is looking at its own child that failed to attest — not at a foreign
+   * occupant. Null/absent from older daemons; absence is never read as "created after" (ADR 236).
+   */
+  attached_at: z.number().int().nullish(),
+  /** The machine this presence lives on (presence replication, 2026-09-02): a `nodes.id`, or
+   *  null/absent for a row on this daemon. `node_label` is that node's human label. */
+  node: z.string().nullish(),
+  node_label: z.string().nullish(),
 });
 export type Presence = z.infer<typeof PresenceSchema>;
 
@@ -158,6 +178,16 @@ export const MemberSummarySchema = MemberSchema.extend({
    * Optional for back-compat; the server always sets it.
    */
   wakeable: z.boolean().optional(),
+  /**
+   * The ADR 189 five-state read beside the boolean (ADR 357): `wakeable` says "enrolled", this says
+   * whether a directed act can actually reach the seat right now — `enrolled_host_stale` when the
+   * actuator that would spawn it has stopped polling, `enrolled_dead_workspace` when its last wake
+   * report said the workspace is gone and nothing newer contradicts it, `enrolled_seat_busy` when
+   * the audit trail shows it acting with a lapsed heartbeat. The same derivation the ADR 191
+   * offline-acceptor pick uses, so the roster and the picker cannot disagree. Optional and
+   * additive: an older daemon omits it and every consumer reads `wakeable` exactly as before.
+   */
+  wakeability: z.enum(WAKEABILITIES).optional(),
   /**
    * When the seat last attested a capturable harness session (ADR 131 §5) — the resumable badge's
    * input (inc 5, finding b). A TIMESTAMP, not a boolean, deliberately: captures age past the

@@ -78,7 +78,7 @@
  * Treat probe output as "worth looking at", and the live sweep as authoritative.
  */
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
@@ -97,7 +97,6 @@ const QUIET = args.includes('--quiet');
 /** Container the probe pass injects into. Must be an opaque, representative surface. */
 const PROBE_HOST = flag('probe-host') ?? '.lc-stream';
 
-const port = 9334;
 const PROFILE_PREFIX = 'contrast-sweep-';
 /** Old enough that no live run's profile can match. A sweep takes ~10s; an hour is 300x that. */
 const PROFILE_TTL_MS = 60 * 60 * 1000;
@@ -135,21 +134,82 @@ const sweepStaleProfiles = (dir = tmpdir(), ttlMs = PROFILE_TTL_MS, now = Date.n
 };
 sweepStaleProfiles();
 
-const profile = mkdtempSync(join(tmpdir(), PROFILE_PREFIX));
-const chrome = spawn(
-  CHROME,
-  [
-    '--headless=new',
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir=${profile}`,
-    '--no-first-run',
-    '--disable-extensions',
-    '--window-size=1440,900',
-    'about:blank',
-  ],
-  { stdio: 'ignore' },
-);
-const chromeGone = new Promise((res) => chrome.once('exit', res));
+/**
+ * Chrome, its profile, and the evidence it leaves if it fails to start.
+ *
+ * `let`, not `const`, because a launch is RETRYABLE (see `bringUpChrome`) and a retry gets a fresh
+ * profile — reusing the directory of a Chrome that just died is how a bad first start poisons the
+ * second one. `shutdown`/`cleanup` below always act on whichever attempt is current.
+ */
+let profile = mkdtempSync(join(tmpdir(), PROFILE_PREFIX));
+let chrome;
+let chromeGone;
+/** Chrome's own stderr, capped. The ONLY artifact that says why a start failed — see `launch`. */
+let chromeErr = '';
+
+const CHROME_ARGS = [
+  '--headless=new',
+  /* Port 0 = "pick a free one and tell me". NOT a tidiness change: this used to be a hardcoded
+   * 9334, and a hardcoded port is shared state between every sweep on the machine. The second
+   * sweep's Chrome cannot bind it, so the second sweep's `/json/list` answers from the FIRST
+   * sweep's browser and both runs then drive one page. Reproduced by dolly (lane 01KZZ7BQE3):
+   * a sweep pointed at alpha.html filed a GREEN report whose url read beta.html — a pass for a
+   * page nobody looked at, which is the one direction this file's header forbids failing in.
+   * Nineteen worktrees share this laptop, so concurrent sweeps are normal, not exotic.
+   *
+   * The port now comes out of OUR OWN profile directory (`DevToolsActivePort`, written by Chrome
+   * on startup), so it is structurally impossible to reach a browser we did not start. That is
+   * why this fixes the class rather than narrowing the window: there is no shared name left to
+   * collide on. */
+  '--remote-debugging-port=0',
+  '--no-first-run',
+  '--disable-extensions',
+  '--window-size=1440,900',
+  'about:blank',
+];
+
+/**
+ * Start one Chrome against the current `profile`, and KEEP ITS STDERR.
+ *
+ * It used to be spawned with `stdio: 'ignore'`, which threw away the only artifact that could
+ * explain a failed start. Every occurrence of "never opened a debugging port" was therefore
+ * re-run rather than diagnosed — including CI run 32295496057 (2026-08-19), where the operator got
+ * a timeout message and nothing to act on. Capped at 4 KB because a Chrome that is merely CHATTY
+ * must not turn a harness failure into an unreadable one.
+ */
+const launch = () => {
+  chromeErr = '';
+  chrome = spawn(CHROME, [...CHROME_ARGS, `--user-data-dir=${profile}`], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  chrome.stderr?.on('data', (d) => {
+    if (chromeErr.length < 4096) chromeErr += String(d);
+  });
+  /* A spawn that never starts emits 'error', and an unhandled 'error' on a ChildProcess THROWS.
+     Without this, pointing CHROME_BIN at a missing binary killed the sweep with a raw Node stack
+     instead of the refusal directly below — the same harness failure, reported in the one form that
+     tells the reader nothing about which gate refused or why. */
+  chrome.on('error', (e) => {
+    chromeErr += `${e.message}\n`;
+    chrome.exited = true;
+    chrome.exitInfo = e.code ? `spawn ${e.code}` : 'spawn failed';
+  });
+  /* `exited` is a FLAG as well as a promise: the wait loop below needs to ask "is it already gone?"
+     synchronously on every tick, which a promise alone cannot answer. */
+  chrome.exited = false;
+  chromeGone = new Promise((res) => {
+    chrome.once('exit', (code, signal) => {
+      chrome.exited = true;
+      chrome.exitInfo = signal ? `signal ${signal}` : `code ${code}`;
+      res();
+    });
+    /* 'error' as well as 'exit', or `shutdown()` awaits a process that was never born: a spawn
+       failure (ENOENT, EACCES) emits 'error' and may emit no 'exit' at all, and the refusal path
+       below awaits this promise before exiting. It hung there instead of refusing. */
+    chrome.once('error', res);
+  });
+};
+launch();
 
 /**
  * Shut Chrome down and take its profile with it.
@@ -164,21 +224,27 @@ const chromeGone = new Promise((res) => chrome.once('exit', res));
  * because a Chrome wedged mid-screenshot must not hold the gate open. `process.on('exit')` keeps a
  * synchronous best-effort copy for the paths that never get to await anything.
  */
-const shutdown = async () => {
-  chrome.kill();
+const shutdown = async (proc = chrome, dir = profile, gone = chromeGone) => {
+  /* The process/profile are captured as ARGUMENTS, not read from the module bindings inside the
+     timer. Those bindings are reassigned by a launch retry (`bringUpChrome`), and the 3s SIGKILL
+     below outlives the call that armed it — so reading `chrome` at fire time killed the retry's
+     healthy browser 3.0s after it had come up, with `DevTools listening on ...` already in its
+     stderr. Caught 2026-08-19 by the retry's own test; a fixed-delay killer that names a mutable is
+     a bug waiting for a second caller. */
+  proc.kill();
   await Promise.race([
-    chromeGone,
+    gone,
     new Promise((res) => setTimeout(res, 3000)).then(() => {
       try {
-        chrome.kill('SIGKILL');
+        proc.kill('SIGKILL');
       } catch {
         /* already gone */
       }
-      return chromeGone;
+      return gone;
     }),
   ]);
   try {
-    rmSync(profile, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   } catch {
     /* best-effort: a profile on a busy volume can outlive one attempt */
   }
@@ -200,28 +266,111 @@ const exit = async (code) => {
   process.exit(code);
 };
 
-let targets;
+/**
+ * The port Chrome actually chose, read from our own profile.
+ *
+ * `DevToolsActivePort` is written into the user-data-dir once the port is listening; line 1 is the
+ * port. Because the file we read is inside the directory we created with `mkdtemp`, the port we
+ * connect to cannot belong to anyone else's browser.
+ */
+let port;
+const readActivePort = () => {
+  try {
+    const first = readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0].trim();
+    const n = Number(first);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null; /* not written yet */
+  }
+};
+
 /* 30s, not 10. On a cold CI runner the first Chrome of a session takes appreciably longer to open
    its debugging port than the third does — the 2026-08-13 gate run failed the first three routes
    and then sailed through the remaining nine on the same machine. A timeout tuned on a warm laptop
    is how a suite acquires a "flaky" reputation it does not deserve. */
-for (let i = 0; i < 150; i++) {
-  try {
-    targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-    if (targets.some((t) => t.type === 'page')) break;
-  } catch {
-    /* not up yet */
+const START_TIMEOUT_MS = Number(process.env.A11Y_CHROME_TIMEOUT ?? 30000);
+/** Launch attempts before the sweep refuses. Two, not more — see `bringUpChrome`. */
+const START_ATTEMPTS = Number(process.env.A11Y_CHROME_ATTEMPTS ?? 2);
+
+/**
+ * Get a Chrome with a live debugging port, or refuse — RETRYING a failed start.
+ *
+ * The refusal at the bottom is correct and stays: a sweep that could not drive a browser has
+ * measured nothing, and reporting a contrast verdict it never took is the one direction this file's
+ * header forbids failing in. What was wrong is that a TRANSIENT start failure became a hard job
+ * failure. Observed 2026-08-19 on CI run 32295496057 and again on izzo's #888, both on the FIRST
+ * route of the run (`/`), with the remaining eight routes — connected /live included — measuring
+ * fine on the same runner seconds later. Both were re-run by hand.
+ *
+ * TWO attempts, not five. The failure this fixes is a cold first start; a second attempt either
+ * works or is telling you something real. A long retry ladder would convert a genuinely broken
+ * Chrome — no binary, a missing shared library, a sandbox the runner forbids — from a 30-second red
+ * into a multi-minute one, which is a worse gate rather than a safer one.
+ *
+ * Waiting is bounded by the process being ALIVE as well as by the clock. `chromeGone` already
+ * existed here and was never consulted, so a Chrome that died in its first 200ms still burned the
+ * full 30s before anyone was told. An exited process will not write `DevToolsActivePort` however
+ * long it is given.
+ */
+const bringUpChrome = async () => {
+  const failures = [];
+  for (let attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
+    const startedAt = Date.now();
+    const deadline = startedAt + START_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      port ??= readActivePort();
+      if (port) {
+        try {
+          const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+          const found = targets?.find((t) => t.type === 'page');
+          if (found) return found;
+        } catch {
+          /* port file written, socket not accepting connections yet */
+        }
+      }
+      if (chrome.exited) break; // dead: stop waiting for a file it can no longer write
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    const waited = ((Date.now() - startedAt) / 1000).toFixed(1);
+    failures.push(
+      `attempt ${attempt}: ${
+        chrome.exited
+          ? `Chrome exited (${chrome.exitInfo}) after ${waited}s`
+          : port
+            ? `port :${port} was written but never accepted a connection (${waited}s)`
+            : `no DevToolsActivePort was written (${waited}s)`
+      }`,
+    );
+
+    if (attempt < START_ATTEMPTS) {
+      /* A FRESH profile for the retry. Reusing the directory of a Chrome that just failed is how one
+         bad start poisons the next: a half-written profile is exactly the state Chrome recovers from
+         by showing first-run UI or by declining to open the port at all. */
+      await shutdown(chrome, profile, chromeGone); // this attempt's process, explicitly
+      profile = mkdtempSync(join(tmpdir(), PROFILE_PREFIX));
+      port = undefined;
+      console.error(
+        `contrast-sweep — Chrome did not come up (${failures[failures.length - 1]});` +
+          ' retrying once with a fresh profile.',
+      );
+      launch();
+    }
   }
-  await new Promise((r) => setTimeout(r, 200));
-}
-const page = targets?.find((t) => t.type === 'page');
-if (!page) {
+
+  /* Chrome's own words, last. Without this the operator gets a timeout and nothing to act on, which
+     is why every previous occurrence was re-run rather than diagnosed. */
+  const stderrTail = chromeErr.trim().split('\n').slice(-6).join('\n    ');
   console.error(
-    `contrast-sweep — Chrome (${CHROME}) never opened its debugging port on :${port} within 30s.` +
-      ' Nothing was measured. This is a harness failure, not a contrast result.',
+    `contrast-sweep — Chrome (${CHROME}) never opened a debugging port in ${START_ATTEMPTS} attempt(s).` +
+      ' Nothing was measured. This is a harness failure, not a contrast result.\n  ' +
+      failures.join('\n  ') +
+      (stderrTail ? `\n  Chrome said:\n    ${stderrTail}` : '\n  Chrome wrote nothing to stderr.'),
   );
   await exit(2);
-}
+};
+
+const page = await bringUpChrome();
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((res, rej) => {
@@ -295,6 +444,42 @@ const PAPER_SIG = /* js */ `
   };
   const rowKey = (el, cs) =>
     (el.className.toString() || el.tagName).slice(0, 48) + '|' + cs.color + '|' + paperSig(el);
+
+  /*
+   * MEASURE EVERY ROW; collapse only in the REPORT.
+   *
+   * rowKey decides which rows are "the same situation", and every version of it has been wrong in
+   * the same direction. It was class|ink, and four .lc-card__avatar rows on discs painted by
+   * different functions collapsed to one — three avatars lost their initials in #781/#789 on a 3.42
+   * that was never about them. paperSig closed that by carrying the CSS background.
+   *
+   * It cannot close the OVERLAP case, and no ancestor-walking signature can: paperSig reads the
+   * ancestor chain, so paint a row merely SITS ON TOP OF — a sibling underneath — is invisible to
+   * it. Two rows with identical class, ink and ancestors, one on white and one over a dark panel,
+   * produce the same key. The walkers kept the first and skipped the rest, so DOCUMENT ORDER decided
+   * which one was measured, and a genuinely below-AA row was reported as a clean page whenever a
+   * healthy sibling happened to come first (fixtures/dedupe-hides-a-failure.html: same file, same
+   * CSS, swap two elements, and the verdict flips between 0 and 1 below AA).
+   *
+   * The dedupe was there so N identical rows are not measured N times. But the measuring pass is
+   * exactly where collapsing is unsafe — it is the pass whose answer can be WRONG rather than merely
+   * repetitive. So each row now gets its own key (…#0, …#1) and every one is measured; identical
+   * results are folded together when they are printed, which is where repetition was ever the
+   * problem. Occurrence order is stable across the three walkers because all three walk the same
+   * tree with the same filter, which is what lets their rows still join.
+   *
+   * Settle detection (KEYS_IN_PAGE) deliberately keeps the plain rowKey: it asks whether the
+   * page has stopped changing, not whether every row was covered.
+   */
+  const occKeyer = () => {
+    const seenCount = new Map();
+    return (el, cs) => {
+      const k = rowKey(el, cs);
+      const i = seenCount.get(k) ?? 0;
+      seenCount.set(k, i + 1);
+      return k + '#' + i;
+    };
+  };
 `;
 
 /* ── wait for the page to STOP CHANGING, rather than for a number of seconds ─────────────────────
@@ -335,7 +520,60 @@ const PAPER_SIG = /* js */ `
 const SETTLE_MIN = Number(process.env.A11Y_SETTLE_MIN ?? 4000);
 const SETTLE_STEP = Number(process.env.A11Y_SETTLE_STEP ?? 400);
 const SETTLE_WINDOW = Number(process.env.A11Y_SETTLE_WINDOW ?? 2500);
-const SETTLE_CAP = Number(process.env.A11Y_SETTLE_CAP ?? 20000);
+/**
+ * How long to wait for the page to stop changing before measuring it anyway and saying so.
+ *
+ * 30s, not 20s (2026-08-19, ADR 285). The cap has to exceed the longest CHOREOGRAPHY on any route
+ * being measured, or the sweep gives up on a page that was about to settle and reports MEASURED
+ * MID-FLIGHT about a room that does in fact stop. /office-preview under `?still` reaches quiescence
+ * at ~22s — measured with an identity-keeping motion probe, and unchanged whether the script is
+ * emitted as one burst at mount or staggered over its own 6.7s timeline, so it is the choreography's
+ * length and not the emit shape. At 20s the gate missed it by under two seconds and lit the marker
+ * on every single run.
+ *
+ * Raising it is close to free, which is the part worth knowing: a page that settles returns the
+ * instant it settles, so this number is only ever PAID by a page that never settles at all. The cost
+ * is 10 extra seconds on a route that was going to be reported mid-flight anyway.
+ */
+const SETTLE_CAP = Number(process.env.A11Y_SETTLE_CAP ?? 30000);
+/** The beat between the two stillness snapshots — long enough for a walk step to show, short enough
+    to be worth paying twice per run. */
+const GEOM_STEP = Number(process.env.A11Y_GEOM_STEP ?? 250);
+/**
+ * WHERE every row is — the stillness check the key set above cannot make.
+ *
+ * `KEYS_IN_PAGE` is class|ink|paper and nothing else, so it cannot see MOTION at all: a character
+ * walking across the office carries its label and its bubble with it while every key stays
+ * identical, and the sweep concludes the page has settled and shoots mid-walk. That blind spot sits
+ * underneath most of this gate's flakes — the freeze, the pixel pass and the `moved` guard are all
+ * downstream of a precondition that was never actually checked.
+ *
+ * This is deliberately NOT folded into the polled key set. Measured 2026-08-17: sampling geometry
+ * every SETTLE_STEP forced a layout on each poll and starved the office scene's rAF loop badly
+ * enough that its canvas never finished painting inside the 20s cap — the sweep then refused the
+ * whole route, turning a stillness check into a harness failure. Raising the cap to 60s let it
+ * through, which is the proof it was starvation rather than breakage.
+ *
+ * So geometry is the VERIFICATION, not the signal: the cheap key set settles first, and only then
+ * are two snapshots compared. Element boxes rather than text Ranges, for the same cost reason —
+ * motion does not need the glyphs' own box, and an element that moved moved.
+ */
+const GEOM_IN_PAGE = /* js */ `(() => {
+  const out = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!node.textContent.trim()) continue;
+    const el = node.parentElement;
+    if (!el) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+    const r = el.getBoundingClientRect();
+    out.push(Math.round(r.x) + ',' + Math.round(r.y));
+  }
+  return out.sort().join('|');
+})()`;
+
 const KEYS_IN_PAGE = /* js */ `(() => {
   ${PAPER_SIG}
   const keys = [];
@@ -351,10 +589,108 @@ const KEYS_IN_PAGE = /* js */ `(() => {
   }
   return document.readyState + '\\n' + keys.sort().join('\\n');
 })()`;
+/**
+ * The key set above has a hole, and it is the hole that let a real failure ship green for a day.
+ *
+ * `paperSig` walks CSS backgrounds. Text floating over the office WebGL scene has none — `.lc-office`
+ * is transparent — so for those rows the key is the same string whether the canvas has painted or
+ * not. The settle detector was therefore blind to the one surface it most needed to wait for, and
+ * the failure mode is a false PASS: when the floor has not painted by shutter time, the caption is
+ * measured against its CSS token and sails through. Measured 2026-08-13/14 at 272d4ad3:
+ * `/office-preview` reads 2.83 (#5a4e3f on #a49786) when the floor is there and GREEN when it is
+ * not, on identical bytes — main's own push run went success at 01:19 and failure on re-run at
+ * 04:13, same run id, same commit.
+ *
+ * "Wait for the canvas to go quiet" is the wrong repair — the office choreography animates forever,
+ * so a pixel-stability key just waits out the cap and then measures mid-flight (tried 2026-08-14;
+ * it also let the caption drop out of the key set entirely while the scene evolved). What the
+ * measurement actually requires is not a QUIET canvas but a PAINTED one: paint-vs-not is binary,
+ * converges within seconds, and is exactly the difference between the red runs and the vacuous
+ * green ones.
+ *
+ * So, after the ordinary settle: any canvas that overlaps text must be non-blank — some pixel
+ * variation inside its box, glyphs hidden so ticking text cannot fake it. A canvas still blank past
+ * the cap is a HARNESS failure (exit 2, "nothing was measured"), never a page result. A page with
+ * no canvas under its text skips all of this.
+ */
+const CANVAS_UNDER_TEXT = /* js */ `(() => {
+  const boxes = [...document.querySelectorAll('canvas')]
+    .map((c) => c.getBoundingClientRect())
+    .filter((r) => r.width > 1 && r.height > 1);
+  if (!boxes.length) return null;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!node.textContent.trim()) continue;
+    const el = node.parentElement;
+    if (!el) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) continue;
+    const hit = boxes.find(
+      (c) => r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top,
+    );
+    if (hit)
+      return {
+        x: Math.max(0, Math.floor(hit.left)),
+        y: Math.max(0, Math.floor(hit.top)),
+        width: Math.max(1, Math.ceil(hit.width)),
+        height: Math.max(1, Math.ceil(hit.height)),
+      };
+  }
+  return null;
+})()`;
+
+/** True once the canvas region shows any pixel variation; null when no canvas sits under text. */
+const canvasPainted = async () => {
+  const { result } = await send('Runtime.evaluate', {
+    expression: CANVAS_UNDER_TEXT,
+    returnByValue: true,
+  });
+  const clip = result.value;
+  if (!clip) return null;
+  const GLYPHS_OFF = '__a11y_paint_glyphs_off';
+  await send('Runtime.evaluate', {
+    expression: `(() => {
+      if (document.getElementById('${GLYPHS_OFF}')) return;
+      const s = document.createElement('style');
+      s.id = '${GLYPHS_OFF}';
+      s.textContent = '*,*::before,*::after{color:transparent !important;-webkit-text-fill-color:transparent !important;text-shadow:none !important;}';
+      document.head.appendChild(s);
+    })()`,
+  });
+  try {
+    const shot = await send('Page.captureScreenshot', {
+      format: 'png',
+      clip: { ...clip, scale: 1 },
+    });
+    const img = decodePng(Buffer.from(shot.data, 'base64'));
+    const first = [img.data[0], img.data[1], img.data[2]];
+    const stride = img.channels;
+    for (let o = stride; o < img.data.length; o += stride) {
+      if (
+        Math.abs(img.data[o] - first[0]) > 2 ||
+        Math.abs(img.data[o + 1] - first[1]) > 2 ||
+        Math.abs(img.data[o + 2] - first[2]) > 2
+      )
+        return true;
+    }
+    return false;
+  } catch {
+    return false; /* unreadable is not painted — keep waiting */
+  } finally {
+    await send('Runtime.evaluate', {
+      expression: `document.getElementById('${GLYPHS_OFF}')?.remove()`,
+    }).catch(() => {});
+  }
+};
+
 const settle = await (async () => {
   const t0 = Date.now();
   let prev = null;
   let since = Date.now();
+  let painted = null;
   while (Date.now() - t0 < SETTLE_CAP) {
     const { result } = await send('Runtime.evaluate', {
       expression: KEYS_IN_PAGE,
@@ -368,13 +704,39 @@ const settle = await (async () => {
       now !== null &&
       now.startsWith('complete')
     ) {
-      return { how: 'settled', ms: Date.now() - t0 };
+      painted = await canvasPainted();
+      if (painted !== false) {
+        /* Keys are stable and the canvas has painted — now check the thing the keys cannot see.
+           Two geometry snapshots a beat apart: if any row moved, the page was mid-animation with a
+           steady key set, so keep waiting rather than shoot. This costs two layouts per run, not one
+           per poll, which is what makes it affordable (see GEOM_IN_PAGE). */
+        const geom = async () =>
+          (await send('Runtime.evaluate', { expression: GEOM_IN_PAGE, returnByValue: true })).result
+            .value;
+        const g1 = await geom();
+        await new Promise((r) => setTimeout(r, GEOM_STEP));
+        const g2 = await geom();
+        if (g1 === g2) return { how: 'settled', ms: Date.now() - t0, painted };
+        since = Date.now(); // something moved — the page is not still, whatever the key set says
+      }
+      /* Keys are stable but the canvas under the text is still blank — the exact state that
+         produced the vacuous greens. Keep waiting; the cap decides how this ends. */
     }
     prev = now;
     await new Promise((r) => setTimeout(r, SETTLE_STEP));
   }
-  return { how: 'cap', ms: Date.now() - t0 };
+  return { how: 'cap', ms: Date.now() - t0, painted: painted === true };
 })();
+
+if (settle.painted === false) {
+  console.error(
+    `contrast-sweep — a canvas under measurable text never painted within ${SETTLE_CAP}ms.` +
+      ' Any ratio taken now would be against a background the reader never sees, so nothing was' +
+      ' measured. This is a harness failure, not a contrast result. (This exact state is how' +
+      ' /office-preview shipped green while failing AA — see lane 01KZZ7RYW6K9.)',
+  );
+  await exit(2);
+}
 
 /**
  * The whole measurement, run inside the page. Kept as one self-contained function so it can also be
@@ -451,6 +813,12 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     const inactive = el.closest('[disabled],[aria-disabled="true"],:disabled') !== null;
     let fg = resolve(cs.color);
     if (!fg) return null;
+    /* Ink alpha ≈ 0 is invisible text, not low-contrast text. A colour-transition reveal parked at
+       rgba(...,0) — the asks strip's "see all" between reel cycles — passes every opacity guard
+       (element opacity is 1) and then composites to its own paper: ratio 1.0, filed 2026-08-14 as a
+       cream-on-cream token bug that did not exist (lane 01M00M6BYF). Text nobody can perceive has
+       no contrast to measure; exclude it and report it, like SKIPPED. */
+    if (fg.a < 0.05) return { invisible: true, key, el: id, sample };
     /* A gradient defeats the ancestor walk, but the pixel pass can still rescue this element — so
        carry everything it needs (the resolved ink, the size threshold, the join key) rather than
        reporting a bare name. An unrescued row still prints as SKIPPED, exactly as before.
@@ -470,7 +838,8 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
   };
 
   /* ── live sweep: every rendered text node, deduped by (class, ink, paper) ── */
-  const live = [], skipped = [], seen = new Set();
+  const live = [], skipped = [], invisible = [], rowNodes = [];
+  const occKey = occKeyer();
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
@@ -480,12 +849,19 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     if (!el) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
-    const key = rowKey(el, cs);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const key = occKey(el, cs);
+    /* ONE IDENTITY SOURCE FOR EVERY PASS. This walk runs BEFORE the freeze; the rect, opacity and
+       shutter passes run after, and the page keeps mutating in between — /live's asks strip
+       re-renders on a 1s setInterval, which no rAF freeze can stop because it is not on rAF.
+       Re-walking the tree in each pass and pairing rows by key assumes the Nth row of a key is still
+       the same row; with per-occurrence keys that breaks the moment a row is added, removed or
+       replaced, and ink from one row joins the pixel under another. That is how avatar rows carrying
+       their own disc colour came out white-on-cream at 1.15.
+       So the NODES are the identity. Later passes iterate this list instead of re-walking. */
+    rowNodes.push({ node, el, key });
     const m = measure(el, text.slice(0, 28), key);
     if (!m) continue;
-    if (m.skipped) skipped.push(m); else live.push(m);
+    if (m.invisible) invisible.push(m); else if (m.skipped) skipped.push(m); else live.push(m);
   }
 
   /* ── probe pass: classes that never render in this state ── */
@@ -513,10 +889,12 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     }
   }
 
+  window.__a11y_rows = rowNodes;
   return {
     url: location.href,
     live: live.sort((a, b) => a.ratio - b.ratio),
     skipped,
+    invisible,
     probed: probed.sort((a, b) => a.ratio - b.ratio),
     probeHost, probeNote,
   };
@@ -644,19 +1022,16 @@ const RECTS_IN_PAGE = /* js */ `(() => {
     while (n && n.nodeType === 1) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; }
     return o;
   };
-  const rects = [], seen = new Set();
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) {
-    const text = node.textContent.trim();
-    if (!text) continue;
-    const el = node.parentElement;
-    if (!el) continue;
+  const rects = [], clipped = [], covered = [], gone = [];
+  /* The rows the live walk measured, in its order, as the very same nodes — see __a11y_rows there.
+     Re-walking here would re-derive identity from tree position, which is exactly what a page that
+     re-renders between passes invalidates. */
+  for (const { node, el, key } of window.__a11y_rows ?? []) {
+    /* Replaced or removed since the live walk: React swapped the node out, so whatever is at its
+       old coordinate now belongs to something else. No ink of ours is there to measure. */
+    if (!node.isConnected) { gone.push(key); continue; }
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
-    const key = rowKey(el, cs);
-    if (seen.has(key)) continue;
-    seen.add(key);
     /* The TEXT's own box, not the element's: an element's bounding rect can include padding that
        sits on different paint than the glyphs do. */
     const range = document.createRange();
@@ -664,14 +1039,64 @@ const RECTS_IN_PAGE = /* js */ `(() => {
     const r = [...range.getClientRects()].find((x) => x.width > 0 && x.height > 0);
     range.detach?.();
     if (!r) continue;
+    /* OUTSIDE THE CAPTURED PAGE — no pixel exists for this row, so refuse it rather than sample a
+       coordinate it never occupied.
+
+       window.scrollX/Y turns a viewport rect into a PAGE rect, and that conversion only holds for
+       rows the WINDOW scrolls. /live's stream is a scrolling container inside a fixed-height app:
+       its off-screen rows sit at viewport y of -5600 and below while window.scrollY is 0, so the
+       page coordinate lands somewhere the element never was and the pixel pass reads whatever paints
+       there. Measured on the connected /live fixture: avatar rows carrying their proper disc colour
+       inline, reported as white-on-cream at 1.15.
+
+       The bound is the CAPTURED PAGE, not the viewport. The shutter clips to the whole document, so
+       below-the-fold rows are captured and must still be measured — testing against the viewport
+       cost 11 legitimate rows on / in the first version of this check.
+
+       Today the dedupe usually hides this: only the FIRST row of each key is measured and it tends
+       to be the one in view. That makes this cheap now and load-bearing the moment coverage widens.
+       Counted and named, never silently dropped. */
+    const px = r.x + window.scrollX;
+    const py = r.y + window.scrollY;
+    const pageW = document.documentElement.scrollWidth;
+    const pageH = document.documentElement.scrollHeight;
+    if (px + r.width <= 0 || py + r.height <= 0 || px >= pageW || py >= pageH) {
+      clipped.push(key);
+      continue;
+    }
+    /* NO PAINT OF ITS OWN AT ITS CENTRE — clipped by a container edge or behind a panel. The row is
+       inside the captured page (the bound above) and still has no pixel that belongs to it: the one
+       there belongs to whatever covers it, and reading that as this row's paper invents a failure
+       for text the reader cannot see either.
+
+       Measured on connected /live: lc-chip__avatar reported 1.15 white-on-cream while the composited
+       estimate said 4.9 on its own inline disc — a 3.75 disagreement, the largest on the page. The
+       disc is real; its paint does not reach that point.
+
+       The test is the TOPMOST element rather than mere presence in the hit stack: a row under a
+       translucent wash is still read through it and its pixel legitimately includes the wash, but a
+       row whose own element is not what paints at its centre has nothing of its own to measure.
+       Invisible while the dedupe kept one row per key — that row was the one in the clear. */
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) {
+      covered.push(key);
+      continue;
+    }
     rects.push({
       key,
       x: r.x + window.scrollX, y: r.y + window.scrollY, w: r.width, h: r.height,
       opacity: effOpacity(el),
+      /* Born into the frozen room: connected after the freeze marked the living page's elements, so
+         the rAF positioning hand never reached it. See the freeze comment — measured, this strands
+         bubbles at (0,0) over the room papers. Absent mark set (pre-freeze callers) = not born. */
+      born: !!window.__a11y_atFreeze && !window.__a11y_atFreeze.has(el),
     });
   }
   return {
     rects,
+    clipped,
+    covered,
+    gone,
     dpr: window.devicePixelRatio || 1,
     docW: Math.ceil(document.documentElement.scrollWidth),
     docH: Math.ceil(document.documentElement.scrollHeight),
@@ -692,17 +1117,12 @@ const evalIn = async (expression) => {
 const OPACITY_IN_PAGE = /* js */ `(() => {
   ${PAPER_SIG}
   const eff =(el) => { let o = 1, n = el; while (n && n.nodeType === 1) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; } return o; };
-  const outv = {}, seen = new Set();
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (!node.textContent.trim()) continue;
-    const el = node.parentElement; if (!el) continue;
+  const outv = {};
+  /* Same identity source as the rect pass — see __a11y_rows in the live walk. */
+  for (const { node, el, key } of window.__a11y_rows ?? []) {
+    if (!node.isConnected) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
-    const key = rowKey(el, cs);
-    if (seen.has(key)) continue;
-    seen.add(key);
     outv[key] = eff(el);
   }
   return outv;
@@ -715,6 +1135,8 @@ let keysBeforeShutter = null;
 let keysAfterShutter = null;
 /** Rows whose line box slid between the rect pass and the shutter — reported, never measured. */
 const moved = [];
+/** Rows born after the freeze — stranded at (0,0), their geometry is the freeze's artifact. */
+const born = [];
 try {
   /* Hold the scene still for the length of the capture. Everything that moves on these surfaces
      moves on a rAF loop — the office characters walk, and the speech bubbles are absolutely
@@ -724,8 +1146,68 @@ try {
      the rect pass and the shutter and the sample lands on a character's body; with it they are
      measurable at all, which is worth more than a frozen millisecond costs. The `moved` guard below
      stays as the check on this working: if anything still slides, it is excluded rather than
-     mis-sampled. */
-  await evalIn(`(() => { window.requestAnimationFrame = () => 0; return true; })()`);
+     mis-sampled.
+
+     The freeze has a birth hole, and it needs its own guard. Speech bubbles are BORN on timers
+     (`showSpeech` is deliberately not on the rAF loop, so the office can speak while it rests), but
+     they are POSITIONED by the rAF tick — so a bubble born after the no-op lands is real DOM whose
+     placing hand never arrives, and it strands at (0,0). Stationary and at settled opacity 1, it
+     walks through the `moved` and fade guards and its text is sampled over whatever paints in the
+     page's top-left corner: 6 of 6 verified strandings measured the room papers, not the bubble.
+     Key-set differencing cannot see this — rowKey is class|ink|paper, and a stranded bubble collides
+     with any healthy sibling born a beat earlier — so the mark has to be per ELEMENT: everything
+     connected now, while the room is still the living page's arrangement, goes in a WeakSet, and the
+     rect pass reports anything outside it as `born`. Born rows are excluded and counted, exactly
+     like `moved`: their geometry was never a property of the page. (Residual: an element born within
+     the final frame BEFORE the freeze is marked yet may also have missed its first positioning tick.
+     That window is one frame wide; the mark and the override land in the same evaluation to keep it
+     that narrow.) */
+
+  /* ── FREEZE TIME, NOT THE SCHEDULER ───────────────────────────────────────────────────────────
+   *
+   * The old freeze was `requestAnimationFrame = () => 0`, and it dropped every request that arrived
+   * after this line ran. Nothing schedules such an element, so it is never placed — and being never
+   * placed it never moves, so `moved` is blind; being present at the mark walk, `born` is blind too.
+   * That is wanderer's /office-preview failure (`lc-speech__text` 1.8 on #3a4d4d at light=12, two
+   * immediate retries green), modelled by `fixtures/request-after-freeze.html` and reproduced live
+   * on this build before this change.
+   *
+   * Draining pending frames BEFORE freezing was built first and removed: it services work already in
+   * flight, and a request that has not been made yet is not in flight. It changed no arm of the
+   * falsifier and no count on the live route, so it was mechanism without evidence.
+   *
+   * The freeze wants motion to stop. It does not want LAYOUT WORK to stop, and killing the scheduler
+   * conflated the two. So callbacks are still serviced — the element gets placed — but they are
+   * serviced with a PINNED timestamp, so anything computing position from the clock sees no time
+   * pass and holds still. That is the actual intent, stated directly.
+   *
+   * Two bounds, because servicing is not free:
+   *
+   *   - A BUDGET. Loops that reschedule unconditionally (`office-scene/index.ts:926`) would otherwise
+   *     run forever. After the budget the override goes silent — the old behaviour, reached as a
+   *     backstop rather than as the default.
+   *   - A pinned `t0`. An animation that advances by ELAPSED time cannot move. One that advances by
+   *     frame COUNT still can, which is what the budget and the surviving `moved` guard are for.
+   *
+   * Callbacks run on a macrotask, not synchronously: a synchronous call would re-enter the page's
+   * own loop inside the assignment expression, and the rect pass that follows must see the result of
+   * placement rather than the middle of it. */
+  await evalIn(`(() => {
+    window.__a11y_atFreeze = new WeakSet();
+    for (const el of document.querySelectorAll('*')) window.__a11y_atFreeze.add(el);
+    const t0 = performance.now();
+    let budget = 240;
+    window.__a11y_serviced = 0;
+    window.requestAnimationFrame = (cb) => {
+      if (budget-- <= 0) return 0;
+      setTimeout(() => {
+        window.__a11y_serviced++;
+        try { cb(t0); } catch { /* a page callback that throws is the page's problem, not the sweep's */ }
+      }, 0);
+      return 0;
+    };
+    return true;
+  })()`);
   const geom = await evalIn(RECTS_IN_PAGE);
   /* Two readings, a beat apart. A fade that is still MOVING has no settled appearance and must not
      be measured. A fade that is STILL is a design decision — the office watermark sits at 0.45 on
@@ -797,7 +1279,14 @@ try {
   pixel = new Map();
   const unsettled = [];
   const faded = [];
+  const invisible = [];
   for (const rc of geom.rects) {
+    /* Checked before `moved`: a born row is typically STATIONARY (stranded where it appeared), so
+       the movement guard is exactly the one it walks through. */
+    if (rc.born) {
+      born.push(rc.key.split('|')[0] || '?');
+      continue;
+    }
     if (movedKeys.has(rc.key)) {
       moved.push(rc.key.split('|')[0] || '?');
       continue;
@@ -811,6 +1300,20 @@ try {
       Math.abs(after - rc.opacity) > 0.01;
     if (rc.opacity < 0.99 && moving) {
       unsettled.push(rc.key.split('|')[0] || '?');
+      continue;
+    }
+    /* PARKED AT ~ZERO is a third state, and both guards above miss it. A carousel row between
+       fade-out and fade-in sits at opacity ≈0.005 — not moving (the readings agree), not exactly 0
+       (the walk's `+cs.opacity === 0` check keeps it), so it fell through to measurement with its
+       ink composited at α≈0.005 onto its own paper: ratio 1.0, "ink identical to paper". That is
+       invisible text reported as a CONTRAST failure — three /live asks-strip rows filed as
+       cream-on-cream token bugs on 2026-08-14 until stanley demonstrated the live page renders
+       them at ~13:1 (lane 01M00M6BYF; the 1.01/#faf2e5 run was the compositing signature). Text
+       nobody can see has no contrast to measure: exclude it and SAY so, exactly like `moved` and
+       `unsettled`. Which verdict a cycling row gets — measured legible, or excluded here — depends
+       on where the shutter lands in its cycle; both are honest, and neither is a failure. */
+    if (rc.opacity < 0.05) {
+      invisible.push(rc.key.split('|')[0] || '?');
       continue;
     }
     if (rc.opacity < 0.99) faded.push(rc.key.split('|')[0] || '?');
@@ -827,6 +1330,29 @@ try {
     notes.push(
       `page is ${geom.docH}px tall — sampled the viewport only, below-fold text kept its composited estimate`,
     );
+  if (geom.covered?.length)
+    notes.push(
+      `${geom.covered.length} row(s) have no paint of their own at their centre — clipped by a` +
+        ` container edge or behind a panel, so the pixel there belongs to whatever covers them.` +
+        ` Excluded, not measured` +
+        ` (${[...new Set(geom.covered.map((k) => k.split('|')[0] || '?'))].slice(0, 6).join(', ')})`,
+    );
+  if (geom.clipped?.length)
+    notes.push(
+      `${geom.clipped.length} row(s) sit OUTSIDE THE CAPTURED PAGE — a scroll container holds them` +
+        ` where no pixel exists, so sampling one would read whatever paints at a coordinate they` +
+        ` never occupied. Excluded, not measured` +
+        ` (${[...new Set(geom.clipped.map((k) => k.split('|')[0] || '?'))].slice(0, 6).join(', ')})`,
+    );
+  {
+    const names = [...invisible, ...(out.invisible ?? []).map((r) => r.el)];
+    if (names.length)
+      notes.push(
+        `${names.length} element(s) were INVISIBLE for the whole window (effective opacity or ink` +
+          ` alpha < 0.05) — invisible text has no contrast to measure; excluded, not passed:` +
+          ` ${[...new Set(names)].join(', ')}`,
+      );
+  }
   if (faded.length)
     notes.push(
       `${faded.length} element(s) are permanently translucent — their ink is composited at that` +
@@ -837,6 +1363,12 @@ try {
       `${moved.length} element(s) MOVED between the rect pass and the shutter, so the pixel under` +
         ` their recorded line box is no longer what is behind them — excluded, not measured:` +
         ` ${[...new Set(moved)].join(', ')}`,
+    );
+  if (born.length)
+    notes.push(
+      `${born.length} element(s) were BORN after the scene froze — the rAF positioning hand never` +
+        ` reached them, so their line box is the freeze's artifact, not the page's — excluded, not` +
+        ` measured: ${[...new Set(born)].join(', ')}`,
     );
   if (unsettled.length)
     notes.push(

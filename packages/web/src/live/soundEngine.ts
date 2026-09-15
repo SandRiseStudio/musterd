@@ -14,15 +14,19 @@
 // with what pan) all live in `sound.ts`. Nothing here reads localStorage: an engine only exists
 // because a façade already decided it should be on, and told it so.
 
+import { EMPTY_LIFE, type LifeContext } from './sound';
 import {
-  EMPTY_LIFE,
   keyboardFor,
   keypressPlan,
-  type LifeContext,
+  lifeGapFor,
+  type Moment,
+  momentPan,
   panFor,
   pickLifeEvent,
+  pickWorkDesk,
   shouldChime,
-} from './sound';
+  shouldPlayMoment,
+} from './soundLife';
 
 /** One scheduled note: a frequency, a start offset (s), a length (s), a waveform, and a peak gain. */
 interface Note {
@@ -227,9 +231,8 @@ export const firehoseEngine = new FirehoseSound();
 
 /** Ceiling on the whole bed. Low enough to sit under a podcast, loud enough to miss when it stops. */
 const ROOM_GAIN = 0.075;
-/** Gap between sparse events, seconds. Wide, and jittered inside the window — an office you can set
- *  your watch by is a metronome, and the ear finds a metronome within about two cycles. */
-const LIFE_GAP: [number, number] = [2.5, 8];
+// The gap between sparse events now lives in sound.ts (`LIFE_GAP` / `lifeGapFor`): it scales with
+// work density, and the scaling is logic the tests hold still without an AudioContext.
 /**
  * Makeup gain on the whole LIFE layer, and the reason it needs one.
  *
@@ -262,6 +265,10 @@ const LIFE_GAP: [number, number] = [2.5, 8];
  */
 const LIFE_GAIN = 34;
 
+/** The whoosh's length, seconds — `--lc-dur-5` (600ms), the `lc-trace-draw` timing, so the pan
+ *  sweep lands with the visual (E4 spec: one number, pinned). */
+const WHOOSH_S = 0.6;
+
 export class RoomTone {
   enabled = false;
   private ctx: AudioContext | null = null;
@@ -276,6 +283,9 @@ export class RoomTone {
   private broadcast = false;
   /** What the scene last told us about who is near whom. Starts empty: an empty office is quiet. */
   private occupancy: LifeContext = EMPTY_LIFE;
+  /** When the last milestone moment played — the E3 burst throttle's clock. */
+  private lastMomentAt = -Infinity;
+
 
   /** Toggle the bed. The façade owns the preference and its persistence; this is the audio half. */
   setEnabled(on: boolean): void {
@@ -431,10 +441,155 @@ export class RoomTone {
     return buf;
   }
 
-  /** Schedule the next sparse event, and re-arm from it. One timer, always. */
+  /**
+   * A placed room milestone (E3): fanfare at the celebrant, the door opening, an ask's weight.
+   * On the LIFE bus so it inherits the bed's calibration; throttled so a burst of accepts plays
+   * once (dropped, never queued); the ×0.75 stereo squeeze happens HERE and nowhere else —
+   * `pan` arrives raw [-1, 1] from `screenPan` at the emit site.
+   */
+  moment(name: Moment, pan: number, panTo?: number): void {
+    const ctx = this.ctx;
+    const bus = this.lifeBus;
+    if (!ctx || !bus || ctx.state !== 'running' || this.isHidden()) return;
+    const now = Date.now();
+    if (!shouldPlayMoment(now, this.lastMomentAt)) return;
+    this.lastMomentAt = now;
+    const panNode = ctx.createStereoPanner?.();
+    const out = panNode ?? ctx.createGain();
+    if (panNode) panNode.pan.value = momentPan(pan);
+    // The whoosh is the one voice that animates its pan node: it sweeps toward `panTo` over the
+    // trace's own duration, so ear and eye arrive together (E4 spec). Other voices ignore panTo.
+    if (panNode && name === 'whoosh' && panTo !== undefined) {
+      panNode.pan.setValueAtTime(momentPan(pan), ctx.currentTime + 0.02);
+      panNode.pan.linearRampToValueAtTime(momentPan(panTo), ctx.currentTime + 0.02 + WHOOSH_S);
+    }
+    out.connect(bus);
+    setTimeout(() => out.disconnect(), 4000);
+    switch (name) {
+      case 'fanfare': return this.fanfare(ctx, out);
+      case 'door': return this.doorMoment(ctx, out);
+      case 'askbell': return this.askbell(ctx, out);
+      case 'plateOpen': return this.plateTick(ctx, out, true);
+      case 'plateClose': return this.plateTick(ctx, out, false);
+      case 'boardOpen': return this.boardPaper(ctx, out, true);
+      case 'boardClose': return this.boardPaper(ctx, out, false);
+      case 'whoosh': return this.whoosh(ctx, out);
+    }
+  }
+
+  /** A nameplate under the viewer's own hand (E4): one felt-pad tick, pitched a touch up on open
+   *  and down on close — siblings, not twins. Closer than the room, so smaller than the room. */
+  private plateTick(ctx: AudioContext, out: AudioNode, open: boolean): void {
+    const base = open ? 640 : 480;
+    this.click(ctx, out, ctx.currentTime + 0.01, base * (0.94 + Math.random() * 0.12), 0.035, 0.05);
+  }
+
+  /** The board overlay (E4): a brief paper swell — rising on open, falling and shorter on close. */
+  private boardPaper(ctx: AudioContext, out: AudioNode, open: boolean): void {
+    const t0 = ctx.currentTime + 0.02;
+    const dur = open ? 0.28 + Math.random() * 0.08 : 0.18 + Math.random() * 0.06;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(open ? 700 : 1100, t0);
+    bp.frequency.exponentialRampToValueAtTime(open ? 1200 : 600, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.03, t0 + dur * 0.4);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t0);
+    src.stop(t0 + dur + 0.03);
+  }
+
+  /** The directed-act whoosh (E4): lowpassed air with a gentle arc over the trace's 600ms, its pan
+   *  swept by `moment` above. Quiet by design — it accompanies a line, it is not the line. */
+  private whoosh(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(600, t0);
+    lp.frequency.exponentialRampToValueAtTime(1900 + Math.random() * 400, t0 + WHOOSH_S * 0.55);
+    lp.frequency.exponentialRampToValueAtTime(500, t0 + WHOOSH_S);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.026, t0 + WHOOSH_S * 0.45);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + WHOOSH_S);
+    src.connect(lp).connect(g).connect(out);
+    src.start(t0);
+    src.stop(t0 + WHOOSH_S + 0.03);
+  }
+
+  /** Acceptance lands (E3): a quick rising major triad off the cue ladder, and a soft paper
+   *  flutter underneath — the confetti's own sound. A celebration you notice, not a jingle. */
+  private fanfare(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    const triad = [523.25, 659.25, 783.99]; // C5 E5 G5 — the resolve chord, placed in the room
+    triad.forEach((f, i) => {
+      this.ping(ctx, out, t0 + i * (0.07 + Math.random() * 0.03), f * (0.995 + Math.random() * 0.01), 0.02 + Math.random() * 0.006);
+    });
+    // The flutter: a handful of tiny bright taps scattered over the ring — paper coming down.
+    let at = t0 + 0.25;
+    for (let i = 0; i < 5 + Math.floor(Math.random() * 4); i++) {
+      this.click(ctx, out, at, 1800 + Math.random() * 1400, 0.012 + Math.random() * 0.008, 0.03);
+      at += 0.05 + Math.random() * 0.07;
+    }
+  }
+
+  /** The door (E3): a low latch click, the closer arm's short sigh, then a few steps from that side. */
+  private doorMoment(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    this.click(ctx, out, t0, 320 + Math.random() * 120, 0.08, 0.05); // the latch
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(900, t0 + 0.08);
+    lp.frequency.exponentialRampToValueAtTime(320, t0 + 0.55);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0 + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.045, t0 + 0.2);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55); // the closer's sigh
+    src.connect(lp).connect(g).connect(out);
+    src.start(t0 + 0.08);
+    src.stop(t0 + 0.6);
+    let at = t0 + 0.45;
+    for (let i = 0; i < 3 + Math.floor(Math.random() * 3); i++) {
+      this.click(ctx, out, at, 110 + Math.random() * 60, 0.07, 0.07); // steps from the door's side
+      at += 0.4 + Math.random() * 0.12;
+    }
+  }
+
+  /** An ask lands (E3): one soft held tone with a slow decay — weight, not alarm, and quieter than
+   *  the firehose doorbell that may ring beside it. */
+  private askbell(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    const f = 440 * (0.98 + Math.random() * 0.05);
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.018, t0 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.2);
+    osc.connect(g).connect(out);
+    osc.start(t0);
+    osc.stop(t0 + 1.25);
+  }
+
+  /** Schedule the next sparse event, and re-arm from it. One timer, always. The gap tightens with
+   *  work density — a full sprint hums about twice as often as a quiet room (E2 spec §4). */
   private armLife(): void {
     clearTimeout(this.timer);
-    const wait = LIFE_GAP[0] + Math.random() * (LIFE_GAP[1] - LIFE_GAP[0]);
+    const [lo, hi] = lifeGapFor(this.occupancy.density);
+    const wait = lo + Math.random() * (hi - lo);
     this.timer = setTimeout(() => {
       if (this.bus && this.ctx?.state === 'running' && !this.isHidden()) this.life();
       this.armLife();
@@ -448,12 +603,15 @@ export class RoomTone {
     if (!ctx || !bus) return;
     // Placed across the stereo field, never dead centre: everything in an office happens at somebody
     // else's desk, and a sound in the middle of your head is a sound you made.
-    const name = pickLifeEvent(Math.random(), this.occupancy);
+    const now = Date.now();
+    const name = pickLifeEvent(Math.random(), this.occupancy, now);
     const pan = ctx.createStereoPanner?.();
     const out = pan ?? ctx.createGain();
-    // Positioned events (chatter, the dog) pan to where they are on screen; the rest land somewhere
-    // off to one side, the way the layer always has.
-    const at = panFor(name, this.occupancy);
+    // Positioned events pan to where they are on screen: work sounds to the working desk that makes
+    // them (E2 spec §3), chatter to the pair, the dog to the dog; the rest land somewhere off to one
+    // side, the way the layer always has.
+    const desk = pickWorkDesk(name, Math.random(), this.occupancy, now);
+    const at = desk ? desk.x * 0.75 : panFor(name, this.occupancy);
     if (pan) pan.pan.value = at ?? (Math.random() * 2 - 1) * 0.75;
     out.connect(bus);
     // Long enough for the longest murmur or typing run to finish before its channel goes away.
@@ -462,13 +620,11 @@ export class RoomTone {
     // Every branch jitters its own parameters, so even the same event twice in a row never plays the
     // same twice (nick, 2026-07-29: "very dynamic and variable so they don't get old").
     switch (name) {
-      case 'keys': return this.keys(ctx, out);
+      case 'keys': return this.keys(ctx, out, desk?.seed);
       case 'murmur': return this.murmur(ctx, out, false);
       case 'whisper': return this.murmur(ctx, out, true);
       case 'tap': return this.tap(ctx, out, 0.9);
       case 'softTap': return this.tap(ctx, out, 0.35);
-      case 'creak': return this.creak(ctx, out);
-      case 'chime': return this.chime(ctx, out);
       case 'stapler': return this.stapler(ctx, out);
       case 'drawer': return this.drawer(ctx, out);
       case 'footsteps': return this.footsteps(ctx, out);
@@ -480,6 +636,8 @@ export class RoomTone {
       case 'jingle': return this.jingle(ctx, out);
       case 'yawn': return this.blow(ctx, out, true);
       case 'bark': return this.bark(ctx, out);
+      case 'birds': return this.birds(ctx, out);
+      case 'nightair': return this.nightair(ctx, out);
     }
   }
 
@@ -488,8 +646,10 @@ export class RoomTone {
    *  long ones. A uniform run is what the ear learns first. One `Keyboard` per run (see
    *  `keyboardFor`), two transients per key (see `keypressPlan`) — and the whole thing sits at the
    *  bed's level now, not 9 dB over it, which was the "too loud" half of the complaint. */
-  private keys(ctx: AudioContext, out: AudioNode): void {
-    const kb = keyboardFor(Math.floor(Math.random() * 0xffffffff));
+  private keys(ctx: AudioContext, out: AudioNode, deskSeed?: number): void {
+    // A placed burst plays the desk's own keyboard (E2 spec §3) — the same seed every time, so a
+    // desk sounds like itself across bursts. An unplaced one draws a stranger's, as it always has.
+    const kb = keyboardFor(deskSeed ?? Math.floor(Math.random() * 0xffffffff));
     const long = Math.random() < 0.3;
     const n = long ? 14 + Math.floor(Math.random() * 12) : 4 + Math.floor(Math.random() * 9);
     const pauseAt = long ? 5 + Math.floor(Math.random() * (n - 8)) : -1;
@@ -503,26 +663,11 @@ export class RoomTone {
     }
   }
 
-  /** A chat app pinging at somebody else's desk: two quick soft notes. Drawn from a few different
-   *  apps' worth of intervals — rising, wider, falling — so no two pings in a row are the same one. */
-  private chime(ctx: AudioContext, out: AudioNode): void {
-    const sets: [number, number][] = [
-      [523.25, 783.99], // C5 → G5
-      [587.33, 880.0], // D5 → A5
-      [659.25, 987.77], // E5 → B5
-      [783.99, 659.25], // G5 → E5 — the falling one
-    ];
-    const [f1, f2] = sets[Math.floor(Math.random() * sets.length)]!;
-    // A pure sine loses far less through its (nonexistent) filtering than the noise-based events do,
-    // so on the shared LIFE bus it needs the *smallest* number here to sit level with them. Kept a
-    // touch under the keystroke: this is always a ping at somebody else's desk, never yours.
-    const g = 0.009 + Math.random() * 0.006;
-    const t0 = ctx.currentTime + 0.02;
-    this.ping(ctx, out, t0, f1, g);
-    this.ping(ctx, out, t0 + 0.09 + Math.random() * 0.05, f2, g * 1.15);
-  }
-
-  /** One soft sine strike with a fast attack and a long ring — the body of a notification note. */
+  /** One soft sine strike with a fast attack and a long ring — the body of a notification note.
+   *  The room tone's ONLY remaining user is the dog's collar (`jingle`), which fires 6–11 of these
+   *  45 ms apart up at 2400–4000 Hz: a rattle, not a note. The two-note figure that used to share
+   *  this primitive (`chime`) was removed for colliding with the act cues — see the note on
+   *  LIFE_EVENTS in soundLife.ts. Anything new built on `ping` has to clear that same bar. */
   private ping(ctx: AudioContext, out: AudioNode, at: number, freq: number, gain: number): void {
     const osc = ctx.createOscillator();
     osc.type = 'sine';
@@ -594,26 +739,6 @@ export class RoomTone {
     this.click(ctx, out, ctx.currentTime + 0.02, 260 + Math.random() * 420, 0.12 * body, 0.13);
   }
 
-  /** A chair taking somebody's weight — a short downward glide, which is the whole gesture. */
-  private creak(ctx: AudioContext, out: AudioNode): void {
-    const t0 = ctx.currentTime + 0.02;
-    const src = ctx.createBufferSource();
-    src.buffer = this.noiseBuffer(ctx);
-    src.loop = true;
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.Q.value = 7;
-    bp.frequency.setValueAtTime(520, t0);
-    bp.frequency.exponentialRampToValueAtTime(300, t0 + 0.42);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t0);
-    // Q 7 is the narrowest band of any life event, so it loses the most and needs the most back.
-    g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.09);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
-    src.connect(bp).connect(g).connect(out);
-    src.start(t0);
-    src.stop(t0 + 0.5);
-  }
 
   /** A stapler: the soft press of the arm, then the sharp ka-CHUNK of the staple setting. Two
    *  transients with the weight on the second, which is the opposite of a keypress — that reversal
@@ -760,6 +885,41 @@ export class RoomTone {
     src.connect(bp).connect(g).connect(out);
     src.start(t0);
     src.stop(t0 + 0.2);
+  }
+
+  /** Birdsong through the window, morning only (E2 spec §4): one bird, a short phrase of quick
+   *  upward chirps. Sine glides, not noise — a chirp is pitched — and each phrase draws its own
+   *  base pitch, count and pacing so no two mornings repeat. Soft: the window is closed. */
+  private birds(ctx: AudioContext, out: AudioNode): void {
+    const base = 2600 + Math.random() * 900;
+    let at = ctx.currentTime + 0.02;
+    for (let i = 0; i < 2 + Math.floor(Math.random() * 3); i++) {
+      const f = base * (0.92 + Math.random() * 0.16);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, at);
+      osc.frequency.exponentialRampToValueAtTime(f * (1.25 + Math.random() * 0.2), at + 0.06);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.0055 + Math.random() * 0.003, at + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
+      osc.connect(g).connect(out);
+      osc.start(at);
+      osc.stop(at + 0.11);
+      at += 0.13 + Math.random() * 0.22;
+    }
+  }
+
+  /** Night air for the late shift (E2 spec §4): a distant cricket-ish pulse train — a few tremolo'd
+   *  high pips, very quiet, very sparse. Deliberately under everything else: it is the sound of the
+   *  building being empty around the one lit desk, not a nature documentary. */
+  private nightair(ctx: AudioContext, out: AudioNode): void {
+    const f = 3800 + Math.random() * 700;
+    let at = ctx.currentTime + 0.02;
+    for (let i = 0; i < 3 + Math.floor(Math.random() * 3); i++) {
+      this.ping(ctx, out, at, f * (0.98 + Math.random() * 0.04), 0.0035 + Math.random() * 0.002);
+      at += 0.07 + Math.random() * 0.04;
+    }
   }
 
   /** One short filtered noise burst — the shared shape behind a keystroke and a mug on a desk. */

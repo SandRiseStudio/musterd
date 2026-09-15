@@ -6,7 +6,7 @@
 - Relates to: ADR 158 (observed over declared — the ladder this adopts), ADR 101 (model as a
   variable), ADR 119 (ambient HTTP re-attest), ADR 121 (a human shell must not stamp a model),
   ADR 187 (grading speaks only about a session running now), ADR 188 (the graded review ladder that
-  consumes this), ADR 010 (the reclaim grace whose interaction causes it), ADR 056 (the diversity
+  consumes this), ADR 010 (the reclaim grace whose interaction causes it), ADR 314 (the diversity
   conclusions downstream)
 
 ## Context
@@ -55,7 +55,7 @@ de-attestation (new: null) proves nothing`. Across the whole audit table at the 
 `occupancy.model_attested` rows, zero with `new: null`.** The row was designed for and never emitted.
 
 Three consumers were silently wrong for as long as this ran: ADR 188 routing (the eligible pool
-changed with no recorded cause), ADR 056 diversity conclusions (a review episode's candidate set was
+changed with no recorded cause), ADR 314 diversity conclusions (a review episode's candidate set was
 smaller than the roster suggests, with no artefact saying why), and ADR 234's acceptance measurements
 (a lane finding no candidate looks like a routing outcome when it was an attestation gap). This is
 the instrument-vs-system confusion in its purest form: `unknown` reads as a fact about the seat while
@@ -132,6 +132,16 @@ than one uniformly incomplete: a reader can reason about the second and not the 
   `review.ts` already did, which is what made this shape the obvious one rather than a new action.
 - The CLI and the MCP adapter now attest identically. They should be kept that way: a third surface
   that resolves its own ladder re-opens this defect in a new place.
+- **2026-09-02 — a third resolver, found and closed.** The consequence above ("a third surface that
+  resolves its own ladder re-opens this defect in a new place") happened inside the CLI itself:
+  `session.ts` built its hook client from `binding.model` alone (orientation, statusline) or from
+  nothing (`pushAttestation`), and the ADR 339 reclaim that client performs on a refused lease is a
+  real seat claim — so a late hook minted a `cli` Presence attesting nothing. Measured after the
+  2026-09-01 claim storm ended: the two surviving `worker_unattested` picker rows each sat 4 s
+  after a bare `cli` claim; 244 `cli` claims to 50 `claude-code` in the same window. Fixed on lane
+  `01M1G4P6GD8SHFAZJYQ2KJ2A10`: all three clients resolve through `attestedModel` (observed >
+  env > declared), and a test pins the reclaim's carried model. The rung [ADR 351](351-unattested-worker-routes-ungraded.md)
+  added the same day is what catches whatever this still misses.
 - Not fixed here, and deliberately: the presence table still has no session identity, so nothing
   distinguishes "the same session touching again" from "a new session in the same folder". Half 2
   records the consequence rather than removing the ambiguity. ADR 241's `wake_lease` is the only
@@ -180,7 +190,7 @@ rows are deleted on detach, so the 17:47 control exists only because it was capt
 investigation. A comparison of this kind has to be taken before the fix ships or not at all.
 
 **Experiment.** None. An arm without the fix is an arm where the review pool silently shrinks and no
-artefact records it, which corrupts the ADR 056 diversity conclusions at the source — the same reason
+artefact records it, which corrupts the ADR 314 diversity conclusions at the source — the same reason
 ADR 241 declined an arm. The discriminating evidence was gathered before the change instead: the live
 DB read that separated the ambient path from the claim path by the null-epoch fingerprint, and the
 binding timestamp that proved the attestation was available twelve seconds before it was dropped.

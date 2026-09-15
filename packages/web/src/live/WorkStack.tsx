@@ -1,12 +1,30 @@
 import type { RoomEntry } from './workingOn';
 import { shortLaneState } from './presenceLabel';
+import { CaptionPill } from './CaptionPill';
+import type { Caption } from './captions';
 
 /**
  * Who is working — floats over the office floor (presence-chrome design). Present members with a
  * title only; no full roster, no carousel. Rendered inside `OfficeScene` as stage chrome.
+ *
+ * The header also carries the room's narration line (first-five-seconds §2) when one is live —
+ * it replaced a floating lower-third element over the scene (nick, 2026-08-31): a transient
+ * sentence is chrome, and chrome belongs in the frame, not on the floor.
  */
-export function WorkStack({ entries }: { entries: RoomEntry[] }) {
+export function WorkStack({
+  entries,
+  caption,
+  captionColor,
+}: {
+  entries: RoomEntry[];
+  caption?: Caption | null;
+  /** The narrating member's colour, resolved by the caller from the same roster the scene draws. */
+  captionColor?: string | undefined;
+}) {
   const rows = entries.filter((e) => e.title != null);
+  const narration = (
+    <CaptionPill caption={caption ?? null} color={captionColor} className="lc-workstack__caption" />
+  );
   if (rows.length === 0) {
     return (
       <aside className="lc-workstack" aria-label="Who is working">
@@ -14,6 +32,7 @@ export function WorkStack({ entries }: { entries: RoomEntry[] }) {
           <header className="lc-workstack__head">
             <span className="lc-workstack__mark" aria-hidden="true" />
             <span className="lc-workstack__title-label">on the floor</span>
+            {narration}
             <span className="lc-workstack__quiet">nobody claimed yet</span>
           </header>
         </div>
@@ -26,6 +45,7 @@ export function WorkStack({ entries }: { entries: RoomEntry[] }) {
         <header className="lc-workstack__head">
           <span className="lc-workstack__mark" aria-hidden="true" />
           <span className="lc-workstack__title-label">on the floor</span>
+          {narration}
           <span className="lc-workstack__count">
             {rows.length} working
           </span>

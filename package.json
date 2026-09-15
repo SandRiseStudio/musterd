@@ -10,8 +10,8 @@
     "build": "pnpm -r build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write \"**/*.{ts,js,mjs,json,md}\"",
-    "format:check": "prettier --check \"packages/**/*.ts\" \"tests/**/*.ts\" \"*.{ts,json}\" && pnpm roadmap:check && pnpm roadmap-truth:check && pnpm arch-trees:check && pnpm obs-evals:check && pnpm adr-numbers:check && pnpm guidance:check && pnpm vocab:check && pnpm tokens:check && pnpm migrations:check && pnpm source-nul:check && pnpm wiki:check",
+    "format": "node scripts/format.ts --write",
+    "format:check": "node scripts/format.ts --check && pnpm roadmap:check && pnpm roadmap-truth:check && pnpm arch-trees:check && pnpm obs-evals:check && pnpm adr-numbers:check && pnpm guidance:check && pnpm vocab:check && pnpm tokens:check && pnpm migrations:check && pnpm source-nul:check && pnpm wiki:check && pnpm intents:check && pnpm controls:check && pnpm watch:check",
     "adr:next": "node --disable-warning=ExperimentalWarning scripts/adr-next.ts",
     "adr-numbers:check": "node --disable-warning=ExperimentalWarning scripts/check-adr-numbers.ts",
     "migrations:check": "node --disable-warning=ExperimentalWarning scripts/check-migrations.ts",
@@ -21,6 +21,10 @@
     "tokens:check": "node --disable-warning=ExperimentalWarning scripts/check-css-tokens.ts",
     "wiki:index": "node --disable-warning=ExperimentalWarning scripts/wiki-index.ts",
     "wiki:check": "node --disable-warning=ExperimentalWarning scripts/check-wiki.ts",
+    "intents:check": "node --disable-warning=ExperimentalWarning scripts/check-intents.ts",
+    "intents:ingest": "node --disable-warning=ExperimentalWarning scripts/ingest-intents.ts",
+    "controls:check": "node --disable-warning=ExperimentalWarning scripts/check-controls.ts",
+    "watch:check": "node --disable-warning=ExperimentalWarning scripts/check-watches.ts",
     "wiki:probe": "node --disable-warning=ExperimentalWarning scripts/wiki-probe.ts",
     "perf:check": "node --disable-warning=ExperimentalWarning scripts/perf/check-budgets.ts",
     "a11y:contrast": "node scripts/a11y/contrast-sweep.mjs",
@@ -34,6 +38,12 @@
     "steward:notify": "node --disable-warning=ExperimentalWarning scripts/steward/notify.ts",
     "radar:sweep": "node --disable-warning=ExperimentalWarning scripts/radar/sweep.ts",
     "liveness:sweep": "node --disable-warning=ExperimentalWarning scripts/research/adr-166-slot-sweep.ts",
+    "wakes:repeats": "node --disable-warning=ExperimentalWarning scripts/research/adr-250-repeat-wakes.ts",
+    "adr250:asks-per-pr": "node --disable-warning=ExperimentalWarning scripts/research/adr-250-asks-per-pr.ts",
+    "adr250:capability-miss": "node --disable-warning=ExperimentalWarning scripts/research/adr-250-capability-miss.ts",
+    "corpus:snapshot": "node --disable-warning=ExperimentalWarning scripts/corpus/snapshot.ts",
+    "dataset:export": "node --disable-warning=ExperimentalWarning scripts/dataset/export.ts",
+    "dataset:exn-snapshot": "node --disable-warning=ExperimentalWarning scripts/dataset/exn-snapshot.ts",
     "release": "node --disable-warning=ExperimentalWarning scripts/release.ts",
     "bump-brew-formula": "node --disable-warning=ExperimentalWarning scripts/bump-brew-formula.ts",
     "arch-trees:check": "node --disable-warning=ExperimentalWarning scripts/check-arch-trees.ts --check",
@@ -71,6 +81,7 @@
       "esbuild"
     ],
     "overrides": {
+      "@opentelemetry/propagator-jaeger@<2.9.0": ">=2.9.0",
       "esbuild@<0.28.1": ">=0.28.1",
       "vite@<6.4.3": "^6.4.3"
     }

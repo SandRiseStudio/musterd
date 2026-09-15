@@ -45,7 +45,7 @@ no musterd action at all — so a snapshot begins rotting the moment it is writt
 The harness attestation tripwire (#273) classifies declarations as `environment` / `binding` /
 `unknown` and warns on `unknown`. It detects _absent_ attestation only. A confidently wrong
 declaration is indistinguishable from a correct one to it, so this failure passed silently — the
-mode most damaging to ADR 056 diversity conclusions, since a wrong value poisons a chain while
+mode most damaging to ADR 314 diversity conclusions, since a wrong value poisons a chain while
 looking healthy.
 
 ## 3. Constraints

@@ -69,6 +69,18 @@ export function listRoles(
     .map((r) => ({ ...r, capabilities: r.capabilities ? JSON.parse(r.capabilities) : {} }));
 }
 
+/** The authenticated occupancy charter for a Member's Team Role, when that role declares one. */
+export function getRoleCharter(db: Database, teamId: string, role: string): string | null {
+  return (
+    db
+      .prepare<
+        [string, string],
+        { charter: string | null }
+      >('SELECT charter FROM roles WHERE team_id = ? AND name = ?')
+      .get(teamId, role)?.charter ?? null
+  );
+}
+
 /** A team's role summaries as a name→summary map (ADR 227 discovery — the roster's one-line face
  *  per role; roles without a summary are absent). */
 export function roleSummariesMap(db: Database, teamId: string): Map<string, string> {

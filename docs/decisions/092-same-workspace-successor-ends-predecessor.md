@@ -125,3 +125,28 @@ pre-092, indefinite coexistence + manual kill.
 **Experiment** — none built; named: once a long-running dogfood harness exists, compare orphan-count
 and supersede/hour across seeded reload+probe sequences before/after 092 — does the grace-gated reap
 eliminate orphans without reintroducing the ADR 068 flap?
+
+## Correction (2026-09-02)
+
+This ADR's 5s grace window was sized against a Claude Code reload probe (~ms). ADR 346 later layered
+a second, different same-workspace successor onto this same mechanism: the one-shot CLI session-lease
+reclaim, which is not a probe deciding whether to persist — it always claims, attests over HTTP, then
+closes. Its own client-side claim timeout (`CLAIM_LEASE_TIMEOUT_MS`, 3s) already eats most of a 5s
+grace window before the HTTP attest that must follow the claim (and precede the close — the attest
+cannot be reordered before it, since closing the socket puts the just-minted lease's Presence on a
+reclaim hold that the attest's `hasValidSessionLease` check would then fail) even starts.
+
+Measured on seat ryder, 2026-09-02: a live MCP session doing nothing wrong was reaped as
+`superseded, same_workspace: true` during a burst of unrelated shell activity that plausibly slowed
+the daemon — its own ADR-346 reclaim's claim→attest→close round trip outlived the 5s window, and the
+grace timer's "still attached" check (the only signal it has) read that as a durable second session.
+Full investigation and file:line evidence: lane `01M1J8HS63QNNXMRAW4CJPN8X8`.
+
+`SUPERSEDE_GRACE_MS` raised 5s → 10s (`packages/server/src/config.ts`), giving the reclaim's
+worst-case path real margin without weakening the ADR 068 anti-flap property this ADR protects — a
+genuine reload probe still disconnects in milliseconds, so it clears the gate at any window this
+size. The underlying signal ("is the successor connection still attached") remains imprecise for a
+one-shot reclaim specifically — durability is being inferred from persistence, but a one-shot is
+never meant to persist — so a future incident under sustained daemon load could still reproduce this
+at 10s. A structurally sound fix (the successor announcing "I am a one-shot, reap on close" rather
+than the server inferring it from timing) is future work, not done here.

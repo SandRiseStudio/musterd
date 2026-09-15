@@ -17,6 +17,8 @@ export interface ResolvedConfig {
   dbPath: string;
   heartbeatIntervalMs: number;
   presenceTimeoutMs: number;
+  /** Agent working→active decay window (presence-honesty §2.1) — generous by design. */
+  agentIdleMs: number;
   reaperIntervalMs: number;
   /** Footprint sampler tick interval (seat-footprint design). */
   footprintIntervalMs: number;
@@ -53,6 +55,21 @@ export interface ResolvedConfig {
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 export const PRESENCE_TIMEOUT_MS = 45_000;
+/**
+ * How long a presence row folded from another machine stays live after its node's last sync
+ * contact (presence replication, 2026-09-02): the origin's own reap window plus two chances to
+ * push (`SYNC_PUSH_INTERVAL_MS` in sync/push.ts, 60 s — if that changes, change this). This is the
+ * staleness ADR 325 §Consequences said the build must tolerate explicitly, not rediscover — a seat
+ * on a machine that lost power is displaceable in under three minutes; a seat on a machine between
+ * pushes is not. Named once; every reader of remote liveness uses it.
+ */
+export const REMOTE_PRESENCE_TTL_MS = PRESENCE_TIMEOUT_MS + 2 * 60_000;
+/**
+ * Agent working→active decay (presence-honesty §2.1): `working` requires a status_update fresher
+ * than this. 15 min is deliberately generous — hooks nudge status at task boundaries, and an
+ * accepted consequence is a heads-down agent reading `active` with its stale claim shown aged.
+ */
+export const AGENT_IDLE_MS = 900_000;
 export const REAPER_INTERVAL_MS = 15_000;
 /** Single-active grace: a dropped holder may reclaim its member for this long before it frees (ADR 010). */
 export const RECLAIM_GRACE_MS = 45_000;
@@ -63,8 +80,14 @@ export const OBSERVER_IDLE_CAP = 8;
 /** A seat resume grant (ADR 087) is valid for this long, refreshed on every clean occupy. */
 export const RESUME_TTL_MS = 86_400_000; // 24h
 /** A same-workspace successor waits this long, still attached, before reaping its predecessor (ADR
- * 092). Above the ~ms lifetime of a Claude Code health-check probe, below a human-noticeable stall. */
-export const SUPERSEDE_GRACE_MS = 5_000;
+ * 092). Above the ~ms lifetime of a Claude Code health-check probe, below a human-noticeable stall.
+ *
+ * Must clear the ADR 346 one-shot reclaim's own worst case, not just the probe case ADR 092 was
+ * written for: `CLAIM_LEASE_TIMEOUT_MS` (cli/client.ts) alone budgets 3s for the claim step, before
+ * the reclaim's HTTP attest + close even start. At the original 5s, a momentarily busy daemon made
+ * that math too tight and evicted a healthy incumbent that had done nothing wrong (lane 01M1J8HS63,
+ * measured on seat ryder 2026-09-02) — raised to 10s for real margin. */
+export const SUPERSEDE_GRACE_MS = 10_000;
 /** Footprint sampler tick (seat-footprint design): one cheap `ps` scan per minute. */
 export const FOOTPRINT_INTERVAL_MS = 60_000;
 /** Footprint samples older than this are pruned each tick — the table stays bounded. */
@@ -209,6 +232,7 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
     dbPath: opts?.dbPath ?? defaultDbPath(),
     heartbeatIntervalMs: envMs('MUSTERD_HEARTBEAT_INTERVAL_MS', HEARTBEAT_INTERVAL_MS),
     presenceTimeoutMs: envMs('MUSTERD_PRESENCE_TIMEOUT_MS', PRESENCE_TIMEOUT_MS),
+    agentIdleMs: envMs('MUSTERD_AGENT_IDLE_MS', AGENT_IDLE_MS),
     reaperIntervalMs: envMs('MUSTERD_REAPER_INTERVAL_MS', REAPER_INTERVAL_MS),
     footprintIntervalMs: envMs('MUSTERD_FOOTPRINT_INTERVAL_MS', FOOTPRINT_INTERVAL_MS),
     footprintRetentionMs: envMs('MUSTERD_FOOTPRINT_RETENTION_MS', FOOTPRINT_RETENTION_MS),

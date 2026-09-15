@@ -7,7 +7,8 @@ import { openLane, updateLane } from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
 import { listWakeTurns } from '../store/residency.js';
-import { getTeamBySlug, setPolicy } from '../store/teams.js';
+import { getTeamBySlug, mintBootstrapCredential, setPolicy } from '../store/teams.js';
+import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
 /**
  * Direct HTTP coverage for the increment-4 residency surfaces (ADR 131 §5): the resumable
@@ -19,12 +20,19 @@ import { getTeamBySlug, setPolicy } from '../store/teams.js';
 let server: RunningServer;
 let base: string;
 let agentKey: string;
+let adaAuth: AgentHttpAuth;
 let nickCred: string;
 
-function authHeaders(auth?: string): Record<string, string> {
-  return auth ? { authorization: `Bearer ${auth}` } : {};
+function authHeaders(auth?: string | AgentHttpAuth): Record<string, string> {
+  if (!auth) return {};
+  if (typeof auth === 'string') return { authorization: `Bearer ${auth}` };
+  return {
+    authorization: `Bearer ${auth.key}`,
+    'x-musterd-seat': auth.seat,
+    'x-musterd-session-lease': auth.sessionLease,
+  };
 }
-async function post(path: string, body: unknown, auth?: string) {
+async function post(path: string, body: unknown, auth?: string | AgentHttpAuth) {
   const res = await fetch(base + path, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders(auth) },
@@ -35,7 +43,7 @@ async function post(path: string, body: unknown, auth?: string) {
 
   return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
 }
-async function get(path: string, auth?: string) {
+async function get(path: string, auth?: string | AgentHttpAuth) {
   const res = await fetch(base + path, { headers: authHeaders(auth) });
   const text = await res.text();
 
@@ -70,13 +78,84 @@ async function enrollAda(): Promise<void> {
   expect(r.status).toBe(201);
 }
 
+async function claimAda(): Promise<void> {
+  adaAuth = await claimAgentHttp(base, 'dawn', agentKey, nickCred, 'Ada');
+}
+
+describe('host-scoped bootstrap credentials', () => {
+  it.each([
+    ['/teams/dawn/residency/wake-leases', { host: 'laptop.local' }],
+    ['/teams/dawn/residency/wake-progress', { lease_id: 'missing' }],
+    [
+      '/teams/dawn/residency/wake-turn',
+      { lease_id: 'missing', turn: 1, usage: { input_tokens: 1, output_tokens: 1 } },
+    ],
+    [
+      '/teams/dawn/residency/wake-report',
+      { lease_id: 'missing', occupied: false, reason: 'failed' },
+    ],
+  ] as const)(
+    'rejects the retired legacy key on %s before residency effects (ADR 350)',
+    async (path, body) => {
+      const before = server.db
+        .prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM wake_leases')
+        .get()!.count;
+      const cutover = await post('/teams/dawn/agent-bootstrap-cutover', { force: true }, nickCred);
+      expect(cutover.status).toBe(200);
+
+      const refused = await post(path, body, agentKey);
+      expect(refused.status).toBe(401);
+      expect(refused.json.error.message).toContain('musterd team bootstrap mint --seat <name>');
+      expect(
+        server.db.prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM wake_leases').get()!
+          .count,
+      ).toBe(before);
+    },
+  );
+
+  it('accepts only its recorded host label for wake lease polling', async () => {
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const hostKey = mintBootstrapCredential(server.db, {
+      teamId: team.id,
+      useKind: 'host',
+      target: 'laptop.local',
+    });
+
+    const allowed = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      hostKey.agent_key,
+    );
+    expect(allowed.status).toBe(200);
+    expect(
+      server.db
+        .prepare<
+          [string],
+          { first_used_at: number | null }
+        >('SELECT first_used_at FROM agent_bootstrap_credentials WHERE id = ?')
+        .get(hostKey.credential.id)?.first_used_at,
+    ).toEqual(expect.any(Number));
+
+    const refused = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'other-host.local' },
+      hostKey.agent_key,
+    );
+    expect(refused.status).toBe(401);
+  });
+});
+
 describe('POST /teams/:slug/residency/session — the resumable attestation', () => {
+  beforeEach(async () => {
+    await claimAda();
+  });
+
   it('start on an enrolled seat: records harness class + timestamp, audits session_captured', async () => {
     await enrollAda();
     const r = await post(
       '/teams/dawn/residency/session',
       { seat: 'Ada', harness: 'claude-code', event: 'start' },
-      agentKey,
+      adaAuth,
     );
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ ok: true, enrolled: true });
@@ -102,7 +181,7 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
       const r = await post(
         '/teams/dawn/residency/session',
         { seat: 'Ada', harness: 'claude-code', event, session_digest: 'a1b2c3d4e5f6' },
-        agentKey,
+        adaAuth,
       );
       expect(r.status).toBe(200);
     }
@@ -117,6 +196,33 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
     }
   });
 
+  // Presence-honesty §2.3: a clean session exit is the one goodbye the daemon actually hears, so
+  // `end` stamps the sticky reason — a normally-finished session must not wear crash clothing.
+  // The route stays presence-neutral: only the sticky member stamp moves, no presence row.
+  it('end stamps session_ended as the sticky offline reason; start does not', async () => {
+    await enrollAda();
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const ada = () => getMemberByName(server.db, team.id, 'Ada')!;
+
+    await post(
+      '/teams/dawn/residency/session',
+      { seat: 'Ada', harness: 'claude-code', event: 'start' },
+      adaAuth,
+    );
+    expect(ada().last_offline_reason).toBeNull();
+
+    await post(
+      '/teams/dawn/residency/session',
+      { seat: 'Ada', harness: 'claude-code', event: 'end' },
+      adaAuth,
+    );
+    expect(ada().last_offline_reason).toBe('session_ended');
+
+    const roster = await get('/teams/dawn/members', nickCred);
+    // The claimed Presence is still live, so the roster correctly suppresses an offline-only label.
+    expect(roster.json.members.find((m: any) => m.name === 'Ada').offline_reason).toBeUndefined();
+  });
+
   // ADR 252: the identity join between a wake and the session it paid for. `wake_cost` exists only
   // on the report path, so without this token a lease that spawns a session and then expires is
   // free as far as the ledger can tell.
@@ -126,7 +232,7 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
       const r = await post(
         '/teams/dawn/residency/session',
         { seat: 'Ada', harness: 'claude-code', event, wake_lease: 'L-42' },
-        agentKey,
+        adaAuth,
       );
       expect(r.status).toBe(200);
     }
@@ -139,7 +245,7 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
     await post(
       '/teams/dawn/residency/session',
       { seat: 'Ada', harness: 'claude-code', event: 'start' },
-      agentKey,
+      adaAuth,
     );
     const captured = audits('residency.session_captured').map(
       (r) => JSON.parse(r.detail as string) as Record<string, unknown>,
@@ -153,29 +259,31 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
     const r = await post(
       '/teams/dawn/residency/session',
       { seat: 'Ada', harness: 'claude-code', event: 'start', session_digest: 'sid-1234-abcd' },
-      agentKey,
+      adaAuth,
     );
     expect(r.status).toBe(400);
     expect(audits('residency.session_captured')).toHaveLength(0);
   });
 
-  it('is presence-neutral and never claims: the seat stays offline on the roster', async () => {
+  it('is presence-neutral and never changes the claimed Presence', async () => {
     await enrollAda();
+    const before = await get('/teams/dawn/members', nickCred);
+    const beforeAda = before.json.members.find((m: { name: string }) => m.name === 'Ada');
     await post(
       '/teams/dawn/residency/session',
       { seat: 'Ada', harness: 'claude-code', event: 'start' },
-      agentKey,
+      adaAuth,
     );
     const status = await get('/teams/dawn/members', nickCred);
     const ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
-    expect(ada.presence).toBe('offline');
+    expect(ada.presences).toEqual(beforeAda.presences);
   });
 
   it('an unenrolled capture still audits (enrolled:false), updates nothing', async () => {
     const r = await post(
       '/teams/dawn/residency/session',
       { seat: 'Ada', harness: 'claude-code', event: 'end' },
-      agentKey,
+      adaAuth,
     );
     expect(r.json).toEqual({ ok: true, enrolled: false });
     expect(audits('residency.session_ended')).toHaveLength(1);
@@ -191,7 +299,7 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
     const ghost = await post(
       '/teams/dawn/residency/session',
       { seat: 'Ghost', harness: 'claude-code', event: 'start' },
-      agentKey,
+      adaAuth,
     );
     expect(ghost.status).toBe(404);
   });
@@ -287,10 +395,11 @@ describe('wake policy knobs over HTTP (ADR 131 inc 5)', () => {
   });
 
   it('names a live seat at enroll time (the grant-rotation warning input)', async () => {
+    await claimAda();
     await enrollAda();
     // Give Ada a live ambient presence via an authenticated read as the seat.
     const touched = await fetch(base + '/teams/dawn/inbox', {
-      headers: { authorization: `Bearer ${agentKey}`, 'x-musterd-seat': 'Ada' },
+      headers: authHeaders(adaAuth),
     });
     expect(touched.status).toBe(200);
     const hdrs = { 'content-type': 'application/json', authorization: `Bearer ${nickCred}` };
@@ -326,11 +435,11 @@ describe('wake policy knobs over HTTP (ADR 131 inc 5)', () => {
 
 describe('x-musterd-provenance — the ambient touch attests the animation source (inc 5)', () => {
   it('an agent-key read with the header labels the ambient presence `wake`; junk is ignored', async () => {
+    await claimAda();
     const read = async (provenance?: string) => {
       const res = await fetch(base + '/teams/dawn/inbox?seat=Ada', {
         headers: {
-          authorization: `Bearer ${agentKey}`,
-          'x-musterd-seat': 'Ada',
+          ...authHeaders(adaAuth),
           ...(provenance ? { 'x-musterd-provenance': provenance } : {}),
         },
       });
@@ -341,22 +450,31 @@ describe('x-musterd-provenance — the ambient touch attests the animation sourc
     let ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
     expect(ada.presences[0].provenance).toBe('wake');
 
-    // Newest-wins (owner call 2026-07-14): a later human-driven touch flips it back to session…
+    // Newest-wins (owner call 2026-07-14): a later touch that declares nothing clears it. It used
+    // to read back `session` — the server's own word, not the client's — which is the guess SPEC.md
+    // §"Attach context" forbids; a touch that says nothing now leaves the row saying nothing.
     await read();
     status = await get('/teams/dawn/members', nickCred);
     ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
-    expect(ada.presences[0].provenance).toBe('session');
+    expect(ada.presences[0].provenance).toBeNull();
 
-    // …and an unknown value never lands (enum-validated, silently dropped).
+    // …and an unknown value never lands (enum-validated, silently dropped). Declared again first,
+    // so the null below is the junk being dropped rather than the header-less touch above.
+    await read('wake');
+    status = await get('/teams/dawn/members', nickCred);
+    ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
+    expect(ada.presences[0].provenance).toBe('wake');
+
     await read('root');
     status = await get('/teams/dawn/members', nickCred);
     ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
-    expect(ada.presences[0].provenance).toBe('session');
+    expect(ada.presences[0].provenance).toBeNull();
   });
 });
 
 describe('x-musterd-wake-lease — the ambient touch carries the correlation token (ADR 241)', () => {
   it('an agent-key touch stamps the lease; a human credential can never stamp one', async () => {
+    await claimAda();
     const adaLease = async () => {
       const status = await get('/teams/dawn/members', nickCred);
       return status.json.members.find((m: { name: string }) => m.name === 'Ada').presences[0]
@@ -365,8 +483,7 @@ describe('x-musterd-wake-lease — the ambient touch carries the correlation tok
     const read = async (lease?: string) => {
       const res = await fetch(base + '/teams/dawn/inbox?seat=Ada', {
         headers: {
-          authorization: `Bearer ${agentKey}`,
-          'x-musterd-seat': 'Ada',
+          ...authHeaders(adaAuth),
           'x-musterd-provenance': 'wake',
           ...(lease ? { 'x-musterd-wake-lease': lease } : {}),
         },
@@ -496,6 +613,47 @@ describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
     expect(JSON.parse(audits('residency.woke')[0]!.detail as string)).not.toHaveProperty(
       'exact_match',
     );
+  });
+
+  it('an unpriced report records tokens and the reason, and never enters the cost totals (ADR 364)', async () => {
+    const leaseId = await reportedLease();
+    const supplement = await post(
+      '/teams/dawn/residency/wake-report',
+      {
+        lease_id: leaseId,
+        occupied: true,
+        duration_ms: 12_000,
+        usage: { input_tokens: 19818, cached_input_tokens: 11136, output_tokens: 5 },
+        unpriced_reason: 'harness_prints_no_price',
+        harness_cost_usd: 0,
+      },
+      agentKey,
+    );
+    expect(supplement.status).toBe(200);
+    expect(supplement.json.status).toBe('cost_recorded');
+    const rows = audits('residency.wake_cost');
+    expect(rows).toHaveLength(1);
+    const detail = JSON.parse(rows[0]!.detail as string);
+    expect(detail).toMatchObject({
+      lease_id: leaseId,
+      duration_ms: 12_000,
+      usage: { input_tokens: 19818, cached_input_tokens: 11136, output_tokens: 5 },
+      unpriced_reason: 'harness_prints_no_price',
+      harness_cost_usd: 0,
+    });
+    expect(detail.cost_usd).toBeUndefined();
+    const report = await get('/teams/dawn/report', nickCred);
+    expect(report.json.wake.cost_reported).toBe(0);
+  });
+
+  it('a malformed unpriced_reason is refused, not stored as prose', async () => {
+    const leaseId = await reportedLease();
+    const bad = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, duration_ms: 1, unpriced_reason: 'subscription' },
+      agentKey,
+    );
+    expect(bad.status).toBe(400);
   });
 
   it('a second report carrying cost lands as residency.wake_cost (200 cost_recorded)', async () => {
@@ -632,6 +790,7 @@ describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
 
 describe('roster resumable_at (ADR 131 inc 5, finding b)', () => {
   it('projects the capture timestamp for enrolled seats; null before any capture', async () => {
+    await claimAda();
     await enrollAda();
     let status = await get('/teams/dawn/members', nickCred);
     let ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
@@ -641,7 +800,7 @@ describe('roster resumable_at (ADR 131 inc 5, finding b)', () => {
     await post(
       '/teams/dawn/residency/session',
       { seat: 'Ada', harness: 'claude-code', event: 'start' },
-      agentKey,
+      adaAuth,
     );
     status = await get('/teams/dawn/members', nickCred);
     ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
@@ -655,8 +814,7 @@ describe('POST /wake-context — residency.context_read audit (ADR 209 follow-up
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${agentKey}`,
-        'x-musterd-seat': 'Ada',
+        ...authHeaders(adaAuth),
       },
       body: JSON.stringify(body),
     });
@@ -683,6 +841,7 @@ describe('POST /wake-context — residency.context_read audit (ADR 209 follow-up
   }
 
   it('allow path records kind, version, bytes, fetch categories/count, and delivery', async () => {
+    await claimAda();
     await directedToAda();
     const r = await postAsAda('/teams/dawn/wake-context', { act_id: 'wc1' });
     expect(r.status).toBe(200);
@@ -710,12 +869,12 @@ describe('POST /wake-context — residency.context_read audit (ADR 209 follow-up
     await directedToAda('secret-act');
     // Bob is not a member yet — use a second agent who is not the recipient.
     await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickCred);
+    const bobAuth = await claimAgentHttp(base, 'dawn', agentKey, nickCred, 'Bob');
     const res = await fetch(base + '/teams/dawn/wake-context', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${agentKey}`,
-        'x-musterd-seat': 'Bob',
+        ...authHeaders(bobAuth),
       },
       body: JSON.stringify({ act_id: 'secret-act' }),
     });
@@ -735,6 +894,7 @@ describe('POST /wake-context — residency.context_read audit (ADR 209 follow-up
   });
 
   it('forbidden for a missing target looks identical in the audit (no existence leak)', async () => {
+    await claimAda();
     const r = await postAsAda('/teams/dawn/wake-context', { act_id: 'no-such-act' });
     expect(r.status).toBe(403);
     const rows = audits('residency.context_read');
@@ -928,5 +1088,152 @@ describe('POST /teams/:slug/residency/wake-progress (ADR 262)', () => {
       agentKey,
     );
     expect(report.status).toBe(200);
+  });
+
+  it('accepts a host credential across the lifecycle of a lease assigned to its recorded host', async () => {
+    const leaseId = await leaseReviewOrder();
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const hostKey = mintBootstrapCredential(server.db, {
+      teamId: team.id,
+      useKind: 'host',
+      target: 'laptop.local',
+    });
+    expect(hostKey.credential.first_used_at).toBeNull();
+
+    const allowed = await post(
+      '/teams/dawn/residency/wake-progress',
+      { lease_id: leaseId },
+      hostKey.agent_key,
+    );
+    expect(allowed.status).toBe(200);
+    expect(
+      server.db
+        .prepare<
+          [string],
+          { first_used_at: number | null }
+        >('SELECT first_used_at FROM agent_bootstrap_credentials WHERE id = ?')
+        .get(hostKey.credential.id)?.first_used_at,
+    ).toEqual(expect.any(Number));
+
+    const turn = await post(
+      '/teams/dawn/residency/wake-turn',
+      { lease_id: leaseId, turn: 1, usage: { input_tokens: 1, output_tokens: 1 } },
+      hostKey.agent_key,
+    );
+    expect(turn.status).toBe(200);
+
+    const report = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, session: 'fresh' },
+      hostKey.agent_key,
+    );
+    expect(report.status).toBe(200);
+  });
+});
+
+describe('roster wakeability (ADR 357) — the wake-leases poll is the host heartbeat', () => {
+  const adaRow = async () => {
+    const roster = await get('/teams/dawn/members', nickCred);
+    return roster.json.members.find((m: { name: string }) => m.name === 'Ada');
+  };
+
+  it('an enrolled seat on a host this daemon has never heard from is wakeable — unknown never demotes', async () => {
+    await enrollAda();
+    const ada = await adaRow();
+    expect(ada.wakeable).toBe(true);
+    expect(ada.wakeability).toBe('wakeable');
+  });
+
+  it('the poll records the host; silence past HOST_STALE_MS reads enrolled_host_stale while `wakeable` stays true', async () => {
+    await enrollAda();
+    const polled = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      agentKey,
+    );
+    expect(polled.status).toBe(200);
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const seen = server.db
+      .prepare<
+        [string, string],
+        { seen_at: number }
+      >('SELECT seen_at FROM host_liveness WHERE team_id = ? AND host = ?')
+      .get(team.id, 'laptop.local');
+    expect(seen?.seen_at).toEqual(expect.any(Number));
+    expect((await adaRow()).wakeability).toBe('wakeable');
+
+    // The actuator goes quiet: age the sighting past the line instead of waiting a minute.
+    server.db
+      .prepare('UPDATE host_liveness SET seen_at = ? WHERE team_id = ? AND host = ?')
+      .run(Date.now() - 301_000, team.id, 'laptop.local');
+    const stale = await adaRow();
+    expect(stale.wakeability).toBe('enrolled_host_stale');
+    expect(stale.wakeable).toBe(true); // enrolment is a different fact, and it did not change
+
+    // One more poll and it is reachable again.
+    await post('/teams/dawn/residency/wake-leases', { host: 'laptop.local' }, agentKey);
+    expect((await adaRow()).wakeability).toBe('wakeable');
+  });
+
+  it('a seat that is not enrolled reads not_enrolled and wakeable=false', async () => {
+    const ada = await adaRow();
+    expect(ada.wakeable).toBe(false);
+    expect(ada.wakeability).toBe('not_enrolled');
+  });
+});
+
+describe('roster wakeability (ADR 357 correction) — a busy host is not a quiet one', () => {
+  it('a wake-report refreshes the host sighting, so a serial actuation never reads enrolled_host_stale', async () => {
+    await enrollAda();
+    const send = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: makeEnvelope({
+          id: 'u2',
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'Ada' },
+          act: 'message',
+          body: 'need you',
+          meta: { urgent: true, urgent_reason: 'wake me' },
+        }),
+      },
+      nickCred,
+    );
+    expect(send.status).toBe(201);
+    const leases = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      agentKey,
+    );
+    expect(leases.json.orders).toHaveLength(1);
+    const leaseId = leases.json.orders[0].lease_id as string;
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    // The actuator goes quiet for longer than the line while it works the lease — no polls.
+    server.db
+      .prepare('UPDATE host_liveness SET seen_at = ? WHERE team_id = ? AND host = ?')
+      .run(Date.now() - 301_000, team.id, 'laptop.local');
+    const before = await get('/teams/dawn/members', nickCred);
+    expect(before.json.members.find((m: { name: string }) => m.name === 'Ada').wakeability).toBe(
+      'enrolled_host_stale',
+    );
+    // Its report is the next thing it says, and that alone is a sighting.
+    const report = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: false, reason: 'watchdog timeout (5ms)' },
+      agentKey,
+    );
+    expect(report.status).toBe(200);
+    const seen = server.db
+      .prepare<
+        [string, string],
+        { seen_at: number }
+      >('SELECT seen_at FROM host_liveness WHERE team_id = ? AND host = ?')
+      .get(team.id, 'laptop.local');
+    expect(Date.now() - (seen?.seen_at ?? 0)).toBeLessThan(10_000);
+    const after = await get('/teams/dawn/members', nickCred);
+    expect(after.json.members.find((m: { name: string }) => m.name === 'Ada').wakeability).toBe(
+      'wakeable',
+    );
   });
 });

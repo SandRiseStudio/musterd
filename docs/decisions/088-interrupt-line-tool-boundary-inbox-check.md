@@ -86,6 +86,54 @@ a compromised seat could steer every busy agent on the team. Therefore, from the
 - A new provisioning surface to keep honest: `guidance:check`/`init --check` must cover the hook so a
   renamed flag can't silently kill reachability.
 
+**2026-09-05 — the line never reached a Claude Code model, and the audit could not have told us
+(lane 01M1T4339Y).** Decision 1 says "exactly one line to stdout". Claude Code's hook contract says
+a PostToolUse hook's plain-text stdout at exit 0 goes to the **debug log** and is never shown to the
+model — only `UserPromptSubmit`, `SessionStart` and two others promote bare stdout to context; what a
+PostToolUse hook can hand the model is the JSON field `hookSpecificOutput.additionalContext` (or
+`systemMessage`, or stderr on exit 2). So since this ADR shipped, every Claude Code raise was written
+to the daemon as `interrupt.raised`, run by the hook, recorded in the transcript's `hook_success.stdout`,
+and read by nobody. Measured in izzo's own transcript on 2026-09-05: **67** PostToolUse hook runs
+carried a musterd line — "ryder took a turn" at 00:48:26Z among them — and **0** appeared in the
+model's context; the seat noticed none. The 2026-09-05 bell check saw the same fact from the other
+side: every Claude Code seat answered "no bell", including ryder, whose probe the daemon had
+provably raised nineteen seconds after the turn. The fix is one flag: the hook now runs
+`musterd inbox --interrupt-check --hook claude-code`, which emits the line as
+`{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"…"}}`, and the deaf line
+(#1317) rides the same seam — it too had been going to the debug log. Cursor's adapter (ADR 369)
+already wrapped its seam correctly, which is how the mistake stayed visible only on the harness
+everyone assumed worked. Two things follow. First, `interrupt.raised` measured delivery to the
+**hook**, never to the **model**; the raised→read pair this ADR's Eval leans on was confounded by
+agents reading their inbox for unrelated reasons. Second, the doorbell contract the cross-harness
+huddle is convened to write must name each harness's injection seam explicitly — "prints a line" is
+not a delivery. Existing worktrees carry the old hook command; `musterd init --refresh-hooks`
+rewrites the marker-owned hook, and the SessionStart nudge already says so.
+
+## Amendment 3 — discharge (2026-09-14, lane 01M2GJFCQV)
+
+Six clauses of the doorbell contract (`docs/design/daemon-doorbell-contract.md`) governed delivery
+and none governed what stops ringing. Three live falsifiers on `c8e89dd8` the same day: a routed
+acceptance for a lane closed eight days earlier rang at every boundary of two sessions (ryder); a
+steer read, acted on and replied to on its own thread rang ~20 boundaries across two sessions
+(delta); and a directed `interrupt-check` returned `count: 1` with only that stale ask, so a live
+seam with a pinned cursor read as PASS on all six clauses. A bell that rings the wrong thing at every
+boundary teaches the model to ignore it, which defeats the six at once.
+
+**Decided:** the interrupt line discharges on any of — (i) this seat's own accept/decline/resolve
+(#1361); (ii) the referenced lane leaving awaiting acceptance, answered or not; (iii) a
+co-addressee's accept or decline on an eligible-set act, fetched by reference because it is a DM to
+the asker and outside the seat's window; (iv) for an act with no answering move — a steer, an urgent
+message — being **rendered to the addressee by an inbox read**, recorded as one `inbox.rendered`
+audit row per (recipient, act), or the addressee's own reply on it. The ADR 287 watermark is
+unchanged and cannot carry (iv): an elided backlog pins the cursor behind the act forever, which is
+exactly the field case. `interrupt-check` itself never writes the row — the one-line notice is not a
+read. When the newest steer is discharged the superseded steers under it go with it (ADR 103), so
+none rises in its place. The paid wake rail reads the same candidate set, so a wake is no longer
+leased for an obligation whose lane already closed.
+
+Falsify: on a daemon carrying this, a `lane_review` ask whose lane is `done`, or a steer the
+addressee has been shown by `musterd inbox`, appearing in `interrupt-check`'s `act`.
+
 ## Observability & Evaluation
 
 **Traces** — emit `musterd.interrupt.check` (counter, dimension: `result` = `silent` | `raised`) and

@@ -6,7 +6,7 @@ import { z } from 'zod';
  * off: bit-identical to pre-179 until an admin opts in.
  */
 export const LoopsPolicySchema = z.object({
-  /** Review loop: wake a marked-wakeable offline reviewer when `lane_ready` finds nobody live. */
+  /** Review loop: wake a marked-wakeable offline reviewer when `lane_submit` finds nobody live. */
   review: z.boolean().default(false),
   /** Dispatch loop: work-order wake the lane owner (handoff + continuation edges, ADR 199). */
   dispatch: z.boolean().default(false),

@@ -359,6 +359,42 @@ design: `binding.session` remains one slot for a workspace that can hold several
 a channel for first-hand evidence to overrule it, and a way back from a verdict it got wrong.
 This one had neither — it could demote on a guess and had no route home.
 
+## Amendment (2026-09-05): the way back must not wait for a `team_*` call
+
+The 2026-07-29 amendment made a dormant adapter come back "on its next tool call" and it does — the
+next `team_*` tool call. That was measured true and measured not enough, in the same bell check
+([huddles](../wiki/huddles.md), "Bell check, 2026-09-05", lane 01M1T41YRA).
+
+**The gap.** The interrupt line (ADR 088) is a PostToolUse hook that runs at *every* tool boundary
+and authenticates with the session lease in `binding.json`. The ladder's release kills that lease.
+A session that goes quiet, is released, and then resumes makes N ordinary tool calls — reads, edits,
+shell — before it has any reason to reach for a team tool, and every one of those N probes is refused
+with 401. The seat is deaf for exactly the stretch where it is busiest, and it stays deaf until the
+model happens to call `team_*`. Measured: **26 of 102** probes in twelve minutes were 401; every
+adapter-**held** binding on the machine carried a valid lease when checked, so the deaf seats were
+all dormant adapters — one evicted (`claim.superseded` at 09:40, the ADR 365 branch-switch defect
+#1341 fixed the same day), one released by this ladder at ~18:52 and still down fifty minutes later.
+
+**The fix.** Activity in the transcript is the same first-hand evidence a tool call is; this process
+can read it from disk without waiting to be called. While the ladder has the seat released, the
+adapter re-reads the ladder on the heartbeat cadence (`HEARTBEAT_MS`, 15 s) and re-occupies on the
+first `live` verdict (`rejoinIfSessionResumed`). So the seat is held again — and the probe's lease is
+valid again, because the occupy persists it — within one tick of the model's first tool call rather
+than at its first team call.
+
+**Bounded three ways.** Armed only by a *liveness* release — `leave()` and `close()` never arm it and
+a deliberate `team_leave` disarms it, so an agent that left stays left. Re-joins only the seat this
+process already held, so it cannot become the 2026-09-01 claim storm (#1138) any more than the
+tool-call re-arm could. Gives up after `DORMANT_REJOIN_MAX_FAILURES` (3) refused attempts — a seat
+someone else holds or policy refuses does not change with a fourth try — and the tool-call path
+stands behind it unchanged. A `superseded` seat never reaches this: that clears `wantPresence` on
+purpose and stays down.
+
+**Not this amendment.** A seat with **no adapter at all** — a CLI-claimed session, where the lease
+dies with the command by design (#1317's own line explains why) — has nothing to re-arm and stays
+deaf until a harness adapter joins. That is the correct posture, not a gap: a probe that reclaims on
+its own is the storm.
+
 ## Related
 
 - [ADR 057](057-ambient-agent-presence.md) — ambient presence from real actions. An open socket is not an

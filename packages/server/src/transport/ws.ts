@@ -23,6 +23,7 @@ import {
   hashToken,
   isHeld,
   markBound,
+  mintAgentSeatCredential,
 } from '../store/members.js';
 import { memoryEnvelope } from '../store/memory.js';
 import {
@@ -38,13 +39,26 @@ import {
   release,
 } from '../store/presence.js';
 import { createRequest } from '../store/requests.js';
+import { getRoleCharter } from '../store/roles.js';
 import {
   hasFullMessageVisibility,
   resolveAccountStatus,
   resolveCapabilities,
   toMember,
 } from '../store/rows.js';
-import { getAgentKeyHash, getPolicy, requireTeam } from '../store/teams.js';
+import {
+  AGENT_SESSION_LEASE_RENEW_AHEAD_MS,
+  mintSessionLease,
+  sessionLeaseDueForRenewal,
+} from '../store/session-leases.js';
+import {
+  findBootstrapCredential,
+  findBootstrapCredentialRecord,
+  getAgentKeyHash,
+  getPolicy,
+  recordBootstrapCredentialUse,
+  requireTeam,
+} from '../store/teams.js';
 import { recordError, recordPresenceChurn } from '../telemetry.js';
 import type { Connection } from './hub.js';
 
@@ -72,6 +86,10 @@ interface ConnState {
   /** Pending same-workspace-predecessor reap this (successor) connection scheduled (ADR 092). Cleared
    * on close so a successor that drops within the grace never reaps on behalf of a dead session. */
   evictionTimer?: NodeJS.Timeout;
+  /** The agent session lease this connection's Presence currently backs (ADR 337/347): renewed over
+   * the socket before it expires, so a long-lived adapter never presents a dead one. Absent on human
+   * and observer connections, which carry no HTTP lease. */
+  lease?: { id: string };
 }
 
 /**
@@ -210,10 +228,36 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           }
           const team = requireTeam(ctx.db, frame.team);
 
-          // Step 1: authenticate the key — agent key (mskey_) or human credential (mscr_).
+          // Step 1: authenticate the bootstrap key or a self-identifying seat credential. An agent
+          // seat credential is accepted only to reconnect through this claim handshake (ADR 337).
           let authenticatedAs: import('../store/rows.js').MemberRow | null = null;
+          const bootstrapCredential = findBootstrapCredential(ctx.db, team.id, frame.key);
+          const bootstrapRecord =
+            bootstrapCredential ?? findBootstrapCredentialRecord(ctx.db, team.id, frame.key);
+          if (bootstrapRecord && !bootstrapCredential) {
+            const expired =
+              bootstrapRecord.expires_at !== null && bootstrapRecord.expires_at <= Date.now();
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: expired ? 'bootstrap_credential.expired' : 'bootstrap_credential.refused',
+              target: bootstrapRecord.id,
+              result: 'deny',
+              detail: {
+                reason: expired ? 'expired' : bootstrapRecord.state,
+                target: bootstrapRecord.target,
+              },
+            });
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `this bootstrap credential is ${expired ? 'expired' : bootstrapRecord.state}`,
+              claimable: [],
+              hint: 'ask a team admin to mint a replacement credential',
+            });
+            return;
+          }
           const keyHash = getAgentKeyHash(ctx.db, team.id);
-          if (keyHash && hashToken(frame.key) === keyHash) {
+          if (bootstrapCredential || (keyHash && hashToken(frame.key) === keyHash)) {
             // Agent harness: key validates against the team secret. No specific member identity yet.
           } else {
             // Human credential: look up by hash.
@@ -223,16 +267,17 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                 .prepare<
                   [string, string],
                   import('../store/rows.js').MemberRow
-                >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'human'")
+                >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind IN ('human', 'agent')")
                 .get(team.id, credHash) ?? null;
             if (!authenticatedAs) {
               const claimable = claimableSeats(ctx, team.id);
               send(ws, {
                 type: 'refused',
                 code: 'forbidden',
-                message: 'invalid key — present a valid agent key or human credential',
+                message:
+                  'invalid key — present a valid agent key, agent-seat credential, or human credential',
                 claimable,
-                hint: `musterd claim <seat> --key <mskey_...>`,
+                hint: `musterd claim <seat> --key <mskey_...|msac_...>`,
               });
               appendAudit(ctx.db, team.id, {
                 actor: null,
@@ -337,6 +382,76 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             return;
           }
 
+          if (
+            bootstrapCredential?.use_kind === 'claim_seat' &&
+            (!('seat' in frame.target) ||
+              frame.target.seat !== bootstrapCredential.target ||
+              targetMember?.name !== bootstrapCredential.target)
+          ) {
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'bootstrap_credential.refused',
+              target: bootstrapCredential.id,
+              result: 'deny',
+              detail: { reason: 'target_mismatch', target: bootstrapCredential.target },
+            });
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `this bootstrap credential may only claim seat "${bootstrapCredential.target}"`,
+              claimable: [],
+              hint: `musterd claim ${bootstrapCredential.target}`,
+            });
+            return;
+          }
+          if (
+            bootstrapCredential?.use_kind === 'claim_role' &&
+            (!('role' in frame.target) || frame.target.role !== bootstrapCredential.target)
+          ) {
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'bootstrap_credential.refused',
+              target: bootstrapCredential.id,
+              result: 'deny',
+              detail: { reason: 'target_mismatch', target: bootstrapCredential.target },
+            });
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `this bootstrap credential may only claim role "${bootstrapCredential.target}"`,
+              claimable: [],
+              hint: `musterd claim --role ${bootstrapCredential.target}`,
+            });
+            return;
+          }
+          if (bootstrapCredential?.use_kind === 'host') {
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'bootstrap_credential.refused',
+              target: bootstrapCredential.id,
+              result: 'deny',
+              detail: { reason: 'claim_with_host_credential', target: bootstrapCredential.target },
+            });
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message: 'a host bootstrap credential cannot claim a seat',
+              claimable: [],
+              hint: 'use the residency host endpoints with this credential',
+            });
+            return;
+          }
+          if (bootstrapCredential) {
+            recordBootstrapCredentialUse(ctx.db, bootstrapCredential.id);
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'bootstrap_credential.used',
+              target: bootstrapCredential.id,
+              result: 'allow',
+              detail: { use: bootstrapCredential.use_kind, target: bootstrapCredential.target },
+            });
+          }
+
           // Step 3: account_status check on target member.
           if (targetMember) {
             const status = resolveAccountStatus(targetMember);
@@ -360,57 +475,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             }
           }
 
-          // Step 4: single-active is **kind-scoped** (ADR 042), matching the hello path. An **agent**
-          // seat is newest-wins (ADR 017): a newer claim displaces the incumbent — tell it it was
-          // superseded, close it, evict it — rather than dead-ending on `claim_conflict`, so a relaunched
-          // agent re-occupies its own seat without a manual leave. A **human**/observer seat fans out: a
-          // second claim attaches an *additional* presence with no displacement (a person may act on a
-          // laptop while watching on a phone). Displacement is **workspace-scoped** (ADR 068): a claim
-          // from the *same* workspace is the same seat reconnecting — a reload, or the ~90s health-check
-          // MCP probe — and must NOT supersede the live session, or the seat flaps. A client that sends no
-          // workspace falls back to displace-all. A same-workspace predecessor is kept here (anti-flap)
-          // but reaped after this successor proves durable — see scheduleSameWorkspaceEviction (ADR 092).
           const sameWorkspacePredecessors: string[] = [];
-          if (
-            targetMember &&
-            !('observe' in frame.target) &&
-            targetMember.kind === 'agent' &&
-            targetMember.observer === 0
-          ) {
-            const sameWorkspace = (w?: string | null): boolean =>
-              w != null && frame.workspace != null && w === frame.workspace;
-            let displaced = 0;
-            for (const old of ctx.hub.connsForMember(targetMember.id)) {
-              if (sameWorkspace(old.workspace)) {
-                // Same seat reconnecting/probing — keep it now; a durable successor reaps it (ADR 092).
-                sameWorkspacePredecessors.push(old.connId);
-                continue;
-              }
-              old.send?.({
-                type: 'error',
-                code: 'superseded',
-                message: `your session as "${targetMember.name}" was taken over by a newer one`,
-              });
-              old.close?.();
-              ctx.hub.remove(old.connId);
-              clearPresenceById(ctx.db, old.presenceId);
-              displaced++;
-            }
-            // ADR 237: an eviction the ledger cannot see is an eviction nobody can debug — this
-            // branch used to displace silently while the same-workspace reap audited.
-            if (displaced > 0) {
-              appendAudit(ctx.db, team.id, {
-                actor: targetMember.name,
-                action: 'claim.superseded',
-                target: targetMember.name,
-                result: 'allow',
-                detail: { same_workspace: false, evicted: displaced, via: 'ws' },
-              });
-            }
-            clearOrphanPresence(ctx.db, targetMember.id);
-          }
-
-          // Step 5: grant path — if frame.grant is present, validate it and OCCUPY immediately.
+          let displacedModel: string | null = null;
+          // Step 4: authorize. Refused and pending claims must not mutate the incumbent.
           let reseated = false;
           if (frame.grant) {
             const gv = validateGrant(ctx.db, team.id, frame.grant);
@@ -493,6 +560,8 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               // Carry the attestation across the approval gap (ADR 101) so the approved occupancy
               // isn't born `unknown`.
               model: frame.model ?? null,
+              // Tier rides with the id: no model, no source (the pair is meaningless split).
+              model_source: frame.model ? (frame.model_source ?? null) : null,
               // A specific-seat claim collapses to one pending request per seat, refreshing the waiter
               // to this newest session — a reconnecting grant-less agent can't stack duplicates.
               collapseByTarget: 'seat' in frame.target,
@@ -506,9 +575,12 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               presenceId: '',
               awaitingClaim: req.id,
               isAdmin: false,
+              workspace: frame.workspace ?? null,
+              workspaceKey: frame.workspace_key ?? null,
+              isOpen: () => ws.readyState === ws.OPEN,
               send: (f) => send(ws, f),
               close: () => ws.close(),
-              _claimApproved: (presenceId) => {
+              _claimApproved: (presenceId, sameWorkspacePredecessors = []) => {
                 state.authenticated = true;
                 state.conn = {
                   connId: state.connId,
@@ -520,12 +592,22 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                   // Firehose visibility (ADR 136) — same predicate the history read uses, so the live
                   // stream and `GET /messages` can never disagree about what this seat may see.
                   fullVisibility: targetMember ? hasFullMessageVisibility(targetMember) : false,
+                  workspace: frame.workspace ?? null,
+                  workspaceKey: frame.workspace_key ?? null,
                   send: (f) => send(ws, f),
                   close: () => ws.close(),
                 };
                 // Promote from pending to full member slot in hub.
                 ctx.hub.remove(state.connId);
                 ctx.hub.add(state.conn);
+                const evictionTimer = scheduleSameWorkspaceEviction(
+                  ctx,
+                  team.id,
+                  state.connId,
+                  targetMember?.name ?? '',
+                  sameWorkspacePredecessors,
+                );
+                if (evictionTimer) state.evictionTimer = evictionTimer;
               },
             };
             ctx.hub.addPending(pendingConn);
@@ -557,6 +639,74 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             return; // WS stays open — admin decision arrives via hub.deliverClaimDecision
           }
 
+          // Step 5: transition an AUTHORIZED claim. Single-active is **kind-scoped** (ADR 042): an
+          // agent seat is newest-wins (ADR 017), while a human/observer seat fans out. Displacement is
+          // workspace-scoped (ADR 068): same-workspace predecessors survive until the authorized
+          // successor proves durable (ADR 092); a claim with no workspace displaces all incumbents.
+          if (
+            targetMember &&
+            !('observe' in frame.target) &&
+            targetMember.kind === 'agent' &&
+            targetMember.observer === 0
+          ) {
+            // Identity first, label only as a fallback (lane 01M1JQYYAC): `frame.workspace` is a
+            // display label qualified with the git branch, so it changes under the very session it
+            // identifies — a branch switch or a detached HEAD renamed it, this comparison read the
+            // seat's own re-attach as a foreign workspace, and the grace below never engaged. When
+            // both sides carry a `workspace_key` (the work tree root) that is the whole test; when
+            // either does not (an older dist), fall back to exactly the previous behaviour.
+            const sameWorkspace = (old: Connection): boolean => {
+              if (frame.workspace_key != null && old.workspaceKey != null) {
+                return old.workspaceKey === frame.workspace_key;
+              }
+              return (
+                old.workspace != null &&
+                frame.workspace != null &&
+                old.workspace === frame.workspace
+              );
+            };
+            displacedModel =
+              ctx.db
+                .prepare<
+                  [string],
+                  { model: string }
+                >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1')
+                .get(targetMember.id)?.model ?? null;
+            const orphaned = ctx.db
+              .prepare<
+                [string],
+                { count: number }
+              >('SELECT count(*) AS count FROM presence WHERE member_id = ? AND conn_id IS NULL')
+              .get(targetMember.id)?.count;
+            let displaced = 0;
+            for (const old of ctx.hub.connsForMember(targetMember.id)) {
+              if (sameWorkspace(old)) {
+                sameWorkspacePredecessors.push(old.connId);
+                continue;
+              }
+              old.send?.({
+                type: 'error',
+                code: 'superseded',
+                message: `your session as "${targetMember.name}" was taken over by a newer one`,
+              });
+              old.close?.();
+              ctx.hub.remove(old.connId);
+              clearPresenceById(ctx.db, old.presenceId);
+              displaced++;
+            }
+            const evicted = displaced + (orphaned ?? 0);
+            if (evicted > 0) {
+              appendAudit(ctx.db, team.id, {
+                actor: targetMember.name,
+                action: 'claim.superseded',
+                target: targetMember.name,
+                result: 'allow',
+                detail: { same_workspace: false, evicted, via: 'ws' },
+              });
+            }
+            clearOrphanPresence(ctx.db, targetMember.id);
+          }
+
           // OCCUPY: attach presence and complete the handshake.
           if (!targetMember) {
             // Anonymous observe-target ({ observe: true }) isn't built yet; a *named* observer seat is
@@ -571,10 +721,17 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             return;
           }
           const presence = attach(ctx.db, targetMember.id, frame.surface, state.connId, {
-            provenance: frame.provenance ?? null,
+            // ADR 121/131 §6: provenance is stamped on AGENT seats only — the same gate
+            // `ambientTouch` applies in http.ts and the stateless claim mirror applies since #1309.
+            // This was the last claim path without it: a human frame could declare itself `wake`,
+            // which is the word the wake actuators read to conclude a seat is their own spawned
+            // child (`verified.provenance !== 'wake'` in backends/claudeCode.ts, codex.ts, grok.ts,
+            // opencode.ts). A person's shell must not be able to say it.
+            provenance: targetMember.kind === 'agent' ? (frame.provenance ?? null) : null,
             workspace: frame.workspace ?? null,
             driver: frame.driver ?? null,
             model: frame.model ?? null,
+            model_source: frame.model ? (frame.model_source ?? null) : null,
             build: frame.build ?? null,
             epoch: frame.epoch ?? null,
             wake_lease: frame.wake_lease ?? null,
@@ -582,6 +739,39 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // First occupancy stamps the durable *held* marker (ADR 058) — the claim path is the v0.3
           // successor to the v0.2 first-token-touch that used to do this; keeps the ADR 070 derivation.
           markBound(ctx.db, targetMember.id);
+          let agentAuthority: { seat_credential?: string; session_lease?: string } = {};
+          if (targetMember.kind === 'agent' && targetMember.observer === 0) {
+            const credential =
+              targetMember.credential_hash === null
+                ? mintAgentSeatCredential(ctx.db, targetMember.id).seat_credential
+                : undefined;
+            const lease = mintSessionLease(ctx.db, {
+              teamId: team.id,
+              memberId: targetMember.id,
+              presenceId: presence.id,
+            });
+            state.lease = { id: lease.id };
+            if (credential) {
+              appendAudit(ctx.db, team.id, {
+                actor: targetMember.name,
+                action: 'agent_seat_credential.minted',
+                target: targetMember.name,
+                result: 'allow',
+                detail: { source: 'claim' },
+              });
+            }
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'agent_session_lease.minted',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { lease_id: lease.id, presence_id: presence.id },
+            });
+            agentAuthority = {
+              ...(credential ? { seat_credential: credential } : {}),
+              session_lease: lease.session_lease,
+            };
+          }
           const conn: Connection = {
             connId: state.connId,
             memberId: targetMember.id,
@@ -594,6 +784,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             // and `GET /messages` can never disagree about what this seat may see.
             fullVisibility: hasFullMessageVisibility(targetMember),
             workspace: frame.workspace ?? null,
+            workspaceKey: frame.workspace_key ?? null,
             send: (f) => send(ws, f),
             close: () => ws.close(),
           };
@@ -606,6 +797,8 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthority,
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
           if (!conn.observer) emitPresence(ctx, conn, 'online', frame.surface);
@@ -645,7 +838,17 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // NOTHING is not a non-event — if this seat's previous occupancy attested a model, the
           // seat has just left the ADR 188 pool, and before ADR 246 the ledger could not say so
           // even in hindsight, because an occupancy born null has no old→new transition to audit.
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, frame.model);
+          if (!frame.model && displacedModel && sameWorkspacePredecessors.length === 0) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: displacedModel, new: null, source: 'claim' },
+            });
+          } else {
+            recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, frame.model);
+          }
           log.info({
             msg: 'ws_claim_occupied',
             team: team.slug,
@@ -688,10 +891,49 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           case 'heartbeat': {
             if (presenceById(ctx.db, conn.presenceId)) {
               heartbeat(ctx.db, conn.presenceId, frame.status);
+              // ADR 347: renew the agent session lease over the live socket before it expires. The
+              // adapter's HTTP tools present `config.sessionLease`, which was minted once at claim
+              // and lived five minutes — after which every tool call was refused until a reconnect
+              // happened to mint another (lane 01M1FC77F2, 2026-09-01). The old lease is not
+              // revoked: it dies at its own expiry, so a call in flight under it still lands.
+              if (
+                state.lease &&
+                sessionLeaseDueForRenewal(
+                  ctx.db,
+                  state.lease.id,
+                  AGENT_SESSION_LEASE_RENEW_AHEAD_MS,
+                )
+              ) {
+                const renewed = mintSessionLease(ctx.db, {
+                  teamId: conn.teamId,
+                  memberId: conn.memberId,
+                  presenceId: conn.presenceId,
+                });
+                appendAudit(ctx.db, conn.teamId, {
+                  actor: conn.memberName,
+                  action: 'agent_session_lease.renewed',
+                  target: conn.memberName,
+                  result: 'allow',
+                  detail: { previous: state.lease.id, lease: renewed.id, source: 'heartbeat' },
+                });
+                state.lease = { id: renewed.id };
+                send(ws, {
+                  type: 'lease',
+                  session_lease: renewed.session_lease,
+                  expires_at: renewed.expires_at,
+                });
+              }
               // ADR 101 re-attestation: a mid-occupancy model switch rides the heartbeat. Only a
               // real change writes + audits (occupancy.model_attested, old → new).
               if (frame.model) {
-                const changed = reattestModel(ctx.db, conn.presenceId, frame.model);
+                const changed = reattestModel(
+                  ctx.db,
+                  conn.presenceId,
+                  frame.model,
+                  // The pair, not the id alone: without the tier the store cannot tell a
+                  // re-affirmation from a tier-erasing write (see reattestModel).
+                  frame.model_source,
+                );
                 if (changed) {
                   appendAudit(ctx.db, conn.teamId, {
                     actor: conn.memberName,
@@ -712,6 +954,23 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               if (frame.surface) {
                 reattestSurface(ctx.db, conn.presenceId, frame.surface);
               }
+            } else {
+              // The row behind this socket is gone — the reaper removed it while the socket stayed
+              // open — and the session lease that joined on it is dead with it, so every hook probe
+              // this seat runs is refused. Dropping the heartbeat on the floor left the socket a
+              // zombie: subscribed, receiving broadcasts, deaf, and never told. Measured 2026-09-14
+              // (lane 01M2GBPX2S): ghost's socket was reaped at 15:58:37Z and stayed open and deaf
+              // for 19 minutes, 33 refusals, until it happened to drop. Close it: the adapter's
+              // reconnect re-claims, the `occupied` frame mints a new Presence and lease, and #1369
+              // writes that lease where the hook reads it. The row is the tell that separates
+              // "refused because reaped" from "refused because dead".
+              log.warn({
+                msg: 'ws_heartbeat_reaped',
+                member: conn.memberName,
+                conn: conn.connId,
+                presence: conn.presenceId,
+              });
+              ws.close(4410, 'presence reaped — re-claim');
             }
             break;
           }
@@ -789,7 +1048,13 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
         delete state.evictionTimer;
       }
       const conn = state.conn;
-      if (!conn) return;
+      if (!conn) {
+        // A waiting claimant has no Presence yet, but it is still registered by connId so an admin can
+        // answer it. Once its socket closes, it is not a valid approval target and must not later be
+        // promoted into a phantom connection by the HTTP decision path.
+        ctx.hub.remove(state.connId);
+        return;
+      }
       ctx.hub.remove(conn.connId);
       recordPresenceChurn('detach');
       // Keep the row as a reclaim hold for the grace window instead of deleting it (ADR 010).

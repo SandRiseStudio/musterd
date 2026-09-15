@@ -7,6 +7,8 @@
 // object stepped by the scene loop) rather than joining the actor engine, where anonymous entries
 // in the member map are exactly the confusion the room exists to prevent.
 
+import { roll } from './ambientSeed';
+
 /**
  * Her day. `asleep` is the empty office's state — slumped over the desk, deliberately STILL, because
  * an empty office must not spend frame budget on a character nobody is watching. She wakes on the
@@ -21,8 +23,8 @@ export interface ReceptionistState {
   modeT: number;
   /** Seconds since the office emptied — the fuse on going back to sleep. */
   aloneT: number;
-  /** Seconds until the next work beat is drawn. */
-  nextBeat: number;
+  /** The last wall-clock beat slot considered — each slot draws at most once. */
+  lastSlot: number;
   /** How long the current beat runs. */
   beatLen: number;
 }
@@ -32,12 +34,15 @@ const BEAT_LEN: Record<'typing' | 'call', [number, number]> = {
   typing: [3, 7],
   call: [7, 14],
 };
-/** Gap between work beats. Wide and jittered — a receptionist on a metronome is a clock. */
-const BEAT_GAP: [number, number] = [4, 11];
-
-function reBeat(r: ReceptionistState): void {
-  r.nextBeat = BEAT_GAP[0] + Math.random() * (BEAT_GAP[1] - BEAT_GAP[0]);
-}
+/**
+ * Her work beats key off a wall-clock lattice shared by every viewer (E1 spec §2): each 5 s slot
+ * she spends idle fires a beat with p = 2/3 — the same one-beat-per-~7.5-idle-seconds the old
+ * jittered [4, 11] s countdown averaged, but drawn from `roll(team, slot, …)` so two browsers
+ * watching the same team see her pick up the same phone at the same moment. The probability IS the
+ * jitter — a receptionist on a metronome is a clock, and a coin flipped per slot is not one.
+ */
+export const RECEPTION_SLOT_MS = 5_000;
+const RECEPTION_FIRE_P = 2 / 3;
 
 /** The wake stretch: the yawn-and-straighten between slumped and working. */
 export const RECEPTIONIST_WAKE_S = 0.9;
@@ -49,9 +54,7 @@ export const RECEPTIONIST_WAKE_S = 0.9;
 export const RECEPTIONIST_SLEEP_DELAY_S = 6;
 
 export function createReceptionist(): ReceptionistState {
-  const r: ReceptionistState = { mode: 'asleep', modeT: 0, aloneT: 0, nextBeat: 0, beatLen: 0 };
-  reBeat(r);
-  return r;
+  return { mode: 'asleep', modeT: 0, aloneT: 0, lastSlot: -1, beatLen: 0 };
 }
 
 /** Is she mid-work-beat? The painter uses this to pick the pose; nothing else should care. */
@@ -71,8 +74,10 @@ export function stepReceptionist(
   dt: number,
   anyonePresent: boolean,
   greeting: boolean,
+  seed: { team: string; nowMs: number },
 ): boolean {
   const before = r.mode;
+  const slot = Math.floor(seed.nowMs / RECEPTION_SLOT_MS);
   r.modeT += dt;
   r.aloneT = anyonePresent ? 0 : r.aloneT + dt;
 
@@ -87,6 +92,7 @@ export function stepReceptionist(
       if (r.modeT >= RECEPTIONIST_WAKE_S) {
         r.mode = greeting ? 'greeting' : 'idle';
         r.modeT = 0;
+        r.lastSlot = slot; // the slot underway as she settles in is spent — no late-started beats
       }
       break;
     case 'idle':
@@ -97,15 +103,19 @@ export function stepReceptionist(
         r.mode = 'greeting';
         r.modeT = 0;
       } else {
-        // Work beats: a stretch of typing, or a call on the corded landline. Drawn on a jittered
-        // timer rather than alternating, so the desk never falls into a visible rhythm.
-        r.nextBeat -= dt;
-        if (r.nextBeat <= 0) {
-          const kind = Math.random() < 0.55 ? 'typing' : 'call';
-          const [lo, hi] = BEAT_LEN[kind];
-          r.beatLen = lo + Math.random() * (hi - lo);
-          r.mode = kind;
-          r.modeT = 0;
+        // Work beats: a stretch of typing, or a call on the corded landline. Drawn once per shared
+        // wall-clock slot — every viewer computes the same draw, so they see the same beat. A slot
+        // already underway when she reaches idle is skipped (`lastSlot` on entry): starting it late
+        // would put this viewer's beat out of phase with everyone who started it on time.
+        if (slot !== r.lastSlot) {
+          r.lastSlot = slot;
+          if (roll(seed.team, slot, 'reception-fire') < RECEPTION_FIRE_P) {
+            const kind = roll(seed.team, slot, 'reception-kind') < 0.55 ? 'typing' : 'call';
+            const [lo, hi] = BEAT_LEN[kind];
+            r.beatLen = lo + roll(seed.team, slot, 'reception-len') * (hi - lo);
+            r.mode = kind;
+            r.modeT = 0;
+          }
         }
       }
       break;
@@ -116,17 +126,20 @@ export function stepReceptionist(
       if (greeting) {
         r.mode = 'greeting';
         r.modeT = 0;
-        reBeat(r);
+        r.lastSlot = slot;
       } else if (r.modeT >= r.beatLen || !anyonePresent) {
+        // The slot she lands back in is spent — beats stay punctuation, never back-to-back. Both
+        // viewers finish at the same wall time (same start, same beatLen), so this stays shared.
         r.mode = 'idle';
         r.modeT = 0;
-        reBeat(r);
+        r.lastSlot = slot;
       }
       break;
     case 'greeting':
       if (!greeting) {
         r.mode = 'idle';
         r.modeT = 0;
+        r.lastSlot = slot; // greetings are local (this viewer's check-in beat) — resync, don't backfill
       }
       break;
   }

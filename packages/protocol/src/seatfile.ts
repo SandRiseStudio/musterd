@@ -61,9 +61,19 @@ export const SeatFileSchema = z
      *  defaults, never widen (enforced by the daemon's projection via `clampNarrow`). */
     capabilities: PartialCapabilitiesSchema.optional(),
     working_hours: WorkingHoursSchema.optional(),
+    /** ADR 311: Slack identity join for human-submitted Seeds; never valid on an agent seat. */
+    slack_user_id: z.string().min(1).optional(),
+    /** The seat's colour as an HSL hue 0–359 (ADR 374). The file owns it; the daemon projects it
+     *  and never invents one — a seat without a hue renders from its name hash everywhere. */
+    hue: z.number().int().min(0).max(359).optional(),
   })
-  .refine((s) => s.lifecycle !== 'until' || Boolean(s.until), {
-    message: 'lifecycle "until" requires an `until` timestamp',
+  .superRefine((s, ctx) => {
+    if (s.slack_user_id !== undefined && s.kind !== 'human') {
+      ctx.addIssue({ code: 'custom', message: '`slack_user_id` is valid only on a human seat' });
+    }
+    if (s.lifecycle === 'until' && !s.until) {
+      ctx.addIssue({ code: 'custom', message: 'lifecycle "until" requires an `until` timestamp' });
+    }
   });
 export type SeatFile = z.infer<typeof SeatFileSchema>;
 
@@ -143,6 +153,49 @@ export function normalizeSeatName(name: string): string {
   return name.normalize('NFC').trim().toLowerCase();
 }
 
+/**
+ * Top-level keys a roster file carries that its schema does not know — the keys zod's default
+ * `.strip()` silently discards on parse, and that `musterd fmt` therefore **deletes** when it
+ * rewrites the file from the parsed value.
+ *
+ * WHY THIS EXISTS AS A SEPARATE ANSWER. `fmt --check` compares bytes, so it reports "not canonical"
+ * identically for a stray blank line and for a paragraph about to be erased. Those are not the same
+ * finding and must not read the same: one is cosmetic, the other is data loss. Measured instance —
+ * `seats/autorefresh.toml` on the live roster carries an authored 587-character `charter`, `charter`
+ * is in RoleFileSchema but NOT SeatFileSchema, and `fmt` drops it without a word (2026-08-21,
+ * falsified into existence by ryder from a claim of mine that said the hazard was latent).
+ *
+ * Reports only what is CURRENTLY unknown. A key that a future schema adopts stops being reported the
+ * moment it is in the shape — the list is derived from the schema, never a hand-kept denylist that
+ * could itself go stale.
+ *
+ * Malformed TOML returns `[]` rather than throwing: an unparseable file is the PARSER's error to
+ * report, and this answering "no unknown keys" for it would be a lie only if anyone read it as
+ * "this file is fine". Callers run it beside a parse, never instead of one.
+ */
+export function unknownRosterKeys(kind: 'team' | 'seat' | 'role', text: string): string[] {
+  // SeatFileSchema is a ZodEffects (it carries a `.refine`), so its object shape lives one level in.
+  // Reaching through `innerType()` rather than duplicating the key list keeps this derived from the
+  // schema — a hand-kept copy is precisely the stale proxy this function exists to catch.
+  const shape =
+    kind === 'team'
+      ? TeamFileSchema.shape
+      : kind === 'seat'
+        ? SeatFileSchema.innerType().shape
+        : RoleFileSchema.shape;
+  let raw: unknown;
+  try {
+    raw = parseToml(text);
+  } catch {
+    return [];
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return [];
+  const known = new Set(Object.keys(shape));
+  return Object.keys(raw as Record<string, unknown>)
+    .filter((k) => !known.has(k))
+    .sort();
+}
+
 /** Parse a `roles/<name>.toml`. The name is the filename stem (not in the body), like seat files. */
 export function parseRoleFile(text: string): RoleFile {
   return RoleFileSchema.parse(parseToml(text));
@@ -184,9 +237,22 @@ function arrayLine(key: string, values: string[]): string {
   return `${key} = [${values.map(tomlString).join(', ')}]\n`;
 }
 
-function serializeWorkingHours(value: NonNullable<SeatFile['working_hours']>): string {
+/**
+ * A table header, under one blank line when anything precedes it. Canonical form is the form
+ * hand-authors write: measured 2026-08-24, three independent authors put a blank line before the
+ * header on the live roster and none preferred flush, and a `fmt --check` that fails on every
+ * hand-edit teaches people to ignore it. A table that opens the file gets no leading blank.
+ */
+function tableHeader(name: string, precededBy: string): string {
+  return `${precededBy ? '\n' : ''}[${name}]\n`;
+}
+
+function serializeWorkingHours(
+  value: NonNullable<SeatFile['working_hours']>,
+  precededBy: string,
+): string {
   return (
-    '[working_hours]\n' +
+    tableHeader('working_hours', precededBy) +
     `timezone = ${tomlString(value.timezone)}\n` +
     `days = [${value.days.map(tomlString).join(', ')}]\n` +
     `start = ${tomlString(value.start)}\n` +
@@ -221,7 +287,7 @@ export function serializeTeam(team: TeamFile): string {
   let out = line('slug', team.slug);
   if (team.display) out += line('display', team.display);
   if (team.lifecycle && team.lifecycle !== 'forever') out += line('lifecycle', team.lifecycle);
-  if (team.working_hours) out += serializeWorkingHours(team.working_hours);
+  if (team.working_hours) out += serializeWorkingHours(team.working_hours, out);
   return out;
 }
 
@@ -246,12 +312,15 @@ export function serializeSeat(seat: SeatFile): string {
   // Admin-set account status (top-level key — must precede any table). Omitted when unset (the common
   // active/provisioned case is derived, never written).
   if (seat.account_status) out += line('account_status', seat.account_status);
-  if (seat.working_hours) out += serializeWorkingHours(seat.working_hours);
+  if (seat.slack_user_id) out += line('slack_user_id', seat.slack_user_id);
+  // The hue is a bare integer — the one top-level key that is not a string (ADR 374).
+  if (seat.hue !== undefined) out += `hue = ${seat.hue}\n`;
+  if (seat.working_hours) out += serializeWorkingHours(seat.working_hours, out);
   // Per-seat capability narrowing as a trailing `[capabilities]` table (TOML requires tables after
   // top-level keys). Omitted entirely when the override is absent or empty (a known normalization).
   if (seat.capabilities) {
     const body = serializeCapabilities(seat.capabilities);
-    if (body) out += `[capabilities]\n${body}`;
+    if (body) out += tableHeader('capabilities', out) + body;
   }
   return out;
 }
@@ -267,6 +336,6 @@ export function serializeRole(role: RoleFile): string {
   if (role.summary) out += line('summary', role.summary);
   if (role.charter) out += line('charter', role.charter);
   const body = serializeCapabilities(role.capabilities ?? {});
-  if (body) out += `[capabilities]\n${body}`;
+  if (body) out += tableHeader('capabilities', out) + body;
   return out;
 }

@@ -12,7 +12,7 @@ function lane(over: Partial<Lane>): Lane {
     detail: null,
     owner_seat: 'miley',
     role: null,
-    surface_globs: [],
+    scope: [],
     depends_on: [],
     branch: null,
     goal_id: null,
@@ -174,5 +174,18 @@ describe('invalidatesLanes', () => {
     expect(invalidatesLanes({ act: 'status_update', meta: null })).toBe(false);
     expect(invalidatesLanes({ act: 'ask', meta: { species: 'consult' } })).toBe(false);
     expect(invalidatesLanes({ act: 'handoff', meta: null })).toBe(false);
+  });
+});
+
+describe('the stored hue reaches the reel (ADR 374)', () => {
+  it('paints a member with the hue the roster carries, and hashes the name only when there is none', () => {
+    const byName = new Map(
+      roomEntries(
+        [member({ name: 'stanley', kind: 'agent', hue: 212 }), member({ name: 'nick', kind: 'human' })],
+        board([]),
+      ).map((e) => [e.name, e]),
+    );
+    expect(byName.get('stanley')!.color).toBe('hsl(212, 68%, 62%)');
+    expect(byName.get('nick')!.color).toBe(memberColor('nick', 'human'));
   });
 });

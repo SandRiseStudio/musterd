@@ -1,0 +1,39 @@
+# The cloud seat machine (cloud-seats design, increment 1). Deploy with:
+#
+#   fly deploy --config deploy/cloud-seat/fly.toml --app musterd-seat-<name>
+#
+# The app name is per seat (one machine = one node = one enrolled joiner); `--app` overrides the
+# placeholder below. Secrets are NEVER here — see README.md §Create for the `fly secrets set` line.
+app = "musterd-seat"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+  # Build context is the repo root: the Dockerfile builds the CLI from this checkout.
+  # (fly deploy resolves the context from the config's directory; pass `--dockerfile` and run from
+  # the repo root — the README's exact line does.)
+
+# No [[services]] / [http_service] at all: nothing listens for the outside world. The daemon binds
+# loopback; the sync loops and the wake actuator dial OUT (hub over the tailnet, Anthropic over the
+# internet). Fly's auto-stop keys on INBOUND traffic, so with no service block it never applies and
+# the machine stays up while enrolled. Parking is explicit: `fly machine stop` (spec: v1 lifecycle).
+
+[[mounts]]
+  source = "seat_data"
+  destination = "/data"
+  initial_size = "3gb"
+
+[[vm]]
+  # The lean-seat budget (spec §image): a terminal `claude -p` under the wake actuator plus the
+  # daemon. 2 GB is the measured comfortable floor for one seat; the daemon itself is ~100 MB.
+  size = "shared-cpu-2x"
+  memory = "2gb"
+
+[env]
+  # Non-secret config only.
+  MUSTERD_TEAM = "revive"
+  # The hub, as this machine reaches it: the laptop's tailnet name (resolved through tailscaled at
+  # boot) and the port `tailscale serve` forwards to the loopback daemon (ADR 040 allow-list).
+  MUSTERD_HUB = "nicks-laptop"
+  MUSTERD_HUB_PORT = "4849"
+  TAILSCALE_HOSTNAME_PREFIX = "musterd-seat"

@@ -6,7 +6,7 @@
 
 ---
 
-> **Status: EXECUTED** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md)). File: [musterd / Terminal UX](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ). The frames mirror the **already-shipped CLI** (reality wins): `cmd/team-add` shows the MCP env block the CLI actually emits (not a generic join token), and `cmd/join` shows the default `cli` surface.
+> **Status: EXECUTED** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md); integration-doctor frames added 2026-09-06 under [ADR 385](../decisions/385-optional-tailscale-aperture-doctor.md)). File: [musterd / Terminal UX](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ). The frames mirror the **already-shipped CLI** (reality wins): `cmd/team-add` shows the MCP env block the CLI actually emits (not a generic join token), and `cmd/join` shows the default `cli` surface.
 
 ## File
 
@@ -39,12 +39,66 @@ Each is a Figma component with variants where noted:
 Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, frontend)`, `nick (human, lead)`. Each frame named `cmd/<name>`.
 
 1. `cmd/team-create` — `$ musterd team create dawn` → success line `✓ team "dawn" created` (green ✓), then `you are now a member: nick (human, lead)`, then a hint line in dim: `add members with: musterd team add <name> --kind agent`.
-2. `cmd/team-add` — `$ musterd team add Ada --kind agent --role backend` → `✓ added Ada (agent, backend) to dawn` + a dim MCP env block: `connect this agent via MCP with env:` then `  MUSTERD_TEAM=… MUSTERD_MEMBER=… MUSTERD_TOKEN=… MUSTERD_SURFACE=claude-code` (mirrors the actual CLI; a human member instead gets a `musterd join …` hint).
-3. `cmd/join` — `$ musterd join dawn --as Ada --token …` → `✓ Ada joined dawn` + presence line `● Ada online via cli` (default surface is `cli`).
+2. `cmd/team-add` — `$ musterd team add Ada --kind agent --role backend` → `✓ added Ada (agent, backend) to dawn` + a dim MCP env block: `connect this agent via MCP with its scoped key:` then `  MUSTERD_TEAM=… MUSTERD_AGENT_KEY=mskey_… MUSTERD_CLAIM=seat:Ada MUSTERD_LAUNCH_SURFACE=claude-code` (ADR 344: the shown-once key can bootstrap only Ada; a human member instead gets a `musterd claim …` hint).
+3. `cmd/join` — `$ musterd claim Ada --team dawn --detach --key …` → `✓ Ada — occupied on dawn` + presence line `● Ada online via cli` (default surface is `cli`). _(The frame is still named `cmd/join`: the command was respelled by ADR 377 on 2026-09-03 and the frame has not been renamed. `musterd join` survives only as a hidden alias that prints the new spelling, and it retires one FEATURE_EPOCH after 19 — rename the frame when it is next touched.)_
 4. `cmd/send` — `$ musterd send --to Lin --act handoff "auth module ready for wiring"` → echoes the sent `message-row` with `✓ sent`.
 5. `cmd/inbox` — `$ musterd inbox` → header `inbox — dawn (2 unread)`, then 2–4 `message-row`s, newest last; unread marked with a leading accent `▌`. Footer dim: `musterd inbox --watch to follow live`.
 6. `cmd/inbox-watch` — `$ musterd inbox --watch` → same header with a live indicator `◉ watching` (green), a stream of rows, and a blinking-cursor affordance at the bottom. Show one incoming `request_help` highlighted (yellow-bold badge) to demonstrate the flagship moment.
 7. `cmd/status` — `$ musterd status` → table: columns `MEMBER` (member-chip), `KIND`, `ROLE`, `MODEL` (occupancy-attested model id, ADR 101; absent → `unknown`), `LIFECYCLE`, `ACTIVITY` (presence-dot + surface / working label). One row per member. Header row in bright-black, aligned to 80 cols. (The shipped frame still says `PRESENCE` before LIFECYCLE — frame update tracked with ADR 008 lockstep; code is the source of truth.)
+
+### Multi-harness frames (ADR 281/282/286)
+
+8. `cmd/harness-configure` — `$ musterd harness configure` → a registry-ordered **multi-select**
+   (checkbox list), preselecting the current desired set; unavailable adapters stay selectable with
+   a dim `(pending — not installed here)` hint:
+   ```
+   ◆ Which harnesses should launch this worktree's member?
+   ◼ Claude Code
+   ◻ Cursor
+   ◻ Codex (pending — not installed here)
+   ◼ musterd (native host)
+   ```
+   On confirm: `✓ desired harnesses: claude-code, musterd` then one line per reconciled fragment
+   (see the status verdict glyphs below), ending `✓ worktree configured — musterd wire repairs it any time`.
+   Cancel (esc) prints `no changes made` (dim) and exits **0**.
+9. `cmd/harness-status` — `$ musterd harness status` → one block per registry adapter:
+   ```
+   claude-code   selected · available
+     mcp.musterd   repo-shared   ✓ in place
+     hooks.local   folder        ✓ in place
+     permissions   folder        → needs wire
+   cursor        not selected · available
+   codex         selected · pending (not installed here)
+   musterd       selected · native (no external footprint)
+   ```
+   Verdict glyphs (exact strings): `✓ in place` (owned-exact, ours) · `✓ satisfied (unmanaged)` ·
+   `→ needs wire` (would create/add-owner) · `✗ conflict — not musterd's to overwrite` ·
+   `✗ drifted — evidence retained` · `✗ pre-ADR-286 registration — run musterd harness configure` (covers both the retired `MUSTERD_SURFACE` marker and the marker-less ADR 165 shape) ·
+   `✗ release blocked — drifted while deselected` · `⏳ busy — another reconciler holds this` ·
+   `✗ container unreadable` · `journal pending — re-run musterd wire`.
+   Exit code annotation: **0** only when every desired fragment is usable and every undesired owned
+   contribution is released (pending unavailability still exits 0); otherwise **1**.
+10. `state/harness-legacy` — status/wire over a version-1 identity: red
+    `✗ this worktree is pre-ADR-281 (version-1 identity) — run musterd harness configure to convert it`,
+    exit **1** (wire exits **6** when no selection exists at all:
+    `✗ no harness selection here — run musterd harness configure (or musterd init for a fresh folder)`).
+
+### Shared Seed frames (ADR 319)
+
+11. `cmd/seed-list` — `$ musterd seed list` → one active tray row per Seed, using the exact
+    `<id> <state>[ — <explorer>] · <body>` shape. Sample:
+    `01SEED00000000000000000000 open · Try a shared Seed tray`. IDs are dim; `completed` is green;
+    `needs_clarification` is mustard.
+12. `cmd/seed-claim` — `$ musterd seed claim 01SEED00000000000000000000` → exact success line
+    `✓ Seed 01SEED00000000000000000000 — exploring as Ada`, with the checkmark green.
+13. `cmd/seed-promote` — `$ musterd seed promote 01SEED00000000000000000000` → exact success line
+    `✓ Seed 01SEED00000000000000000000 — promoted to Lane 01LANE00000000000000000000`, with the
+    checkmark green.
+
+### Optional integration doctor (ADR 385)
+
+14. [`cmd/integration-doctor`](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ?node-id=18-2) — the exact no-color combined frame for `musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net`: separate Tailscale `verified` and Aperture `off (configuration ready)` headings, the 13 stable checks in protocol order, including ADR 394's `one exact Member tag; standard user role` identity line, and the two `LIMITS` non-claims. The frame is 80-column-safe, JetBrains Mono `14/22`, and matches the renderer snapshot character-for-character.
+15. [`cmd/integration-doctor/blocked`](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ?node-id=18-4) — combined selected failures: red `✗` on the failed check, dim `→` repair and `·` skipped dependent checks, with both section headings `blocked`. Selected failure exits **1**; invalid command/URL usage exits **2**; neither selected renders both sections `off` and exits **0**.
 
 ## Page: States (empty + error)
 
@@ -53,6 +107,7 @@ Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, fr
 3. `state/unknown-member` — `✗ no member "Bob" in dawn` (red) + dim hint `musterd status to list members`.
 4. `state/server-down` — `✗ can't reach team server at ws://localhost:4849 — is the daemon running?` (red).
 5. `state/not-permitted` / generic error — `✗ <message>` red, exit code shown in a side annotation (errors exit non-zero; see `04-cli.md` exit-code table).
+6. `state/empty-seeds` — `no active Seeds — send an idea through the Team's Slack capture` (dim).
 
 For every error frame, annotate the **exit code** in a Figma comment/sticky so the CLI brief and implementation agree.
 
@@ -60,8 +115,8 @@ For every error frame, annotate the **exit code** in a Figma comment/sticky so t
 
 - [ ] `terminal/frame` plus all 7 components exist with the listed variants.
 - [ ] ANSI color styles exist and match `brand.md` §2 exactly.
-- [ ] All 7 `cmd/*` frames exist, 80-col aligned, using the shared components and the canonical sample data.
-- [ ] All 5 `state/*` frames exist; each error frame annotates its exit code and uses the verbatim strings above.
+- [ ] All 15 `cmd/*` frames exist, 80-col aligned, using the shared components and the canonical sample data.
+- [ ] All 6 `state/*` frames exist; each error frame annotates its exit code and uses the verbatim strings above.
 - [ ] No glyph or color is used that the CLI can't reproduce in a 16-color ANSI terminal.
 - [ ] Every literal string a frame shows is reproducible character-for-character (these are the spec for CLI copy).
 

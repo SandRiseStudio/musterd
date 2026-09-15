@@ -9,11 +9,15 @@ export interface Seatable {
    * the rail can never disagree about who is working. Callers resolve it once (`memberPosture`). */
   posture: Posture;
   availability?: { status: 'available' | 'away' | 'dnd' | 'off_hours' } | null | undefined;
+  /** Why the seat is dark (ADR 141/315) — `left_team` is the one reason that empties the desk. */
+  offline_reason?: string | null | undefined;
+  /** When the seat was last seen — decides who loses a desk when owners outnumber slots. */
+  last_seen_at?: number | null | undefined;
 }
 
 /** Where a member is rendered this frame. */
 export type Placement =
-  | { kind: 'desk'; slot: number }
+  | { kind: 'desk'; slot: number; owned?: true }
   /** An idle member, on the room's leisure furniture — index into `LEISURE_SPOTS`. */
   | { kind: 'leisure'; spot: number }
   | { kind: 'nook' }
@@ -27,19 +31,92 @@ function hash(name: string): number {
   return h;
 }
 
-/** A member reads as "away" from the composed posture, explicit presence, or a self-set away/dnd. */
+/**
+ * Is this seat *audibly* working — may the room type, tap and creak from its desk?
+ *
+ * Keys on the composed posture, never `activity` (E2 spec §2): activity lags, and a stale
+ * `activity: working` with posture folded to idle used to sit on the lounge couch drumming an
+ * imaginary keyboard.
+ *
+ * This is the ROSTER half of the fact. The whole one is `workingAtDesk` below, which adds the body —
+ * and that is what eyes, ears and the loop all read, so none of the three can disagree. Seating uses
+ * this half directly, because where to PUT a member cannot depend on where they already are.
+ */
+export function audiblyWorking(m: Pick<Seatable, 'posture'>): boolean {
+  return m.posture === 'working';
+}
+
+/**
+ * Is this member **at work at their desk** — the one predicate the room's eyes, ears and loop share?
+ *
+ * `audiblyWorking` on its own was never the whole fact: it is true from the instant a seat's posture
+ * flips, including while that seat's body is still walking in from the door. Everything the desk did
+ * about work therefore fired early — the screen lit itself, the room typed, and the loop counted the
+ * desk as alive — for a member who had not arrived (nick, 2026-09-04: "I want the monitor to only
+ * turn on once a member has sat down at desk and docked computer, same with typing sounds").
+ *
+ * So the body is part of the predicate, and `sit` is how the body says so: the same `> 0.9` the
+ * typing HANDS were already gated on in `render.ts` `skelFor`, and the same one the chair pieces and
+ * the dock use. E2 §2 is unchanged in what it demands — one predicate for eyes, ears and the loop —
+ * it is only that the predicate now tells the truth about arrival. Its three callers are the screen
+ * (`drawWorkstation`), the room tone's `working[]`, and the park check `living()`.
+ *
+ * `sit` comes off the member's live pose. A member with no pose at all — an offline owner's kept
+ * desk, or a body the render cap dropped — is not at work at it.
+ */
+export function workingAtDesk(
+  m: Pick<Seatable, 'posture'> | undefined,
+  sit: number | undefined,
+): boolean {
+  return !!m && audiblyWorking(m) && (sit ?? 0) > 0.9;
+}
+
+/**
+ * Does this member, **at home in their own seat**, have their laptop on their person?
+ *
+ * The model is one biconditional (2026-09-04 laptop/dock design §0): **the laptop is docked ⟺ the
+ * member is working AT THEIR DESK; every other moment it is on their person.** This function is the
+ * second clause of that — given a member who is already where they belong, working is what decides.
+ *
+ * The "at their desk" half is not in here on purpose, because it is not a roster fact. A member
+ * crossing the floor is not at their desk whatever their posture says, so `posesNow` gives every
+ * walk the laptop outright and never calls this; and a dock only fills once its owner is actually
+ * sitting at it (`render.ts`, the `docked` parameter). Folding the position into this predicate is
+ * what made a member who came online already `working` walk in empty-handed past a dock that had
+ * filled itself before they arrived (nick, 2026-09-04).
+ *
+ * A member the floor has no node for (a ghost walking out of the door) carries it: they are leaving,
+ * and an empty dock is exactly what their desk should say.
+ */
+export function carriesLaptop(m: Pick<Seatable, 'posture'> | undefined): boolean {
+  return m ? !audiblyWorking(m) : true;
+}
+
+/** dnd means *working, don't interrupt* (presence-honesty §4) — they keep their desk and chair. */
+export function isDnd(m: Seatable): boolean {
+  return m.availability?.status === 'dnd';
+}
+
+/**
+ * A member reads as "stepped away" — declared absence. Their body leaves the floor; the desk stays
+ * theirs (jacket over the chair, `stepped away` on the plate). dnd is deliberately NOT this: dnd
+ * folds into posture `away` on the wire (ADR 044), but on the floor it is presence at a desk.
+ */
 export function isAway(m: Seatable): boolean {
   return (
-    m.posture === 'away' ||
-    m.presence === 'away' ||
-    m.availability?.status === 'away' ||
-    m.availability?.status === 'dnd'
+    !isDnd(m) &&
+    (m.posture === 'away' || m.presence === 'away' || m.availability?.status === 'away')
   );
 }
 
-/** A member is out of the room entirely — gone from the floor, not merely resting on it. */
+/** A member is dark on the roster — their desk stays owned unless they left the team. */
 function isGone(m: Seatable): boolean {
   return m.presence === 'offline' || m.posture === 'offline';
+}
+
+/** Out of the room entirely: leaving the team is the line, not presence (presence-honesty §4). */
+function leftTeam(m: Seatable): boolean {
+  return m.offline_reason === 'left_team';
 }
 
 /** Hash → linear-probe to the first free index of a fixed-size zone. `-1` when the zone is full. */
@@ -56,6 +133,20 @@ function probe(name: string, taken: boolean[]): number {
   return -1;
 }
 
+/** Indexes into `LEISURE_SPOTS` for the meeting table's chairs — where a huddle gathers. */
+const MEETING_SPOTS: number[] = LEISURE_SPOTS.map((s, i) => (s.zone === 'meeting' ? i : -1)).filter(
+  (i) => i >= 0,
+);
+
+/** Hash → linear-probe within a SUBSET of the leisure spots (the meeting table). `-1` when full. */
+function probeSubset(name: string, indexes: number[], taken: boolean[]): number {
+  const free = indexes.filter((i) => !taken[i]);
+  if (free.length === 0) return -1;
+  const pick = free[hash(name) % free.length]!;
+  taken[pick] = true;
+  return pick;
+}
+
 /**
  * Deterministic, stable seat assignment — **independent of roster array order**. Posture decides the
  * zone (ADR 138/140): `working` members compete for a desk, `idle` members take the room's leisure
@@ -69,7 +160,10 @@ function probe(name: string, taken: boolean[]): number {
  * when the leisure furniture is full — so a desk is never occupied by someone idle while a couch sits
  * empty. That inversion is the whole contract: on this floor, an occupied desk means work in progress.
  */
-export function assignSeats(members: Seatable[]): Map<string, Placement> {
+export function assignSeats(
+  members: Seatable[],
+  gathered: ReadonlySet<string> = new Set(),
+): Map<string, Placement> {
   const out = new Map<string, Placement>();
   const desks = new Array<boolean>(DESK_SLOTS.length).fill(false);
   const spots = new Array<boolean>(LEISURE_SPOTS.length).fill(false);
@@ -79,9 +173,27 @@ export function assignSeats(members: Seatable[]): Map<string, Placement> {
   const away = present.filter((m) => isAway(m));
   const rest = present.filter((m) => !isAway(m));
 
-  // Idle first — they have first call on the leisure furniture, and the desks they'd otherwise hold.
+  // The huddle gathers FIRST — before the lounge, before the desks. A seat taking turns in an open
+  // huddle is doing that, not sitting at its desk, so the table wins over both zones (ADR 378
+  // increment 2). Four chairs and no more: the fifth participant stays wherever they were, because
+  // the alternative is drawing a chair that does not exist to make a picture come out even.
+  //
+  // Present-and-not-away only. Being gathered is a reading of the THREAD, and a thread has no
+  // presence — an away or offline participant who spoke an hour ago is not in the room now, and
+  // seating them at the table would be the floor telling a nicer story than the roster's.
+  const gatheredHere = rest.filter((m) => gathered.has(m.name));
+  for (const m of gatheredHere) {
+    const spot = probeSubset(m.name, MEETING_SPOTS, spots);
+    if (spot >= 0) out.set(m.name, { kind: 'leisure', spot });
+  }
+  const seatedAtTable = new Set([...out.keys()]);
+
+  // Active (between claims) first — they have first call on the leisure furniture, and the desks
+  // they'd otherwise hold. dnd never lounges: away-posture from a dnd fold still means at-desk.
   const spilled: Seatable[] = [];
-  for (const m of rest.filter((m) => m.posture === 'idle')) {
+  for (const m of rest.filter(
+    (m) => m.posture === 'active' && !isDnd(m) && !seatedAtTable.has(m.name),
+  )) {
     const spot = probe(m.name, spots);
     if (spot >= 0) out.set(m.name, { kind: 'leisure', spot });
     else spilled.push(m); // lounge full — they wait it out at a desk, below
@@ -93,10 +205,30 @@ export function assignSeats(members: Seatable[]): Map<string, Placement> {
     if (slot >= 0) out.set(m.name, { kind: 'desk', slot });
     else out.set(m.name, { kind: 'strip', index: overflow++ });
   };
-  for (const m of rest) if (m.posture !== 'idle') toDesk(m);
+  for (const m of rest)
+    if ((m.posture !== 'active' || isDnd(m)) && !seatedAtTable.has(m.name)) toDesk(m);
   for (const m of spilled) toDesk(m);
 
-  for (const m of away) out.set(m.name, { kind: 'nook' });
-  for (const m of sorted) if (isGone(m)) out.set(m.name, { kind: 'gone' });
+  // Stepped-away members keep their desk without a body (jacket over the chair): the same
+  // owned-desk shape offline owners get, claimed before them — an away member is still present.
+  for (const m of away) {
+    const slot = probe(m.name, desks);
+    if (slot >= 0) out.set(m.name, { kind: 'desk', slot, owned: true });
+    else out.set(m.name, { kind: 'nook' }); // desks exhausted — the old nook keeps them visible
+  }
+
+  // Owned empty desks (presence-honesty §4): every offline member except `left_team` keeps a desk —
+  // the room must not empty when the team sleeps. Present members claimed desks above (zero
+  // regression); owners fill what remains by the same name-hash probe, freshest-gone first, so when
+  // desks run out it is the longest-gone who lose theirs. Deterministic; normal rosters keep every desk.
+  const owners = sorted
+    .filter((m) => isGone(m) && !leftTeam(m))
+    .sort((a, b) => (b.last_seen_at ?? 0) - (a.last_seen_at ?? 0) || a.name.localeCompare(b.name));
+  for (const m of owners) {
+    const slot = probe(m.name, desks);
+    if (slot >= 0) out.set(m.name, { kind: 'desk', slot, owned: true });
+    else out.set(m.name, { kind: 'gone' }); // desks exhausted — the longest-gone wait outside
+  }
+  for (const m of sorted) if (isGone(m) && leftTeam(m)) out.set(m.name, { kind: 'gone' });
   return out;
 }

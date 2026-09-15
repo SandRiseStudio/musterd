@@ -17,10 +17,10 @@ import { flagStr, parseMeta, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { readBindingAt } from '../config.js';
 import { CliError } from '../errors.js';
-import { openActionNeeded, renderMessageRow } from '../render/rows.js';
+import { dischargedIds, openActionNeeded, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { bindThread } from '../session/continuity.js';
-import { findWorkspaceDir, kindLookup, resolve } from './helpers.js';
+import { findWorkspaceDir, kindLookup, resolve, sendOrEcho } from './helpers.js';
 
 /**
  * The act `accept`/`decline` answers, when the caller didn't name one (ADR 067). Auto-targets the
@@ -31,7 +31,7 @@ import { findWorkspaceDir, kindLookup, resolve } from './helpers.js';
 async function openRequests(http: HttpClient, team: string, me: string): Promise<Envelope[]> {
   try {
     const res = await http.inbox(team, { unread: false });
-    const open = openActionNeeded(res.messages, me, res.answered ?? []).filter(
+    const open = openActionNeeded(res.messages, me, res.answered ?? [], dischargedIds(res)).filter(
       (m) =>
         m.act === 'request_help' || m.act === 'handoff' || m.act === 'challenge' || m.act === 'ask',
     );
@@ -189,7 +189,7 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     throw new CliError(`invalid message: ${(err as Error).message}`, 3);
   }
 
-  const ackBody = await http.send(team, envelope);
+  const ackBody = await sendOrEcho(() => http.send(team, envelope), envelope);
 
   // ADR 210: a successful threaded send means this session IS the dialogue on that thread, which is
   // exactly the causal fact a later wake needs and the daemon can never learn. Bind it locally.
@@ -228,9 +228,12 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     // (mirrors the MCP structured `ask_contract`) without a second round-trip to the tier table.
     // Prefer the daemon-derived contract (carries `unblocker_reachable`, ADR 153); the pure local
     // contract stands when an older daemon omits it.
-    const payload = askTier
-      ? { ...envelope, ask_contract: ackBody?.ask_contract ?? askContract(askTier) }
-      : envelope;
+    const payload = {
+      ...(askTier
+        ? { ...envelope, ask_contract: ackBody?.ask_contract ?? askContract(askTier) }
+        : envelope),
+      ...(ackBody?.lane_verdict ? { lane_verdict: ackBody.lane_verdict } : {}),
+    };
     process.stdout.write(JSON.stringify(payload) + '\n');
     return 0;
   }
@@ -248,6 +251,17 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     process.stdout.write(
       theme.dim(askContractText(envelope.id, askTier, ackBody?.ask_contract?.unblocker_reachable)) +
         '\n',
+    );
+  // ADR 202's consequence, at parity with the MCP reply (lane 01M2GQFJXG): an accept that answered
+  // a lane_review ask closed the lane — the sender is told here, not left to find it on the board.
+  const verdict = ackBody?.lane_verdict;
+  if (verdict)
+    process.stdout.write(
+      theme.dim(
+        verdict.state === 'done'
+          ? `lane ${verdict.lane} → done: this accept was the acceptance verdict (ADR 202), not an announcement.`
+          : `lane ${verdict.lane} → active: this decline sent the work back to its owner.`,
+      ) + '\n',
     );
   return 0;
 }

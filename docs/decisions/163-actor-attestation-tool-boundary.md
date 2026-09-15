@@ -19,7 +19,7 @@ seats must write.** Its stated justification is that a writing subagent has no s
 model attestation, so it writes under its parent seat's identity and breaks three musterd invariants
 at once — ADR 150 lane ownership (the gate fires on the parent's seat), ADR 109 git attribution (the
 commit carries the parent's name), and ADR 101/158 model attestation (the work is recorded at the
-parent's model, corrupting the ADR 056 diversity conclusions at their source).
+parent's model, corrupting the ADR 314 diversity conclusions at their source).
 
 That rule is **guidance only**. Nothing enforces it, and finding 006 measured guidance-only
 compliance at **0/8 versus 8/8 under enforcement** — so the honest description of the current state
@@ -166,7 +166,7 @@ ambiguous when two subagents of the same type run concurrently under different m
 That ambiguity is recorded on the row, not hidden: a joined attribution carries
 `model_attribution: 'joined' | 'ambiguous' | 'unknown'`, and any consumer of ADR 056 diversity data
 **must** treat `ambiguous` as unattributed rather than guessing. A silently-wrong model attribution
-corrupts the diversity conclusions exactly as badly as a missing one — worse, because it looks
+corrupts the ADR 314 diversity conclusions exactly as badly as a missing one — worse, because it looks
 trustworthy. We do not claim recovered attestation we do not have.
 
 ### Fail-open, unchanged

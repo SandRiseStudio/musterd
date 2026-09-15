@@ -25,6 +25,7 @@
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { decisionSection, isAppendOnlyAmendment } from './adr-sections.ts';
 import { isAcceptedAdr } from './adr-status.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -35,6 +36,12 @@ function git(...args: string[]): string {
     cwd: repoRoot,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
+    // Capture stderr instead of inheriting it. Several reads here PROBE for paths that may not exist
+    // at a ref (`fileAt`, the history walk), and each miss is expected and caught — but git still
+    // writes `fatal: path … does not exist` to the terminal, and a `fatal:` printed directly above a
+    // refusal reads as a crash rather than a verdict. The failure is still visible: it arrives in the
+    // thrown error, where the callers already handle it.
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
@@ -66,14 +73,61 @@ function resolveBase(): string {
 }
 
 const base = resolveBase();
-const changed = git('diff', '--name-status', `${base}...HEAD`)
+// `-M` so a rename arrives as one `R<score>\told\tnew` record instead of an unrelated delete plus
+// add. Without it rule 3 came off with a single `git mv`: the add has no before side, so a rename
+// that rewrote the Decision in the same diff was never judged at all (dolly, #1129 review, lane
+// 01M1EWVE68CB9CCGV76WGN61XT). Rules 1 and 2 are unaffected — neither reads the rename half.
+const changed = git('diff', '--name-status', '-M', `${base}...HEAD`)
   .split('\n')
   .filter(Boolean)
   .map((line) => {
     const [status, ...rest] = line.split('\t');
-    return { status: status ?? '', path: rest[rest.length - 1] ?? '' };
+    const code = status ?? '';
+    return {
+      status: code,
+      path: rest[rest.length - 1] ?? '',
+      // Only renames carry a second path; `null` everywhere else keeps the read below honest.
+      fromPath: code.startsWith('R') ? (rest[0] ?? '') : null,
+    };
   })
   .filter((c) => c.path);
+
+const ADR_PATH = /^docs\/decisions\/\d{3}-.*\.md$/;
+/** `docs/decisions/288-goal-retract.md` → `goal-retract.md`. The part a renumber does not touch. */
+const adrSlug = (path: string) => path.replace(/^docs\/decisions\/\d{3}-/, '');
+
+/*
+ * `-M` pairs by SIMILARITY, which is defeated by rewriting enough of the file: gut a long Decision
+ * and the pair falls under the 50% default, git reports an unrelated delete plus add, and rule 3 is
+ * off again. Measured on the corpus, 2026-09-01: renaming `106-unified-git-workflow.md` and
+ * replacing its 78-line Decision scored R040 — under threshold. Lowering the threshold trades one
+ * blind spot for false pairings across a 300-ADR corpus, so instead pair the way a RENUMBER actually
+ * works: the number changes and the slug does not. All 12 ADR renames in history keep the slug
+ * identical (falsify: `git log --diff-filter=R --name-status -M -- docs/decisions`). Deterministic,
+ * and it does not care how much of the body moved.
+ */
+const adrsBySlug = (status: string) => {
+  const by = new Map<string, typeof changed>();
+  for (const c of changed) {
+    if (c.status !== status || !ADR_PATH.test(c.path)) continue;
+    const slug = adrSlug(c.path);
+    by.set(slug, [...(by.get(slug) ?? []), c]);
+  }
+  return by;
+};
+
+const addedBySlug = adrsBySlug('A');
+const deletedBySlug = adrsBySlug('D');
+for (const [slug, added] of addedBySlug) {
+  const deleted = deletedBySlug.get(slug) ?? [];
+  // Exactly one candidate ON EACH SIDE, or the pairing is a guess — and a guess here accuses the
+  // wrong file of rewriting a Decision it never held. Two adds sharing a retired slug is the case
+  // that made the one-sided guard wrong (dolly, #1136 review): both were judged against the same
+  // before side, so a genuinely new ADR reusing the slug was refused.
+  if (added.length !== 1 || deleted.length !== 1) continue;
+  const entry = added[0];
+  if (entry) entry.fromPath = deleted[0]?.path ?? null;
+}
 
 if (changed.length === 0) {
   process.stdout.write('No changes against the base ref — nothing to gate.\n');
@@ -139,15 +193,8 @@ if (addedDeps.length > 0 && !hasAdr) {
 }
 
 // ─── Rule 3: an accepted ADR's Decision is immutable ───────────────────────────────────────────
-/** The body of the `## Decision` section, or null when the ADR has no such heading. */
-function decisionSection(text: string): string | null {
-  const lines = text.split('\n');
-  const start = lines.findIndex((l) => /^##\s+Decision\s*$/i.test(l));
-  if (start === -1) return null;
-  const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => /^##\s+/.test(l));
-  return (end === -1 ? rest : rest.slice(0, end)).join('\n').trim();
-}
+// `decisionSection` moved to `adr-sections.ts` so `check-watches.ts` can share the same boundary.
+// Two gates disagreeing about where a Decision starts would make one of them silently wrong.
 
 // The status parser lives in `adr-status.ts` — its own module so a test can import it without
 // running this script. Only the DETECTOR was widened there; what counts as frozen is unchanged:
@@ -207,14 +254,61 @@ function wasEverOnMain(path: string, decision: string): boolean {
   return false;
 }
 
-for (const { path, status } of changed) {
-  if (status !== 'M') continue; // only in-place edits; a new ADR is the sanctioned path
-  if (!/^docs\/decisions\/\d{3}-.*\.md$/.test(path)) continue;
+for (const { path, status, fromPath } of changed) {
+  // An in-place edit, or a rename OF ONE ADR TO ANOTHER — renumbering is legitimate, but it must not
+  // carry a Decision rewrite through the gate. A rename from outside `docs/decisions/` is left alone
+  // deliberately: promoting a draft into the corpus is an add, and the before side is not an ADR to
+  // compare against. A new ADR remains the sanctioned path.
+  const renamedFromAdr = fromPath !== null && ADR_PATH.test(fromPath);
+  if (status !== 'M' && !renamedFromAdr) continue;
+  if (!ADR_PATH.test(path)) continue;
 
-  const before = fileAt(base, path);
+  // For a rename the before side lives at the OLD path; reading the new path at base would find
+  // nothing and skip the check, which is the evasion itself.
+  const before = fileAt(base, fromPath ?? path);
   const after = fileAt('HEAD', path);
   if (before === null || after === null) continue;
-  if (!isAcceptedAdr(before)) continue; // a proposed ADR is still being drafted — editable
+  if (!isAcceptedAdr(before)) {
+    // A proposed ADR is still being drafted — editable. But the diff that FLIPS it to accepted is
+    // the last moment the Decision can change before the freeze, and rule 3 reads the before side,
+    // so without this branch that one diff could rewrite the Decision and freeze text nobody
+    // reviewed (dolly, #1123 review; measured on the corpus: 9 of 41 flips edited the Decision in
+    // the same commit, lane 01M1D3HJZACT6CC9KQ0QR88AJS). The flip diff must leave the Decision
+    // identical, or amend it with the same dated append-only markers accepted Decisions use — a
+    // silent rewrite is refused. `wasEverOnMain` deliberately does not apply here: a proposed
+    // Decision's history is drafts, and "some draft once said this" is not review.
+    if (!isAcceptedAdr(after)) continue;
+    const wasDecision = decisionSection(before);
+    const nowDecision = decisionSection(after);
+    if (wasDecision === nowDecision) {
+      process.stdout.write(
+        `• ${path} — Status flipped to accepted with the Decision unchanged; allowed. The freeze starts here.\n`,
+      );
+      continue;
+    }
+    if (
+      wasDecision !== null &&
+      nowDecision !== null &&
+      isAppendOnlyAmendment(wasDecision, nowDecision)
+    ) {
+      process.stdout.write(
+        `• ${path} — Status flipped to accepted and the Decision gained a dated amendment marker; allowed.\n`,
+      );
+      continue;
+    }
+    failed = true;
+    process.stderr.write(
+      `✗ ${path} — the \`## Decision\` changed in the same diff that flipped the ADR to accepted.\n` +
+        `  The flip is where the freeze begins, so this diff decides what text gets frozen — and a\n` +
+        `  Decision rewritten here is frozen without ever having been the text that was reviewed.\n` +
+        `  EITHER: keep the old text and add a dated marker carrying the correction —\n` +
+        `  \`_(Amended YYYY-MM-DD: … See the amendment below.)_\` — append-only, checked word for word.\n` +
+        `  OR: land the Decision change in a separate PR while the ADR is still proposed, and flip\n` +
+        `  in its own diff. The gate reads the whole diff, not commits, so splitting the commits on\n` +
+        `  one branch does not help — the separate PR is the reviewed route.\n\n`,
+    );
+    continue;
+  }
 
   const wasDecision = decisionSection(before);
   const nowDecision = decisionSection(after);
@@ -222,9 +316,24 @@ for (const { path, status } of changed) {
   // A restoration passes: this exact Decision text is one the file has held before (see
   // `wasEverOnMain`). Undoing an edit that slipped through the blind years must not be blocked by
   // the gate that just started watching.
-  if (nowDecision !== null && wasEverOnMain(path, nowDecision)) {
+  // Ask about the OLD path on a rename: at the base the new path has no history, so the restoration
+  // escape would find nothing and refuse a legitimate restore-and-renumber. (`--follow` inside walks
+  // through earlier renames from there; this only gets it to the right starting name.)
+  if (nowDecision !== null && wasEverOnMain(fromPath ?? path, nowDecision)) {
     process.stdout.write(
       `• ${path} — \`## Decision\` restored to a form this file previously held; allowed.\n`,
+    );
+    continue;
+  }
+  // An append-only dated amendment marker passes: the Decision's words survive and the only addition
+  // points at the amendment recorded elsewhere. This exists because the repo's own convention for
+  // marking superseded decision text in place (ADR 160:48/:90, ADR 250:67) became unwritable when
+  // this gate started firing — those markers landed while the status regex was blind, and
+  // `wasEverOnMain` cannot help, since it only ever passes text the file already held. The check is
+  // a property of the diff, not a promise: strip the markers, and the rest must match word for word.
+  if (nowDecision !== null && isAppendOnlyAmendment(wasDecision, nowDecision)) {
+    process.stdout.write(
+      `• ${path} — \`## Decision\` gained a dated amendment marker and is otherwise unchanged; allowed.\n`,
     );
     continue;
   }
@@ -236,6 +345,9 @@ for (const { path, status } of changed) {
       `  USUALLY WHAT YOU WANT: move the new text into \`## Consequences\` as a dated note. That is\n` +
       `  the amendment mechanism 07-conventions prescribes — Context / Consequences / Observability\n` +
       `  are all editable, and only Decision is frozen. A paragraph move, not a new document.\n` +
+      `  IF YOU ARE MARKING SUPERSEDED TEXT: add a dated marker and change nothing else —\n` +
+      `  \`_(Amended YYYY-MM-DD: … See the amendment below.)_\` or \`> **Amended YYYY-MM-DD.** …\`.\n` +
+      `  Append-only is checked, not trusted: strip the markers and the rest must match word for word.\n` +
       `  Write a superseding ADR only when the DECISION ITSELF is being reversed.\n\n`,
   );
 }

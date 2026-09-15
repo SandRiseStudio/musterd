@@ -1,6 +1,6 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
-import { roomTone, type LifeContext } from '../sound';
+import { roomTone, screenPan, type LifeContext } from '../sound';
 import { modelProvider } from '../modelProvider';
 import { providerIconHtml } from '../modelProviderIcon';
 import {
@@ -9,7 +9,13 @@ import {
   shortLaneState,
   shortWorkTitle,
 } from '../presenceLabel';
-import { createActors, type Actors } from './actors';
+import { musterdChipSvg } from '../../brand/chipMark';
+import { memberInk } from '../format';
+import { platesOpenMode, stillMode } from '../stillMode';
+import { surfaceGlyph } from '../surfaceGlyph';
+import { createActors, deskNeighbourPairs, type Actors } from './actors';
+import { solidHit, walkable } from './nav';
+import { helpWalks } from './mapping';
 import {
   ambientFrameBudgetMs,
   DEFAULT_CAPTURE_FPS,
@@ -18,15 +24,18 @@ import {
   shouldCoalesceDraw,
   suspendIgnored,
 } from './broadcast';
+import { AMBIENT_SLOT_MS, decideAmbient, roll, slotAt, slotRng } from './ambientSeed';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { createReceptionist, stepReceptionist } from './receptionist';
 import { fitFloor, project, type Fit, type Pt } from './iso';
-import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS } from './layout';
+import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS , RECEPTIONIST } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
-import { assignSeats, type Placement } from './seating';
+import { isWithinWorkingHours } from './workingHours';
+import { assignSeats, workingAtDesk, type Placement } from './seating';
+import { captionForPresence, pushCaption, tickCaption, CAPTION_HOLD_MS, type Caption, type CaptionRail } from '../captions';
+import { createWelcome, stepWelcome } from './welcome';
 import {
   animatedDeskAnchors,
-  chairKindFor,
   boardAnchor,
   coffeeAnchor,
   DARK_PALETTE,
@@ -41,64 +50,116 @@ import {
 } from './render';
 import { GESTURE } from './skeleton';
 import type { WallBoard } from './wallboard';
-import { shapeSpeech, speechLength, speechTokens, typeCadence, type SpeechToken } from './speech';
-import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
+import {
+  enqueueSpeech,
+  shapeSpeech,
+  speechHoldMs,
+  speechLength,
+  speechTokens,
+  SPEECH_MARK_GLYPH,
+  typeCadence,
+  type Addressee,
+  type SpeechMarking,
+  type SpeechToken,
+} from './speech';
+import type { AmbientLogEntry, OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, OfficeStats } from './types';
 
 const DPR_CAP = 2;
+
+/**
+ * The synthetic head the receptionist's bubble hangs from, and the key `showSpeech` recognises as
+ * "this is the house voice, not a seat".
+ *
+ * A bare string literal in three places was one typo away from a bubble that renders as an ordinary
+ * member — and the failure would be silent, because `heads.get(who)` simply returns undefined and
+ * `showSpeech` drops the line. She is deliberately NOT in the node map (staff, not roster —
+ * receptionist.ts), so no name collision with a real seat is possible: a member called
+ * `receptionist` could not be seated, since the room's own front desk is not a desk in `DESK_SLOTS`.
+ */
+const RECEPTIONIST_SPEAKER = 'receptionist';
 const CUE_SECS = 1.5;
 
 /** Posture → the name label's dot modifier. One green: only `working` earns it. */
 const DOT_STATE: Record<Posture, 'on' | 'idle' | 'away' | 'off'> = {
   working: 'on',
-  idle: 'idle',
+  active: 'idle', // the dot's visual state keeps its CSS name; the wire token is `active`
   away: 'away',
   offline: 'off',
 };
-// Speech-bubble lifecycle (ms): hold after the text finishes typing, then the exit transition length.
-// The hold is deliberately generous (plus a per-character allowance, capped) so a bubble lingers long
-// enough to actually read — and to click through to the stream — before it drifts away.
-const SPEECH_HOLD_MS = 4200;
-const SPEECH_HOLD_PER_CHAR_MS = 22;
-const SPEECH_HOLD_MAX_MS = 9000;
-/** Routine status pulses linger less — they arrive constantly and shouldn't own the floor. */
-const SPEECH_HOLD_MAX_STATUS_MS = 6000;
+// Speech-bubble lifecycle: the hold, the queue policy and their constants live in `speech.ts`
+// (`speechHoldMs` / `enqueueSpeech`) so they can be tested — this module runs the DOM half.
 const SPEECH_OUT_MS = 560;
+
 /** How far above the head anchor the bubble sits (clears the name label). */
 const SPEECH_LIFT = 26;
 /** After a real act, keep the loop alive this long so the Rive character settles into idle rather than
  * freezing mid-gesture (ADR 086 #5 afterglow) — a brief, bounded post-act tail, not a continuous loop. */
 const AFTERGLOW_MS = 2600;
-/** Ambient micro-choreography (ADR 086 Phase 2): when the room is quiet, inject one idle beat (a seated
- * micro-gesture — scratch, sip, swivel… — or a stroll) every ~30–70s. Timer-based (not RAF), one beat at
- * a time, always preempted by a real act. This is the whole-room cadence — on a small present roster it
- * divides down to each person. 90–180s read as a frozen room once the beat variety grew (nick's call,
- * 2026-07); the old 15–25s water-cooler parade is still the floor to stay well above. */
-const AMBIENT_MIN_MS = 30000;
-const AMBIENT_MAX_MS = 70000;
+/** Ambient micro-choreography (ADR 086 Phase 2, seeded by E1): when the room is quiet, inject one idle
+ * beat (a seated micro-gesture — scratch, sip, swivel… — or a stroll), drawn per 10s wall-clock slot so
+ * every viewer of the same team sees the same beats. How OFTEN is `ambientSeed.ambientFireP`, which
+ * scales with how many people are in the room (E1b): a populated floor reads at ~2.5–3 beats/idle-min,
+ * a room of two stays near the old ~30–70s cadence so a near-empty office does not read as twitchy.
+ * Timer-based (not RAF), one beat at a time, always preempted by a real act. 90–180s read as a frozen
+ * room once the beat variety grew (nick's call, 2026-07); the old 15–25s water-cooler parade is still
+ * the floor to stay well above. */
 /** While Tier B is awake for an *ambient-only* beat, coalesce toward ~20fps: only advance+redraw once
  * this much wall time has built up. A coffee stroll is visually identical at 20fps and ~3× cheaper; real
  * acts keep 60fps because their motion is not `ambientOnly`. */
 const AMBIENT_FRAME_MS = 50;
+
+/**
+ * THE DRIFT TIER (nick, 2026-09-14). A parked room is a still photograph — correct, cheap, and the
+ * reason it never looked alive between beats. This wakes it just enough for the idle sway, at 4fps.
+ *
+ * MEASURED before it was built, on /office-preview (12 desks), headless, 30s windows, main-thread
+ * busy time via CDP Performance.getMetrics, as a delta over a genuinely parked room (4.26/4.47% of
+ * one core):
+ *
+ *   2fps  +1.4   ·   4fps  +2.1..2.6   ·   6fps  +3.2   ·   12fps  +4.4   ·   20fps (ambient) +8.9
+ *
+ * 4 because 2 reads as a slideshow for a sway and 6 buys smoothness nobody can see. The cost lands in
+ * the same order as the "~2% of one core" already recorded in packages/web/AGENTS.md for the ambient
+ * cap, which the team accepted as a product call.
+ *
+ * A TIMER, NOT THE RAF COALESCER, and that is the spike's other finding rather than a style choice.
+ * Every coalesced measurement showed ~1800 ticks in 30s — rAF keeps firing at 60Hz and early-returns,
+ * so about a third of the 4fps cost was wasted wakeups. Fitting the four points: ~0.35pt per draw/s
+ * of real drawing, ~0.8pt of pure loop overhead. A timer skips ~56 pointless wakes a second.
+ *
+ * It does NOT touch the loop's park predicate: the loop still parks exactly when it always did, and
+ * this is a separate, slower heartbeat that only runs WHILE it is parked. The AGENTS.md rule is
+ * "stop when UNSEEN" — a hidden tab, a collapsed panel — and those still park dead, below.
+ */
+const DRIFT_FRAME_MS = 250;
 
 /** How often the office re-reads the PST clock so the lighting tracks the real sun (the sun moves slowly —
  * once a minute is plenty, and a rebake only happens when the veil/lamp state actually crosses a step). */
 const LIGHT_TICK_MS = 60000;
 
 /**
- * Current hour-of-day (0..24) in America/Los_Angeles — the office clock the lighting follows. A
- * `?light=HH` / `?light=HH:MM` query param overrides it, a dev aid for previewing dawn/dusk/night without
- * waiting for the wall clock (harmless in prod — it only applies when explicitly present).
+ * The `?light=HH` / `?light=HH:MM` dev override, if present — a dev aid for previewing dawn/dusk/night
+ * without waiting for the wall clock (harmless in prod — it only applies when explicitly present). The
+ * shift check rides the same override (keeping the real weekday), so `?light=23` also previews the
+ * after-hours office.
  */
-function pstNowHours(): number {
+function lightOverrideHours(): number | null {
   try {
     const q = new URLSearchParams(window.location.search).get('light');
     const m = q && /^(\d{1,2})(?::(\d{2}))?$/.exec(q.trim());
     if (m) return (Number(m[1]) % 24) + (m[2] ? Number(m[2]) / 60 : 0);
   } catch {
-    /* no window/search available — fall through to the real clock */
+    /* no window/search available — the real clock rules */
   }
+  return null;
+}
+
+/** Current hour-of-day (0..24) in America/Los_Angeles — the office clock the lighting follows. */
+function pstNowHours(): number {
+  const override = lightOverrideHours();
+  if (override !== null) return override;
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Los_Angeles',
     hour: 'numeric',
@@ -110,11 +171,53 @@ function pstNowHours(): number {
   return (hh % 24) + mm / 60;
 }
 
+/**
+ * `?still` — MEASUREMENT MODE. Two things in this file answer to it, and they are different sizes.
+ *
+ * THE BUBBLE HOLD. A speech bubble dismisses itself after `SPEECH_HOLD_MS + 22ms/char` (capped at
+ * 6–9s). That is right for a reader and fatal for a measurement: the a11y contrast sweep settles,
+ * freezes rAF and shoots one screenshot, and that window straddles the dismiss countdown — so the
+ * same commit measures a different room run to run, and a bubble caught mid-fade is sampled over
+ * whatever scene paint is behind it rather than over its own paper. Measured 2026-08-17:
+ * /office-preview flipped red about 1 run in 3, always an `lc-speech__text` row, on #3b5854 /
+ * #2d4245 / #724b29 — three different bits of furniture, one bubble.
+ *
+ * THE AMBIENT HOLD (added 2026-08-19, ADR 285). The idle-beat scheduler injects a stroll or a
+ * micro-gesture every 30–70s, forever. It already stands down under reduced motion — but
+ * /office-preview mounts this scene with `reduced: false` hardcoded, so on the route the contrast
+ * gate leans on hardest it keeps running: an identity-keeping motion probe watched a room sit
+ * perfectly still for 115 seconds and then start walking again at 137s. One re-arming timer is
+ * enough to make a page that never settles, and the sweep then reports MEASURED MID-FLIGHT on every
+ * run — a true signal that decays into noise precisely because it is always on.
+ *
+ * The room still paints what it would otherwise paint: nothing is hidden, nothing is repositioned,
+ * and the script's own walks are untouched (they drain in ~22s, and they are the subject). What
+ * stops is the room MOVING ON of its own accord. Inert unless explicitly present, like `?light=HH`.
+ *
+ * The flag itself is read by `../stillMode`, shared with the overlay reel and the asks-strip so the
+ * four consumers cannot drift apart on what `?still` means.
+ */
+
 /** An in-flight speech bubble over a member's head — its DOM root plus the timers/frames to cancel when
- * it's superseded (a newer act from the same member) or the office is disposed. */
+ * the office is disposed (or the member leaves the floor mid-sentence). */
 interface Speech {
   outer: HTMLDivElement;
   cancels: Array<() => void>;
+}
+
+/** An act waiting for the speaker's current bubble to finish. Stored as the ARGUMENTS, not as a
+ * built bubble: by the time it plays the member may have walked to another desk, so the head anchor
+ * and the actor's colour have to be resolved then, not now. */
+interface Utterance {
+  raw: string;
+  tone: string;
+  // Explicitly `| undefined` on each optional: the repo runs `exactOptionalPropertyTypes`, so a
+  // field declared `id?: string` will not accept an `id` that is present and undefined — which is
+  // exactly what forwarding `showSpeech`'s own optional arguments produces.
+  id?: string | undefined;
+  act?: string | undefined;
+  addressee?: Addressee | null | undefined;
+  marking?: SpeechMarking | null | undefined;
 }
 
 /**
@@ -156,6 +259,13 @@ export interface OfficeOptions {
    * the in-panel WorkStack fallback instead.
    */
   showWorkCues?: boolean;
+  /**
+   * The narration line (first-five-seconds §2) — one transient plain-language moment about what
+   * just happened in the room. Called with the current caption, or null when it expires. The rail
+   * used to be a floating lower-third element over the scene; it now reads as chrome, so the CHROME
+   * renders it (WorkStack's header) and the scene only says what the moment is (nick, 2026-08-31).
+   */
+  onCaption?: (caption: Caption | null) => void;
 }
 
 export function mountOffice(
@@ -165,11 +275,19 @@ export function mountOffice(
   options: OfficeOptions = {},
 ): OfficeHandle {
   const broadcast = options.broadcast === true;
+  /* Read once at mount: the flag cannot change under a running room, and re-parsing per bubble would
+     put a URLSearchParams allocation on the speech path. */
+  const STILL = stillMode();
   const captureFps =
     typeof options.captureFps === 'number' && options.captureFps > 0
       ? options.captureFps
       : DEFAULT_CAPTURE_FPS;
   const interactiveLabels = options.interactiveLabels === true;
+  /* `?plates-open` (stillMode.ts) — measurement mode: every plate mounts with its detail already
+     open, so the harness segment's four inks are visible to the contrast sweep. Read once here
+     rather than per plate per sync: the flag cannot change without a navigation, and this runs
+     inside syncLabels. Interactive routes only — a broadcast plate has no detail to open. */
+  const platesOpen = interactiveLabels && platesOpenMode();
   const showWorkCues = options.showWorkCues !== false;
   const dpr = officeDpr(broadcast, DPR_CAP);
 
@@ -233,6 +351,40 @@ export function mountOffice(
    * reads it, so it advances only while the loop runs and a rested office holds its frame. */
   let clock = 0;
   let placements = new Map<string, Placement>();
+  // The caption rail (first-five-seconds §2): one transient plain-language line. The queue/hold
+  // logic lives here in the lazy chunk; the LINE renders in WorkStack's header via onCaption.
+  let rail: CaptionRail = { current: null, shownAt: 0, queue: [] };
+  let railTimer: ReturnType<typeof setInterval> | null = null;
+  let onlineNames = new Set<string>();
+  // The receptionist welcome (first-five-seconds §4) — stepped on a coarse timer; her bubble rides
+  // the ordinary speech machinery via the synthetic 'receptionist' head injected each bake.
+  const welcome = createWelcome(broadcast, typeof localStorage === 'undefined' ? null : localStorage);
+  const welcomeTimer = setInterval(() => {
+    if (STILL) return; // deterministic measurement mode: nothing transient may start
+    if (!broadcast && (suspended || !VISIBLE())) return;
+    // The team name is hers to say: she is the one character on the floor whose job is to tell a
+    // stranger where they have landed (welcome.ts).
+    const line = stepWelcome(welcome, Date.now(), actors.active(), teamName);
+    if (line) showSpeech(RECEPTIONIST_SPEAKER, line, 'info');
+  }, 5_000);
+  function renderRail() {
+    // The line is chrome now, not scene DOM — hand it out and let WorkStack's header carry it.
+    options.onCaption?.(rail.current);
+    if (rail.current === null && rail.queue.length === 0) {
+      if (railTimer) clearInterval(railTimer);
+      railTimer = null;
+    } else if (!railTimer) {
+      // Tick only while something shows or waits — no standing interval on an idle rail.
+      railTimer = setInterval(() => {
+        rail = tickCaption(rail, Date.now());
+        renderRail();
+      }, CAPTION_HOLD_MS / 4);
+    }
+  }
+  function pushRail(caption: Caption) {
+    rail = pushCaption(rail, caption, Date.now());
+    renderRail();
+  }
   let teamName = 'revive';
   let teamWorkingHours: OfficeData['teamWorkingHours'] = null;
   let wallBoard: WallBoard | null = null; // the wall's agile board (bake-time data)
@@ -242,6 +394,7 @@ export function mountOffice(
 
   const labels = new Map<string, HTMLDivElement>();
   const speeches = new Map<string, Speech>(); // one live speech bubble per member (name → bubble)
+  const queued = new Map<string, Utterance[]>(); // acts waiting behind a member's live bubble
   const cues: Cue[] = [];
 
   const AUTO_COLLAPSE_MS = 5000;
@@ -281,12 +434,18 @@ export function mountOffice(
     if (!interactiveLabels) return;
     let st = plateExpand.get(name);
     if (!st) {
-      st = { expanded: false, timer: null };
+      // Seeded from the flag for the same reason: without this, the first click on a plate that
+      // MOUNTED open would set expanded=true — a no-op the viewer reads as a dead control.
+      st = { expanded: platesOpen, timer: null };
       plateExpand.set(name, st);
     }
     clearExpandTimer(name);
     st.expanded = !st.expanded;
     applyExpandDom(name, st.expanded);
+    // The tick lives HERE and not in applyExpandDom, whose other caller is scheduleCollapse's
+    // timer — a tick from a timer is feedback for an action nobody chose (E4 spec §2).
+    const at = heads.get(name);
+    roomTone.moment(st.expanded ? 'plateOpen' : 'plateClose', at ? screenPan(at.x, width) : 0);
   }
 
   // ── Tier-A ambient overlay (ADR 086): GPU-composited CSS life over the baked floor — a slow day-cycle
@@ -362,12 +521,16 @@ export function mountOffice(
     };
   }
 
-  /** Recompute the office lighting from the PST clock + occupancy, and push the natural-light wash (tint +
-   * strength) to the CSS overlay. Returns whether the *canvas* light (night veil / desk lamps) crossed a
-   * step and so needs a rebake — the caller decides whether to act on it. */
+  /** Recompute the office lighting from the PST clock + occupancy + the team's declared shift, and push
+   * the natural-light wash (tint + strength) to the CSS overlay. Returns whether the *canvas* light
+   * (night veil / desk lamps) crossed a step and so needs a rebake — the caller decides whether to act
+   * on it. */
   function refreshLightEnv(): boolean {
     const prev = lightEnv;
-    lightEnv = computeLightEnv(pstNowHours(), occupied);
+    const inShift = teamWorkingHours
+      ? isWithinWorkingHours(teamWorkingHours, new Date(), lightOverrideHours() ?? undefined)
+      : null;
+    lightEnv = computeLightEnv(pstNowHours(), occupied, inShift);
     if (!reduced) {
       // natural light enters as the soft-light wash — colour + strength straight off the clock
       ambientHost.style.setProperty('--lc-amb-strength', lightEnv.skyStrength.toFixed(3));
@@ -399,6 +562,10 @@ export function mountOffice(
       teamWorkingHours,
     );
     heads = anchors.heads;
+    // The receptionist's bubble anchor — synthetic head above her desk. syncLabels skips names
+    // without a node, so she gains a voice without gaining a nameplate or a roster row.
+    const rp = project(RECEPTIONIST.lx, RECEPTIONIST.ly, fit);
+    heads.set(RECEPTIONIST_SPEAKER, { x: rp.x, y: rp.y - 58 * fit.scale });
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
     positionBoardSpot();
@@ -480,9 +647,16 @@ export function mountOffice(
       el.textContent = '';
       el.style.pointerEvents = interactiveLabels ? 'auto' : 'none';
       el.classList.toggle('is-broadcast', !interactiveLabels);
+      /* The plate's rim wears the seat's own hue rather than the house mustard — the same identity
+         the body under it is painted in. `memberColor`, a FILL: the CSS mixes it into the paper rim
+         at 34% and it never carries text, so the fill/ink split is respected. */
+      el.style.setProperty('--lc-plate-hue', node.color);
 
       const present = node.presence !== 'offline';
-      const expanded = plateExpand.get(name)?.expanded === true;
+      // Absent state means the viewer has not touched this plate yet, which is where `?plates-open`
+      // lands: the DEFAULT is open under the flag, so plates mount unpacked with no transition to
+      // race. An explicit state always wins, so a viewer collapsing one still collapses it.
+      const expanded = plateExpand.get(name)?.expanded ?? platesOpen;
       el.classList.toggle('is-expanded', expanded);
 
       const meta = identityMeta({
@@ -511,13 +685,44 @@ export function mountOffice(
         plateRule.setAttribute('aria-hidden', 'true');
         plate.appendChild(plateRule);
 
-        const provider = modelProvider(node.model);
-        const icon = document.createElement('span');
-        icon.className = 'lc-gl-label__provider';
-        icon.style.borderColor = provider.border;
-        icon.style.background = provider.fill;
-        icon.innerHTML = providerIconHtml(provider);
-        plate.appendChild(icon);
+        if (node.dnd) {
+          // dnd is prominent on the COLLAPSED plate (presence-honesty §3): same slot grammar as the
+          // service tag, filled pill in the warn ink — visible at both scales without expanding.
+          const dndTag = document.createElement('span');
+          dndTag.className = 'lc-gl-label__dnd';
+          dndTag.textContent = 'dnd';
+          plate.appendChild(dndTag);
+        }
+        if (node.woken) {
+          // Why this seat is in the room (ADR 131) — a wake put it there, rather than a person
+          // opening a session. On the COLLAPSED plate, same slot grammar as `dnd` and `service`,
+          // because the window it has to be read in is the whole problem: a clean codex wake held
+          // presence for ELEVEN SECONDS (claim 14:19:04 → ws_close 14:19:15). A fact that only
+          // appears on expand is a fact nobody will ever expand in time to see.
+          // Quieter than `dnd` on purpose. dnd is an instruction to the room — do not walk to me —
+          // and it outranks this; `woken` is context you check once something has caught your eye.
+          const wokenTag = document.createElement('span');
+          wokenTag.className = 'lc-gl-label__woken';
+          wokenTag.textContent = 'woken';
+          plate.appendChild(wokenTag);
+        }
+        if (node.service) {
+          // A service seat has no model to attest (ADR 232 — it is pure code), so the provider
+          // slot would render the unknown-"?" mark and read as a broken attestation. Say what it
+          // is instead: a small mono "service" tag where the icon would sit.
+          const tag = document.createElement('span');
+          tag.className = 'lc-gl-label__service';
+          tag.textContent = 'service';
+          plate.appendChild(tag);
+        } else {
+          const provider = modelProvider(node.model);
+          const icon = document.createElement('span');
+          icon.className = 'lc-gl-label__provider';
+          icon.style.borderColor = provider.border;
+          icon.style.background = provider.fill;
+          icon.innerHTML = providerIconHtml(provider);
+          plate.appendChild(icon);
+        }
 
         // The detail is a two-part nest on purpose: the outer element is the animating *track* (a
         // 0fr→1fr grid column, which is the only way to slide open to a width nobody knows in
@@ -526,13 +731,17 @@ export function mountOffice(
         detail.className = 'lc-gl-label__detail';
         const detailIn = document.createElement('span');
         detailIn.className = 'lc-gl-label__detailin';
+        // Services carry no model: the tag above already says what they are, so the expanded
+        // detail is harness · role only, and broadcast (model crumb only) shows nothing extra.
         const detailParts = interactiveLabels
           ? plateDetailParts({
               surface: node.surface,
-              model: node.model,
+              model: node.service ? null : node.model,
               role: node.role,
             })
-          : plateDetailParts({ model: node.model }).filter((p) => p.kind === 'model');
+          : plateDetailParts({ model: node.service ? null : node.model }).filter(
+              (p) => p.kind === 'model',
+            );
         for (const [i, part] of detailParts.entries()) {
           if (i > 0) {
             const divider = document.createElement('span');
@@ -542,7 +751,20 @@ export function mountOffice(
           }
           const segEl = document.createElement('span');
           segEl.className = `lc-gl-label__seg lc-gl-label__seg--${part.kind}`;
-          segEl.textContent = part.text;
+          // The three harnesses whose seats a provider pin cannot distinguish (a cursor seat's pin
+          // says Claude) get a glyph + their own ink; everything else stays bare text.
+          const glyph = part.kind === 'harness' ? surfaceGlyph(node.surface) : null;
+          if (glyph) {
+            segEl.classList.add(`lc-gl-label__seg--hz-${glyph.id}`);
+            const mark = document.createElement('span');
+            mark.className = 'lc-gl-label__hz';
+            mark.setAttribute('aria-hidden', 'true');
+            mark.innerHTML = glyph.svg;
+            segEl.appendChild(mark);
+            segEl.appendChild(document.createTextNode(part.text));
+          } else {
+            segEl.textContent = part.text;
+          }
           detailIn.appendChild(segEl);
         }
         // Each child carries its own position so ONE css rule can stagger them. Five nth-child rules
@@ -641,6 +863,36 @@ export function mountOffice(
     repositionSpeeches(headMap);
   }
 
+  /**
+   * The light-trace: one quadratic arc from just under the speaker's bubble to the recipient's head,
+   * bowed upward so it clears the furniture between them rather than cutting through the room. Sized
+   * to the bounding box of the two anchors (plus the bow) so the SVG never covers the whole stage and
+   * intercepts nothing — it is inert decoration over a canvas that owns the pointer.
+   */
+  function drawTether(from: Pt, to: Pt): SVGSVGElement {
+    const bow = Math.min(120, Math.max(48, Math.hypot(to.x - from.x, to.y - from.y) * 0.28));
+    const y0 = from.y - SPEECH_LIFT + 8; // leaves the bubble at its lower edge, not the head
+    const cx = (from.x + to.x) / 2;
+    const cy = Math.min(y0, to.y) - bow;
+    const minX = Math.min(from.x, to.x) - 2;
+    const minY = cy - 2;
+    const w = Math.abs(to.x - from.x) + 4;
+    const h = Math.max(y0, to.y) - minY + 4;
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'lc-speech-trace');
+    svg.setAttribute('viewBox', `${minX} ${minY} ${w} ${h}`);
+    svg.style.left = `${minX}px`;
+    svg.style.top = `${minY}px`;
+    svg.style.width = `${w}px`;
+    svg.style.height = `${h}px`;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M${from.x} ${y0} Q${cx} ${cy} ${to.x} ${to.y}`);
+    // The dash is the whole path length, so the CSS animation draws it on from the speaker's end.
+    svg.appendChild(path);
+    return svg;
+  }
+
   // ── ephemeral speech: an act's body types out over the sender's head, then fades ───────────────────
   function positionSpeech(outer: HTMLDivElement, head: Pt) {
     outer.style.transform = `translate(-50%, -100%) translate(${head.x}px, ${head.y - SPEECH_LIFT}px)`;
@@ -660,18 +912,65 @@ export function mountOffice(
     if (speeches.get(who) === s) speeches.delete(who);
   }
 
-  /** Show a member's act body as a typed-out bubble that holds, then drifts up and fades. One bubble per
-   * member — a newer act supersedes the previous. Driven by timers/CSS (not the RAF loop), so it animates
-   * even while the office rests; reduced-motion shows the text at once with no typewriter. When the act's
-   * envelope `id` is known (and the host wired `onActClick`), the bubble is a click-through to that act
-   * in the stream panel. */
-  function showSpeech(who: string, raw: string, tone: string, id?: string, act?: string) {
+  /**
+   * A member said something. If they are already mid-sentence, it WAITS.
+   *
+   * The floor used to supersede: a second act from the same seat destroyed the first bubble wherever
+   * its typewriter had got to. On a quiet room that is invisible, but seats speak in bursts — a
+   * status_update, then the lane act, then the insight — and what a viewer actually saw was a line
+   * appear, get two words in, and vanish (nick, 2026-09-04: "the 1st one will appear briefly and
+   * then get replaced by the next one"). The act was on screen and unreadable, which is worse than
+   * not showing it: the eye is drawn to the movement and then given nothing.
+   *
+   * So a bubble now owns the head until it has finished. The next act queues, the current one types
+   * out, holds a short beat rather than its full generous read (`SPEECH_HOLD_QUEUED_MS` — the long
+   * hold is for a line nobody is waiting behind), fades, and the next enters. Hovering still freezes
+   * everything, because the handover rides the same fade the hover already pauses.
+   *
+   * The queue is bounded and drops from the FRONT — see `SPEECH_QUEUE_MAX`.
+   */
+  function showSpeech(
+    who: string,
+    raw: string,
+    tone: string,
+    id?: string,
+    act?: string,
+    addressee?: Addressee | null,
+    marking?: SpeechMarking | null,
+  ) {
+    const u: Utterance = { raw, tone, id, act, addressee, marking };
+    if (!speeches.has(who)) {
+      playSpeech(who, u);
+      return;
+    }
+    // Drop the oldest unshown, never the newest: what is worth catching up on is the recent state.
+    const q = queued.get(who) ?? [];
+    queued.set(who, enqueueSpeech(q, u));
+  }
+
+  /** Hand the head to the next queued act, if any. Called only where a bubble ended on its own
+   * schedule — a bubble torn down because the office is disposing has nothing to hand over to. */
+  function drainSpeech(who: string) {
+    const q = queued.get(who);
+    const next = q?.shift();
+    if (!q || q.length === 0) queued.delete(who);
+    if (next) playSpeech(who, next);
+  }
+
+  /** Build and run one bubble: type out, hold, drift up and fade. Driven by timers/CSS (not the RAF
+   * loop), so it animates even while the office rests; reduced-motion shows the text at once with no
+   * typewriter. When the act's envelope `id` is known (and the host wired `onActClick`), the bubble is
+   * a click-through to that act in the stream panel. */
+  function playSpeech(who: string, u: Utterance) {
+    const { raw, tone, id, act, addressee, marking } = u;
     const { glance, full, clamped } = shapeSpeech(raw, act);
     const head = heads.get(who);
-    if (!glance || !head) return; // nothing to say, or the sender isn't on the floor (offline / capped)
-
-    const prev = speeches.get(who);
-    if (prev) clearSpeech(who, prev);
+    // Nothing to say, or the sender left the floor while queued (offline / capped out of the render).
+    // Their backlog goes with them — a bubble over an empty desk is not a catch-up, it is a ghost.
+    if (!glance || !head) {
+      queued.delete(who);
+      return;
+    }
 
     const outer = document.createElement('div');
     outer.className = 'lc-speech';
@@ -688,7 +987,82 @@ export function mountOffice(
         options.onActClick!(id);
       });
     }
-    inner.style.setProperty('--lc-speech-tone', toneColor(tone));
+    /* ── the bubble's colour is WHO, not WHAT ──────────────────────────────────────────────────
+       `--lc-speech-tone` names an act tone for historical reasons and now carries the sender's
+       identity hue: ring, tail, blush and glow all come off it, so every bubble a member speaks
+       looks like that member and no other. See speech.ts `speechMark` for the full argument and
+       for where the act went instead.
+
+       Two values, because a colour that is both SEEN and READ needs two (format.ts, and the
+       --lc-*-ink block in Live.css). `node.color` is `memberColor` — a FILL, and it spans luminance
+       0.154–0.699 across the hue bands, so mixing it into the rich-token text colours would be
+       readable for indigo and not for amber. `memberInk` is the same hue held at a luminance that
+       clears AA on the paper, and it is what the text usages mix with.
+
+       The receptionist is not in the node map (she is staff, not roster — receptionist.ts), so she
+       falls through to the act tone and to her own stock in the CSS. That is the intended path, not
+       a gap: she is the one speaker on the floor with no identity to paint. */
+    const speaker = actors.nodes().get(who);
+    inner.style.setProperty('--lc-speech-tone', speaker ? speaker.color : toneColor(tone));
+    // Both are set on every bubble, never one of them: `--lc-speech-ink` has no `:root` definition
+    // (it is runtime-parametric, which is what exempts it from `tokens:check`), so a bubble that set
+    // only the tone would leave every text usage with an unresolved var() — and an unresolved
+    // `color:` is not an error, CSS just drops the declaration and the span silently inherits. That
+    // is the exact failure mode the --lc-type-* note in packages/web/AGENTS.md records costing three
+    // of six tokens in #1104. The receptionist gets the act tone for both, which is what she had.
+    inner.style.setProperty(
+      '--lc-speech-ink',
+      speaker ? memberInk(who, speaker.kind, speaker.hue) : 'var(--lc-paper-ink)',
+    );
+    if (marking) {
+      inner.classList.add(`is-mark--${marking.mark}`);
+      // The loud variant of `needs-human`: the tier actually holds its sender (ADR 147 §2), so
+      // nothing that seat was doing moves again until a person answers.
+      if (marking.holds) inner.classList.add('is-holding');
+      /* A real element rather than a pseudo, for two reasons that both bit: `__inner`'s ::before
+         and ::after are the bubble's tail, and hanging the badge off `__text::after` instead
+         anchored it to the TEXT — so on a bubble with a recipient chip it landed halfway down the
+         body instead of at the corner. As a child of `__inner` it sits against the bubble's own box
+         and inherits the enter/fade transition, which a pseudo on the outer wrapper would not. */
+      const badge = document.createElement('span');
+      badge.className = 'lc-speech__mark';
+      badge.textContent = SPEECH_MARK_GLYPH[marking.mark];
+      badge.setAttribute('aria-hidden', 'true');
+      inner.appendChild(badge);
+    }
+
+    /* ── the receptionist's bubble is HOUSE, not a member's ────────────────────────────────────
+       Everything the room says about itself comes out of her mouth — where you are, what these
+       people are, what the bubbles mean (welcome.ts). Until now that arrived wearing the same paper
+       and the same tail as an agent's status update, which quietly made the house voice look like a
+       eleventh seat: the one bubble on the floor that is NOT an attested member speaking was the one
+       hardest to tell apart from one.
+       Same argument as receptionist.ts's "staff, not roster" — no nameplate, no headcount, no roster
+       row — carried into the one place she does appear as a speaker. She gets the brand mark rather
+       than an identity hue, because the mark IS her identity: she speaks for musterd, not for a
+       seat. */
+    if (who === RECEPTIONIST_SPEAKER) {
+      outer.classList.add('is-reception');
+      const mark = document.createElement('span');
+      mark.className = 'lc-speech__brand';
+      // Static markup from a constant path (brand/chipMark.ts) — no interpolated content ever
+      // reaches it. Same shape as the provider pin and the harness glyph above.
+      mark.innerHTML = musterdChipSvg(13);
+      inner.appendChild(mark);
+    }
+    // ── the recipient chip ────────────────────────────────────────────────────────────────────
+    // A directed act names who it is aimed at, so the body can safely say "you". Team and broadcast
+    // acts pass no addressee: the team is already the default audience, and a chip on every bubble
+    // would be chrome. The chip carries MEANING, so unlike the tether it survives reduced-motion
+    // and measurement mode.
+    if (addressee) {
+      const chip = document.createElement('span');
+      // A set chip drops the single-name width clamp: at 3-4 names the clamp ellipsises, and a chip
+      // that names the set and then hides part of it is the failure this whole path exists to end.
+      chip.className = addressee.names.length > 1 ? 'lc-speech__to lc-speech__to--set' : 'lc-speech__to';
+      chip.textContent = `→ ${addressee.label}`;
+      inner.appendChild(chip);
+    }
     const textEl = document.createElement('span');
     textEl.className = 'lc-speech__text';
     inner.appendChild(textEl);
@@ -753,6 +1127,34 @@ export function mountOffice(
     speeches.set(who, s);
     positionSpeech(outer, head);
 
+    // ── the light-trace ───────────────────────────────────────────────────────────────────────
+    // A soft arc from the bubble toward the recipient's desk, drawn once and fading as the bubble
+    // settles: it makes the room read as wired together rather than as a set of separate speakers.
+    // Pure delight, so it stands down wherever delight is not wanted — reduced motion, and STILL
+    // (ADR 285) where a moving line would make the contrast sweep nondeterministic. A recipient who
+    // isn't on the floor (offline, or capped out of the render) has no desk to point at, so the
+    // chip stands alone.
+    //
+    // An ADR 254 eligible set names 2–4 seats, any one of whom discharges the act, so it gets a
+    // trace to EACH of their desks rather than a picked one: the room shows the same ambiguity the
+    // ledger holds. A sender inside their own set is skipped here for the same reason a self-
+    // addressed member act drops its tether.
+    const targets = addressee?.tether
+      ? addressee.names.filter((n) => n !== who).map((n) => heads.get(n))
+      : [];
+    const drawn = targets.filter((t): t is NonNullable<typeof t> => t !== undefined);
+    if (drawn.length > 0 && !reduced && !STILL) {
+      for (const target of drawn) {
+        const trace = drawTether(head, target);
+        labelHost.appendChild(trace);
+        s.cancels.push(() => trace.remove());
+      }
+      // The whoosh deliberately follows the tether's own gate (E4 spec §2): a sweep describing
+      // motion that is not drawing would be a lie. Pan rides sender → addressee with the trace, and
+      // stays ONE sweep however many traces drew — four whooshes for one act is noise, not weight.
+      roomTone.moment('whoosh', screenPan(head.x, width), screenPan(drawn[0]!.x, width));
+    }
+
     // enter on the next frame so the hidden initial state paints first → the CSS transition actually runs
     const raf = requestAnimationFrame(() => outer.classList.add('is-in'));
     s.cancels.push(() => cancelAnimationFrame(raf));
@@ -781,18 +1183,29 @@ export function mountOffice(
 
     // The dismiss countdown: begin() arms it, and it's cancelled while hovered (below) so a reader —
     // or a click — is never raced by the fade. Longer glances earn a longer base read.
-    const holdCap = act === 'status_update' ? SPEECH_HOLD_MAX_STATUS_MS : SPEECH_HOLD_MAX_MS;
-    const holdMs = Math.min(holdCap, SPEECH_HOLD_MS + glance.length * SPEECH_HOLD_PER_CHAR_MS);
     let hold: ReturnType<typeof setTimeout> | undefined;
     let counting = false; // true once the typewriter has finished and the fade timer is live
     const begin = () => {
       counting = true;
-      hold = setTimeout(() => {
-        outer.classList.remove('is-in');
-        outer.classList.add('is-out');
-        const rm = setTimeout(() => clearSpeech(who, s), SPEECH_OUT_MS);
-        s.cancels.push(() => clearTimeout(rm));
-      }, holdMs);
+      if (STILL) return; // measurement mode: the bubble stays up, so the sweep measures a room that stops
+      // Read the queue HERE, not at build time: an act can arrive while this bubble is still typing,
+      // and the whole point is that it shortens this line's stay rather than cutting it off. Re-read
+      // on every begin(), so a hover that re-arms the countdown also re-asks the question.
+      const waiting = queued.get(who)?.length ?? 0;
+      hold = setTimeout(
+        () => {
+          outer.classList.remove('is-in');
+          outer.classList.add('is-out');
+          const rm = setTimeout(() => {
+            clearSpeech(who, s);
+            // The handover, at the end of the fade rather than the start of it — two bubbles over
+            // one head, one arriving as the other leaves, reads as the flicker this replaced.
+            drainSpeech(who);
+          }, SPEECH_OUT_MS);
+          s.cancels.push(() => clearTimeout(rm));
+        },
+        speechHoldMs(glance.length, act, waiting),
+      );
     };
     s.cancels.push(() => clearTimeout(hold));
 
@@ -890,7 +1303,16 @@ export function mountOffice(
    */
   function living(): boolean {
     if (reduced) return false;
-    for (const n of actors.nodes().values()) if (n.activity === 'working') return true;
+    // The same predicate the renderer types on and the room-tone `working[]` is collected by
+    // (E2 spec §2's park invariant): keyed on activity while the renderer keyed on posture, a
+    // posture-working seat with stale activity froze mid-typing on the park frame — and the sound
+    // layer would have kept typing after the room visually idled.
+    //
+    // It now reads the pose too (`workingAtDesk`), because a desk is only alive once its owner has
+    // sat down at it. A member still walking in keeps the loop running on their walk, and their sit
+    // blend is itself reported as motion, so the loop cannot park between "seated" and `sit > 0.9`.
+    const poses = actors.poses();
+    for (const n of actors.nodes().values()) if (workingAtDesk(n, poses.get(n.name)?.sit)) return true;
     return false;
   }
 
@@ -936,7 +1358,7 @@ export function mountOffice(
     // The receptionist wakes for a present member and looks up while any check-in beat holds. Like
     // the pet, she never keeps an empty room awake: asleep returns false and the room bakes still.
     const anyonePresent = [...actors.nodes().values()].some((n) => n.presence !== 'offline');
-    const recepActive = stepReceptionist(recep, dt, anyonePresent, actors.checkInHolds() > 0);
+    const recepActive = stepReceptionist(recep, dt, anyonePresent, actors.checkInHolds() > 0, { team: teamName, nowMs: Date.now() });
     pushOccupancy(now);
     for (let i = cues.length - 1; i >= 0; i--) {
       const c = cues[i]!;
@@ -968,10 +1390,39 @@ export function mountOffice(
       raf = 0;
       last = 0;
       acc = 0;
+      // The loop is parking, so occupancy stops updating — hand the sound layer a final snapshot
+      // with `working: []` as the floor of the park invariant (E2 spec §2): a parked room must not
+      // keep typing off its last live snapshot.
+      pushOccupancy(now, true);
+      // …and hand the room over to the slow heartbeat, so a quiet office breathes instead of freezing.
+      ensureDrift();
     }
   }
+  /* The drift heartbeat. Armed whenever the rAF loop is NOT running and the room is genuinely on
+     screen; cleared the instant the loop takes over, so the two never draw the same frame twice. */
+  let driftTimer: ReturnType<typeof setInterval> | null = null;
+  function stopDrift() {
+    if (driftTimer) clearInterval(driftTimer);
+    driftTimer = null;
+  }
+  function ensureDrift() {
+    if (driftTimer || raf || reduced || STILL || suspended || disposed || !VISIBLE()) return;
+    driftTimer = setInterval(() => {
+      // Re-check every tick, not just at arm time: a tab can hide, a panel collapse or a real act
+      // wake the loop between two beats of a 250ms timer, and a drift frame drawn over a live rAF
+      // frame is a double paint nobody asked for.
+      if (raf || reduced || STILL || suspended || disposed || !VISIBLE()) {
+        stopDrift();
+        return;
+      }
+      clock += DRIFT_FRAME_MS / 1000;
+      drawDynamic();
+    }, DRIFT_FRAME_MS);
+  }
+
   function ensureLoop() {
     if (!raf && !reduced && !suspended && VISIBLE()) {
+      stopDrift(); // the real loop supersedes the heartbeat
       last = 0;
       acc = 0;
       raf = requestAnimationFrame(tick);
@@ -1001,8 +1452,16 @@ export function mountOffice(
   // engine never reads the scene, and a push every couple of seconds is plenty for a layer whose
   // events are 2.5–8s apart.
   let occAt = 0;
-  function pushOccupancy(now: number): void {
-    if (now - occAt < 2000) return;
+  /** When the last act cue landed — the "recent act rate" nudge in `density` (E2 spec §2). */
+  let actPulseAt = 0;
+  /** FNV-ish name hash (same idiom as seating's) — a desk's audio seed is as stable as its chair. */
+  const audioSeed = (name: string): number => {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return h;
+  };
+  function pushOccupancy(now: number, parked = false): void {
+    if (!parked && now - occAt < 2000) return;
     occAt = now;
     const toX = (lx: number, ly: number): number => {
       const sx = project(lx, ly, fit).x;
@@ -1010,9 +1469,18 @@ export function mountOffice(
     };
     // Group present members by shared zone: a pod (desk slots), a leisure zone, or the nook.
     const zones = new Map<string, { lx: number; ly: number }[]>();
+    const actorPoses = actors.poses(); // read once — `working[]` below needs each member's sit blend
+    // Desks that may type, tap and creak (E2 spec §2/§3) — collected by `workingAtDesk`, so the ears
+    // agree with the typing the eyes see: posture (never activity, which lags) AND a body that has
+    // sat down in that chair. The room used to type from the desk of a member who was still walking
+    // toward it (nick, 2026-09-04). Forced empty on the park frame: the parked room is exactly the
+    // room that should be quiet.
+    const working: { x: number; seed: number }[] = [];
+    let present = 0;
     for (const [name, pl] of placements) {
       const node = actors.nodes().get(name);
       if (!node || node.presence === 'offline') continue;
+      present++;
       let zone: string | null = null;
       let at: { lx: number; ly: number } | null = null;
       if (pl.kind === 'desk') {
@@ -1022,6 +1490,9 @@ export function mountOffice(
           // sitters are exactly the "near each other" pair the room tone listens for.
           zone = slot.kind === 'pod' ? `pod-${slot.pod}` : slot.kind;
           at = { lx: slot.lx, ly: slot.ly };
+          if (!parked && workingAtDesk(node, actorPoses.get(name)?.sit)) {
+            working.push({ x: toX(slot.lx, slot.ly), seed: audioSeed(name) });
+          }
         }
       } else if (pl.kind === 'leisure') {
         const spot = LEISURE_SPOTS[pl.spot];
@@ -1046,10 +1517,21 @@ export function mountOffice(
         pairs.push({ x: toX((mid[0]!.lx + mid[1]!.lx) / 2, (mid[0]!.ly + mid[1]!.ly) / 2) });
       }
     }
+    // Work intensity: the working share of who is present, nudged up while acts are actually
+    // landing (a fading pulse, gone after a quiet minute). Tempo and mix only — never gain.
+    const share = present > 0 ? working.length / present : 0;
+    // Wall clock, not the rAF timestamp `now` — `actPulseAt` is stamped with Date.now().
+    const actNudge = Math.max(0, 0.25 * (1 - (Date.now() - actPulseAt) / 60_000));
     const ctx: LifeContext = {
       pairs,
       // An asleep dog is a quiet dog — it neither pads nor jingles.
       dog: pet.mode === 'sleep' ? null : { x: toX(pet.lx, pet.ly), walking: pet.mode === 'walk' },
+      working,
+      density: Math.min(1, share + (working.length > 0 ? actNudge : 0)),
+      // The same envelope the daylight overlay and the wall clock read — audio and window light
+      // can never disagree, and `?light=HH` overrides audio too.
+      daylight: lightEnv.daylight,
+      hours: lightEnv.hours,
     };
     roomTone.setOccupancy(ctx);
   }
@@ -1077,49 +1559,76 @@ export function mountOffice(
    * pour. Whether the dog comes is *its* business: the stroll's own success is what's reported back, so a
    * dog that stays put can never cost a member their walk.
    */
-  function coffeeStroll(who: string): boolean {
+  function coffeeStroll(who: string, slot: number): boolean {
     if (!actors.ambientWalk(who)) return false;
-    if (Math.random() < 0.5) petFollow(pet, COFFEE_STAND);
+    if (roll(teamName, slot, 'pet-follow') < 0.5) petFollow(pet, COFFEE_STAND, slotRng(teamName, slot, 'pet-follow-walk'));
     return true;
   }
 
   function quiet(): boolean {
     return !actors.active() && cues.length === 0 && !(lastActive > 0 && performance.now() - lastActive < AFTERGLOW_MS);
   }
+  /** The shared beat log — the E1 falsifier: what the slot lattice decided, and whether this browser
+   * could play it. Two visible viewers over the same interval must log the same slots, actors, and
+   * beats in the same order; `played` is the one honest per-browser field (a locally busy room skips
+   * a beat, bounded to that one slot). Read from CDP via the `window.__office` handle. */
+  const ambientLog: AmbientLogEntry[] = [];
+  function logAmbient(e: AmbientLogEntry): void {
+    ambientLog.push(e);
+    if (ambientLog.length > 200) ambientLog.shift();
+  }
   function scheduleAmbient() {
-    if (reduced || disposed) return;
+    /* `STILL` sits beside `reduced` rather than inside `fireAmbient`: the point is that no timer is
+       left ARMED, not merely that the beat is skipped when it lands. A scheduler that keeps
+       re-arming and declining still re-enters the page's timer set, and the next reader wonders why
+       a "held" room has a pending callback. Same reason `disposed` is checked here. */
+    if (reduced || disposed || STILL) return;
     if (ambientTimer) clearTimeout(ambientTimer);
-    const delay = AMBIENT_MIN_MS + Math.random() * (AMBIENT_MAX_MS - AMBIENT_MIN_MS);
-    ambientTimer = setTimeout(fireAmbient, delay);
+    // Armed to the next slot boundary, not a random delay: the wall-clock lattice is the scheduling
+    // quantum (E1 spec §2), so every viewer of this team wakes at the same instants. The +5ms nudge
+    // keeps a timer that fires a hair early from landing in the old slot and drawing stale rolls.
+    ambientTimer = setTimeout(fireAmbient, AMBIENT_SLOT_MS - (Date.now() % AMBIENT_SLOT_MS) + 5);
   }
   function fireAmbient() {
     ambientTimer = null;
     if (disposed) return; // office torn down between the timer arming and firing — don't re-arm or wake
 
-    // Only stir a calm, visible room; otherwise let this slot pass and wait for the next one.
+    // Only stir a calm, visible room; otherwise let this slot pass and wait for the next one. The
+    // decision itself is pure over roster-derived inputs (stanley's E1 review item): local scene
+    // state may veto PLAYING a beat, but it can never change WHICH beat every viewer chose.
     if (!reduced && !suspended && VISIBLE() && quiet()) {
-      // Sometimes the beat is the pet's: it wakes, stretches, pads to a fresh nap spot (a sunbeam by
-      // day, a rug by night, occasionally a working member's side) and curls back up.
-      if (Math.random() < 0.35 && petBeat(pet, { daylight: lightEnv.daylight, workSpots: workingSideSpots() })) {
-        ensureLoop();
-        scheduleAmbient();
-        return;
+      const slot = slotAt(Date.now());
+      const nodes = actors.nodes();
+      const members: string[] = [];
+      // Mirrors `homePoses`'s desk test exactly: present desk members, minus owned (empty) desks.
+      for (const [name, pl] of placements) {
+        if (pl.kind === 'desk' && !pl.owned && nodes.has(name)) members.push(name);
       }
-      // Sometimes the beat belongs to a *pair* rather than a person: two neighbours turn and talk. It
-      // has to be chosen here, above the per-member pick, because it is the one beat with two subjects
-      // — routed through `playAmbientBeat` it could only ever move one of them.
-      const pairs = actors.deskNeighbours();
-      if (pairs.length && Math.random() < 0.22) {
-        const [a, b] = pairs[Math.floor(Math.random() * pairs.length)]!;
-        if (actors.deskChat(a, b)) {
-          ensureLoop();
-          scheduleAmbient();
-          return;
-        }
+      const decision = decideAmbient(teamName, slot, {
+        members,
+        pairs: deskNeighbourPairs(placements, nodes),
+      });
+      if (decision.kind === 'pet') {
+        // The pet's beat: it wakes, stretches, pads to a fresh nap spot (a sunbeam by day, a rug by
+        // night, occasionally a working member's side) and curls back up.
+        const played = petBeat(pet, {
+          daylight: lightEnv.daylight,
+          workSpots: workingSideSpots(),
+          rng: slotRng(teamName, slot, 'pet-beat'),
+        });
+        logAmbient({ slot, kind: 'pet', played });
+        if (played) ensureLoop();
+      } else if (decision.kind === 'pair') {
+        // The pair beat: two neighbours turn and talk — the one beat with two subjects, so it is
+        // decided above the per-member pick.
+        const played = actors.deskChat(decision.a, decision.b, slotRng(teamName, slot, 'chat'));
+        logAmbient({ slot, kind: 'pair', pair: [decision.a, decision.b], played });
+        if (played) ensureLoop();
+      } else if (decision.kind === 'member') {
+        const played = playAmbientBeat(decision.who, slot);
+        logAmbient({ slot, kind: 'member', who: decision.who, played });
+        if (played) ensureLoop();
       }
-      const idle = actors.idleDeskMembers();
-      const who = idle.length ? idle[Math.floor(Math.random() * idle.length)]! : null;
-      if (who && playAmbientBeat(who)) ensureLoop();
     }
     scheduleAmbient();
   }
@@ -1130,30 +1639,48 @@ export function mountOffice(
    * coffee-stroll staying in the mix at ~1 in 5. Weighted rather than uniform so the broad, always-valid
    * beats (stretch/glance/scratch/chin/lean) carry the room and the chair theatrics stay occasional.
    */
-  function playAmbientBeat(who: string): boolean {
+  function playAmbientBeat(who: string, slot: number): boolean {
     const pl = placements.get(who);
-    const slot = pl?.kind === 'desk' ? pl.slot : null;
-    const casters = slot !== null && chairKindFor(slot) !== 'stool';
-    const mug = slot !== null && deskHasProp(slot, 'coffee');
-    const water = slot !== null && deskHasProp(slot, 'water');
+    const deskSlot = pl?.kind === 'desk' ? pl.slot : null;
+    const casters = deskSlot !== null; // every desk chair rolls now (the `stool` kind is gone)
+    const mug = deskSlot !== null && deskHasProp(deskSlot, 'coffee');
+    const water = deskSlot !== null && deskHasProp(deskSlot, 'water');
+    // A seated LEISURE spot (couch, meeting chair, waiting chair) is a different body: already
+    // reclined with its hands in its lap, and with no desk, no casters and no mug to work against.
+    // So it swaps the desk's `lean` — which would recline someone who is already reclined — for
+    // `settle`, and leans the weights toward the broad, deskless beats (nick, 2026-08-31).
+    const lounging = pl?.kind === 'leisure' && (LEISURE_SPOTS[pl.spot]?.sit ?? 0) > 0;
     const beats: Array<[number, () => boolean]> = [
       [15, () => actors.gestureBeat(who, GESTURE.stretch)],
-      [15, () => actors.gestureBeat(who, GESTURE.glance)],
+      [lounging ? 20 : 15, () => actors.gestureBeat(who, GESTURE.glance)],
       [14, () => actors.gestureBeat(who, GESTURE.scratch)],
-      [14, () => actors.gestureBeat(who, GESTURE.chin)],
-      [14, () => actors.gestureBeat(who, GESTURE.lean)],
+      [lounging ? 18 : 14, () => actors.gestureBeat(who, GESTURE.chin)],
+      [14, () => actors.gestureBeat(who, lounging ? GESTURE.settle : GESTURE.lean)],
+      /* The 2026-09-14 variation pass (nick). Four more solo beats, weighted BELOW the original five:
+       * the old set carries the room's baseline rhythm and these are the ones you notice, which only
+       * works while they stay the minority. `behindHead` and `pocketPhone` want a backrest and a lap,
+       * so they sit out the deskless leisure spots where the body is already reclined with its hands
+       * down — `shoulders` and `rubEyes` work anywhere a torso does. */
+      [11, () => actors.gestureBeat(who, GESTURE.shoulders)],
+      [10, () => actors.gestureBeat(who, GESTURE.rubEyes)],
+      ...(lounging
+        ? []
+        : ([
+            [10, () => actors.gestureBeat(who, GESTURE.behindHead)],
+            [9, () => actors.gestureBeat(who, GESTURE.pocketPhone)],
+          ] as Array<[number, () => boolean]>)),
       // The errands — real trips with a point to them, so they stay the occasional highlight:
-      [15, () => coffeeStroll(who)],
-      [9, () => actors.errandPhone(who)], // gets up, takes a call, paces, comes back
+      [15, () => coffeeStroll(who, slot)],
+      [9, () => actors.errandPhone(who, slotRng(teamName, slot, 'phone'))], // gets up, takes a call, paces, comes back
       // A meal is the one errand the dog cares about: it drops whatever it was doing and follows the
       // plate to the lounge to sit and stare at it. Not every time — a dog that never misses a meal is
       // a mechanism, and the beat reads better when you notice it happening rather than expect it.
       [
         7,
         () => {
-          const seat = actors.errandFridge(who);
+          const seat = actors.errandFridge(who, slotRng(teamName, slot, 'fridge'));
           if (!seat) return actors.gestureBeat(who, GESTURE.glance); // lounge full → cheap fallback
-          if (Math.random() < 0.65) petBeg(pet, seat);
+          if (roll(teamName, slot, 'pet-beg') < 0.65) petBeg(pet, seat, slotRng(teamName, slot, 'pet-beg-walk'));
           return true;
         },
       ],
@@ -1163,7 +1690,7 @@ export function mountOffice(
     if (casters) beats.push([9, () => actors.gestureBeat(who, GESTURE.swivel)], [5, () => actors.gestureBeat(who, GESTURE.roll)]);
     let total = 0;
     for (const [w] of beats) total += w;
-    let r = Math.random() * total;
+    let r = roll(teamName, slot, 'beat') * total;
     for (const [w, play] of beats) {
       r -= w;
       if (r <= 0) return play();
@@ -1172,17 +1699,28 @@ export function mountOffice(
   }
 
   function update(next: OfficeData) {
+    const nextOnline = new Set(next.nodes.filter((n) => n.presence === 'online').map((n) => n.name));
+    if (onlineNames.size > 0) {
+      const line = captionForPresence(onlineNames, nextOnline);
+      if (line) pushRail(line);
+    }
+    onlineNames = nextOnline;
     teamName = next.teamName ?? 'revive';
     teamWorkingHours = next.teamWorkingHours ?? null;
     wallBoard = next.wallBoard ?? null;
-    placements = assignSeats(next.nodes);
+    placements = assignSeats(next.nodes, new Set(next.gathered ?? []));
     const byName = new Map(next.nodes.map((n) => [n.name, n]));
     // The overhead lights follow occupancy: on while anyone's online on the floor, off once the room empties.
     occupied = next.nodes.some((n) => n.presence === 'online');
     refreshLightEnv(); // fold the new occupancy (+ current clock) into the lighting before we bake
     // Animate presence changes (walk in/out, drift) unless reduced-motion asked for stillness.
     actors.setHomes(placements, byName, !reduced);
-    if (!reduced && actors.takeDoorPulses() > 0) pushDoorCue(); // the entrance "opens" as someone comes/goes
+    // The pulse is read ONCE, above the motion gate: the door's sound plays under reduced-motion
+    // (audio is not motion, E3 spec §2); only the visual glow stays gated.
+    if (actors.takeDoorPulses() > 0) {
+      roomTone.moment('door', screenPan(project(ENTRANCE.lx, ENTRANCE.ly, fit).x, width));
+      if (!reduced) pushDoorCue(); // the entrance "opens" as someone comes/goes
+    }
     // Someone just walked in: the dog goes to meet them at the door. Arrivals only — nobody, dog included,
     // gets up to see you leave. This outranks whatever nap it had planned, which is the whole point of it.
     if (!reduced && actors.takeArrivals() > 0) petGreet(pet);
@@ -1192,9 +1730,31 @@ export function mountOffice(
   }
 
   function pushCue(name: string, color: string, glyph: Cue['glyph'], urgent = false) {
+    actPulseAt = Date.now(); // an act just landed — the density nudge's clock (E2 spec §2)
     const at = heads.get(name);
     if (!at) return;
     cues.push({ at: { x: at.x, y: at.y + 20 }, color, glyph, t: 0, urgent });
+  }
+
+  /** The acceptance celebration burst — a one-shot confetti puff over a member's head. */
+  function pushConfetti(name: string) {
+    const at = heads.get(name);
+    if (!at) return;
+    cues.push({ at: { x: at.x, y: at.y }, color: '#5cd49a', glyph: '', t: 0, urgent: false, kind: 'confetti' });
+  }
+
+  /** The `count` nearest drawn members to `name` (excluding them) within one pod's reach — the desk
+   * neighbors who plausibly noticed. Head positions are already screen-space, so plain distance works. */
+  function nearestNeighbors(name: string, count: number): string[] {
+    const at = heads.get(name);
+    if (!at) return [];
+    return [...heads.entries()]
+      .filter(([n]) => n !== name)
+      .map(([n, p]) => ({ n, d: Math.hypot(p.x - at.x, p.y - at.y) }))
+      .filter((e) => e.d < 190 * fit.scale)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, count)
+      .map((e) => e.n);
   }
 
   /** A broadcast sweep rolling out from the announcer. */
@@ -1234,28 +1794,64 @@ export function mountOffice(
       actors.cancelAmbient();
       scheduleAmbient();
     }
+    if (ev.kind === 'caption') {
+      pushRail(ev.caption);
+      return;
+    }
     // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
     if (ev.kind === 'speech') {
-      showSpeech(ev.who, ev.text, ev.tone, ev.id, ev.act);
+      showSpeech(ev.who, ev.text, ev.tone, ev.id, ev.act, ev.addressee, ev.marking);
+      // An ask lands with acoustic weight in the room (E3 spec §2): one soft held tone, panned to
+      // the asked member's desk when directed, soft-centre for a team ask. Stateless by design.
+      if (ev.act === 'ask') {
+        // `ask` is deliberately not an ELIGIBLE_ACT (envelope.ts), so an ask's addressee is always
+        // the single routed member — the first name is the only name.
+        const at = ev.addressee ? heads.get(ev.addressee.names[0]!) : undefined;
+        roomTone.moment('askbell', at ? screenPan(at.x, width) : 0);
+      }
       return;
+    }
+    // The fanfare emits ABOVE the motion gate (E3 spec §2): the celebration sound plays under
+    // reduced-motion; the confetti and glances below stay gated with the rest of the choreography.
+    if (ev.kind === 'accept' && ev.of && ev.of !== ev.who && heads.has(ev.of)) {
+      roomTone.moment('fanfare', screenPan(heads.get(ev.of)!.x, width));
     }
     if (reduced) return;
     switch (ev.kind) {
       case 'screen-pulse':
         pushCue(ev.who, toneColor(ev.tone), '');
         break;
+      // `to` is a list on the three ELIGIBLE_ACTS: one name normally, 2-4 for an ADR 254 set. Each
+      // name gets the identical treatment a single recipient gets — the room must not rank them,
+      // because the ledger does not (nick, 2026-09-02).
       case 'note':
-        pushCue(ev.to, toneColor(ev.tone), '');
         pushCue(ev.from, toneColor(ev.tone), '');
-        pushThread(ev.from, ev.to, toneColor(ev.tone));
+        for (const to of ev.to) {
+          pushCue(to, toneColor(ev.tone), '');
+          pushThread(ev.from, to, toneColor(ev.tone));
+        }
         break;
-      case 'walk-help':
-        pushThread(ev.from, ev.to);
-        // A real walk-over; fall back to an in-place cue only if the walk can't play (target gone).
-        if (!actors.walk(ev.from, { kind: 'help', to: ev.to, urgent: ev.tier === 'urgent' })) {
+      case 'walk-help': {
+        // The sender walks to EVERY name, one desk after another: `actors.walk` queues per call —
+        // one trip in flight plus three pending, so a set at the MAX_ELIGIBLE cap of four fits
+        // exactly, WITH NO HEADROOM. A sender who already has a walk running loses the tail of a
+        // four-name set to the backlog guard, silently. Measured in the browser 2026-09-02: the
+        // /office-preview script re-fires faster than an ~8.5s round trip drains, so from its
+        // second loop on the guard refuses legs — including the single-recipient `Ada -> Bo` walk
+        // that predates eligible sets entirely. That makes it a property of the queue depth and the
+        // act rate, not of this fan-out; on /live, acts arrive far enough apart that it has room.
+        // The fallback cue fires only if NO leg could play — one unreachable desk among several is
+        // not a failed act, it is a shorter trip.
+        let walked = false;
+        for (const req of helpWalks(ev)) {
+          pushThread(ev.from, req.to);
+          if (actors.walk(ev.from, req)) walked = true;
+        }
+        if (!walked) {
           pushCue(ev.from, '#f4cf52', ev.tier === 'urgent' ? '!' : '', ev.tier === 'urgent');
         }
         break;
+      }
       case 'walk-handoff':
         pushThread(ev.from, ev.to, toneColor('handoff'));
         if (!actors.walk(ev.from, { kind: 'handoff', to: ev.to, urgent: false })) {
@@ -1271,6 +1867,18 @@ export function mountOffice(
         break;
       case 'accept':
         pushCue(ev.who, '#5cd49a', '✓');
+        // The celebration (liveliness ladder inc 1, nick 2026-08-19): a directed accept lands on the
+        // CELEBRANT — whose work was accepted — as confetti over their head, a green thread from the
+        // acceptor, and the nearest desk neighbors turning for a beat. Event choreography only:
+        // one cue lifetime, no re-arming, nothing for ?still to hold.
+        if (ev.of && ev.of !== ev.who && heads.has(ev.of)) {
+          pushThread(ev.who, ev.of, '#5cd49a');
+          pushCue(ev.of, '#5cd49a', '✓');
+          pushConfetti(ev.of);
+          for (const name of nearestNeighbors(ev.of, 2)) {
+            if (name !== ev.who) actors.gestureBeat(name, GESTURE.glance);
+          }
+        }
         break;
       case 'decline':
         pushCue(ev.who, '#f3776a', '');
@@ -1297,7 +1905,7 @@ export function mountOffice(
         // party when it's directed. Urgent only when flagged (bolder ring + glyph then).
         const col = toneColor('challenge');
         pushCue(ev.from, col, '?', ev.urgent);
-        if (ev.to) pushCue(ev.to, col, '?', ev.urgent);
+        for (const to of ev.to) pushCue(to, col, '?', ev.urgent);
         break;
       }
       case 'defer':
@@ -1322,7 +1930,12 @@ export function mountOffice(
 
   const onVisibility = () => {
     // ensureLoop's own suspended/reduced guards apply — a collapsed office stays parked on tab-focus.
-    if (document.visibilityState === 'visible' && (living() || actors.active() || cues.length)) ensureLoop();
+    if (document.visibilityState !== 'visible') {
+      stopDrift(); // a hidden tab draws nothing at all, heartbeat included
+      return;
+    }
+    if (living() || actors.active() || cues.length) ensureLoop();
+    else ensureDrift(); // back on screen with nothing happening: resume the slow breath
   };
   document.addEventListener('visibilitychange', onVisibility);
 
@@ -1331,6 +1944,7 @@ export function mountOffice(
   bake();
   drawStatic();
   scheduleAmbient(); // start the idle coffee-stroll timer (no-op under reduced-motion)
+  ensureDrift(); // and the slow breath, for the stretches where the loop is parked
 
   // Track the real PST sun: re-read the clock every minute and rebake only when the veil/lamp state moves.
   const lightTimer = setInterval(() => {
@@ -1346,6 +1960,16 @@ export function mountOffice(
     update,
     emit,
     stats: () => ({ ticks, draws, since }),
+    ambientLog: () => [...ambientLog],
+    floorSamples: () =>
+      [...actors.poses()].map(([name, p]) => ({
+        name,
+        lx: p.lx,
+        ly: p.ly,
+        walkable: walkable(p.lx, p.ly),
+        hit: solidHit(p.lx, p.ly),
+        sit: p.sit,
+      })),
     setSuspended: (on: boolean) => {
       // A stream never parks (ADR 157). The broadcast route has no collapse control, so this only ever
       // fires from a host surface that shouldn't be able to freeze the outgoing frame anyway.
@@ -1359,6 +1983,7 @@ export function mountOffice(
         raf = 0;
         last = 0;
         acc = 0;
+        stopDrift(); // no heartbeat behind a collapsed panel either — the rule is "stop when UNSEEN"
       } else {
         // One fresh frame immediately (light + poses may have moved while parked) → instant
         // re-expand; the loop only re-engages if the room is actually alive.
@@ -1396,7 +2021,7 @@ export function mountOffice(
               ? actors.errandWater(who)
               : kind === 'phone'
                 ? actors.errandPhone(who)
-                : coffeeStroll(who);
+                : coffeeStroll(who, slotAt(Date.now()));
         if (played) {
           ensureLoop();
           return who;
@@ -1407,12 +2032,19 @@ export function mountOffice(
     dispose: () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      stopDrift(); // the heartbeat outlives nothing
       clearInterval(lightTimer); // stop the PST lighting clock
+      if (railTimer) clearInterval(railTimer); // stop the caption rail
+      options.onCaption?.(null);
+      clearInterval(welcomeTimer); // stop the receptionist welcome
       if (ambientTimer) clearTimeout(ambientTimer); // stop the idle-beat scheduler
       window.removeEventListener('resize', onResize);
       ro?.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
       for (const [who, s] of [...speeches]) clearSpeech(who, s); // cancel timers + remove bubbles
+      // Torn down, not finished — nothing is owed a turn. `clearSpeech` deliberately does not drain
+      // (see `drainSpeech`), so the backlog is dropped here rather than replayed into a dead room.
+      queued.clear();
       for (const name of plateExpand.keys()) clearExpandTimer(name);
       plateExpand.clear();
       for (const el of labels.values()) el.remove();

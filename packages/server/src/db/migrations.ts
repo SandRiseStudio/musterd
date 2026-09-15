@@ -1,5 +1,7 @@
+import { hostname } from 'node:os';
 import { sparsifyPolicy } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { monotonicFactory as monotonicUlid } from 'ulid';
 import { SCHEMA_V1_SQL } from './schema.js';
 
 export interface Migration {
@@ -634,7 +636,9 @@ export const MIGRATIONS: Migration[] = [
           observer_scope TEXT,
           last_offline_reason TEXT,
           working_hours TEXT,
-          roles TEXT
+          roles TEXT,
+          slack_user_id TEXT,
+          hue INTEGER
         );
         INSERT INTO members_new (${colList}) SELECT ${colList} FROM members;
         DROP TABLE members;
@@ -851,6 +855,737 @@ export const MIGRATIONS: Migration[] = [
           created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_incident_reports_team_gate ON incident_reports(team_id, gate);
+      `);
+    },
+  },
+  {
+    // ADR 101 increment: an occupancy records WHICH TIER produced its model — `observed` (a harness
+    // probe saw it), `environment`, or `binding` (a declaration). NULL for every pre-existing row
+    // and for any client that does not send it, which is the honest answer: those rows genuinely do
+    // not know, and backfilling a guess would be the exact substitution this column exists to end.
+    version: 42,
+    up: (db) => {
+      const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
+      if (!cols.includes('model_source'))
+        db.exec('ALTER TABLE presence ADD COLUMN model_source TEXT');
+      // `requests` carries the claimant's attestation across the approval gap, so the tier must
+      // cross it too — otherwise an approval-gated claim lands a model whose tier is permanently
+      // unknowable, which is the exact hole this column closes one path over.
+      const reqCols = db.prepare("SELECT name FROM pragma_table_info('requests')").pluck().all();
+      if (!reqCols.includes('model_source'))
+        db.exec('ALTER TABLE requests ADD COLUMN model_source TEXT');
+    },
+  },
+  {
+    // ADR 291: the durable shared-Seed projection. Relay capture stays outside the database; this
+    // table owns the Team-visible lifecycle and is keyed by immutable relay provenance.
+    version: 43,
+    up: (db) => {
+      const memberCols = db.prepare("SELECT name FROM pragma_table_info('members')").pluck().all();
+      if (!memberCols.includes('slack_user_id'))
+        db.exec('ALTER TABLE members ADD COLUMN slack_user_id TEXT');
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_members_team_slack_user
+          ON members(team_id, slack_user_id) WHERE slack_user_id IS NOT NULL;
+        CREATE TABLE IF NOT EXISTS seeds (
+          id TEXT PRIMARY KEY,
+          team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          relay_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          body TEXT NOT NULL,
+          captured_at INTEGER NOT NULL,
+          slack_user_id TEXT NOT NULL,
+          submitted_by TEXT NOT NULL REFERENCES members(id),
+          state TEXT NOT NULL,
+          explorer_id TEXT REFERENCES members(id),
+          final_brief TEXT,
+          conclusion TEXT,
+          linked_lane_id TEXT REFERENCES lanes(id),
+          promotion_kind TEXT,
+          research_skipped INTEGER,
+          promoted_at INTEGER,
+          completed_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(team_id, relay_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_seeds_team_state ON seeds(team_id, state, updated_at);
+        CREATE TABLE IF NOT EXISTS seed_thread_entries (
+          id TEXT PRIMARY KEY,
+          seed_id TEXT NOT NULL REFERENCES seeds(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          body TEXT NOT NULL,
+          member_id TEXT NOT NULL REFERENCES members(id),
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_seed_thread_entries_seed ON seed_thread_entries(seed_id, created_at);
+      `);
+    },
+  },
+  {
+    // ADR 321 §2: `opencode` joins the Surface enum as a first-class harness. Same drift shape
+    // migration 39 closed for `musterd`: the protocol enum widened (zod accepts the value) while
+    // this table's CHECK still refused it, so an opencode claim would throw inside the WS handler —
+    // loud since the ADR 251 fix, but still broken. SQLite cannot ALTER a CHECK, so: copy-drop-
+    // rename rebuild, columns enumerated because positional copy transposes silently (v39's rule).
+    // `model_source` (migration 42) postdates v39's column list and must ride along.
+    version: 44,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE presence_new (
+          id            TEXT PRIMARY KEY,
+          member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          surface       TEXT NOT NULL CHECK (surface IN
+                          ('cli','claude-code','codex','opencode','cursor','web','ios','slack',
+                           'other','musterd')),
+          status        TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online','away','offline')),
+          conn_id       TEXT,
+          last_seen_at  INTEGER NOT NULL,
+          created_at    INTEGER NOT NULL,
+          held_until    INTEGER,
+          provenance    TEXT,
+          workspace     TEXT,
+          driver        TEXT,
+          model         TEXT,
+          build         TEXT,
+          epoch         INTEGER,
+          wake_lease    TEXT,
+          model_source  TEXT
+        );
+        INSERT INTO presence_new (id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                                  held_until, provenance, workspace, driver, model, build, epoch,
+                                  wake_lease, model_source)
+          SELECT id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                 held_until, provenance, workspace, driver, model, build, epoch,
+                 wake_lease, model_source
+          FROM presence;
+        DROP TABLE presence;
+        ALTER TABLE presence_new RENAME TO presence;
+        CREATE INDEX idx_presence_member ON presence(member_id);
+        CREATE INDEX idx_presence_last_seen ON presence(last_seen_at);
+      `);
+    },
+  },
+  {
+    // ADR 325 prereq: `incident_reports.id` was the schema's only INTEGER AUTOINCREMENT id — an
+    // ordering that exists only in this database file, which collides the moment rows originate on
+    // more than one machine. Rebuild on ULID TEXT ids (the convention every other table follows).
+    // New ids are minted in old-integer-id order through a monotonic factory seeded per-row at
+    // created_at: the pool's `ORDER BY id` promise (= arrival order) survives the rebuild even for
+    // rows whose created_at disagrees with their arrival, and the new ids still carry an honest
+    // timestamp prefix.
+    version: 45,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE incident_reports_new (
+          id TEXT PRIMARY KEY,
+          team_id TEXT NOT NULL,
+          gate TEXT NOT NULL,
+          seat TEXT NOT NULL,
+          sig TEXT,
+          ref TEXT,
+          message_id TEXT,
+          lane_id TEXT,
+          created_at INTEGER NOT NULL
+        );
+      `);
+      const mint = monotonicUlid();
+      const rows = db
+        .prepare<
+          [],
+          {
+            id: number;
+            team_id: string;
+            gate: string;
+            seat: string;
+            sig: string | null;
+            ref: string | null;
+            message_id: string | null;
+            lane_id: string | null;
+            created_at: number;
+          }
+        >('SELECT * FROM incident_reports ORDER BY id')
+        .all();
+      const ins = db.prepare(
+        `INSERT INTO incident_reports_new (id, team_id, gate, seat, sig, ref, message_id, lane_id, created_at)
+         VALUES (@id, @team_id, @gate, @seat, @sig, @ref, @message_id, @lane_id, @created_at)`,
+      );
+      for (const row of rows) ins.run({ ...row, id: mint(row.created_at) });
+      db.exec(`
+        DROP TABLE incident_reports;
+        ALTER TABLE incident_reports_new RENAME TO incident_reports;
+        CREATE INDEX idx_incident_reports_team_gate ON incident_reports(team_id, gate);
+      `);
+    },
+  },
+  {
+    // ADR 327: the team-memory retrieval fold — a derived FTS5 index over `insight` acts in the
+    // message log. Triggers keep it current on the append-only log's insert/delete; the INSERT..
+    // SELECT below is the rebuild path's first run (store/insights.ts `rebuildInsightsFts` can
+    // repeat it at any time). The table is a declared cache (ADR 259): dropping it loses nothing
+    // the log does not hold.
+    version: 46,
+    up: (db) => {
+      db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS insights_fts USING fts5(
+          message_id UNINDEXED,
+          team_id UNINDEXED,
+          headline,
+          body,
+          tags
+        );
+        CREATE TRIGGER IF NOT EXISTS insights_fts_ins AFTER INSERT ON messages WHEN NEW.act = 'insight' BEGIN
+          INSERT INTO insights_fts (message_id, team_id, headline, body, tags)
+          VALUES (NEW.id,
+                  NEW.team_id,
+                  COALESCE(json_extract(NEW.meta, '$.headline'), ''),
+                  NEW.body,
+                  COALESCE(json_extract(NEW.meta, '$.tags'), ''));
+        END;
+        CREATE TRIGGER IF NOT EXISTS insights_fts_del AFTER DELETE ON messages WHEN OLD.act = 'insight' BEGIN
+          DELETE FROM insights_fts WHERE message_id = OLD.id;
+        END;
+      `);
+      // Backfill = the rebuild path's first run; delete-first so a rewound-and-replayed
+      // migration cannot double-index.
+      db.exec('DELETE FROM insights_fts');
+      db.exec(`
+        INSERT INTO insights_fts (message_id, team_id, headline, body, tags)
+        SELECT m.id,
+               m.team_id,
+               COALESCE(json_extract(m.meta, '$.headline'), ''),
+               m.body,
+               COALESCE(json_extract(m.meta, '$.tags'), '')
+        FROM messages m
+        WHERE m.act = 'insight';
+      `);
+    },
+  },
+  {
+    // ADR 331: the ordering substrate. `nodes` arrives in ADR 328's shape with the three departures
+    // that ADR names (`next_seq`, nullable `credential_hash`/`enrolled_at`), one self-minted row per
+    // hosted team — per (daemon, team), not per daemon. `(origin_node, origin_seq)` land NOT NULL on
+    // `messages`, backfilled per team as a gapless prefix in (ts, id) order. Guarded ALTERs and
+    // insert-if-absent because the migration tests rewind-and-replay; the backfill recomputes, so a
+    // replayed partition renumbers rather than doubling. `next_seq` holds the NEXT value to assign.
+    version: 47,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS nodes (
+          id              TEXT PRIMARY KEY,
+          team_id         TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          label           TEXT NOT NULL,
+          credential_hash TEXT,
+          enrolled_at     INTEGER,
+          enrolled_by     TEXT,
+          revoked_at      INTEGER,
+          last_seen_at    INTEGER,
+          next_seq        INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_nodes_team ON nodes(team_id);
+      `);
+      const msgCols = (db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]).map(
+        (c) => c.name,
+      );
+      // NOT NULL via ALTER needs a default; insertMessage always stamps, and the backfill below
+      // overwrites the default on every pre-existing row, so '' / 0 never survive the migration.
+      if (!msgCols.includes('origin_node'))
+        db.exec("ALTER TABLE messages ADD COLUMN origin_node TEXT NOT NULL DEFAULT ''");
+      if (!msgCols.includes('origin_seq'))
+        db.exec('ALTER TABLE messages ADD COLUMN origin_seq INTEGER NOT NULL DEFAULT 0');
+
+      const mint = monotonicUlid();
+      const now = Date.now();
+      const teams = db.prepare<[], { id: string }>('SELECT id FROM teams ORDER BY id').all();
+      const nodeFor = db.prepare<[string], { id: string }>(
+        'SELECT id FROM nodes WHERE team_id = ? ORDER BY id LIMIT 1',
+      );
+      const stamp = db.prepare('UPDATE messages SET origin_node = ?, origin_seq = ? WHERE id = ?');
+      for (const team of teams) {
+        let node = nodeFor.get(team.id);
+        if (!node) {
+          node = { id: mint(now) };
+          db.prepare('INSERT INTO nodes (id, team_id, label, next_seq) VALUES (?, ?, ?, 1)').run(
+            node.id,
+            team.id,
+            hostname(),
+          );
+        }
+        const rows = db
+          .prepare<
+            [string],
+            { id: string }
+          >('SELECT id FROM messages WHERE team_id = ? ORDER BY ts, id')
+          .all(team.id);
+        rows.forEach((row, i) => stamp.run(node!.id, i + 1, row.id));
+        db.prepare('UPDATE nodes SET next_seq = ? WHERE id = ?').run(rows.length + 1, node.id);
+      }
+    },
+  },
+  {
+    // Which `nodes` row is THIS daemon's, per team — ADR 325 residence 3 (local-only, never
+    // replicated), so a separate table rather than a column: "is this row me" is machine-relative,
+    // and `nodes` is hub-authoritative state that will replicate, where a self-referring boolean is
+    // false on every receiver.
+    //
+    // v47 picked the local row with `ORDER BY id LIMIT 1`, correct only while enrollment did not
+    // exist. Increment 3a is what adds the second row, so this precedes it: a remote ULID sorting
+    // lower would otherwise take over our stamp, holing our sequence and putting numbers in theirs
+    // that name events they never wrote — the loss-versus-silence ambiguity ADR 331 exists to
+    // prevent. Backfills from v47's rows, every one of which is local by construction because
+    // nothing has ever enrolled. `INSERT OR IGNORE` for the rewind-and-replay harness, and
+    // `ORDER BY id` so that if the one-row-per-team assumption is ever violated the row picked is
+    // deterministic rather than whatever the scan happened to reach first (miley, 2026-08-27).
+    version: 48,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS local_node (
+          team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          node_id TEXT NOT NULL REFERENCES nodes(id)
+        );
+        INSERT OR IGNORE INTO local_node (team_id, node_id)
+          SELECT team_id, id FROM nodes ORDER BY id;
+      `);
+    },
+  },
+  {
+    // Enrollment codes (ADR 328 §2): a one-time code, not a copied secret. Hashed like every other
+    // token kind — the plaintext is shown once at mint and never persisted. Single-use is enforced
+    // by the guarded CAS in store/nodes.ts (`WHERE consumed_at IS NULL`), not by this schema: the
+    // uniqueness here is on the code, so a replayed mint collides rather than shadowing.
+    //
+    // No backfill — an invite is a live object with a 15-minute life, and history has none.
+    version: 49,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS node_invites (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          code_hash   TEXT NOT NULL,
+          label       TEXT,
+          created_by  TEXT NOT NULL,
+          created_at  INTEGER NOT NULL,
+          expires_at  INTEGER NOT NULL,
+          consumed_at INTEGER,
+          consumed_by TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_node_invites_team ON node_invites(team_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_node_invites_code ON node_invites(code_hash);
+      `);
+    },
+  },
+  {
+    // ADR 325 increment 3b-i: the hub's staging log for pushed events, and the daemon's push cursor.
+    //
+    // Pushed events land HERE, never in `messages`. The fold into `messages` is 3b-ii, and it is one
+    // implementation run by hub and puller alike, so exactly one piece of code ever writes a
+    // foreign-origin row into the local log — the second insert path ADR 331 §Consequences warned
+    // about, built once and reviewed as its own slice. Nothing in this migration relates to
+    // `nodes.next_seq`; `src/sync/containment.test.ts` is what holds that true.
+    version: 50,
+    up: (db) => {
+      db.exec(`
+        -- id is NOT a primary key. It is the envelope's id, minted by the ORIGIN daemon, so it is
+        -- attacker-chosen for any enrolled node; a global unique on it lets one node permanently
+        -- wedge another's sync by staging that node's next id first (dolly, 2026-08-28, #1102). The
+        -- refusal is correct in isolation and terminal in aggregate: the batch rolls back, the
+        -- cursor rightly does not move, and the next tick resends into the same constraint forever.
+        -- Team-scoping it would only narrow the wedge to same-team nodes — the population federation
+        -- exists to serve. Uniqueness is scoped to the ORIGIN instead: an origin is answerable for
+        -- its own ids and for nobody else's, and it cannot honestly mint one twice (messages.id is
+        -- its own local primary key), so a repeat is its own corruption wedging only itself.
+        CREATE TABLE IF NOT EXISTS sync_log (
+          id           TEXT NOT NULL,
+          team_id      TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          origin_node  TEXT NOT NULL REFERENCES nodes(id),
+          origin_seq   INTEGER NOT NULL,
+          hub_seq      INTEGER NOT NULL,
+          payload      TEXT NOT NULL,
+          received_at  INTEGER NOT NULL
+        );
+        -- The idempotence key (a replayed push is a no-op) and the canonical-order key. The second
+        -- is UNIQUE rather than a plain index on purpose: it enforces hub_seq's density in the
+        -- schema instead of trusting the allocator, and it is the index 3b-ii's cursor read walks.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_origin ON sync_log(origin_node, origin_seq);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_hub ON sync_log(team_id, hub_seq);
+        -- Envelope-id uniqueness, scoped to the origin per the note above. NOTE for 3b-ii: this
+        -- scoping did not REMOVE the wedge, it MOVED it. Two rows in one team may now share an
+        -- envelope id, and messages.id is a PRIMARY KEY, so the fold cannot write both -- what was
+        -- one node's push loop failing is now the whole team's fold failing, and 3b-ii inherits it.
+        -- Still the right trade (refusing at the door hands one node a lever on another's
+        -- liveness), but a real cost, not a footnote. The fold must key on (origin_node,
+        -- origin_seq), and choosing what it does with the second row is 3b-ii's call.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_origin_id ON sync_log(origin_node, id);
+
+        -- The hub's canonical-order allocator, per team. next_hub_seq names the NEXT value to
+        -- assign, the same convention nodes.next_seq uses, so the allocator must hand out the
+        -- PRE-increment value: copying this DEFAULT into an insert hands out 1 twice.
+        CREATE TABLE IF NOT EXISTS sync_meta (
+          team_id       TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          next_hub_seq  INTEGER NOT NULL DEFAULT 1
+        );
+
+        -- Local-only (ADR 325 residence 3): this describes THIS machine's conversation with a hub,
+        -- not team state, so it is never replicated.
+        CREATE TABLE IF NOT EXISTS sync_push_cursor (
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          node_id     TEXT NOT NULL,
+          last_seq    INTEGER NOT NULL,
+          updated_at  INTEGER NOT NULL,
+          PRIMARY KEY (team_id, node_id)
+        );
+      `);
+    },
+  },
+  {
+    // Agent HTTP authority (ADR 337): an agent's durable, self-identifying credential is stored in
+    // the existing per-member credential slot, kind-bound by the auth query. Each successful claim
+    // additionally mints a short-lived lease tied to the exact presence it created. A presence
+    // deletion therefore invalidates its lease even if an eviction path cannot explicitly revoke it.
+    version: 51,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_leases (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          presence_id TEXT NOT NULL REFERENCES presence(id) ON DELETE CASCADE,
+          token_hash  TEXT NOT NULL UNIQUE,
+          expires_at  INTEGER NOT NULL,
+          revoked_at  INTEGER,
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_leases_lookup
+          ON session_leases(team_id, member_id, presence_id, expires_at);
+      `);
+    },
+  },
+  {
+    // ADR 344 replaces the Team-wide bootstrap-key column with independently scoped records.
+    // Existing keys become explicit legacy records so an installed Workspace remains usable until
+    // the separately ADR-gated compatibility removal.
+    version: 52,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_bootstrap_credentials (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          key_hash    TEXT NOT NULL UNIQUE,
+          use_kind    TEXT NOT NULL CHECK (use_kind IN ('claim_seat', 'claim_role', 'host', 'legacy')),
+          target      TEXT,
+          label       TEXT,
+          state       TEXT NOT NULL CHECK (state IN ('active', 'rotated', 'revoked')),
+          expires_at  INTEGER,
+          created_by  TEXT,
+          created_at  INTEGER NOT NULL,
+          rotated_at  INTEGER,
+          revoked_at  INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_bootstrap_credentials_lookup
+          ON agent_bootstrap_credentials(team_id, key_hash, state, expires_at);
+        INSERT OR IGNORE INTO agent_bootstrap_credentials
+          (id, team_id, key_hash, use_kind, target, state, created_at)
+        SELECT 'legacy-' || id, id, agent_key_hash, 'legacy', NULL, 'active', updated_at
+        FROM teams
+        WHERE agent_key_hash IS NOT NULL;
+      `);
+    },
+  },
+  {
+    // The read cursors move off `messages.ts` (the origin's clock, which travels — ADR 335) onto
+    // `created_at` (this daemon's receipt clock) so an event that arrives after a seat last read
+    // but was stamped before it is the next unread rather than invisible forever (the ts-cursor
+    // defect, lane 01M1FAYTHQA881M35PDPXRTGM1). Nothing in messages indexed created_at until now;
+    // every inbox, interrupt-check and unread-count read scans by it from here on.
+    version: 53,
+    up: (db) => {
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_messages_team_created ON messages(team_id, created_at);`,
+      );
+    },
+  },
+  {
+    // Federation 3b-ii (spec 2026-09-01-sync-fold-design.md §Schema). v47 added the origin pair to
+    // messages; nothing enforced its uniqueness because insertMessage was the only writer and it
+    // allocates gaplessly. The fold is a second writer, so the schema holds the invariant now.
+    // The fold's idempotence key = this index. NOT messages.id (ADR 335 scoped id uniqueness to the
+    // origin, so two origins may legitimately stage one id in one team). The created_at index the
+    // spec put here landed as v53 (ADR 349, the ts-cursor fix) — this migration adds only its own.
+    version: 54,
+    up: (db) => {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_origin ON messages(origin_node, origin_seq);
+
+        -- Local-only (ADR 325 residence 3), like sync_push_cursor: this daemon's memory of how far
+        -- it has applied the team's canonical order to its own messages. One row per team — a
+        -- daemon is a puller for a team or it is not. The hub uses the same row for its own fold.
+        CREATE TABLE IF NOT EXISTS sync_pull_cursor (
+          team_id       TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          last_hub_seq  INTEGER NOT NULL,
+          updated_at    INTEGER NOT NULL
+        );
+      `);
+    },
+  },
+  {
+    // v54 is reserved by the open federation 3b-ii branch. Gaps are valid; using v55 avoids the
+    // collision that would make the second same-number migration silently never run.
+    // ADR 350: persist migration provenance, first scoped use, and per-Team legacy cutover.
+    version: 55,
+    up: (db) => {
+      // Guard ALTERs for the version-rewind migration tests, which replay the tail against an
+      // already-widened schema. The production runner still applies this exactly once.
+      const credentialCols = db
+        .prepare("SELECT name FROM pragma_table_info('agent_bootstrap_credentials')")
+        .pluck()
+        .all();
+      if (!credentialCols.includes('migration_target_member_id')) {
+        db.exec(
+          'ALTER TABLE agent_bootstrap_credentials ' +
+            'ADD COLUMN migration_target_member_id TEXT REFERENCES members(id)',
+        );
+      }
+      if (!credentialCols.includes('first_used_at')) {
+        db.exec('ALTER TABLE agent_bootstrap_credentials ADD COLUMN first_used_at INTEGER');
+      }
+      const teamCols = db.prepare("SELECT name FROM pragma_table_info('teams')").pluck().all();
+      if (!teamCols.includes('bootstrap_cutover_at')) {
+        db.exec('ALTER TABLE teams ADD COLUMN bootstrap_cutover_at INTEGER');
+      }
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_bootstrap_migration_target
+        ON agent_bootstrap_credentials(
+          team_id,
+          migration_target_member_id,
+          state,
+          first_used_at
+        );
+      `);
+    },
+  },
+  {
+    // v54 never ran on any DB that had already reached v55. #1164 (ADR 350) landed v55 on main
+    // first; #1155 (3b-ii) then landed v54 behind it, and runMigrations is a high-water mark, so a
+    // lower number arriving later is skipped. The dogfood daemon sat at schema 55 with no
+    // idx_messages_origin and no sync_pull_cursor (ryder, 3b-ii acceptance, 2026-09-02). Re-issue
+    // v54's body verbatim; every statement is IF NOT EXISTS, so a DB that ran v54 is untouched.
+    version: 56,
+    up: (db) => {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_origin ON messages(origin_node, origin_seq);
+        CREATE TABLE IF NOT EXISTS sync_pull_cursor (
+          team_id       TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          last_hub_seq  INTEGER NOT NULL,
+          updated_at    INTEGER NOT NULL
+        );
+      `);
+    },
+  },
+  {
+    // ADR 352: `grok` joins the Surface enum. SQLite cannot ALTER a CHECK, so rebuild presence
+    // the way v39 (`musterd`) and v44 (`opencode`) did. Column list matches the live table
+    // (v44 + model_source from v42); v1 DDL in schema.ts is deliberately left stale.
+    version: 57,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE presence_new (
+          id            TEXT PRIMARY KEY,
+          member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          surface       TEXT NOT NULL CHECK (surface IN
+                          ('cli','claude-code','codex','opencode','grok','cursor','web','ios','slack',
+                           'other','musterd')),
+          status        TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online','away','offline')),
+          conn_id       TEXT,
+          last_seen_at  INTEGER NOT NULL,
+          created_at    INTEGER NOT NULL,
+          held_until    INTEGER,
+          provenance    TEXT,
+          workspace     TEXT,
+          driver        TEXT,
+          model         TEXT,
+          build         TEXT,
+          epoch         INTEGER,
+          wake_lease    TEXT,
+          model_source  TEXT
+        );
+        INSERT INTO presence_new (id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                                  held_until, provenance, workspace, driver, model, build, epoch,
+                                  wake_lease, model_source)
+          SELECT id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                 held_until, provenance, workspace, driver, model, build, epoch,
+                 wake_lease, model_source
+          FROM presence;
+        DROP TABLE presence;
+        ALTER TABLE presence_new RENAME TO presence;
+        CREATE INDEX idx_presence_member ON presence(member_id);
+        CREATE INDEX idx_presence_last_seen ON presence(last_seen_at);
+      `);
+    },
+  },
+  {
+    // Lane-replication slice (spec 2026-09-01 §"The wire, decided"): a `lane.*` audit row is the
+    // second replicated kind. It draws `(origin_node, origin_seq)` from the same `nodes.next_seq`
+    // allocator as messages (ADR 335 §8) at the moment the store writes it. Every other audit row,
+    // and every row older than this migration, keeps the DEFAULTs and reads as "not replicated";
+    // the unique index is partial on `origin_seq > 0` so those rows never collide with each other.
+    // This is the fold's idempotence key, the shape v54 gave `idx_messages_origin`.
+    //
+    // v58 lands after v57 (#1181, presence CHECK): runMigrations is a high-water mark, so a lower
+    // number arriving later never runs (the v54/v55 lesson, #1174).
+    version: 58,
+    up: (db) => {
+      const cols = db
+        .prepare<[], { name: string }>('PRAGMA table_info(audit)')
+        .all()
+        .map((c) => c.name);
+      if (!cols.includes('origin_node'))
+        db.exec("ALTER TABLE audit ADD COLUMN origin_node TEXT NOT NULL DEFAULT ''");
+      if (!cols.includes('origin_seq'))
+        db.exec('ALTER TABLE audit ADD COLUMN origin_seq INTEGER NOT NULL DEFAULT 0');
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_origin ON audit(origin_node, origin_seq) WHERE origin_seq > 0',
+      );
+    },
+  },
+  {
+    // ADR 328 §4, enforced (ADR 355 amendment, 2026-09-02): the hub-minted seat→node residence
+    // binding. "Seat X binds to node N the first time N speaks for X", first-writer-wins — the
+    // primary key on `member_id` IS the guarded CAS (`INSERT … ON CONFLICT DO NOTHING`, the
+    // `bindNode` shape). Re-binding is an explicit act (a DELETE under admin authority), never a
+    // silent overwrite. Hub-local: `member_id` is this daemon's private anchor (ADR 325), which is
+    // exactly right for a table only the arbitrating daemon reads. On a single-machine install
+    // every seat binds to the local node on its first self-claim, so when a second machine enrolls
+    // the seats that have been building here are already the hub's — the honest reading of "where
+    // does this seat live" and the case ADR 328 §Experiment watches.
+    version: 59,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS seat_nodes (
+          member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+          team_id   TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          node_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+          bound_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_seat_nodes_node ON seat_nodes(node_id);
+      `);
+    },
+  },
+  {
+    // Presence replication (spec 2026-09-02, ADR 356): a presence row folded from another machine
+    // carries the `nodes.id` it lives on; NULL is a local row (a socket or an ambient touch animates
+    // it). Every reader's liveness predicate branches on this column (store/presence.ts
+    // LIVE_PRESENCE_SQL), and the reaper's heartbeat cutoff applies to local rows only.
+    version: 61,
+    up: (db) => {
+      const cols = db
+        .prepare<[], { name: string }>('PRAGMA table_info(presence)')
+        .all()
+        .map((c) => c.name);
+      if (!cols.includes('node')) db.exec('ALTER TABLE presence ADD COLUMN node TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_presence_node ON presence(node)');
+    },
+  },
+  {
+    // ADR 357: the host actuator's `POST /residency/wake-leases` poll is its heartbeat. One row per
+    // (team, host), newest sighting wins — the fact `enrolled_host_stale` was always waiting for.
+    // Not replicated (ADR 331): a host's liveness is a fact about THIS daemon's reachability.
+    version: 62,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS host_liveness (
+          team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          host    TEXT NOT NULL,
+          seen_at INTEGER NOT NULL,
+          PRIMARY KEY (team_id, host)
+        );
+      `);
+    },
+  },
+  {
+    // ADR 358: a human seat trusts a SET of machines. The key widens from `member_id` to
+    // `(member_id, node_id)`; first-writer-wins still holds for an EMPTY set (the insert is the CAS
+    // in `bindSeatToNode`), and a second row is minted only by the explicit trust act from a node
+    // already in the set. Agents stay one-node by rule in the store, not by the schema. Rebuilt
+    // rather than altered: SQLite cannot change a primary key in place.
+    version: 63,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE seat_nodes_new (
+          member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          team_id   TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          node_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+          bound_at  INTEGER NOT NULL,
+          PRIMARY KEY (member_id, node_id)
+        );
+        INSERT INTO seat_nodes_new SELECT member_id, team_id, node_id, bound_at FROM seat_nodes;
+        DROP TABLE seat_nodes;
+        ALTER TABLE seat_nodes_new RENAME TO seat_nodes;
+        CREATE INDEX IF NOT EXISTS idx_seat_nodes_node ON seat_nodes(node_id);
+      `);
+    },
+  },
+  {
+    // Wedged-push UX (ADR 360 follow-on, 2026-09-02): the last residence refusal the hub gave this
+    // node's push, as JSON, on the cursor row it stalled. Cleared by the next accepted push. Local
+    // (residence 3) like the row it sits on.
+    version: 64,
+    up: (db) => {
+      const cols = db
+        .prepare<[], { name: string }>('PRAGMA table_info(sync_push_cursor)')
+        .all()
+        .map((c) => c.name);
+      if (!cols.includes('refused_json'))
+        db.exec('ALTER TABLE sync_push_cursor ADD COLUMN refused_json TEXT');
+    },
+  },
+  {
+    // ADR 374 — a member's colour is a hue the seat file owns. One nullable INTEGER, 0–359. No
+    // backfill on purpose: on a file-backed team the file is the source and reconcile projects it;
+    // a backfill here would recolour every seat on upgrade and be overwritten by the next reconcile
+    // anyway. `musterd team hue --assign-missing` assigns, as a reviewable diff.
+    version: 65,
+    up: (db) => {
+      const cols = db.prepare("SELECT name FROM pragma_table_info('members')").pluck().all();
+      if (!cols.includes('hue')) db.exec('ALTER TABLE members ADD COLUMN hue INTEGER');
+    },
+  },
+  {
+    // ADR 373 increment 2: a document-recorded intention is a Seed with source `repo`. Such a Seed
+    // has no Slack author — its author is a document — so `slack_user_id` must be able to be NULL.
+    // SQLite cannot drop a NOT NULL in place; rebuild the table the way v5 rebuilt `messages`. The
+    // `fkOff`: with enforcement on, DROP TABLE seeds would cascade-delete every thread entry (the
+    // v66 test plants one and proves it survives). The child FK names `seeds` by name, which the
+    // rename restores, and the runner's `foreign_key_check` afterwards proves nothing was orphaned.
+    version: 66,
+    fkOff: true,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE seeds_v66 (
+          id TEXT PRIMARY KEY,
+          team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          relay_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          body TEXT NOT NULL,
+          captured_at INTEGER NOT NULL,
+          slack_user_id TEXT,
+          submitted_by TEXT NOT NULL REFERENCES members(id),
+          state TEXT NOT NULL,
+          explorer_id TEXT REFERENCES members(id),
+          final_brief TEXT,
+          conclusion TEXT,
+          linked_lane_id TEXT REFERENCES lanes(id),
+          promotion_kind TEXT,
+          research_skipped INTEGER,
+          promoted_at INTEGER,
+          completed_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(team_id, relay_id)
+        );
+        INSERT INTO seeds_v66 SELECT * FROM seeds;
+        DROP TABLE seeds;
+        ALTER TABLE seeds_v66 RENAME TO seeds;
+        CREATE INDEX IF NOT EXISTS idx_seeds_team_state ON seeds(team_id, state, updated_at);
       `);
     },
   },

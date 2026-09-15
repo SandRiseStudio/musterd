@@ -21,6 +21,7 @@ function baseConfig(over: Partial<McpConfig> = {}): McpConfig {
     team: 'dawn',
     agent_key: 'mskey_team',
     surface: 'claude-code',
+    markerGeneration: 'test-override',
     provenance: 'session',
     workspace: 'repo',
     claim: { mode: 'chat' },
@@ -89,6 +90,45 @@ describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     rmSync(cwd, { recursive: true, force: true });
+  });
+
+  /**
+   * Lane 01M2GP25R3, clause 8. The deaf line prescribes `team_join` as THE repair for a dead
+   * session lease — it is the only thing that holds a Presence. But an explicit join answered from
+   * the local `joined` flag never reaches the server, so it repairs nothing and says "already".
+   *
+   * Measured twice on 2026-09-14: izzo's seat went deaf on every daemon bounce and a no-op
+   * "Already joined" team_join did NOT clear it (a later `team_send` did — that path goes through
+   * `request()`, sees the 401, and re-joins for real); stanley hit the same after an MCP transport
+   * drop. The flag is in-process state and the thing that died is server-side, so the flag is
+   * exactly the wrong authority: it reports on a Presence it cannot see.
+   *
+   * Autojoin keeps the cheap reuse — it fires on every tool call and must not add a round trip.
+   * An EXPLICIT team_join is a decision to re-occupy, and is rare, so it verifies.
+   */
+  it('an explicit join re-occupies instead of trusting the local flag — the prescribed repair must repair', async () => {
+    const config = baseConfig();
+    const client = joiningClient(config);
+    const spy = vi.spyOn(client, 'join');
+
+    await claimAndJoin(client, config, { seat: 'Ada' });
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // The seat is now deaf server-side; the adapter cannot know, and its flag still says joined.
+    // An explicit re-join must go to the server anyway.
+    const res = await claimAndJoin(client, config, { seat: 'Ada' }, undefined, { verify: true });
+    expect(spy).toHaveBeenCalledTimes(2);
+    expect(res.member).toBe('Ada');
+  });
+
+  it('autojoin still reuses without a round trip — the common path stays free', async () => {
+    const config = baseConfig();
+    const client = joiningClient(config);
+    const spy = vi.spyOn(client, 'join');
+    await claimAndJoin(client, config, { seat: 'Ada' });
+    const res = await claimAndJoin(client, config, { seat: 'Ada' });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(res).toEqual({ member: 'Ada', reused: true });
   });
 
   it('points the claim at the seat, joins, persists the binding, and clears the marker', async () => {
@@ -171,10 +211,10 @@ describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
       writeFileSync(
         bindingPath(anchor),
         JSON.stringify({
+          version: 2,
           server: 'http://x',
           team: 'dawn',
           agent_key: 'mskey_repaired',
-          surface: 'cursor',
           claim: { mode: 'seat', name: 'Ada' },
           grant: 'msgr_repaired',
         }),
@@ -205,10 +245,10 @@ describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
       writeFileSync(
         bindingPath(anchor),
         JSON.stringify({
+          version: 2,
           server: 'http://x',
           team: 'dawn',
           agent_key: 'mskey_ryder',
-          surface: 'cursor',
           claim: { mode: 'seat', name: 'ryder' },
           grant: 'msgr_ryder',
         }),
@@ -351,9 +391,9 @@ describe('claimAndJoin concurrency + surface authority (live native-wake finding
     writeFileSync(
       join(dir, BINDING_DIR, BINDING_FILE),
       JSON.stringify({
+        version: 2,
         server: 'http://x',
         team: 'dawn',
-        surface: 'cursor',
         claim: { mode: 'seat', name: 'compo' },
         ...b,
       }),
@@ -413,10 +453,10 @@ describe('claimAndJoin concurrency + surface authority (live native-wake finding
     expect(config.agent_key).toBe('mskey_fresh');
   });
 
-  it('still repairs an UNKNOWN surface from the binding — "other" means we could not tell', async () => {
+  it('never adopts a Surface from disk — the launcher declared it, and v2 identity carries none (ADR 286)', async () => {
     writeBinding({});
     const config = baseConfig({ bindingDir: dir, surface: 'other', claim: { mode: 'chat' } });
     await claimAndJoin(joiningClient(config), config, { seat: 'compo' });
-    expect(config.surface).toBe('cursor');
+    expect(config.surface).toBe('other');
   });
 });

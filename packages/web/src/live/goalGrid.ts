@@ -1,5 +1,5 @@
-import type { Goal, Lane, LaneWarning } from '@musterd/protocol';
-import { compareGoals, isAwaitingAcceptance } from '@musterd/protocol';
+import type { FlowMetrics, Goal, GoalFlow, Lane, LaneWarning } from '@musterd/protocol';
+import { compareGoals, isAwaitingAcceptance } from '@musterd/protocol/wire';
 
 /**
  * The goals-grid front door (goals-front-door design) — the pure model behind `GoalGrid.tsx`.
@@ -71,6 +71,13 @@ export interface GoalCardModel {
   staleNote: string | null;
   /** ⚡ pill — the card's most recently touched non-terminal lane. */
   lastMoved: { lane: string; title: string; at: number } | null;
+  /**
+   * The daemon's per-goal flow (ADR 295), or null when it sent none — a pre-295 server, or a goal
+   * whose lanes it did not report. Quoted, never recomputed from `dots`: ADR 104 froze the rule
+   * that analytics the board renders are derived server-side, so a client-side cycle time would be
+   * a second, drifting answer to a question `GET /report` already answers.
+   */
+  flow: FlowMetrics | null;
 }
 
 export interface GoalGridModel {
@@ -160,6 +167,7 @@ function buildCard(
   lanes: Lane[],
   now: number,
   stale: Map<string, string>,
+  flow: FlowMetrics | null,
 ): GoalCardModel {
   const live = lanes.filter((l) => l.state !== 'abandoned');
   const done = live.filter((l) => l.state === 'done').length;
@@ -219,6 +227,7 @@ function buildCard(
     lastMoved: lastMoved
       ? { lane: lastMoved.id, title: lastMoved.title, at: lastMoved.updated_at }
       : null,
+    flow,
   };
 }
 
@@ -231,11 +240,22 @@ export function buildGoalGrid(
   goals: Goal[],
   now: number,
   warnings: LaneWarning[] = [],
+  /** `report.goal_flow` (ADR 295); empty against a pre-295 daemon, which leaves every card's
+   *  `flow` null and the grid rendering exactly as it did before. */
+  goalFlow: GoalFlow[] = [],
 ): GoalGridModel {
+  const flowByGoal = new Map<string | null, FlowMetrics>(
+    goalFlow.map((g) => [g.goal_id, g.flow]),
+  );
+  const flowOf = (id: string | null) => flowByGoal.get(id) ?? null;
   const stale = new Map<string, string>();
   for (const w of warnings) {
     if (w.kind === 'stale_acceptance' && !stale.has(w.subject)) stale.set(w.subject, w.detail);
   }
+  // goal-retract design: a withdrawn Goal renders no card and no shelf entry. Its lanes are NOT
+  // dropped — with the id gone from declaredIds they fall to the undeclared-goal card, so work
+  // attached to a retracted goal stays visible (the ADR 257 silent-delete scar).
+  const visibleGoals = goals.filter((g) => g.retracted === undefined);
   const active = lanes.filter((l) => l.state !== 'abandoned');
   const doneLanes = active.filter((l) => l.state === 'done' && l.resolved_at !== null);
   const latest = doneLanes.reduce<Lane | null>(
@@ -244,7 +264,8 @@ export function buildGoalGrid(
   );
   const pulse = latest ? { title: latest.title, at: latest.resolved_at! } : null;
 
-  // No declared goals: the grid has nothing to lead with — the route falls back to columns.
+  // No declared goals AT ALL: the grid has nothing to lead with — the route falls back to columns.
+  // (All-retracted is different: the grid still builds, so lanes on retracted goals stay visible.)
   if (goals.length === 0) return { cards: [], shippedShelf: [], pulse };
 
   const byGoal = new Map<string | null, Lane[]>();
@@ -257,23 +278,23 @@ export function buildGoalGrid(
 
   const cards: GoalCardModel[] = [];
   const shippedShelf: ShippedGoal[] = [];
-  for (const g of [...goals].sort(compareGoals)) {
+  for (const g of [...visibleGoals].sort(compareGoals)) {
     const owned = byGoal.get(g.id) ?? [];
     byGoal.delete(g.id);
     if (g.status === 'shipped') {
       shippedShelf.push({ id: g.id, title: g.title, outcome: g.outcome ?? null });
       continue;
     }
-    cards.push(buildCard(g.id, g.title, true, g, owned, now, stale));
+    cards.push(buildCard(g.id, g.title, true, g, owned, now, stale, flowOf(g.id)));
   }
-  const declaredIds = new Set(goals.map((g) => g.id));
+  const declaredIds = new Set(visibleGoals.map((g) => g.id));
   for (const [id, orphans] of byGoal) {
     if (id === null || declaredIds.has(id)) continue;
-    cards.push(buildCard(id, id, false, null, orphans, now, stale));
+    cards.push(buildCard(id, id, false, null, orphans, now, stale, flowOf(id)));
   }
   const unassigned = byGoal.get(null);
   if (unassigned && unassigned.length > 0) {
-    cards.push(buildCard(null, 'Not on a goal yet', true, null, unassigned, now, stale));
+    cards.push(buildCard(null, 'Not on a goal yet', true, null, unassigned, now, stale, flowOf(null)));
   }
   return { cards, shippedShelf, pulse };
 }

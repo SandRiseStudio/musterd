@@ -115,6 +115,24 @@ human_ask_fired }`. The 17-row baseline table stays queryable and is the before-
   pick for `risk.length === 0` is now the agents-only ladder. Risky peer-then-human (§4) is
   untouched.
 
+- **2026-09-02 — a rung below the ladder.** [ADR 351](351-unattested-worker-routes-ungraded.md)
+  routes an **unattested worker** to a live attested peer at `ungraded`, below `cross_model`. §1's
+  "either side unknown → null, ineligible to route" stays frozen as the *grade*; the picker adds
+  the rung outside `REVIEW_GRADES`, with its own `route` value, and §3's close-edge abstention
+  (`review_grade_unknown`) is what such a close records. An unattested *candidate* is still never
+  routed.
+
+- **2026-09-05 — ties get a policy.** §2's "among equal grades, roster order stands; no new
+  tie-break policy" is superseded for the tie only, by lane `01M1S6GZ96XNEPFRPZBHT7PKAM`: measured
+  over the 30 days to 2026-09-05, all 32 equal-grade ties went to the earlier `listMembers` seat,
+  and the seat that kept winning held up to 14 open acceptance asks at once. Both pickers now break
+  an equal-grade tie by **load** (fewest open acceptance asks held), then **recency** (least
+  recently picked), then roster order as the last resort — and the ready row's
+  `review_selection.selected.tie_decided_by` names which rung decided (`grade` when nothing tied).
+  The ladder is untouched: grade still dominates, and load never reorders across rungs. The other
+  measured cause of the same concentration — a wake pool with exactly one `flow: auto` seat — is
+  not a picker fact and is left to enrollment (see the wiki's acceptance-routing page).
+
 - **Honesty limit (ADR 200):** the ladder grades what was **recorded**, and no rung can detect a seat
   presenting a human credential ([ADR 200](200-credential-custody-and-the-real-use-gate.md)).
   Accepted for dogfood; forbidden in any build promoted for real use.

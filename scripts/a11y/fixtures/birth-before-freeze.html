@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>birth fixture — the frame BEFORE the freeze</title>
+    <style>
+      body {
+        background: #ffffff;
+        margin: 0;
+        font: 16px sans-serif;
+      }
+      /* Dark paint in the top-left corner — the "room papers" a stranded bubble lands on. */
+      #patch {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 420px;
+        height: 80px;
+        background: #3a4d4d;
+      }
+      /* Bubbles: dark ink. Fine over the white body; ~1.8:1 over the patch. */
+      .bub {
+        position: absolute;
+        left: 0;
+        top: 0;
+        color: #2b1f13;
+      }
+      #normal {
+        position: absolute;
+        left: 40px;
+        top: 200px;
+        color: #111;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="patch"></div>
+    <p id="normal">a normally measurable row</p>
+    <div class="bub" style="left: 40px; top: 400px">a healthy sibling speaks</div>
+    <script>
+      /*
+       * The OTHER arm of the birth hole — the residual the fix documented but did not close, and the
+       * one wanderer hit on /office-preview at light=12 (lc-speech__text 1.8 on #3a4d4d).
+       *
+       * `birth-after-freeze.html` covers a bubble born AFTER the rAF no-op lands: unmarked, so the
+       * WeakSet reports it `born` and it is excluded. This one is born in the last frame BEFORE the
+       * freeze, so it IS in the mark set — and is therefore NOT excluded — but its positioning tick
+       * never runs, because the freeze replaces rAF before the queued frame fires. It is stranded at
+       * (0,0) over the dark patch and measured there.
+       *
+       * Same visible signature as the post-freeze case, opposite cause: not "born after the mark"
+       * but "marked, yet never placed". Birth TIME was the wrong predicate; what matters is whether
+       * the element ever got its positioning tick.
+       */
+      /*
+       * The page's positioning hand: places any unplaced bubble on each frame.
+       *
+       * It reschedules through `window.requestAnimationFrame` — the LIVE property, deliberately not
+       * a captured reference. That is what makes the freeze bite: replacing the property stops this
+       * loop, which is exactly the real scene's behaviour and the whole reason a bubble can end up
+       * stranded. A fixture that captured the original rAF would keep placing elements straight
+       * through the freeze and could never reproduce the bug (it silently did, on the first attempt).
+       */
+      function place() {
+        for (const el of document.querySelectorAll('.bub:not([style*="left"])')) {
+          el.style.left = '40px';
+          el.style.top = '300px';
+        }
+        window.requestAnimationFrame(place);
+      }
+      window.requestAnimationFrame(place);
+
+      /*
+       * The trap has to fire BEFORE the mark walk, or it reproduces the wrong arm.
+       *
+       * The sweep's freeze is one synchronous evaluation in this order:
+       *     window.__a11y_atFreeze = new WeakSet();      // (1) assignment
+       *     for (const el of document.querySelectorAll('*')) …add(el);   // (2) the mark walk
+       *     window.requestAnimationFrame = () => 0;      // (3) the freeze
+       *
+       * Trapping (3) — the obvious hook — creates the element after the walk, so it is UNMARKED and
+       * the sweep correctly excludes it as `born`. That is `birth-after-freeze.html`, the arm the fix
+       * already closes. To land in the residual the element must exist between (1) and (2): marked
+       * like any pre-existing node, yet with its placement frame still only queued when (3) lands.
+       *
+       * So the trap is the assignment at (1).
+       */
+      let markSet;
+      Object.defineProperty(window, '__a11y_atFreeze', {
+        configurable: true,
+        get() {
+          return markSet;
+        },
+        set(v) {
+          markSet = v;
+          // Born here: after (1), before (2). The walk that follows will mark it, and the freeze at
+          // (3) lands before `place()` can ever run for it — stranded at (0,0) over the dark patch,
+          // marked, and therefore measured there.
+          const el = document.createElement('div');
+          el.className = 'bub';
+          el.textContent = 'marked, yet never placed';
+          document.body.prepend(el);
+        },
+      });
+    </script>
+  </body>
+</html>

@@ -158,6 +158,91 @@ describe('codex detect reads its own entry back', () => {
 });
 
 /**
+ * Hook drift is a claim about provisioning musterd DID, so it can only be made where musterd
+ * provisioned Codex. `detect` used to compute `hookDrift` unconditionally and report it beside
+ * `configured: false`, so every Claude-Code-only folder on the machine got a hard ✗ naming a Codex
+ * file it has no reason to own — observed 2026-08-14 in the izzo seat, whose own `--check` printed
+ * the two contradictory lines together: "Codex: no musterd server (~/.codex present)" and "✗ Codex:
+ * the project-local Codex hooks are missing from .codex/hooks.json".
+ *
+ * It matters because `--check` is the drift instrument: the same run also carried a real, load-
+ * bearing finding (no harness permissions block — ADR 261, where a non-interactive seat fails closed
+ * on its first Write). A permanent unfixable ✗ standing next to a real one is how a checker gets
+ * ignored, which is the failure ADR 168 exists to prevent.
+ */
+describe('codex hook drift is scoped to folders codex is actually wired into', () => {
+  it('reports no hook drift when there is no musterd server for this folder', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-codex-nohooks-'));
+    const prev = process.cwd();
+    const prevHome = process.env['HOME'];
+    try {
+      process.env['HOME'] = dir; // no global entry either
+      process.chdir(dir);
+      const d = await codex.detect();
+      expect(d.configured).toBe(false);
+      // The bare fact the gate is built on: the file really is absent, so the raw inspector does
+      // report drift — `detect` must decline to surface it, rather than the inspector going quiet.
+      expect(inspectCodexHookDrift(process.cwd()).length).toBeGreaterThan(0);
+      expect(d.hookDrift).toBeUndefined();
+    } finally {
+      process.chdir(prev);
+      if (prevHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = prevHome;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('still reports hook drift once the folder carries a musterd server', async () => {
+    await codex.configure(buildEntry(binding), binding);
+    rmSync(join(cwd, '.codex', 'hooks.json'), { force: true }); // configure installs them; drift them
+    const d = await codex.detect();
+    expect(d.configured).toBe(true);
+    expect(d.hookDrift).toBeDefined();
+  });
+});
+
+/**
+ * The other half of the same defect: once drift IS reported, the seat needs a repair it can run.
+ * Codex declared no `refreshHooks`, so `musterd init --refresh-hooks` skipped it and the doctor
+ * pointed at `musterd wire` — which only registers the MCP server and never calls
+ * `installCodexHooks`, so it exits 0 having changed nothing. The only path that installed them was
+ * the full `musterd init`, which ADR 161 forbids in a live seat's workspace. Verified 2026-08-14 by
+ * running both against a drifted folder and watching the ✗ survive.
+ */
+describe('codex refreshHooks', () => {
+  it('does not apply to a folder codex was never provisioned into (a refresh is not a first install)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-codex-refresh-none-'));
+    try {
+      expect(codex.refreshHooks?.applies(dir)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('applies once the folder carries a musterd server, and reinstalls hooks that went missing', async () => {
+    await codex.configure(buildEntry(binding), binding);
+    rmSync(join(cwd, '.codex', 'hooks.json'), { force: true });
+    expect(codex.refreshHooks?.applies(cwd)).toBe(true);
+    const res = codex.refreshHooks!.run(cwd);
+    expect(res.files).toContain(join(cwd, '.codex', 'hooks.json'));
+    expect(res.warnings).toEqual([]);
+    // The repair is real, not just a written file: the drift the doctor reported is now gone.
+    expect(inspectCodexHookDrift(cwd)).toEqual([]);
+  });
+
+  it('warns instead of claiming success when the hooks file is malformed', async () => {
+    await codex.configure(buildEntry(binding), binding);
+    writeFileSync(join(cwd, '.codex', 'hooks.json'), '{ not json', 'utf8');
+    const res = codex.refreshHooks!.run(cwd);
+    // installCodexHooks declines to touch a malformed file (it may be hand-authored), and the
+    // refresh driver prints "✓ refreshed" off the return value — so a silent [] here would report a
+    // repair that did not happen, which is the exact failure ADR 168 exists to end.
+    expect(res.files).toEqual([]);
+    expect(res.warnings.join(' ')).toMatch(/malformed/);
+  });
+});
+
+/**
  * Codex merges a **global** `~/.codex/config.toml` with the project-local one, and musterd only ever
  * writes the project file (ADR 031, deliberately non-invasive). `detect` read only the project file,
  * so a globally-registered musterd server read as ABSENT: `musterd init --check` printed "Codex: no

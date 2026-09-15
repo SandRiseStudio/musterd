@@ -1,5 +1,7 @@
 import type { LaneState, Posture, WorkingHours } from '@musterd/protocol';
+import type { Caption } from '../captions';
 import type { ActTone } from '../format';
+import type { Addressee, SpeechMarking } from './speech';
 import type { WallBoard } from './wallboard';
 
 /** Facing on the isometric floor. S = toward the viewer (front), N = away, E/W = profiles. */
@@ -12,8 +14,15 @@ export type Dir = 'S' | 'E' | 'N' | 'W';
 export interface OfficeNode {
   name: string;
   kind: 'agent' | 'human';
+  /**
+   * A `kind: 'service'` roster seat (ADR 232 — autorefresh, guardian). Pure code: no model, no
+   * harness attestation. The BODY stays an agent (`kind` above is the drawing decision), but the
+   * nameplate must say "service" rather than render the unknown-provider "?" — a ledger seat with
+   * a question mark reads as a broken attestation, not as what it is.
+   */
+  service: boolean;
   presence: 'online' | 'away' | 'offline';
-  activity: 'offline' | 'idle' | 'working';
+  activity: 'offline' | 'active' | 'working';
   /**
    * The composed roster posture (ADR 138) — resolved **once, by the same `memberPosture` the roster rail
    * uses**, and carried here so the floor can't drift from the chip. It decides both where the member is
@@ -21,8 +30,11 @@ export interface OfficeNode {
    */
   posture: Posture;
   state: string | null;
-  /** The member's signature colour — `memberColor(name, kind)`, an `hsl()` string. */
+  /** The member's signature colour — `memberColor(name, kind, hue)`, an `hsl()` string. */
   color: string;
+  /** The stored hue behind `color` (ADR 374), or null when the name hash painted it — carried so the
+   *  speech ink (`memberInk`) can be derived from the same number the fill was. */
+  hue?: number | null;
   role: string;
   /** Live presence surface (harness) — for the floating nameplate identity line. */
   surface: string | null;
@@ -33,6 +45,22 @@ export interface OfficeNode {
   workSource: 'lane' | 'status' | null;
   laneState: LaneState | null;
   moreLanes: number;
+  /** Self-set do-not-disturb (ADR 044) — at their desk, headphones on, never walked to (§4). */
+  dnd: boolean;
+  /** Why the seat is dark (ADR 141/315) — drives the owned-desk texture and the left_team exit. */
+  offline_reason: string | null;
+  /** Last seen (wire fact) — the warm-desk fade and the desk-capacity tiebreak read it. */
+  last_seen_at: number | null;
+  /**
+   * This seat is in the room because a wake put it there (ADR 131), not because a person opened a
+   * session — read from the live presence's stamped `provenance` (see `wokenSeat.ts`).
+   *
+   * NOT a posture, and deliberately kept off `posture` rather than folded into it: posture decides
+   * where the body is placed and what colour its dot is, and a woken seat sits, works and idles
+   * like any other. This answers the different question the office could not answer at all — an
+   * eleven-second codex wake and a human at a terminal drew identically until now.
+   */
+  woken: boolean;
 }
 
 /** The office has no arcs — relationships show as choreography, not edges. */
@@ -44,6 +72,8 @@ export interface OfficeData {
   nodes: OfficeNode[];
   /** The lane board projected for the wall's agile board (wallboard.ts). Absent/null → empty board. */
   wallBoard?: WallBoard | null;
+  /** Members taking turns in an open huddle (ADR 378) — they gather at the meeting table. */
+  gathered?: string[];
 }
 
 /** A thought/urgency bubble over an actor's head while it's mid-choreography. */
@@ -64,6 +94,12 @@ export interface Pose {
    * Absent → render by `dir` alone. */
   heading?: number;
   small: boolean;
+  /**
+   * Seated on furniture with nothing in front of the hands — the lounge couch, a meeting chair,
+   * reception's waiting chair. The skeleton rests the hands in the lap and settles the spine back
+   * instead of reaching onto a keyboard. Only meaningful while `sit > 0`; absent/false is the desk.
+   */
+  casual?: boolean;
   /** What's in the hands this frame: a handoff box, an errand's plate/bottle/mug — or nothing. */
   carry: CarryKind | null;
   bubble: Bubble;
@@ -101,8 +137,10 @@ export interface Pose {
   depthAt?: { lx: number; ly: number };
 }
 
-/** What a member can carry through a walk or a hold: the handoff box, or an errand's prop. */
-export type CarryKind = 'box' | 'plate' | 'bottle' | 'mug' | 'phone';
+/** What a member can carry through a walk or a hold: the handoff box, an errand's prop, or the
+ * member's own closed laptop — which is the default whenever it is not docked at their desk, and
+ * which an errand's carry outranks for the errand's duration (you set the laptop down to eat). */
+export type CarryKind = 'box' | 'plate' | 'bottle' | 'mug' | 'phone' | 'laptop';
 
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */
 export type Tier = 'ambient' | 'needs-attn' | 'urgent';
@@ -113,11 +151,21 @@ export type Tier = 'ambient' | 'needs-attn' | 'urgent';
  */
 export type OfficeEvent =
   | { kind: 'screen-pulse'; who: string; tone: ActTone }
-  | { kind: 'note'; from: string; to: string; tone: ActTone }
-  | { kind: 'walk-help'; from: string; to: string; tier: Tier }
+  /**
+   * `to` is a LIST on the three acts that may carry an ADR 254 eligible set (message, request_help,
+   * challenge — `ELIGIBLE_ACTS`): one name normally, 2-4 when any of them can discharge the act.
+   * Plural in the type rather than "a name plus some others", because the scene must treat every
+   * name the same way — the sender walks the whole set, one desk after another, exactly as it walks
+   * to a single recipient. `walk-handoff` and `steer` stay singular: two owners is zero owners, and
+   * both are structurally single-target.
+   */
+  | { kind: 'note'; from: string; to: string[]; tone: ActTone }
+  | { kind: 'walk-help'; from: string; to: string[]; tier: Tier }
   | { kind: 'walk-handoff'; from: string; to: string; label: string }
   | { kind: 'megaphone'; from: string }
-  | { kind: 'accept'; who: string }
+  /** `of`: whose work was accepted (the act's recipient) — the celebration lands on THEM, not the
+   *  acceptor. Null/absent for team-addressed accepts, where there is no single celebrant. */
+  | { kind: 'accept'; who: string; of?: string | null }
   | { kind: 'decline'; who: string }
   | { kind: 'wait'; who: string }
   | { kind: 'resolve'; who: string }
@@ -126,13 +174,31 @@ export type OfficeEvent =
   // the target. `challenge` is an epistemic "justify?" question over the head(s). `defer` mutates the
   // plan (a Goal, `meta.goal_id`) so it pulses across the board in the lane family.
   | { kind: 'steer'; from: string; to: string | null; urgent: boolean }
-  | { kind: 'challenge'; from: string; to: string | null; urgent: boolean }
+  | { kind: 'challenge'; from: string; to: string[]; urgent: boolean }
   | { kind: 'defer'; who: string }
+  /** A plain-language narrated moment for the caption rail (first-five-seconds §2). Structured
+   * rather than a bare string: the chrome colours the line by tone and dots it in the actor's own
+   * colour, and both facts were already known where the sentence was composed. */
+  | { kind: 'caption'; caption: Caption }
   // An act, typed out over the sender's head then faded — the body when it has one, else the act label.
   // Independent of the choreography cue above; both can fire for one act. `id` (the envelope id) makes
   // the bubble a click-through to the same act in the stream panel.
   // `act` (the wire act name) lets the bubble shape act-aware — status chatter gets a tighter glance.
-  | { kind: 'speech'; who: string; text: string; tone: ActTone; id?: string; act?: string };
+  // `addressee` names who a DIRECTED act is aimed at, so "You were right, I'll take the handoff…"
+  // can't float unaddressed; null for team/broadcast, where the audience is already the default.
+  | {
+      kind: 'speech';
+      who: string;
+      text: string;
+      tone: ActTone;
+      id?: string;
+      act?: string;
+      addressee?: Addressee | null;
+      /** What KIND of act this is, as one of four ranked marks — see speech.ts `speechMark`. The
+       *  bubble's colour is the sender's identity, so this is the whole of what it says about the
+       *  act. `null`/absent is the common answer: most acts are the room working. */
+      marking?: SpeechMarking | null;
+    };
 
 /** The imperative handle the `OfficeScene` component drives the mounted scene through. */
 export interface OfficeHandle {
@@ -156,6 +222,47 @@ export interface OfficeHandle {
    * were equal (full rAF waste). Two integer increments per frame; not gated, because gating costs
    * more than it saves. */
   stats: () => OfficeStats;
+  /** The shared ambient beat log (E1 spec §5): one entry per fired slot — slot number, whose beat,
+   * and whether this browser played it. Two visible viewers of the same team over the same interval
+   * must agree on everything but `played`. Capped at the last 200 entries. */
+  ambientLog: () => AmbientLogEntry[];
+  /**
+   * Where every posed member is standing right now, in logical floor coordinates, plus whether the
+   * nav grid calls that spot walkable.
+   *
+   * A measurement affordance, and it exists because the question "do members walk through the
+   * furniture?" had two candidate answers that look identical on screen — a painter that sorts a
+   * member behind a desk they are standing in front of, and a walker whose path genuinely crosses a
+   * solid footprint. Only one of those is a nav bug, and the two want opposite fixes, so guessing
+   * costs a session (nick, 2026-09-14). Read from CDP the way `ambientLog` is.
+   */
+  floorSamples: () => {
+    name: string;
+    lx: number;
+    ly: number;
+    /** The PLANNING test: footprints inflated by a body radius. False near furniture, not only in it. */
+    walkable: boolean;
+    /**
+     * The COLLISION test: which footprint as DRAWN (pad 0) this member is inside, or null. `inset` is
+     * how far past its nearest edge — a walker brushing an edge reads small, a path straight across a
+     * desk reads large — and `tag` says whose furniture it is.
+     */
+    hit: { tag: string; inset: number } | null;
+    /** The sit blend, 0 standing … 1 seated. A member easing into a chair is inside their own desk
+     *  legitimately, and still moving — so clipping has to be split on this or the sit-down is
+     *  counted as walking through the table. */
+    sit: number;
+  }[];
+}
+
+/** @see OfficeHandle.ambientLog */
+export interface AmbientLogEntry {
+  slot: number;
+  kind: 'pet' | 'pair' | 'member';
+  who?: string;
+  pair?: [string, string];
+  /** Whether THIS browser's local guards let the beat run — the one honest per-viewer field. */
+  played: boolean;
 }
 
 /** @see OfficeHandle.stats */

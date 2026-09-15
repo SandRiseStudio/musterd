@@ -96,6 +96,9 @@ human-accepted ones. The sweep therefore reads, and writes only when it closes.
 
 ## Consequences
 
+- _Dated note (2026-08-24):_ the Decision's "ADR 056 diversity conclusions" resolves to
+  [ADR 314](314-correlated-models-correlated-mistakes.md), the diversity charter — ADR 056 never
+  stated the thesis; the Decision text is frozen, so the repoint lives here.
 - Protocol: `LoopsPolicy` gains `sweep`. No wire change for a team that does not set it.
 - A team that arms it trades "a stranded lane waits forever" for "a stranded lane closes, unverified
   and labelled, after a day". That is a real loss of information — an acceptance that would have

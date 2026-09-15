@@ -1,6 +1,8 @@
 import {
   ARXIV_CATEGORIES,
   ARXIV_MAX_RESULTS,
+  EXN_FEED_LIMIT,
+  EXN_FEED_URL,
   FETCH_RETRIES,
   FETCH_TIMEOUT_MS,
   HF_DAILY_LIMIT,
@@ -331,5 +333,71 @@ export async function fetchHuggingFacePaper(
     });
   } catch {
     return null;
+  }
+}
+
+/** One row of the Exploring Next public feed — only the fields the radar reads. */
+interface ExnFeedItem {
+  id?: string;
+  title?: string;
+  url?: string;
+  description?: string;
+  /** The argued two-host episode digest — triage signal no arXiv abstract has. */
+  audio_summary?: string;
+  discovered_at?: string;
+}
+
+export function parseExnFeed(data: unknown): RadarCandidate[] {
+  const items =
+    data !== null && typeof data === 'object' && Array.isArray((data as { items?: unknown }).items)
+      ? ((data as { items: unknown[] }).items as ExnFeedItem[])
+      : [];
+  const out: RadarCandidate[] = [];
+  for (const row of items) {
+    if (row === null || typeof row !== 'object') continue;
+    const { id, title, url, discovered_at } = row;
+    if (!id || !title || !url || !discovered_at) continue;
+    const abstract = collapseWs([row.description ?? '', row.audio_summary ?? ''].join(' ').trim());
+    // An arXiv-linked row takes the arXiv id, so mergeCandidates and the seen ledger collapse it
+    // with the same paper arriving from the arxiv/hf sources.
+    const arxivMatch = /arxiv\.org\/(?:abs|html|pdf)\/([0-9.]+?)(?:v\d+)?(?:[/?#]|$)/.exec(url);
+    out.push({
+      source: 'exn',
+      id: arxivMatch ? normalizeArxivId(arxivMatch[1]!) : id,
+      title: collapseWs(title),
+      url,
+      published: discovered_at.slice(0, 10),
+      ...(abstract ? { abstract: truncateDescription(abstract) } : {}),
+    });
+  }
+  return out;
+}
+
+/** Sweep the Exploring Next feed: window by discovered_at, then the same keyword filter as HF. */
+export async function sweepExn(opts: {
+  sinceDays: number;
+  fetchFn?: FetchFn | undefined;
+  /** Injected clock for tests (ms epoch). */
+  now?: number;
+}): Promise<{ candidates: RadarCandidate[]; warning?: string }> {
+  const fetchFn = opts.fetchFn ?? fetch;
+  const url = `${EXN_FEED_URL}?limit=${EXN_FEED_LIMIT}`;
+  try {
+    const res = await fetchWithRetry(url, { headers: { Accept: 'application/json' } }, fetchFn);
+    if (!res.ok) {
+      return { candidates: [], warning: `Exploring Next feed returned ${res.status}` };
+    }
+    const cutoff = (opts.now ?? Date.now()) - opts.sinceDays * 86_400_000;
+    const candidates = parseExnFeed(await res.json()).filter((c) => {
+      const t = Date.parse(c.published);
+      if (Number.isFinite(t) && t < cutoff) return false;
+      return matchesKeywordFilter(`${c.title} ${c.abstract ?? ''}`);
+    });
+    return { candidates };
+  } catch (err) {
+    return {
+      candidates: [],
+      warning: `Exploring Next feed failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }

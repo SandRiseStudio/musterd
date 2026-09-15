@@ -8,6 +8,7 @@
  * (the 8-day-old-log ghost paged a human for an incident that ended a week ago).
  */
 import type { GuardianSignals } from './classify.js';
+import { parseSample } from './sample.js';
 
 export interface HealthPayload {
   ok: boolean;
@@ -18,10 +19,33 @@ export interface HealthPayload {
   build?: string;
 }
 
+/**
+ * The bound on the ONE confirming probe, and the whole point of it: a different bound is a
+ * different observation. Derived from measurement rather than taste — /health latency is bursty and
+ * load-correlated (2026-08-21, live daemon: 25 samples under load gave p50 2.8 ms, p90 16 ms, max
+ * 3.22 s; 90 samples while quiet gave max 0.02 s), so 10 s is ~3x the worst answer yet observed and
+ * still a fraction of the ~120 s tick. Revisit it if a raise ever shows this probe failing on a
+ * daemon later found healthy — that is the falsifier, and it is cheap to run.
+ */
+export const CONFIRM_TIMEOUT_MS = 10_000;
+
 export interface SignalDeps {
   now: () => number;
   /** GET /health on the explicitly configured server (#780: name the server you measured). */
   fetchHealth: () => Promise<HealthPayload>;
+  /**
+   * The same GET, on a bound the COLLECTOR dictates rather than the caller.
+   *
+   * Taking `timeoutMs` as an argument is what makes the bound reported in the raise true by
+   * construction: if the caller chose it, a wiring that quietly passed the short bound would still
+   * produce evidence claiming the long one, and the raise would assert a discrimination that never
+   * happened.
+   *
+   * REQUIRED, deliberately. As an optional dep a forgotten wiring would degrade in silence — the
+   * guardian back to calling every slow tick an outage, with nothing to show it had stopped
+   * confirming. Required makes every caller, and every fixture, say what the long probe does.
+   */
+  confirmHealth: (timeoutMs: number) => Promise<HealthPayload>;
   /** Delay between outage-confirmation probes. Injected so tests do not wait. */
   sleep?: (ms: number) => Promise<void>;
   /** `launchctl print gui/<uid>/<daemon label>` raw output; '' when the call fails. */
@@ -30,6 +54,8 @@ export interface SignalDeps {
   readSince: (path: string, epochMs: number) => Promise<string[]>;
   /** mtime of `path` in epoch ms, null when absent. */
   statMtime: (path: string) => Promise<number | null>;
+  /** The machine's 1-minute load average and core count (lane 01M2GTB0RA); absent = no reader wired. */
+  loadAverage?: () => { one: number; cores: number };
   /** What THIS build expects — drift is measured against the probe's own code. `schema: null`
    *  skips the drift check (the CLI has no compiled-in schema constant to compare against yet). */
   expected: { dbPath: string; schema: number | null };
@@ -41,13 +67,43 @@ export interface SignalDeps {
   lastRefreshAt: () => Promise<number | null>;
   /** ADR 274's explicit, bounded daemon-restart state. Read only after a confirmed health miss. */
   readHandover?: () => Promise<Exclude<GuardianSignals['handover'], undefined>>;
+  /**
+   * Raw `sample <pid> <seconds>` output for the live daemon pid (ADR 389 §1).
+   *
+   * OPTIONAL, and its absence is a first-class answer rather than an oversight: the tool is macOS
+   * only, and on a host without it the class is simply unreachable and the posture stays exactly
+   * today's. A build that cannot sample must degrade toward `daemon_down` at `alert` — never past
+   * it — so every failure path here resolves to "not taken, and here is why".
+   */
+  sampleStack?: (pid: number, seconds: number) => Promise<string>;
 }
 
+/**
+ * The bound on the stack sample, in seconds. Read-only, no signal sent, nothing written — and it
+ * is only ever paid on a tick that has ALREADY spent four failed /health probes, never on a
+ * healthy machine (ADR 389 Consequences).
+ */
+export const SAMPLE_SECONDS = 3;
+
 /** Tolerant parse of `launchctl print` — absent fields are zeros, never a throw. */
-export function parseLaunchctlPrint(out: string): { lastExit: number; runs: number } {
+export function parseLaunchctlPrint(out: string): {
+  lastExit: number;
+  runs: number;
+  pid: number | null;
+} {
   const runs = /runs\s*=\s*(\d+)/.exec(out);
   const exit = /last exit code\s*=\s*(\d+)/.exec(out);
-  return { lastExit: exit ? Number(exit[1]) : 0, runs: runs ? Number(runs[1]) : 0 };
+  // The pid launchd itself reports, not one we look up by name: sampling the wrong process would
+  // put a stranger's stack in a raise about ours. Absent when launchd has no running instance —
+  // which is itself the answer (nothing alive to be wedged).
+  // Anchored to its own line so a qualified field ("original pid = ...") cannot be read as the
+  // live one: sampling a pid launchd no longer owns is worse than not sampling at all.
+  const pid = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(out);
+  return {
+    lastExit: exit ? Number(exit[1]) : 0,
+    runs: runs ? Number(runs[1]) : 0,
+    pid: pid ? Number(pid[1]) : null,
+  };
 }
 
 export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
@@ -57,7 +113,13 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
   let bootedAt = now; // no reachable daemon / no booted_at → nothing is "since boot"
   // One failed request is a transport observation, not an outage. Confirm it inside this tick so
   // transient handovers do not enter the daemon_down classifier (ADR 274).
+  // Kept, never swallowed: the reason the LAST attempt failed, and how many were made. The bare
+  // `catch {}` that used to stand here is why 22 daemon_down raises were byte-identical and none
+  // could be adjudicated — the same defect as Chrome's stderr discarded by `stdio: 'ignore'` (#894).
+  let probe: GuardianSignals['healthProbe'];
+  let attempts = 0;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    attempts = attempt + 1;
     try {
       const h = await d.fetchHealth();
       bootedAt = h.booted_at ?? now;
@@ -67,13 +129,103 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
         schemaOk: d.expected.schema === null || h.schema === d.expected.schema,
         dbPathExpected: h.db === d.expected.dbPath,
       };
+      probe = undefined;
       break;
-    } catch {
+    } catch (err) {
+      // One line, bounded: this rides an alert body, and an unbounded stack would bury the reason.
+      probe = {
+        attempts,
+        lastError: (err instanceof Error ? err.message : String(err))
+          .replace(/\s+/g, ' ')
+          .slice(0, 200),
+      };
       if (attempt < 2) await (d.sleep?.(1_000) ?? Promise.resolve());
     }
   }
 
+  /**
+   * ADR 274 confirms an unreachable /health with two further probes — but all three share the short
+   * bound, so inside one stall they are ONE observation repeated, not three. Repeating the
+   * measurement under question can only restate it; separating slow from down needs a DIFFERENT
+   * bound, which is what this is.
+   *
+   * Run unconditionally rather than gated on the error's shape. The shape does discriminate
+   * ("fetch failed" = nothing listening, "aborted due to timeout" = listening but slow, verified
+   * 2026-08-21) and that is what diagnosed the six false alarms — but it is not worth gating on: a
+   * refused connection fails this probe in about a millisecond, so a real outage pays nothing,
+   * while a shape regex would be one more thing to be wrong about a failure mode nobody has met
+   * yet. The error shape says which hypothesis is worth testing; the probe is what tests it.
+   *
+   * A wedged daemon — process alive, socket listening, event loop stuck — answers neither bound and
+   * still reports down, which is the property that keeps this a discrimination rather than a
+   * blindfold.
+   */
+  if (health === null) {
+    try {
+      const h = await d.confirmHealth(CONFIRM_TIMEOUT_MS);
+      bootedAt = h.booted_at ?? now;
+      health = {
+        ok: h.ok,
+        bootedAt,
+        schemaOk: d.expected.schema === null || h.schema === d.expected.schema,
+        dbPathExpected: h.db === d.expected.dbPath,
+      };
+      // Nothing survives a successful confirm: there is no incident left for a human to adjudicate.
+      probe = undefined;
+    } catch (err) {
+      if (probe !== undefined) {
+        probe = {
+          ...probe,
+          confirmMs: CONFIRM_TIMEOUT_MS,
+          confirmError: (err instanceof Error ? err.message : String(err))
+            .replace(/\s+/g, ' ')
+            .slice(0, 200),
+        };
+      }
+    }
+  }
+
   const launchd = parseLaunchctlPrint(await d.launchctlPrint().catch(() => ''));
+
+  /**
+   * The stack sample (ADR 389 §1), taken only on the shape that could become `daemon_wedged`:
+   * /health unreachable on both bounds, launchd reporting a clean exit, and a pid launchd itself
+   * still names. A healthy machine never reaches this line, and a machine whose daemon genuinely
+   * exited has no pid to sample.
+   *
+   * Persistence across ticks — the fourth condition — is the classifier's to check, not the
+   * collector's: `firstUnreachableAt` is injected by the tick from its stamp, after this runs. So
+   * a first sighting pays the sample too, and that is deliberate: the evidence is most useful at
+   * the moment it is fresh, and it rides even a deferred raise.
+   *
+   * Every failure is an answer, never a throw: no sampler wired, no pid, the tool absent, the pid
+   * gone between probe and sample — each yields `taken: false` with a reason, and the classifier
+   * degrades to exactly today's `daemon_down` posture.
+   */
+  let stack: GuardianSignals['stack'];
+  if (health === null && launchd.lastExit === 0) {
+    if (d.sampleStack === undefined) {
+      stack = { taken: false, reason: 'this build wires no stack sampler', wedged: false };
+    } else if (launchd.pid === null) {
+      stack = {
+        taken: false,
+        reason: 'launchd reports no running pid — nothing alive to be wedged',
+        wedged: false,
+      };
+    } else {
+      const pid = launchd.pid;
+      stack = await d
+        .sampleStack(pid, SAMPLE_SECONDS)
+        .then((out) => parseSample(out, pid))
+        .catch((err) => ({
+          taken: false,
+          reason: `sample(1) failed: ${(err instanceof Error ? err.message : String(err))
+            .replace(/\s+/g, ' ')
+            .slice(0, 200)}`,
+          wedged: false,
+        }));
+    }
+  }
 
   const errLines = await d.readSince(d.daemonErrLogPath, bootedAt).catch(() => []);
 
@@ -96,7 +248,10 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
   return {
     now,
     health,
+    ...(probe !== undefined ? { healthProbe: probe } : {}),
     handover,
+    ...(stack !== undefined ? { stack } : {}),
+    ...(d.loadAverage !== undefined ? { load: d.loadAverage() } : {}),
     launchd,
     publisherLog: { freshFailure },
     errLinesSinceBoot: errLines.length,

@@ -33,6 +33,24 @@ for _ in $(seq 1 30); do
 done
 tailscale status >/dev/null || { echo "✗ tailscale never came up"; tail -20 /tmp/tailscale/tailscaled.log; exit 1; }
 
+# Say which node we actually became. We ASK for `musterd-broadcast` every run, but the state above is
+# a tmpfs path — so this is a genuinely new node each time, and Tailscale will not hand out a
+# hostname that is still taken: it appends `-1`, `-2`. Paired with an ephemeral auth key that is
+# self-correcting (the coordination server drops the old node a while after it goes offline), and a
+# suffix here just means the previous run has not been reaped yet.
+#
+# It is echoed because the two states are indistinguishable at a glance. If the key is NOT ephemeral
+# nothing is ever reaped, every run leaks a device row, and the only symptom is this same suffix
+# climbing — which is how three `musterd-broadcast*` rows turned up in the admin console on
+# 2026-09-03 with nothing anywhere to explain them. One line in the run log makes the climb readable
+# after the fact; `musterd stream doctor` is what counts them before it matters.
+ASSIGNED="$(tailscale status --json 2>/dev/null | sed -n 's/.*"DNSName"[[:space:]]*:[[:space:]]*"\([^".]*\)\..*/\1/p' | head -1)"
+if [ -n "$ASSIGNED" ] && [ "$ASSIGNED" != "musterd-broadcast" ]; then
+  echo "▸ tailnet node: ${ASSIGNED} (asked for musterd-broadcast — the previous node is not reaped yet)"
+else
+  echo "▸ tailnet node: ${ASSIGNED:-musterd-broadcast}"
+fi
+
 # Ask tailscaled for the peer's address rather than a resolver. Accepts an IP, a MagicDNS short name,
 # or a full `host.tailnet.ts.net` (only the first label is meaningful to `tailscale ip`).
 resolve_air() {

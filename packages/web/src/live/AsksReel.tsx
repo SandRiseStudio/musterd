@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
-import { askTierHolds } from '@musterd/protocol';
+import { askTierHolds } from '@musterd/protocol/wire';
 import {
+  applyTierClock,
   askIsLoud,
   byUrgency,
+  clockFraction,
   deriveAsks,
   deriveReviewQueue,
   reelItems,
@@ -11,8 +13,8 @@ import {
   type AskView,
   type ReviewView,
 } from './asks';
-import { acceptanceCapacity, initial, kindOf, memberAvatar } from './format';
-import { reelIndex } from './reel';
+import { acceptanceCapacity, initial, kindOf, memberAvatar, memberColor, hueOf } from './format';
+import { reelIndex, reelTicks } from './reel';
 
 /**
  * The asks rail as stream chrome (ADR 228) — what `AsksStrip` is to `/live`, minus every part that
@@ -38,10 +40,23 @@ export function AsksReel({
   /** The lane board the page already holds — feeds the review queue into the rotation. */
   board?: LaneBoard | null;
 }) {
-  const asks = useMemo(() => deriveAsks(envelopes), [envelopes]);
-  const loud = asks.filter((a) => askIsLoud(a.state)).sort((a, b) => byUrgency(a, b));
+  // One clock drives the rotation, the countdowns, and which side of its tier contract an
+  // unanswered ask fell on — declared first because the derivation now reads it.
+  const [mountedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+
+  const derived = useMemo(() => deriveAsks(envelopes), [envelopes]);
+  /**
+   * A stream has no cursor, so anything the reel rotates is the whole of what a viewer can ever see —
+   * which makes rotating dead cards worse here than on /live, not better. An ask past a below-top
+   * tier deadline was answered by the contract days ago (`applyTierClock`); it leaves the rotation
+   * and is counted, dimmed, as `elapsed`.
+   */
+  const asks = useMemo(() => applyTierClock(derived, now), [derived, now]);
+  const loud = asks.filter((a) => askIsLoud(a.state)).sort((a, b) => byUrgency(a, b, now));
   const deferred = asks.filter((a) => a.state === 'deferred');
-  const settled = asks.length - loud.length - deferred.length;
+  const lapsed = asks.filter((a) => a.state === 'lapsed');
+  const settled = asks.length - loud.length - deferred.length - lapsed.length;
   const reviews = useMemo(
     () => (board ? deriveReviewQueue(board.lanes, asks) : []),
     [board, asks],
@@ -53,15 +68,21 @@ export function AsksReel({
     [asks, reviews],
   );
 
-  // One clock drives both the rotation and the countdowns. It ticks only while something is loud —
-  // idle cost is paid by every viewer, forever (packages/web/AGENTS.md), and a stream runs for hours.
-  const [mountedAt] = useState(() => Date.now());
-  const [now, setNow] = useState(() => Date.now());
+  // The tick. Idle cost is paid by every viewer, forever (packages/web/AGENTS.md), and a stream runs
+  // for hours — so it runs only when something on screen actually changes with time: a countdown
+  // (`loud`), or a rotation with more than one card to turn. Both halves matter, and why the second
+  // one is not implied by the first is written out on `reelTicks`.
+  //
+  // Computed HERE, in render, rather than inside the effect: it makes the condition a pure function
+  // this suite can hold (effects never run under `react-dom/server`), and it makes the dependency
+  // exactly the thing the effect branches on — the interval is now torn down and rebuilt only when
+  // the answer actually flips, not on every change of loud count.
+  const ticks = reelTicks(loud.length, cards.length);
   useEffect(() => {
-    if (loud.length === 0) return;
+    if (!ticks) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [loud.length]);
+  }, [ticks]);
 
   // Null only when the timeline holds no asks at all — same rule as /live's strip. With everything
   // settled, /live shows a quiet "nothing waiting" row rather than vanishing, and the stream keeps
@@ -76,23 +97,41 @@ export function AsksReel({
   // this the reel repeats one name until it looks like a preference; it is a capacity failure, and
   // a viewer should be able to see that from the picture alone.
   const capacity = acceptanceCapacity(roster);
+  // The reel wears the shown seat's colour, rim and bell, as /live's strip wears its lead's — see
+  // the note there. A review row colours by the lane's owner: the person whose work is waiting.
+  const who = shown ? (shown.ask?.env.from ?? shown.review!.lane.owner_seat ?? null) : null;
+  const whoStyle = who
+    ? ({ '--lc-asks-hue': memberColor(who, kindOf(who, idx), hueOf(who, idx)) } as CSSProperties)
+    : undefined;
 
   return (
     <section
-      className={`bc-reel${loud.length > 0 ? ' bc-reel--loud' : ''}`}
+      className={`bc-reel${loud.length > 0 ? ' bc-reel--loud' : ''}${who ? ' has-lead' : ''}`}
+      style={whoStyle}
       aria-label="asks and approvals"
     >
-      {/* The eyebrow row — the same shape as the floor card's "ON THE FLOOR" head: mono label,
-          counts pushed right, the amber hairline underneath. The card announces WHAT it is here so
-          the ask line below can be nothing but the ask. */}
-      <header className="bc-reel__head">
+      {/* One line, /live's rail shape (nick, 2026-08-19: the eyebrow-header version spent two rows
+          of stage on what /live says in one). The bell is the announcement, the rotating slot is the
+          content, and the counts + rotation dots hold the right edge — nothing stacks. */}
+      <div className="bc-reel__line">
         <BellIcon />
-        <span className="bc-reel__label">Asks &amp; approvals</span>
-        <span className="bc-reel__spacer" />
-        {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
-        {reviews.length > 0 && <span className="bc-reel__meta">{reviews.length} in review</span>}
-        {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
-        {settled > 0 && <span className="bc-reel__meta bc-reel__meta--dim">{settled} settled</span>}
+        {shown === null ? (
+          <div className="bc-reel__row bc-reel__row--quiet">
+            <b>asks &amp; approvals</b>
+            <span className="bc-reel__verb">nothing waiting</span>
+          </div>
+        ) : shown.kind === 'ask' ? (
+          <ShownAsk shown={shown.ask!} idx={idx} now={now} />
+        ) : (
+          <ShownReview shown={shown.review!} idx={idx} />
+        )}
+        <ReelCounts
+          waiting={loud.length}
+          inReview={reviews.length}
+          deciding={deferred.length}
+          elapsed={lapsed.length}
+          settled={settled}
+        />
         {shown !== null && cards.length > 1 && (
           <span className="bc-reel__dots" aria-hidden="true">
             {cards.map((c) => {
@@ -101,14 +140,7 @@ export function AsksReel({
             })}
           </span>
         )}
-      </header>
-      {shown === null ? (
-        <div className="bc-reel__row bc-reel__row--quiet">nothing waiting</div>
-      ) : shown.kind === 'ask' ? (
-        <ShownAsk shown={shown.ask!} idx={idx} now={now} />
-      ) : (
-        <ShownReview shown={shown.review!} idx={idx} />
-      )}
+      </div>
       {capacity.degraded && (
         <div className="bc-reel__ladder">
           No live acceptor
@@ -117,6 +149,96 @@ export function AsksReel({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * The tally on the right edge — what is owed, and what is already answered.
+ *
+ * It shipped as five spans in one voice: `13px` mono at `--lc-paper-dim`, with `elapsed` and
+ * `settled` at 0.6 opacity and nothing else separating them (nick, 2026-09-04: "there are a lot of
+ * counts/text at the end that all look visually the same"). Five equal greys is not a summary, it
+ * is a run of text a viewer has to *read* — and this bar is watched from across a room, through a
+ * 720p encode, by someone who will never click it.
+ *
+ * Three changes, in the order they matter.
+ *
+ * **The number leads.** In every one of these the digit is the content and the word is its label,
+ * but they were the same size and weight, so neither won. The count is now a heavier, larger
+ * tabular figure and the label is small and quiet beside it. That alone makes the row scannable
+ * without changing a single value.
+ *
+ * **Two clusters, not five items.** `waiting`, `in review` and `deciding` are things this team
+ * still owes; `elapsed` and `settled` are history. They are split by a hairline, so the eye lands
+ * on "is anything owed?" before it reads a single word. They are deliberately NOT merged into one
+ * "done" — an elapsed ask timed out unanswered and a settled one was answered, and collapsing a
+ * miss into a success is exactly the kind of tidy lie a summary row invites.
+ *
+ * **Colour carries the state**, because colour is what survives the encode when weight does not. A
+ * pip per count: accent for what is waiting, ink for the two middle states, `--lc-warn` for elapsed
+ * (a fill — text amber is `--lc-warn-ink`, per packages/web/AGENTS.md) and a hollow ring for
+ * settled. Pure decoration, so every pip is `aria-hidden` and the text still reads on its own.
+ *
+ * Zero counts stay absent rather than showing `0`: a stream is watched, not audited, and five zeroes
+ * is the same wall of grey in a different disguise.
+ */
+function ReelCounts({
+  waiting,
+  inReview,
+  deciding,
+  elapsed,
+  settled,
+}: {
+  waiting: number;
+  inReview: number;
+  deciding: number;
+  elapsed: number;
+  settled: number;
+}) {
+  // The state key drives the pip's colour; the label is what a viewer reads. They are separate
+  // because the shortest honest label is not always a good class name, and vice versa — "in review"
+  // is two words and `is-in review` is not a selector.
+  const owed: Tally[] = [
+    { state: 'waiting', label: 'waiting', n: waiting },
+    { state: 'review', label: 'in review', n: inReview },
+    { state: 'deciding', label: 'deciding', n: deciding },
+  ];
+  const past: Tally[] = [
+    { state: 'elapsed', label: 'elapsed', n: elapsed },
+    { state: 'settled', label: 'settled', n: settled },
+  ];
+  const live = owed.filter((t) => t.n > 0);
+  const done = past.filter((t) => t.n > 0);
+  if (live.length === 0 && done.length === 0) return null;
+  return (
+    <span className="bc-reel__counts">
+      {live.map((t) => (
+        <Count key={t.state} {...t} />
+      ))}
+      {/* Only where both sides exist — a rule with nothing on one side of it is a stray mark. */}
+      {live.length > 0 && done.length > 0 && (
+        <i className="bc-reel__counts-split" aria-hidden="true" />
+      )}
+      {done.map((t) => (
+        <Count key={t.state} {...t} past />
+      ))}
+    </span>
+  );
+}
+
+interface Tally {
+  state: string;
+  label: string;
+  n: number;
+}
+
+function Count({ state, label, n, past = false }: Tally & { past?: boolean }) {
+  return (
+    <span className={`bc-reel__meta is-${state}${past ? ' is-past' : ''}`}>
+      <i className="bc-reel__pip" aria-hidden="true" />
+      <b>{n}</b>
+      <em>{label}</em>
+    </span>
   );
 }
 
@@ -130,13 +252,20 @@ function ShownAsk({
   idx: Map<string, MemberSummary>;
   now: number;
 }) {
+  // The tier clock as an arc round the avatar, off the same `now` the text clock reads.
+  const frac = clockFraction(shown, now);
   return (
     // Keyed on the envelope id so React remounts on rotation and the entry animation replays —
     // without it the text swaps in place and the change is easy to miss on a stream.
     <div className="bc-reel__row" key={shown.env.id}>
       <span
-        className="bc-reel__who"
-        style={{ background: memberAvatar(shown.env.from, kindOf(shown.env.from, idx)) }}
+        className={`bc-reel__who${frac === null ? '' : frac > 0 ? ' is-timed' : ' is-over'}`}
+        style={
+          {
+            background: memberAvatar(shown.env.from, kindOf(shown.env.from, idx), hueOf(shown.env.from, idx)),
+            '--lc-ask-frac': frac ?? 0,
+          } as CSSProperties
+        }
         aria-hidden="true"
       >
         {initial(shown.env.from)}
@@ -164,7 +293,7 @@ function ShownReview({ shown, idx }: { shown: ReviewView; idx: Map<string, Membe
     <div className="bc-reel__row" key={shown.lane.id}>
       <span
         className="bc-reel__who"
-        style={{ background: memberAvatar(owner, kindOf(owner, idx)) }}
+        style={{ background: memberAvatar(owner, kindOf(owner, idx), hueOf(owner, idx)) }}
         aria-hidden="true"
       >
         {initial(owner)}

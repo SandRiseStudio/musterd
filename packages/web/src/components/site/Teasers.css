@@ -1,0 +1,42 @@
+/* Docs/blog teaser cards. Semantic tokens only. */
+
+.tz {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0.8rem;
+  padding-top: 0;
+  padding-bottom: var(--section-y);
+}
+
+.tz__card {
+  display: block;
+  background: var(--surface-solid);
+  border: 1px solid var(--mustard-100);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  text-decoration: none;
+}
+
+.tz__card:hover,
+.tz__card:focus-visible {
+  border-color: var(--accent);
+}
+
+.tz__card h3 {
+  font-family: var(--font-display);
+  color: var(--text);
+  font-size: 1rem;
+  margin: 0 0 0.3rem;
+}
+
+.tz__card p {
+  color: var(--text-dim);
+  line-height: 1.45;
+  font-size: 0.92rem;
+  margin: 0 0 0.5rem;
+}
+
+.tz__cta {
+  color: var(--accent-ink);
+  font-size: 0.85rem;
+}

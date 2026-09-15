@@ -12,9 +12,9 @@ import {
 } from './cursorCapture.js';
 
 const boot = {
+  version: 2 as const,
   server: 'http://s1',
   team: 'lab',
-  surface: 'cursor' as const,
   claim: { mode: 'seat' as const, name: 'Ui' },
 };
 
@@ -121,7 +121,7 @@ describe('reconcileCursorCapture (ADR 270)', () => {
     const startedAt = Date.now() - 60_000;
     saveBinding(ws, {
       ...boot,
-      surface: 'claude-code',
+
       session: {
         harness: 'claude-code',
         id: 'claude-live',

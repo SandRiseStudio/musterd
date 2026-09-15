@@ -16,8 +16,11 @@ import { Route as BroadcastRouteImport } from './routes/broadcast'
 import { Route as BoardRouteImport } from './routes/board'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as ApprovalsRouteImport } from './routes/approvals'
-import { Route as ApprovalPreviewRouteImport } from './routes/approval-preview'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DocsIndexRouteImport } from './routes/docs.index'
+import { Route as BlogIndexRouteImport } from './routes/blog.index'
+import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
+import { Route as BlogSlugRouteImport } from './routes/blog.$slug'
 
 const OfficePreviewRoute = OfficePreviewRouteImport.update({
   id: '/office-preview',
@@ -54,20 +57,34 @@ const ApprovalsRoute = ApprovalsRouteImport.update({
   path: '/approvals',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApprovalPreviewRoute = ApprovalPreviewRouteImport.update({
-  id: '/approval-preview',
-  path: '/approval-preview',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsIndexRoute = DocsIndexRouteImport.update({
+  id: '/docs/',
+  path: '/docs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BlogIndexRoute = BlogIndexRouteImport.update({
+  id: '/blog/',
+  path: '/blog/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsSlugRoute = DocsSlugRouteImport.update({
+  id: '/docs/$slug',
+  path: '/docs/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BlogSlugRoute = BlogSlugRouteImport.update({
+  id: '/blog/$slug',
+  path: '/blog/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/approval-preview': typeof ApprovalPreviewRoute
   '/approvals': typeof ApprovalsRoute
   '/audit': typeof AuditRoute
   '/board': typeof BoardRoute
@@ -75,10 +92,13 @@ export interface FileRoutesByFullPath {
   '/character-sheet': typeof CharacterSheetRoute
   '/live': typeof LiveRoute
   '/office-preview': typeof OfficePreviewRoute
+  '/blog/$slug': typeof BlogSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
+  '/blog/': typeof BlogIndexRoute
+  '/docs/': typeof DocsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/approval-preview': typeof ApprovalPreviewRoute
   '/approvals': typeof ApprovalsRoute
   '/audit': typeof AuditRoute
   '/board': typeof BoardRoute
@@ -86,11 +106,14 @@ export interface FileRoutesByTo {
   '/character-sheet': typeof CharacterSheetRoute
   '/live': typeof LiveRoute
   '/office-preview': typeof OfficePreviewRoute
+  '/blog/$slug': typeof BlogSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
+  '/blog': typeof BlogIndexRoute
+  '/docs': typeof DocsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/approval-preview': typeof ApprovalPreviewRoute
   '/approvals': typeof ApprovalsRoute
   '/audit': typeof AuditRoute
   '/board': typeof BoardRoute
@@ -98,12 +121,15 @@ export interface FileRoutesById {
   '/character-sheet': typeof CharacterSheetRoute
   '/live': typeof LiveRoute
   '/office-preview': typeof OfficePreviewRoute
+  '/blog/$slug': typeof BlogSlugRoute
+  '/docs/$slug': typeof DocsSlugRoute
+  '/blog/': typeof BlogIndexRoute
+  '/docs/': typeof DocsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/approval-preview'
     | '/approvals'
     | '/audit'
     | '/board'
@@ -111,10 +137,13 @@ export interface FileRouteTypes {
     | '/character-sheet'
     | '/live'
     | '/office-preview'
+    | '/blog/$slug'
+    | '/docs/$slug'
+    | '/blog/'
+    | '/docs/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/approval-preview'
     | '/approvals'
     | '/audit'
     | '/board'
@@ -122,10 +151,13 @@ export interface FileRouteTypes {
     | '/character-sheet'
     | '/live'
     | '/office-preview'
+    | '/blog/$slug'
+    | '/docs/$slug'
+    | '/blog'
+    | '/docs'
   id:
     | '__root__'
     | '/'
-    | '/approval-preview'
     | '/approvals'
     | '/audit'
     | '/board'
@@ -133,11 +165,14 @@ export interface FileRouteTypes {
     | '/character-sheet'
     | '/live'
     | '/office-preview'
+    | '/blog/$slug'
+    | '/docs/$slug'
+    | '/blog/'
+    | '/docs/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ApprovalPreviewRoute: typeof ApprovalPreviewRoute
   ApprovalsRoute: typeof ApprovalsRoute
   AuditRoute: typeof AuditRoute
   BoardRoute: typeof BoardRoute
@@ -145,6 +180,10 @@ export interface RootRouteChildren {
   CharacterSheetRoute: typeof CharacterSheetRoute
   LiveRoute: typeof LiveRoute
   OfficePreviewRoute: typeof OfficePreviewRoute
+  BlogSlugRoute: typeof BlogSlugRoute
+  DocsSlugRoute: typeof DocsSlugRoute
+  BlogIndexRoute: typeof BlogIndexRoute
+  DocsIndexRoute: typeof DocsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -198,13 +237,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApprovalsRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/approval-preview': {
-      id: '/approval-preview'
-      path: '/approval-preview'
-      fullPath: '/approval-preview'
-      preLoaderRoute: typeof ApprovalPreviewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -212,12 +244,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs/': {
+      id: '/docs/'
+      path: '/docs'
+      fullPath: '/docs/'
+      preLoaderRoute: typeof DocsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/blog/': {
+      id: '/blog/'
+      path: '/blog'
+      fullPath: '/blog/'
+      preLoaderRoute: typeof BlogIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs/$slug': {
+      id: '/docs/$slug'
+      path: '/docs/$slug'
+      fullPath: '/docs/$slug'
+      preLoaderRoute: typeof DocsSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/blog/$slug': {
+      id: '/blog/$slug'
+      path: '/blog/$slug'
+      fullPath: '/blog/$slug'
+      preLoaderRoute: typeof BlogSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ApprovalPreviewRoute: ApprovalPreviewRoute,
   ApprovalsRoute: ApprovalsRoute,
   AuditRoute: AuditRoute,
   BoardRoute: BoardRoute,
@@ -225,6 +284,10 @@ const rootRouteChildren: RootRouteChildren = {
   CharacterSheetRoute: CharacterSheetRoute,
   LiveRoute: LiveRoute,
   OfficePreviewRoute: OfficePreviewRoute,
+  BlogSlugRoute: BlogSlugRoute,
+  DocsSlugRoute: DocsSlugRoute,
+  BlogIndexRoute: BlogIndexRoute,
+  DocsIndexRoute: DocsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

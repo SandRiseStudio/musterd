@@ -32,6 +32,8 @@ coverage/
 **/.musterd/session-start-*
 # musterd provisioning state — regenerated per-workspace by `musterd init` (ADR 060/085), never committed.
 **/.musterd/provisioned.json
+# ADR 326 orient stamp — per-session orientation marker, machine-local, never committed.
+**/.musterd/orient-stamp.json
 **/.musterd/skill/
 # Claude Code local settings + the musterd-provisioned skill/slash-commands (`.claude/skills`,
 # `.claude/commands`) — per-workspace + personal, written by `musterd init` / the harness, never committed.
@@ -44,15 +46,40 @@ coverage/
 .cursor/mcp.json
 # Codex's project-local MCP config may contain machine-specific launch paths.
 .codex/config.toml
+# Grok CLI project MCP / statusline / permission floor (ADR 352) — machine launch paths.
+.grok/config.toml
+# Grok CLI provisioned guidance shells (ADR 085) — team-stamped, same class as `.claude/`.
+# User projects commit these (ADR 352 §9); this product repo cannot (they carry the dogfood
+# team name). The hooks file is portable (`musterd` on PATH) and IS committed.
+.grok/skills/
+.grok/commands/
 
 # musterd-provisioned Cursor guidance (ADR 085) — the skill rule + slash commands `musterd init` writes
 # for Cursor, the counterpart to the `.claude/` skill/commands above. Surgical (only musterd's stamped
 # files) rather than the whole dirs, because `.cursor/plans/` and any project-authored rules are committed.
+.cursor/rules/musterd-*.mdc
 .cursor/rules/musterd.mdc
-.cursor/rules/musterd-label-session.mdc
 .cursor/commands/musterd-*.md
-# `musterd wire` writes this per-workspace; it is machine-local, not project config.
+# The glob above covers every stamped rule whose name starts `musterd-` — `musterd-orient.mdc` was
+# written by provisioning (onboard/guidance.ts) for two weeks while only its two siblings were
+# enumerated here, so every Cursor-wired seat worktree on a machine carried a permanently dirty
+# `git status` (2026-09-14; falsify: `git status --porcelain` in a wired worktree naming a
+# `.cursor/rules/musterd-*.mdc`). That is exactly the forgotten line the note below predicts.
+# ADR 299 role-skill bridges: `musterd wire` writes one per role a seat holds, as
+# `.cursor/rules/<role>.mdc` — per-workspace pointers at the canonical `.agents/skills/<role>/`,
+# same class as the two rules above. Enumerated because the filename is the ROLE name, so no glob
+# covers the set and these bridges carry no `musterd:content` stamp to match on either. Adding a
+# role skill therefore means adding a line here, which will be forgotten. The durable fix is to
+# name them `musterd-<role>.mdc` so `.cursor/rules/musterd-*.mdc` covers every future one — that
+# is a change to the provisioning writer, not to this file (lane 01M0K5ANE1).
+.cursor/rules/product-communications.mdc
+# `musterd wire` writes these per-workspace; they are machine-local, not project config.
 .cursor/hooks.json
+.codex/hooks.json
+# OpenCode's MCP config carries absolute machine paths (node binary + checkout dir).
+.opencode/opencode.json
+# ADR 392: the OpenCode doorbell plugin — marker-owned, rewritten by `musterd init --refresh-hooks`.
+.opencode/plugins/musterd.js
 
 # Qoder editor workspace state — local tooling, never committed
 .qoder/
@@ -61,3 +88,16 @@ coverage/
 scripts/broadcast/.image-digest
 .superpowers/
 workers/*/.wrangler/
+
+# Nested git worktrees (Cursor and friends create them under .worktrees/). One inside the daemon's
+# checkout made it read dirty forever, and the auto-refresher — which rightly refuses to touch a
+# dirty tree — silently skipped every deploy from 18:42 on 2026-08-19 until a human read the log.
+.worktrees/
+
+# Build-prep output of packages/web/scripts/gen-site-content.ts (ADR 302) — regenerated every build.
+packages/web/src/content/generated/
+
+# Playwright MCP scratch output — page-*.yml snapshots, console-*.log and screenshots, written on
+# every browser verification. They accumulated to 102 files / 5.4 MB in this worktree, and 16 of the
+# .yml were swept into unrelated PRs (#960, #996) by `git add -A` because nothing ignored them.
+.playwright-mcp/

@@ -8,10 +8,18 @@ import { clearPendingMarker } from './pending.js';
 export type ClaimTarget = { seat: string } | { role: string };
 
 export interface ClaimResult {
-  /** The resolved seat name (a role pool's `<role>-<n>` is resolved server-side). */
+  /** The resolved seat name (a role pool's `<role>-<n>` is resolved server-side). While `pending`
+   *  nothing is resolved yet, so this carries the seat or role that was ASKED for. */
   member: string;
   /** True when this session re-occupied a seat it already held rather than claiming a new one. */
   reused: boolean;
+  /**
+   * ADR 095: set when the caller asked not to block (`wait: 0`) and the server opened an approval
+   * request instead of seating. **The seat is not held.** The socket stays parked, so a later
+   * approval occupies in the background and the next `team_join` reports already-joined; nothing is
+   * persisted here, because a binding written now would claim an identity this session does not have.
+   */
+  pending?: { requestId: string | null };
 }
 
 export class ClaimConflictError extends Error {
@@ -37,9 +45,28 @@ export async function claimAndJoin(
   config: McpConfig,
   target: ClaimTarget,
   waitMs?: number,
+  opts?: { verify?: boolean },
 ): Promise<ClaimResult> {
+  // `client.joined` is IN-PROCESS state, and the thing that dies is server-side: a reaped Presence,
+  // a daemon bounce, an MCP transport drop. So on the repair path the flag is precisely the wrong
+  // authority — it reports on an occupancy it cannot see, and answering an explicit join from it
+  // returns "already joined" while the seat stays deaf (clause 8, lane 01M2GP25R3).
+  //
+  // That matters because the deaf line PRESCRIBES team_join as the repair: it is the only thing
+  // that holds a Presence, and `musterd claim` provably does not (see commands/inbox.ts). A
+  // prescription that no-ops is worse than none — measured 2026-09-14, izzo (deaf on every daemon
+  // bounce, "Already joined" changed nothing, a later team_send repaired it via request()'s
+  // lease-refusal re-join) and stanley (same after an MCP reconnect).
+  //
+  // Scoped to EXPLICIT joins. Autojoin rides every tool call and must stay free; it also does not
+  // need this, because its sibling HTTP calls already hit the refusal path that re-joins for real.
+  // An explicit team_join is a decision to re-occupy, and is rare enough to afford the round trip.
   const reused =
-    client.claimed && 'seat' in target && client.member === target.seat && client.joined;
+    opts?.verify !== true &&
+    client.claimed &&
+    'seat' in target &&
+    client.member === target.seat &&
+    client.joined;
   if (reused) return { member: client.member!, reused: true };
 
   // Single-flight the claim (first live native wake, 2026-08-12). The `reused` guard above answers
@@ -53,10 +80,12 @@ export async function claimAndJoin(
   //
   // Keyed by target: two callers converging on the same seat share one claim, while a deliberate
   // re-target (a different seat or pool) is a distinct intent and still proceeds on its own.
-  const key = targetKey(target);
+  // A verify is a DIFFERENT intent from an ordinary claim — it must not be answered by an in-flight
+  // reuse-path claim that will early-return inside join().
+  const key = targetKey(target) + (opts?.verify === true ? '#verify' : '');
   const pending = inFlight.get(client);
   if (pending && pending.key === key) return pending.promise;
-  const promise = performClaim(client, config, target, waitMs).finally(() => {
+  const promise = performClaim(client, config, target, waitMs, opts?.verify).finally(() => {
     if (inFlight.get(client)?.promise === promise) inFlight.delete(client);
   });
   inFlight.set(client, { key, promise });
@@ -73,6 +102,7 @@ async function performClaim(
   config: McpConfig,
   target: ClaimTarget,
   waitMs?: number,
+  reoccupy?: boolean,
 ): Promise<ClaimResult> {
   // Re-read binding.json before an explicit named claim (#118 class / ADR 018 source-of-truth). The
   // boot config pins the grant + key read at launch, so an in-session binding *repair* — e.g. a
@@ -86,16 +116,10 @@ async function performClaim(
     if (fresh && fresh.claim && fresh.claim.mode === 'seat' && fresh.claim.name === target.seat) {
       if (fresh.grant !== undefined) config.grant = fresh.grant;
       if (fresh.agent_key !== undefined) config.agent_key = fresh.agent_key;
-      // Surface is NOT a credential, and adopting it here is only a repair when this session never
-      // knew its own (ADR 251 §2, measured live 2026-08-12). A grant or key on disk can be newer
-      // than the one we booted with — that is the whole point of the re-read. A surface cannot: it
-      // describes what is animating THIS session, which the process knows first-hand and the
-      // workspace file only guesses at. The native backend constructs its config in the host, with
-      // no workspace to read, and declares `musterd` precisely so native occupancies are
-      // roster-distinct; adopting the seat's binding here overwrote that with `cursor` and the
-      // first native occupancy in history attested the wrong harness. `other` is the one honest
-      // exception — it means boot could not tell, so a binding that can is an upgrade.
-      if (config.surface === 'other') config.surface = fresh.surface;
+      if (fresh.seat_credential !== undefined) config.seatCredential = fresh.seat_credential;
+      if (fresh.session_lease !== undefined) config.sessionLease = fresh.session_lease;
+      // Surface is NOT adopted from disk, ever (ADR 286): it is what the LAUNCHER declared for
+      // THIS session, resolved once at startup. v2 identity files carry no surface to adopt.
     }
   }
 
@@ -105,7 +129,20 @@ async function performClaim(
   config.claim =
     'seat' in target ? { mode: 'seat', name: target.seat } : { mode: 'role', role: target.role };
   try {
-    await client.join(waitMs);
+    const outcome = await client.join(waitMs, {
+      parkOnPending: true,
+      ...(reoccupy ? { reoccupy: true } : {}),
+    });
+    if (outcome === 'pending') {
+      // Non-blocking return (ADR 095). Deliberately BEFORE persistBinding/clearPendingMarker: this
+      // session holds no seat, and the pending marker is what a later `musterd claim --for <code>`
+      // resolves against.
+      return {
+        member: 'seat' in target ? target.seat : target.role,
+        reused: false,
+        pending: { requestId: client.awaitingRequestId },
+      };
+    }
   } catch (err) {
     const msg = (err as Error).message;
     if (/claim_conflict|conflict|occupied|busy/i.test(msg)) {
@@ -138,12 +175,28 @@ export async function adoptIdentity(
 }
 
 /** Persist the resolved seat as this folder's standing claim policy (so a re-launch re-occupies it). */
+/**
+ * Write the lease this socket currently holds — renewed over it (ADR 347), or minted with the
+ * occupancy a reconnect re-claimed — into the binding of the seat that holds it, so a CLI hook in
+ * this workspace presents a live lease too, and nowhere else. Same seat on
+ * disk, or nothing is written: an adapter whose binding was re-provisioned to another seat must not
+ * hand that seat its authority.
+ */
+export function persistRenewedLease(config: McpConfig): void {
+  if (!config.member || !config.bindingDir || !config.sessionLease) return;
+  const onDisk = findBinding(config.bindingDir);
+  if (!onDisk?.claim || onDisk.claim.mode !== 'seat' || onDisk.claim.name !== config.member) return;
+  persistBinding(config, config.member);
+}
+
 function persistBinding(config: McpConfig, seat: string): void {
   const binding: Binding = {
+    version: 2,
     server: config.server,
     team: config.team,
     ...(config.agent_key ? { agent_key: config.agent_key } : {}),
-    surface: config.surface,
+    ...(config.seatCredential ? { seat_credential: config.seatCredential } : {}),
+    ...(config.sessionLease ? { session_lease: config.sessionLease } : {}),
     claim: { mode: 'seat', name: seat },
     ...(config.grant !== undefined ? { grant: config.grant } : {}),
     // Carry the attested model through the rewrite (ADR 101). `config.model` is the resolved ladder

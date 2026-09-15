@@ -9,13 +9,17 @@ import {
   renderLabelSessionsSkill,
   renderNudgeRelayFrontmatter,
   renderNudgeRelaySkill,
+  renderOrientFrontmatter,
+  renderOrientSkill,
   renderSelfLabelSessionFrontmatter,
   renderSelfLabelSessionSkill,
   renderSkillBody,
   renderSkillFrontmatter,
   renderSlashCommand,
 } from '@musterd/protocol';
-import type { Harness } from './harness.js';
+import type { Harness, HarnessGuidance } from './harness.js';
+import type { FsSeam } from './reconcile/context.js';
+import { canonicalFingerprint, type ObservedFragment } from './reconcile/fragments.js';
 
 /**
  * File I/O for the on-demand **skill** + slash-command prompts (ADR 085 /
@@ -37,6 +41,8 @@ import type { Harness } from './harness.js';
 /** The harness-neutral skill, always written and pointed at by the primer (covers Codex + any harness
  * without a native skill mechanism). */
 export const CANONICAL_SKILL_PATH = '.musterd/skill/SKILL.md';
+/** Harness-neutral orient ritual (ADR 333) — Codex/OpenCode/native catalog; primer does not point here. */
+export const CANONICAL_ORIENT_PATH = '.musterd/skill/orient.md';
 
 const SLASH_COMMANDS = ['standup', 'handoff', 'claim'] as const;
 
@@ -114,6 +120,25 @@ function skillFile(flavor: 'claude-code' | 'cursor' | 'canonical', team: string)
   return fm ? `${fm}\n\n${body}` : body;
 }
 
+/** Cursor `.mdc` shell for the orient ritual — assembled here so we do not edit protocol/guidance.ts
+ *  (izzo's #1087). Claude keeps `renderOrientFrontmatter`. Canonical is body-only. */
+function orientSkillFile(flavor: 'claude-code' | 'cursor' | 'canonical'): string {
+  if (flavor === 'canonical') return renderOrientSkill();
+  if (flavor === 'cursor') {
+    return [
+      '---',
+      'description: Orient a seat session at start: inbox, seat memory, handle directed asks and ' +
+        'incidents unprompted, surface the rest, then stamp oriented. Use when the injected ' +
+        'orientation block appears, before other work.',
+      'alwaysApply: false',
+      '---',
+      '',
+      renderOrientSkill(),
+    ].join('\n');
+  }
+  return `${renderOrientFrontmatter()}\n\n${renderOrientSkill()}`;
+}
+
 /**
  * Write the guidance surface into `dir`: the canonical `.musterd/skill/SKILL.md` always, plus the
  * skill + slash commands for each harness that declares `guidance` placement. Best-effort and
@@ -130,6 +155,8 @@ export function writeGuidance(
 
   // Canonical, harness-neutral skill — the primer's fallback pointer target.
   writeOne(dir, CANONICAL_SKILL_PATH, skillFile('canonical', opts.team), force, written, skipped);
+  // ADR 333: canonical orient ritual for harnesses with no native skill catalog.
+  writeOne(dir, CANONICAL_ORIENT_PATH, orientSkillFile('canonical'), force, written, skipped);
 
   for (const h of harnesses) {
     const g = h.guidance;
@@ -169,6 +196,10 @@ export function writeGuidance(
         skipped,
       );
     }
+    if (g.orientSkillPath) {
+      // ADR 333: catalog on every harness that declares a native shell (Claude Code + Cursor).
+      writeOne(dir, g.orientSkillPath, orientSkillFile(g.frontmatter), force, written, skipped);
+    }
     if (g.commandsDir) {
       for (const name of SLASH_COMMANDS) {
         writeOne(
@@ -207,7 +238,7 @@ export function establishedHarnesses(dir: string, harnesses: Harness[]): Harness
 /** Every relative path guidance *could* occupy, across the canonical location and all harnesses — the
  * removal set for uninstall and the expected set for the doctor. */
 export function guidanceTargets(harnesses: Harness[]): string[] {
-  const paths = new Set<string>([CANONICAL_SKILL_PATH]);
+  const paths = new Set<string>([CANONICAL_SKILL_PATH, CANONICAL_ORIENT_PATH]);
   for (const h of harnesses) {
     const g = h.guidance;
     if (!g) continue;
@@ -215,6 +246,7 @@ export function guidanceTargets(harnesses: Harness[]): string[] {
     if (g.sessionsSkillPath) paths.add(g.sessionsSkillPath);
     if (g.selfLabelSkillPath) paths.add(g.selfLabelSkillPath);
     if (g.nudgeSkillPath) paths.add(g.nudgeSkillPath);
+    if (g.orientSkillPath) paths.add(g.orientSkillPath);
     if (g.commandsDir)
       for (const n of SLASH_COMMANDS) paths.add(join(g.commandsDir, `musterd-${n}.md`));
   }
@@ -242,6 +274,7 @@ export function removeGuidance(dir: string, harnesses: Harness[]): { removed: st
     '.claude/skills/musterd',
     '.claude/skills/musterd-label-sessions',
     '.claude/skills/musterd-nudge-relay',
+    '.claude/skills/musterd-orient',
     '.musterd/skill',
   ]) {
     const abs = join(dir, rel);
@@ -253,4 +286,89 @@ export function removeGuidance(dir: string, harnesses: Harness[]): { removed: st
     }
   }
   return { removed };
+}
+
+// ── Fragment-contract helpers (ADR 281/282, Task 5) ──────────────────────────────────────────────
+// The guidance surface as a MANAGED FRAGMENT: one deterministic file map (relPath → stamped text)
+// per harness, observed and applied through the reconciler's injected FsSeam. The legacy
+// writeGuidance/removeGuidance above keep serving the pre-282 lifecycle path until it is retired.
+
+/** The per-harness guidance file map, rendered + stamped, keyed by path relative to the worktree. */
+export function guidanceFileMap(g: HarnessGuidance, team: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  out[g.skillPath] = stamped(skillFile(g.frontmatter, team));
+  if (g.sessionsSkillPath) {
+    out[g.sessionsSkillPath] = stamped(
+      `${renderLabelSessionsFrontmatter()}\n\n${renderLabelSessionsSkill()}`,
+    );
+  }
+  if (g.selfLabelSkillPath) {
+    out[g.selfLabelSkillPath] = stamped(
+      `${renderSelfLabelSessionFrontmatter()}\n\n${renderSelfLabelSessionSkill()}`,
+    );
+  }
+  if (g.nudgeSkillPath) {
+    out[g.nudgeSkillPath] = stamped(
+      `${renderNudgeRelayFrontmatter()}\n\n${renderNudgeRelaySkill()}`,
+    );
+  }
+  if (g.orientSkillPath) {
+    out[g.orientSkillPath] = stamped(orientSkillFile(g.frontmatter));
+  }
+  if (g.commandsDir) {
+    for (const name of SLASH_COMMANDS) {
+      out[join(g.commandsDir, `musterd-${name}.md`)] = stamped(renderSlashCommand(name));
+    }
+  }
+  return out;
+}
+
+/** The harness-neutral canonical guidance (the musterd-core fragment's file map). */
+export function canonicalGuidanceMap(team: string): Record<string, string> {
+  return {
+    [CANONICAL_SKILL_PATH]: stamped(skillFile('canonical', team)),
+    [CANONICAL_ORIENT_PATH]: stamped(orientSkillFile('canonical')),
+  };
+}
+
+/** Observe a file-map fragment over the EXPECTED key set: all absent ⇒ absent; otherwise the
+ *  fingerprint of exactly what is on disk (missing files as null). Fingerprinting the actual map —
+ *  never the intent — is what lets a payload-less RELEASE intent (rebuilt from ledger evidence)
+ *  observe the same fingerprint the write recorded: equal state hashes equal, whoever asks. */
+export function observeFileMap(
+  fs: FsSeam,
+  root: string,
+  files: Record<string, string>,
+): ObservedFragment {
+  const actual: Record<string, string | null> = {};
+  let anyPresent = false;
+  for (const rel of Object.keys(files)) {
+    const text = fs.readFile(join(root, rel));
+    actual[rel] = text;
+    if (text !== null) anyPresent = true;
+  }
+  if (!anyPresent) return { state: 'absent' };
+  const allEqual = Object.entries(files).every(([rel, text]) => actual[rel] === text);
+  return {
+    state: 'present',
+    fingerprint: allEqual ? canonicalFingerprint(files) : canonicalFingerprint(actual),
+  };
+}
+
+/** Apply a file-map fragment mutation: write every rendered file, or remove every managed path. */
+export function applyFileMap(
+  fs: FsSeam,
+  root: string,
+  files: Record<string, string>,
+  kind: 'write' | 'remove',
+): void {
+  for (const [rel, text] of Object.entries(files)) {
+    const abs = join(root, rel);
+    if (kind === 'remove') {
+      fs.rm(abs);
+    } else {
+      fs.mkdirp(dirname(abs));
+      fs.writeFile(abs, text, 0o644);
+    }
+  }
 }

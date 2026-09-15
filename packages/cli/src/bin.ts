@@ -14,16 +14,21 @@ import { doneCommand } from './commands/done.js';
 import { fmtCommand } from './commands/fmt.js';
 import { gateCommand } from './commands/gate.js';
 import { goalCommand } from './commands/goal.js';
+import { harnessCommand } from './commands/harness.js';
 import { reachabilityNudge } from './commands/helpers.js';
 import { hostCommand } from './commands/host.js';
+import { huddleCommand } from './commands/huddle.js';
 import { humanCommand } from './commands/human.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
+import { insightCommand } from './commands/insight.js';
+import { integrationCommand } from './commands/integration.js';
 import { joinCommand } from './commands/join.js';
 import { laneCommand, lanesCommand } from './commands/lane.js';
 import { liveCommand } from './commands/live.js';
 import { memoryCommand } from './commands/memory.js';
 import { nextCommand } from './commands/next.js';
+import { nodeCommand } from './commands/node.js';
 import { notifyCommand } from './commands/notify.js';
 import { nudgeCommand } from './commands/nudge.js';
 import { reapCommand } from './commands/reap.js';
@@ -34,25 +39,30 @@ import { requestsCommand } from './commands/requests.js';
 import { resetCommand } from './commands/reset.js';
 import { residencyCommand } from './commands/residency.js';
 import { roleCommand } from './commands/role.js';
+import { seedCommand } from './commands/seed.js';
 import { sendCommand } from './commands/send.js';
 import { serveCommand } from './commands/serve.js';
 import { serviceCommand } from './commands/service.js';
 import { sessionCommand } from './commands/session.js';
 import { statusCommand } from './commands/status.js';
 import { streamCommand } from './commands/stream.js';
+import { surfaceCommand } from './commands/surface.js';
 import { teamCommand } from './commands/team.js';
+import { toolkitCommand } from './commands/toolkit.js';
 import { unbindCommand } from './commands/unbind.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { wakeContextCommand } from './commands/wake-context.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { wireCommand } from './commands/wire.js';
 import { CliError } from './errors.js';
+import { exitAfterFlush } from './exit.js';
 import {
   nearestCommand,
   renderCommandHelp,
   renderGroupHelp,
   renderHelp,
   renderHelpJson,
+  wantsCommandHelp,
 } from './render/help.js';
 import { setColorEnabled, theme } from './render/theme.js';
 import { emitTerminalTitle, terminalTitleFor } from './render/title.js';
@@ -119,6 +129,14 @@ async function main(argv: string[]): Promise<number> {
       );
     }
     process.stdout.write(renderHelp({ full: rest.flags['full'] === true }) + '\n');
+    return 0;
+  }
+
+  // The OTHER word order: `musterd agent help`. Checked here, before dispatch, because the command
+  // itself cannot tell a help request from an argument — `agent` reads that positional as a seat name
+  // and provisions a worktree for it. See `wantsCommandHelp` for the incident this closes.
+  if (wantsCommandHelp(command, rest.positionals)) {
+    process.stdout.write(renderCommandHelp(command)! + '\n');
     return 0;
   }
 
@@ -199,6 +217,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return broadcastCommand(rest);
     case 'stream':
       return streamCommand(rest);
+    case 'integration':
+      return integrationCommand(rest);
     case 'team':
       return teamCommand(rest);
     case 'join':
@@ -207,10 +227,16 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return sendCommand(rest);
     case 'lane':
       return laneCommand(rest);
+    case 'huddle':
+      return huddleCommand(rest);
+    case 'seed':
+      return seedCommand(rest);
     case 'lanes':
       return lanesCommand(rest);
     case 'next':
       return nextCommand(rest);
+    case 'node':
+      return nodeCommand(rest);
     case 'done':
       return doneCommand(rest);
     case 'goal':
@@ -233,6 +259,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return statusCommand(rest);
     case 'availability':
       return availabilityCommand(rest);
+    case 'insight':
+      return insightCommand(rest);
     case 'memory':
       return memoryCommand(rest);
     case 'wake-context':
@@ -259,12 +287,18 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return sessionCommand(rest);
     case 'gate':
       return gateCommand(rest);
+    case 'harness':
+      return harnessCommand(rest);
+    case 'surface':
+      return surfaceCommand(rest);
     case 'host':
       return hostCommand(rest);
     case 'wire':
       return wireCommand(rest);
     case 'role':
       return roleCommand(rest);
+    case 'toolkit':
+      return toolkitCommand(rest);
     case 'reset':
       return resetCommand(rest);
     case 'uninstall':
@@ -278,12 +312,13 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
 }
 
 main(process.argv.slice(2))
-  .then((code) => process.exit(code))
+  .then((code) => exitAfterFlush(code))
   .catch((err) => {
     if (err instanceof CliError) {
       process.stderr.write(`${theme.err('✗')} ${err.message}\n`);
-      process.exit(err.exitCode);
+      exitAfterFlush(err.exitCode);
+      return;
     }
     process.stderr.write(`${theme.err(sym.err)} ${(err as Error).message}\n`);
-    process.exit(1);
+    exitAfterFlush(1);
   });

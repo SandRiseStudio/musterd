@@ -68,9 +68,9 @@ describe('Codex hook local evidence', () => {
     workspace = mkdtempSync(join(tmpdir(), 'musterd-codex-hook-'));
     mkdirSync(join(workspace, '.musterd'), { recursive: true });
     const binding: Binding = {
+      version: 2,
       server: 'http://127.0.0.1:1',
       team: 'dawn',
-      surface: 'codex',
       claim: { mode: 'seat', name: 'Ada' },
       agent_key: 'mskey_test',
       model: 'declared-model',

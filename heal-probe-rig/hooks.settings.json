@@ -1,0 +1,64 @@
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-.}\"; cd \"$d\" 2>/dev/null; command -v musterd >/dev/null 2>&1 && musterd nudge 2>/dev/null || true # musterd-notify-hook"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-.}\"; cd \"$d\" 2>/dev/null; command -v musterd >/dev/null 2>&1 && musterd inbox --interrupt-check 2>/dev/null || true # musterd-interrupt-hook"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-.}\"; cd \"$d\" 2>/dev/null; command -v musterd >/dev/null 2>&1 && musterd gate check --stdin 2>/dev/null || true # musterd-gate-hook"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__ccd_session_mgmt__send_message",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-.}\"; cd \"$d\" 2>/dev/null; command -v musterd >/dev/null 2>&1 && musterd gate check --stdin 2>/dev/null || true # musterd-sessionmsg-hook"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-.}\"; cd \"$d\" 2>/dev/null; command -v musterd >/dev/null 2>&1 && musterd session start --stdin 2>/dev/null || true # musterd-session-capture-hook"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-.}\"; cd \"$d\" 2>/dev/null; command -v musterd >/dev/null 2>&1 && musterd session end --stdin >/dev/null 2>&1 || true # musterd-session-end-hook"
+          }
+        ]
+      }
+    ]
+  }
+}

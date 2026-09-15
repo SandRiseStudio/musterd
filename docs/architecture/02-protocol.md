@@ -77,9 +77,9 @@ Handshake state machine: `connecting → hello → authenticated → subscribed 
 4. **Live frames:**
    - Client → `send`: `{ "type":"send", "envelope": <Envelope> }` → server validates, persists, routes; replies `{ "type":"ack", "id": <envelope.id> }`.
    - Server → `deliver`: `{ "type":"deliver", "envelope": <Envelope> }` for each message routed to this member's presence — or, for a `team-all` subscriber, every envelope on the team (deduped against recipients + sender, so a normal recipient never gets it twice).
-   - Client → `heartbeat`: `{ "type":"heartbeat", "model"?, "surface"? }` every **15s**; server updates `last_seen_at`. Optional `model` re-attests (ADR 101); optional `surface` follows capture (ADR 275; absent ⇒ no change). (Server may also treat any inbound frame as a heartbeat.)
+   - Client → `heartbeat`: `{ "type":"heartbeat", "model"?, "model_source"?, "surface"? }` every **15s**; server updates `last_seen_at`. Optional `model` re-attests (ADR 101); optional `model_source` is the tier that produced it (ADR 301; absent ⇒ no change, never defaulted); optional `surface` follows capture (ADR 275; absent ⇒ no change). (Server may also treat any inbound frame as a heartbeat.)
    - Server → `presence`: `{ "type":"presence", "member":"Lin", "status":"online", "surface":"codex" }` on roster presence changes.
-   - Either → `error`: `{ "type":"error", "code":"...", "message":"..." }`. A `superseded` error MAY carry `"same_workspace": true` (ADR 092) — the displacing claim came from the client's own workspace (a reload successor), signalling the replaced adapter to **exit** rather than linger dormant; absent ⇒ a cross-workspace takeover (stay dormant).
+   - Either → `error`: `{ "type":"error", "code":"...", "message":"..." }`. A `superseded` error MAY carry `"same_workspace": true` (ADR 092) — the displacing claim came from the client's own workspace (a reload successor), signalling the replaced adapter to **exit** rather than linger dormant; absent ⇒ a cross-workspace takeover (stay dormant). "Own workspace" is decided by `workspace_key` when both sides sent one, by the `workspace` label otherwise (ADR 368).
 5. **Close:** server removes the presence row (or marks offline) and emits a `presence` offline event to the team.
 
 Heartbeat/timeout values are defined in `03-server.md` (heartbeat 15s, offline after 45s missed = 3 intervals).
@@ -111,6 +111,24 @@ without their own schedule; a Member schedule replaces it wholesale. The value i
 informational—no Presence or schedule enforcement is performed (ADR 206).
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
+
+## Shared Seeds (ADR 291, unreleased)
+
+`SeedSchema` is the contract for a captured Team idea before it becomes a Lane. It carries immutable
+Slack relay provenance (`relay_id`, `source: "slack"`, raw `body`, `captured_at`, `slack_user_id`,
+`submitted_by`) and mutable lifecycle state, explorer, narrow public thread, exhaustive final brief,
+conclusion, promotion metadata, completion time, and linked Lane id. `SeedStateSchema` accepts only
+`open`, `exploring`, `needs_clarification`, `clarified`, `completed`, and `promoted`.
+Every accepted relay capture starts `open`; ingest does not classify body semantics. Only an active
+explorer's parsed clarification request creates the answerable `needs_clarification` state (ADR 312).
+
+`RelaySeedSchema` and `RelaySeedListSchema` reject every non-Slack or unattributed relay record at the
+HTTP boundary (ADR 311). `SubmitSeedBriefSchema` requires problem/context, evidence, at least one
+approach with trade-offs, constraints, risks, unknowns, recommendation, and proposed Lane framing.
+`SeedMcpUpdateSchema` (ADR 318) parses the compact MCP `{action, id, input?}` lifecycle envelope and
+then applies the existing action-specific claim, clarification, brief, or promotion schema.
+The protocol also exports parsed bodies for claim, clarification, answer, and manual promotion, plus
+single-Seed and list results. Promotion is the only operation that creates a Lane.
 
 ### Portable wake context (ADR 209)
 
@@ -160,7 +178,7 @@ The CLI maps these to exit codes (`04-cli.md`).
 
 The governed successor to `hello` — **additive schemas, not yet wired into `WSClientFrame`/`WSServerFrame`** (that wiring is Cleo's P3.2 cutover step, part of the one atomic merge; ADR 069 decision 2). Landing the frame shapes first lets June's P3.1 substrate + Cleo's P3.2 handshake import a stable contract.
 
-- `ClaimFrame` (client→server) — `{ type:'claim', v, team, key, target:{seat}|{role}|{observe:true}, grant?, surface }`. `key` = agent key (harness) or human credential; `grant` present → occupy, omitted → open a claim request (A.5).
+- `ClaimFrame` (client→server) — `{ type:'claim', v, team, key, target:{seat}|{role}|{observe:true}, grant?, surface, workspace?, workspace_key?, provenance?, driver?, model?, model_source? }`. `key` = agent key (harness) or human credential; `grant` present → occupy, omitted → open a claim request (A.5). `workspace` is the ADR 014 display label; **`workspace_key` is the workspace's identity** — the git work tree root from `resolveWorkspaceKey` (ADR 368), which is what displacement compares (`03-server.md`). They are two fields because the label is branch-qualified and so changes under the session that holds it; both optional, and with either side missing a key the server falls back to label equality. `provenance` (ADR 131 §6) says what ANIMATES the session — `wake` marks an actuator-spawned harness, which is how a wake actuator recognises a child of its own rather than a stranger holding the seat. The stateless mirror `POST /teams/:slug/claim` carries all of these; it records `provenance` on agent seats only.
 - `OccupiedFrame` (server→client) — `{ type:'occupied', seat:Member, presence_id, server_time, charter?, memory:MemoryEnvelope|null }`. `memory` is the seat-scoped continuity envelope (ADR 093) — `MemoryEnvelope = { headline (≤120), saved_at, size_bytes }` (`.strict()`, so the body never rides the frame) — or `null` when nothing is saved; the body is fetched on demand via `GET /teams/:slug/memory`.
 - `RefusedFrame` (server→client) — `{ type:'refused', code:RefusedCode, message, claimable:[…], hint }`. `RefusedCode` = `claim_conflict|forbidden|not_found|disabled|banned|expired_grant` (A.8; `disabled`/`banned` surface the seat's account state — HTTP maps those to `forbidden` 403).
 - `PendingFrame` (server→client) — `{ type:'pending', request_id, message }`. The WS stays open; the server pushes the terminal `occupied`/`refused` when an admin decides (spec-gap 3, no client polling).
@@ -171,7 +189,7 @@ The governed successor to `hello` — **additive schemas, not yet wired into `WS
 ```ts
 export const PROTOCOL_VERSION = 'musterd/0.3';
 export const ACTS = ['message','status_update','request_help','handoff','accept','decline','wait','resolve','steer','challenge','defer'] as const; // steer/challenge/defer: the steering trio, ADR 103
-export const SURFACES = ['cli','claude-code','codex','cursor','web','ios','slack','other'] as const;
+export const SURFACES = ['cli','claude-code','codex','opencode','grok','cursor','web','ios','slack','other','musterd'] as const; // grok: ADR 352; opencode: ADR 321; musterd (the native harness): ADR 251
 
 export const Act = z.enum(ACTS);
 export const Surface = z.enum(SURFACES);
@@ -198,15 +216,29 @@ export const P3_AUDIT_ACTIONS = ['grant.issue','grant.use','grant.revoke','claim
 // ADR 078 (P3, SPEC A.3) — the claim handshake frames. Additive; NOT yet in WSClientFrame/WSServerFrame (Cleo's P3.2 cutover wires them).
 export const ClaimTarget = z.union([ z.object({seat:string}), z.object({role:string}), z.object({observe:z.literal(true)}) ]);
 export const RefusedCode = z.enum(['claim_conflict','forbidden','not_found','disabled','banned','expired_grant']);
-export const ClaimFrame = z.object({ type:'claim', v, team, key:string, target:ClaimTarget, grant?:string, surface:Surface });
+export const ClaimFrame = z.object({ type:'claim', v, team, key:string, target:ClaimTarget, grant?:string, surface:Surface, workspace?:string, workspace_key?:string(<=200), provenance?:Provenance, driver?:string, model?:string(<=120), model_source?:ModelSource });
+// ADR 368 — `workspace` is ADR 014's display LABEL (branch-qualified, changes under its own session); `workspace_key` is the IDENTITY displacement compares (work tree root). Absent on either side ⇒ label equality, exactly as before.
 export const MemoryEnvelopeSchema = z.object({ headline:string(1..120), saved_at:int, size_bytes:int>=0 }).strict();
 export const OccupiedFrame = z.object({ type:'occupied', seat:Member, presence_id, server_time:int, charter?:string, memory:MemoryEnvelopeSchema.nullable() });
 export const RefusedFrame = z.object({ type:'refused', code:RefusedCode, message, claimable:string[], hint:string });
 export const PendingFrame = z.object({ type:'pending', request_id, message });
 
-// ADR 018/075/080 — the workspace binding files (binding.ts). Read by both the CLI and the MCP adapter.
-export const WorkspaceSpec = z.object({ server:string, team:string, surface:Surface, claim?:ClaimPolicy });  // the committed, secret-free `.musterd/workspace.json`
-export const Binding = WorkspaceSpec.extend({ agent_key?:string, grant?:string });                          // gitignored `.musterd/binding.json` = spec + the two secrets
+// ADR 014/177/368 — workspace & project resolution (project.ts). Local-only helpers; two deliberately opposite invariants.
+export function resolveWorkspace(env?, cwd?): string;      // ADR 014 — the workspace LABEL sent as `workspace`: MUSTERD_WORKSPACE if declared, else `<folder>@<branch|subpath>`, else the folder; capped at 120. Moved here from @musterd/mcp 2026-09-04 (ADR 379 amendment) so the CLI's wake actuator and the adapter run one resolver without crossing the package boundary.
+export function resolveWorkspaceKey(env?, cwd?): string;   // ADR 368 — the workspace IDENTITY sent as `workspace_key`: MUSTERD_WORKSPACE if declared, else `git rev-parse --show-toplevel`, else cwd; capped at 200. Work-tree-SPECIFIC, so two seats on one repo are two workspaces. Never throws.
+export function repoProject(cwd?): string | null;          // ADR 177 — the project name: `--git-common-dir`, so it is work-tree-INvariant and N seats share one surface space. Same repo, opposite invariant, on purpose.
+
+// ADR 018/075/080/281 — the workspace binding files (binding.ts). Read by both the CLI and the MCP adapter.
+export const WorkspaceSpec = z.object({ version:2, server:string, team:string, claim?:ClaimPolicy }).strict();  // the committed, secret-free `.musterd/workspace.json`; v2 carries NO surface (runtime Surface is launcher-only, ADR 286)
+export const Binding = WorkspaceSpec.extend({ agent_key?:string, host_key?:string, grant?:string, ... }).strict(); // gitignored `.musterd/binding.json` = spec + secrets + per-machine runtime fields; `host_key` is the actuator credential (ADR 395); strict — unknown keys reject, never strip
+
+// ADR 281/282 — strict machine-local provisioning/reconciliation contracts (provisioning.ts). Local-only: never wire types.
+export const HarnessId = z.string(1..64).regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);  // selection vocabulary; unknown ids still parse (registry lives in the CLI)
+export type  LocalLoad<T> = missing | legacy(value) | valid(value) | invalid(issues:LocalStateIssue[]);  // every local loader's result — parse failures never collapse to null
+export const WorktreeProvisioning = z.object({ version:2, role:string, desired:HarnessId[unique], contributions:Record<HarnessId,string[]>, provisionedAt:string }).strict();  // `.musterd/provisioned.json`
+export const FragmentLedger = z.object({ version:1, fragments:Record<resourceKey, { harness, scope:folder|repo-shared|machine, containerKey, fragmentKey, fingerprint, owners:string[unique], adapterVersion:int }> }).strict();  // machine config root, 0600
+export const ReconcileJournal = z.object({ version:1, operationId, action:create|remove|add-owner|release-owner, harness, containerKey, resourceKey, oldFingerprint:string|null, intendedFingerprint:string|null, oldOwners, intendedOwners, worktreeRoot, phase:'prepared' }).strict();  // write-ahead, one per fragment operation
+export const HarnessLockRecord = z.object({ version:1, holderId, pid:int>0, processStartedAt, acquiredAt:ISO, renewedAt:ISO, expiresAt:ISO }).strict();  // recoverable cross-process lease per containerKey
 
 // ADR 210 — the local continuity registry (continuity.ts). Host-only: NOT a wire type, ever.
 export const ContinuityBinding = z.object({ thread_id, harness, session_id, transcript_path?, bound_at:int, captured_at:int }).strict();

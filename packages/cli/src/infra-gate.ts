@@ -36,6 +36,8 @@ const GATE_TIMEOUT_MS = 1_500;
 function ambientIdentity(): GateIdentity | null {
   if (process.env['VITEST']) return null;
   try {
+    // A gate path: takes the default (no reclaim). #1138's own ResolveReadOptions doc named
+    // infra-gate as a must-not-reclaim caller while the code still reclaimed by default.
     const r = resolveRead({});
     if (!r.explicit || !r.identity) return null;
     return {

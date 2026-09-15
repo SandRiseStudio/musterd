@@ -7,6 +7,7 @@ import {
 } from '@musterd/protocol';
 import { resolveProject } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
+import type { HttpClient } from '../client.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 import { resolve } from './helpers.js';
@@ -23,9 +24,9 @@ const USAGE =
   '  musterd lane claim <id> [--goal <id>]\n' +
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>] [--note <why>]\n' +
-  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high] [--goal <id>]\n' +
-  '  musterd lane submit <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>] [--branch b]\n' +
-  '  musterd lane ready <id> […]  (deprecated alias for submit)\n' +
+  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high] [--goal <id>] [--clear-merged]\n' +
+  '  musterd lane submit <id> [--to <seat>] [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
+  '                          [--branch b]\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lanes [--project p] [--mine] [--open] [--json]';
 
@@ -60,7 +61,7 @@ function renderLane(l: Lane): string {
   const owner = l.owner_seat ? theme.memberName(l.owner_seat, 'agent') : theme.meta('unowned');
   const state =
     l.state === 'done' ? theme.ok(l.state) : l.state === 'blocked' ? theme.warn(l.state) : l.state;
-  const surface = l.surface_globs.length ? theme.meta(` [${l.surface_globs.join(', ')}]`) : '';
+  const surface = l.scope.length ? theme.meta(` [${l.scope.join(', ')}]`) : '';
   const deps = l.depends_on.length ? theme.meta(` deps:${l.depends_on.length}`) : '';
   const branch = l.branch ? theme.meta(` ⎇ ${l.branch}`) : '';
   const goal = l.goal_id ? theme.meta(` ◆ ${l.goal_id}`) : '';
@@ -122,7 +123,7 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         ? { goal_id: flagStr(parsed.flags, 'goal')! }
         : {}),
       ...(list(parsed.flags, 'surface') !== undefined
-        ? { surface_globs: list(parsed.flags, 'surface')! }
+        ? { scope: list(parsed.flags, 'surface')! }
         : {}),
       ...(list(parsed.flags, 'depends') !== undefined
         ? { depends_on: list(parsed.flags, 'depends')! }
@@ -137,12 +138,14 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
 
-  if (sub === 'claim' || sub === 'resolve' || sub === 'ready' || sub === 'submit') {
+  if (sub === 'claim' || sub === 'resolve' || sub === 'submit') {
     const id = parsed.positionals[1];
     if (!id) throw new CliError(USAGE, 2);
-    // resolve/submit may attest the landed merge (ADR 109): {pr, sha, authorized_by}. On resolve it
-    // rides the terminal move into `git.pr_merged`; on submit (ADR 192) it is the worker's stage-one
-    // claim, persisted on the lane so an acceptor's later accept carries it. `ready` is a deprecated alias.
+    // resolve/submit may attest the landed merge (ADR 109): {pr, sha, authorized_by}. On submit
+    // (ADR 192) it is the worker's stage-one claim. On a *self*-resolve it rides the terminal
+    // move into `git.pr_merged`. On a counterpart resolve the server ignores them when the worker's
+    // submit stamp stands (ADR 305), so that stamp — ADR 300 verification included — is never
+    // replaced by a partial patch; on a lane with NO stamp they are recorded (ADR 305 amendment 1).
     const prRaw = flagStr(parsed.flags, 'pr');
     const pr = prRaw !== undefined ? Number(prRaw) : undefined;
     if (pr !== undefined && !Number.isInteger(pr)) throw new CliError(USAGE, 2);
@@ -153,7 +156,7 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         ? { authorized_by: flagStr(parsed.flags, 'authorized-by')! }
         : {}),
     };
-    const submit = sub === 'ready' || sub === 'submit';
+    const submit = sub === 'submit';
     const res = await http.updateLane(
       team,
       id,
@@ -174,6 +177,13 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
             ...(flagStr(parsed.flags, 'branch') !== undefined
               ? { branch: flagStr(parsed.flags, 'branch')! }
               : {}),
+            // Route the acceptance ask to a seat you name, instead of the daemon's pick. The
+            // acceptance a human routes by hand was previously invisible: the named seat's `accept`
+            // had no server-composed ask to bind to, so the owner ended up self-closing work that
+            // HAD been reviewed. Recorded as `route: 'named'` — never as a pick.
+            ...(submit && flagStr(parsed.flags, 'to') !== undefined
+              ? { acceptor: flagStr(parsed.flags, 'to')! }
+              : {}),
           },
     );
     const label = sub === 'claim' ? 'claimed' : submit ? 'submitted for acceptance' : 'done';
@@ -181,69 +191,7 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
     renderWarnings(res.warnings);
     // value-layer design: the daemon's advisory notices (e.g. the ship nudge) reach the closer.
     for (const n of res.notices ?? []) process.stdout.write(`${theme.warn('▸')} ${n}\n`);
-    if (submit) {
-      // ADR 192: report the acceptor routing — who was asked, or that self-close is sanctioned.
-      if (res.review?.standing) {
-        // A repeat submit (e.g. recording the merge SHA after the PR landed) re-routes nothing;
-        // the daemon reports the STANDING state. Before it did, the else-branch below read the
-        // silence as "no eligible acceptor is live" and sanctioned self-close against lanes whose
-        // acceptor had a pending ask — the premature unverified close ADR 235 exists to stop.
-        process.stdout.write(
-          theme.meta(
-            res.review.reviewer
-              ? `already awaiting acceptance from ${res.review.reviewer}` +
-                  `${res.review.route ? ` (${res.review.route})` : ''} — attestation recorded, ` +
-                  `nothing re-routed. Leave it with them.`
-              : res.review.acceptance_exempt
-                ? 'already awaiting close — this submit was acceptance-exempt (declared low ' +
-                  'stakes, ADR 234): `musterd lane resolve` when ready'
-                : 'no acceptor was ever routed — self-close sanctioned: ' +
-                  '`musterd lane resolve` when ready (recorded unconfirmed)',
-          ) + '\n',
-        );
-      } else if (!res.review) {
-        // No routing decision and no standing report (an older daemon, or a patch that never
-        // touched acceptance). Absence of a decision is not absence of an acceptor (ADR 173) —
-        // abstain rather than assert, and never sanction self-close on silence.
-      } else if (res.review.acceptance_exempt) {
-        // ADR 234 increment 2: no ask by design, on the lane's own declared stakes — never worded
-        // as the "nobody was eligible" degradation.
-        process.stdout.write(
-          theme.meta(
-            'acceptance-exempt (declared low stakes, ADR 234) — no ask was routed and none is ' +
-              'owed: `musterd lane resolve` when ready',
-          ) + '\n',
-        );
-      } else if (res.review.reviewer) {
-        // ADR 235: the advice follows the backstop. "Self-close on silence" was right while an
-        // unaccepted lane hung forever; with a sweep armed it is what turns a recoverable wait into
-        // a permanent unverified close — measured, the acceptor came back 20 of 20 times, an
-        // average 106.8 minutes after the owner had already shut the lane.
-        const backstop = res.review.backstop;
-        process.stdout.write(
-          `acceptance asked of ${theme.memberName(res.review.reviewer, 'agent')} ` +
-            theme.meta(
-              backstop?.armed
-                ? `(${res.review.route}) — you are done; leave it with them. Do NOT self-close on ` +
-                    `silence: the daemon sweeps an unanswered lane after ` +
-                    `${Math.round(backstop.grace_ms / 3_600_000)}h. \`musterd lane resolve\` still ` +
-                    `works if you need it shut now, and records unconfirmed. ` +
-                    `Acceptor judges intent/principles/usable/feel — not a code review.`
-                : `(${res.review.route}) — wait ≤5m; accept closes the lane, reject resumes it; ` +
-                    `on silence, \`musterd lane resolve\` yourself (recorded unconfirmed). ` +
-                    `Acceptor judges intent/principles/usable/feel — not a code review.`,
-            ) +
-            '\n',
-        );
-      } else {
-        process.stdout.write(
-          theme.meta(
-            'no eligible acceptor is live — self-close sanctioned: ' +
-              '`musterd lane resolve` when ready (recorded unconfirmed)',
-          ) + '\n',
-        );
-      }
-    }
+    if (submit) renderSubmitReport(res);
     if (sub === 'resolve') {
       // ADR 169 advisory nudge: closing your own lane records an unverified close.
       if (res.lane.owner_seat === identity.name) {
@@ -312,7 +260,7 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         ? { project: flagStr(parsed.flags, 'project')! }
         : {}),
       ...(list(parsed.flags, 'surface') !== undefined
-        ? { surface_globs: list(parsed.flags, 'surface')! }
+        ? { scope: list(parsed.flags, 'surface')! }
         : {}),
       ...(list(parsed.flags, 'depends') !== undefined
         ? { depends_on: list(parsed.flags, 'depends')! }
@@ -325,6 +273,9 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       ...(flagStr(parsed.flags, 'goal') !== undefined
         ? { goal_id: flagStr(parsed.flags, 'goal')! }
         : {}),
+      // ADR 305 amendment 2 (lane 01M2GR0434): the one verb for NONE — a lane stamped with the
+      // wrong merge had no way back. Owner or admin only; the daemon refuses a counterpart.
+      ...(parsed.flags['clear-merged'] === true ? { merged: null } : {}),
     });
     process.stdout.write(`${theme.ok('✓')} lane updated\n${renderLane(res.lane)}\n`);
     renderWarnings(res.warnings);
@@ -360,4 +311,85 @@ export async function lanesCommand(parsed: Parsed): Promise<number> {
   for (const l of board.lanes) process.stdout.write(renderLane(l) + '\n');
   renderWarnings(board.warnings);
   return 0;
+}
+
+/**
+ * The routing report after a submit (ADR 192/235): who was asked, or that self-close is sanctioned,
+ * or that the lane already had a standing acceptance. Shared by `lane submit` and `done --pr/--sha`
+ * so the two closers cannot describe the same close differently.
+ */
+export function renderSubmitReport(res: Awaited<ReturnType<HttpClient['updateLane']>>): void {
+  // ADR 192: report the acceptor routing — who was asked, or that self-close is sanctioned.
+  if (res.review?.rerouted && res.review.reviewer) {
+    // Lane 01M1QYHJFY: `--to` on a lane already awaiting acceptance moved the ask. Say so, and
+    // that the previous holder was told — this branch used to fall through to "no acceptor was
+    // ever routed", which was false and counselled an unconfirmed close.
+    process.stdout.write(
+      theme.meta(
+        `acceptance re-routed to ${theme.memberName(res.review.reviewer, 'agent')} ` +
+          `(${res.review.route ?? 'named'})` +
+          `${res.review.superseded ? ` — ${res.review.superseded}'s ask is closed and they were told` : ''}. ` +
+          `You are done; leave it with them.`,
+      ) + '\n',
+    );
+  } else if (res.review?.standing) {
+    // A repeat submit (e.g. recording the merge SHA after the PR landed) re-routes nothing;
+    // the daemon reports the STANDING state. Before it did, the else-branch below read the
+    // silence as "no eligible acceptor is live" and sanctioned self-close against lanes whose
+    // acceptor had a pending ask — the premature unverified close ADR 235 exists to stop.
+    process.stdout.write(
+      theme.meta(
+        res.review.reviewer
+          ? `already awaiting acceptance from ${res.review.reviewer}` +
+              `${res.review.route ? ` (${res.review.route})` : ''} — attestation recorded, ` +
+              `nothing re-routed. Leave it with them.`
+          : res.review.acceptance_exempt
+            ? 'already awaiting close — this submit was acceptance-exempt (declared low ' +
+              'stakes, ADR 234): `musterd lane resolve` when ready'
+            : 'no acceptor was ever routed — self-close sanctioned: ' +
+              '`musterd lane resolve` when ready (recorded unconfirmed)',
+      ) + '\n',
+    );
+  } else if (!res.review) {
+    // No routing decision and no standing report (an older daemon, or a patch that never
+    // touched acceptance). Absence of a decision is not absence of an acceptor (ADR 173) —
+    // abstain rather than assert, and never sanction self-close on silence.
+  } else if (res.review.acceptance_exempt) {
+    // ADR 234 increment 2: no ask by design, on the lane's own declared stakes — never worded
+    // as the "nobody was eligible" degradation.
+    process.stdout.write(
+      theme.meta(
+        'acceptance-exempt (declared low stakes, ADR 234) — no ask was routed and none is ' +
+          'owed: `musterd lane resolve` when ready',
+      ) + '\n',
+    );
+  } else if (res.review.reviewer) {
+    // ADR 235: the advice follows the backstop. "Self-close on silence" was right while an
+    // unaccepted lane hung forever; with a sweep armed it is what turns a recoverable wait into
+    // a permanent unverified close — measured, the acceptor came back 20 of 20 times, an
+    // average 106.8 minutes after the owner had already shut the lane.
+    const backstop = res.review.backstop;
+    process.stdout.write(
+      `acceptance asked of ${theme.memberName(res.review.reviewer, 'agent')} ` +
+        theme.meta(
+          backstop?.armed
+            ? `(${res.review.route}) — you are done; leave it with them. Do NOT self-close on ` +
+                `silence: the daemon sweeps an unanswered lane after ` +
+                `${Math.round(backstop.grace_ms / 3_600_000)}h. \`musterd lane resolve\` still ` +
+                `works if you need it shut now, and records unconfirmed. ` +
+                `Acceptor judges intent/principles/usable/feel — not a code review.`
+            : `(${res.review.route}) — wait ≤5m; accept closes the lane, reject resumes it; ` +
+                `on silence, \`musterd lane resolve\` yourself (recorded unconfirmed). ` +
+                `Acceptor judges intent/principles/usable/feel — not a code review.`,
+        ) +
+        '\n',
+    );
+  } else {
+    process.stdout.write(
+      theme.meta(
+        'no eligible acceptor is live — self-close sanctioned: ' +
+          '`musterd lane resolve` when ready (recorded unconfirmed)',
+      ) + '\n',
+    );
+  }
 }

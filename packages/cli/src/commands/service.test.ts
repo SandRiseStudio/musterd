@@ -535,6 +535,27 @@ describe('serviceCommand', () => {
     const stamp = loadStamp(join(dir, 'guardian', 'stamp.json'));
     expect(stamp.lastIncident).toBeNull();
     expect(stamp.lastAttemptAt).toEqual({});
+    // Raise memory is damping state too. If the probe recorded a raise, the SECOND install inside
+    // the hour would suppress its own `✓` — and the wiki tells operators to read a missing `✓` as
+    // "the alert path is untrusted". A dry run that can silence the next dry run is not a dry run.
+    expect(stamp.lastRaise).toEqual({});
+  });
+
+  it('a second control probe inside the raise window still fires — the probe is exempt from damping', async () => {
+    for (const _ of [1, 2]) {
+      const { code } = await capture(() =>
+        serviceCommand(parseArgs(['install', '--guardian']), {
+          platform: 'darwin',
+          ctx: ctx(recorder()),
+          guardianCtx: guardianCtxFor(join(dir, 'guardian.log')),
+        }),
+      );
+      expect(code).toBe(0);
+    }
+    const logged = readFileSync(join(dir, 'guardian', 'guardian.log'), 'utf8');
+    const fired = logged.match(/control probe: alert path fired ✓/g) ?? [];
+    expect(fired.length).toBe(2);
+    expect(logged).not.toContain('guardian.suppressed');
   });
 
   it('service status --guardian names a never-ticked probe', async () => {

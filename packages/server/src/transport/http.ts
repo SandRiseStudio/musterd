@@ -1,8 +1,10 @@
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { hostname } from 'node:os';
 import { extname, join, resolve, sep } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import {
+  isWireAttestationSource,
   type Act,
   MemberKindSchema,
   LifecycleSchema,
@@ -16,6 +18,8 @@ import {
   ClaimTargetSchema,
   DecideRequestSchema,
   IssueGrantSchema,
+  type Policy,
+  type PolicyOverride,
   PolicyOverrideSchema,
   EnrollResidencyBodySchema,
   RevokeResidencyBodySchema,
@@ -32,6 +36,7 @@ import {
   UpdateLaneSchema,
   DeclareGoalSchema,
   PostGoalOutcomeSchema,
+  PostGoalRetractSchema,
   ActorAttestationSchema,
   GateCheckRequestSchema,
   AskTierSchema,
@@ -42,24 +47,54 @@ import {
   isAwaitingAcceptance,
   makeEnvelope,
   type Envelope,
+  type Lane,
   type LaneWarning,
   type MemberSummary,
   type Provenance,
   describeFamilyPosture,
   resolvePosture,
   resolveOfflineReason,
+  STICKY_OFFLINE_REASONS,
   type OfflineReason,
   isRailCandidate,
+  AnswerSeedClarificationSchema,
+  AskSeedClarificationSchema,
+  CaptureRepoSeedSchema,
+  ClaimSeedSchema,
+  PromoteSeedSchema,
+  SeedListSchema,
+  SeedResultSchema,
+  SeedSchema,
+  SubmitSeedBriefSchema,
+  TeamMemorySearchResponseSchema,
+  TOKEN_PREFIXES,
+  BootstrapCutoverRequestSchema,
+  BootstrapMigrationRequestSchema,
+  NodeEnrollRequestSchema,
+  NodeInviteMintSchema,
+  NodeJoinRequestSchema,
+  NodeJoinResponseSchema,
+  NodeListSchema,
+  SYNC_PULL_MAX_BATCH,
+  SyncPullResponseSchema,
+  SyncClaimRequestSchema,
+  SyncLanePatchRequestSchema,
+  SyncPolicyRequestSchema,
+  SyncTrustRequestSchema,
+  SyncPushRequestSchema,
+  SyncPushResponseSchema,
+  wakeabilityFromFacts,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { z } from 'zod';
-import { isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
+import { checkUpgrade, isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
-import { MusterdError, asMusterdError } from '../errors.js';
+import { MusterdError, SessionLeaseRefused, asMusterdError } from '../errors.js';
 import { reapOrphans } from '../footprint/reap.js';
 import { log } from '../log.js';
+import { saveNodeEnrollment } from '../node/state.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
 import { deliveryHintFor } from '../protocol/nudge.js';
@@ -68,12 +103,16 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import {
   appendAudit,
+  appendLaneEventRequired,
   hasInterruptRaised,
+  listRenderedActs,
+  hasRecentInterruptRefusal,
   laneOwnerHistory,
   listAudit,
   standingAcceptance,
 } from '../store/audit.js';
-import { getCursor, setCursor } from '../store/cursors.js';
+import { applyCursorAdvance, getCursor } from '../store/cursors.js';
+import { deferralFold } from '../store/deferralFold.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { latestFootprint } from '../store/footprint.js';
 import { listGoals } from '../store/goals.js';
@@ -85,12 +124,15 @@ import {
   revokeGrant,
   validateGrant,
 } from '../store/grants.js';
+import { rowsToEnvelopes } from '../store/hydrate.js';
 import { deriveReport } from '../store/insights.js';
-import { recordLaneClose } from '../store/laneClose.js';
+import { listInterruptCandidates } from '../store/interruptCandidates.js';
+import { type LaneCloseVerdict, recordLaneClose } from '../store/laneClose.js';
 import {
   boardWarnings,
   deriveGoalStatus,
   getLane,
+  LaneConflictError,
   laneWarnings,
   lanesForGoal,
   noGoalWarning,
@@ -112,28 +154,46 @@ import {
   leaveMember,
   listMembers,
   markBound,
-  markSignedOff,
+  markSeatReleased,
+  mintAgentSeatCredential,
+  markSessionEnded,
   mintCredential,
+  newSecret,
   rotateToken,
   setAvailability,
   setMemberGovernance,
+  setMemberHue,
   teamHasAdmin,
 } from '../store/members.js';
-import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/memory.js';
+import { applyMemoryClear, applyMemorySave, getMemory, memoryEnvelope } from '../store/memory.js';
 import {
   countInbox,
+  countUnread,
   latestStatusUpdate,
-  deferrals,
   listInbox,
-  raisedDeferrals,
   listTeamMessages,
+  localNodeForTeam,
   pendingInterrupts,
   rowToEnvelope,
 } from '../store/messages.js';
-import { deriveNext } from '../store/orientation.js';
+import {
+  authenticateNode,
+  bindNode,
+  consumeInvite,
+  listNodeLiveness,
+  listNodes,
+  mintInvite,
+  revokeNode,
+  rotateNode,
+  touchNode,
+  unbindSeat,
+} from '../store/nodes.js';
+import { deriveNext, deriveNextSummary } from '../store/orientation.js';
 import {
   attach,
+  clearOrphanPresence,
   clearMemberPresence,
+  clearPresenceById,
   countLivePresences,
   hasLivePresence,
   listLiveDrivers,
@@ -159,6 +219,9 @@ import {
   enrollResidency,
   getResidency,
   listResidency,
+  recordHostSeen,
+  seatWakeabilityFacts,
+  wakeabilityInputs,
   markWakeSpawned,
   recordSessionAttestation,
   revokeResidency,
@@ -169,15 +232,19 @@ import {
 import {
   ACCEPTANCE_EXEMPT_SAMPLE_RATE,
   acceptanceExemption,
+  namedAcceptor,
+  openAcceptanceAsk,
   pickHumanReviewer,
-  pickReviewCounterpart,
   pickWakeReviewer,
   REVIEW_LOOP_BREAKER_N,
   reviewLoopBounceCount,
+  selectReviewCounterpart,
+  workerFamily,
   teamFamilyPosture,
-  verifiedCloses,
+  annotateClose,
+  closeVerdicts,
 } from '../store/review.js';
-import { listRoles } from '../store/roles.js';
+import { getRoleCharter, listRoles } from '../store/roles.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import {
   hasFullMessageVisibility,
@@ -186,20 +253,73 @@ import {
   resolveCapabilities,
   toMember,
 } from '../store/rows.js';
+import {
+  answerSeedClarification,
+  askSeedClarification,
+  captureRepoSeed,
+  claimSeed,
+  getSeed,
+  listSeeds,
+  promoteSeed,
+  submitSeedBrief,
+} from '../store/seeds.js';
+import { mintSessionLease, revokeMemberSessionLeases } from '../store/session-leases.js';
 import { redeemHandoff, stageHandoff } from '../store/signinHandoff.js';
 import { staleLaneWarnings } from '../store/staleness.js';
+import { searchInsights } from '../store/teamMemory.js';
 import {
   archiveTeam,
+  bootstrapCutoverReadiness,
   createTeam,
+  cutoverLegacyBootstrap,
+  findBootstrapCredential,
+  findBootstrapCredentialRecord,
   getTeamBySlug,
   getAgentKeyHash,
   getPolicy,
   getStoredPolicy,
+  listBootstrapCredentials,
+  migrateLegacyBootstrapCredential,
+  mintBootstrapCredential,
+  recordBootstrapCredentialUse,
   requireTeam,
+  revokeBootstrapCredential,
   rotateAgentKey,
-  setPolicy,
+  applyPolicyChange,
 } from '../store/teams.js';
-import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
+import { applyToolCalls, recordSurfaceRender } from '../store/toolCalls.js';
+import {
+  applyTrust,
+  arbitrateClaim,
+  arbitrateLanePatch,
+  type ArbitratedLanePatch,
+  assertSeatAlreadyResident,
+  assertSeatResident,
+  ClaimRefusedError,
+  decideLanePatch,
+  HubUnreachableError,
+  isOwnershipOrStatePatch,
+  joinerEnrollment,
+  policyAtHub,
+  localNodeWithLabel,
+  patchAtHub,
+  SeatBoundElsewhereError,
+  trustAtHub,
+  TrustRefusedError,
+} from '../sync/claim.js';
+import {
+  hasEnrolledJoiners,
+  hubHead,
+  ingestBatch,
+  laneGenesis,
+  readStaged,
+  SyncDuplicateIdError,
+  SyncGapError,
+  SyncOriginError,
+  SyncResidenceError,
+} from '../sync/log.js';
+import { pullTeam } from '../sync/pull.js';
+import { readPushRefusal, pushTeam } from '../sync/push.js';
 import {
   recordCcdNudge,
   recordNudgeDecision,
@@ -234,6 +354,28 @@ const JSON_COMPRESS_MIN_BYTES = 1400;
  * the pre-ADR-211 behaviour, which is a degradation rather than a wrong answer.
  */
 const DEFERRAL_SCAN_LIMIT = 2000;
+/**
+ * The bound on an `/inbox` read that named no `?limit=`. Big enough that an ordinary check returns
+ * everything waiting and never sees a `truncated` flag; small enough that a seat 24k acts behind its
+ * cursor cannot hold the loop while its whole history is marshalled and serialised.
+ */
+const INBOX_DEFAULT_LIMIT = 200;
+
+/**
+ * Rollback sentinel for node enrollment (ADR 328 §2). better-sqlite3 commits a transaction whose
+ * function returns normally, so a refusal has to throw to roll the invite's consumption back with
+ * the bind that failed. Compared by identity and never surfaced — the caller gets one 409.
+ */
+const ENROLL_REFUSED = Symbol('enrollment refused');
+
+/** A refused trust act (ADR 358): the envelope plus the bound node when there is one to name. */
+function sendTrustRefusal(res: ServerResponse, err: TrustRefusedError): void {
+  const status = err.code === 'bound_elsewhere' || err.code === 'forbidden' ? 403 : 404;
+  return sendJson(res, status, {
+    error: { code: err.code, message: err.message },
+    ...(err.nodeId ? { node_id: err.nodeId, node_label: err.nodeLabel ?? '' } : {}),
+  });
+}
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -441,6 +583,16 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
+function parseSeedPathId(segment: string): string {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    throw new MusterdError('bad_request', 'Seed id has invalid URL encoding');
+  }
+  return parseOrBadRequest(SeedSchema.shape.id, decoded);
+}
+
 /**
  * ADR 273 — parse a wake report, and if the daemon refuses it, SAY SO on the ledger before throwing.
  *
@@ -533,6 +685,13 @@ function actingSeat(req: IncomingMessage): string | undefined {
   return v && v.length > 0 ? v : undefined;
 }
 
+/** The short-lived agent HTTP lease (ADR 337). It has no authority without the matching credential. */
+function agentSessionLease(req: IncomingMessage): string | undefined {
+  const h = req.headers['x-musterd-session-lease'];
+  const v = Array.isArray(h) ? h[0] : h;
+  return v && v.length > 0 ? v : undefined;
+}
+
 /**
  * Defense-in-depth (banned = inert): a `disabled`/`banned`/`archived` seat can't READ message content
  * either — the send gate (route.ts) already blocks its sends, this closes the residual inbox/firehose
@@ -549,7 +708,15 @@ function assertSeatCanRead(member: MemberRow): void {
  * can raise the line without the `urgent` flag; everything else that raises is `urgent`. Named on the
  * line and in the audit so "who grabbed the mic, and by what right" stays legible.
  */
-function raiseClass(latest: Envelope): 'steer' | 'urgent' | 'acceptance' {
+function raiseClass(
+  latest: Envelope,
+  huddleTopic?: string,
+): 'steer' | 'urgent' | 'acceptance' | 'huddle' {
+  // ADR 378: a turn in a huddle raises on its own class. Without this it borrowed `urgent` — the
+  // scarce flag — and said so on the line, which is false twice over: the turn is not urgent, and
+  // the seat is given no way to tell a huddle apart from any other directed act. The topic is
+  // resolved by the caller from the ROOT act (a turn carries no huddle meta of its own).
+  if (huddleTopic !== undefined) return 'huddle';
   if (latest.act === 'steer') return 'steer';
   // ADR 225: a routed acceptance raises on its own class, not on `urgent` — the noun has to say so,
   // or a seat reads "urgent" for a standard-tier obligation and the urgent signal loses its meaning
@@ -571,12 +738,87 @@ function raiseClass(latest: Envelope): 'steer' | 'urgent' | 'acceptance' {
  * the content. The class noun (`steer` vs `urgent`, ADR 103) describes only `latest`, so a mixed queue
  * isn't mislabeled: the plural line uses the neutral "acts" and names the latest's class inline.
  */
-function composeInterruptLine(latest: Envelope, count: number): string {
+function composeInterruptLine(
+  latest: Envelope,
+  count: number,
+  huddleTopic?: string,
+  rest?: RaiseMix,
+): string {
   const head = `${latest.from} (${latest.act})`;
-  const noun = raiseClass(latest);
+  const noun = raiseClass(latest, huddleTopic);
+  // The tail names the rest of the queue by class (ADR 225 amendment, 2026-09-06): "+5 more
+  // waiting" told stanley nothing about the huddle turn behind an acceptance — a count, not a
+  // sentence. Class nouns are daemon-derived, so this stays inside the ADR 088 §4 discipline.
+  const mix = rest && count > 1 ? ` (${describeMix(rest)})` : '';
+  // A huddle turn names the room it came from and how to answer in it. `topic` is a structured
+  // field, so this keeps the ADR 128 discipline — sender, act and topic, never `env.body`.
+  if (huddleTopic !== undefined && latest.thread) {
+    const more = count > 1 ? ` (+${count - 1} more waiting${mix})` : '';
+    return (
+      `⚡ musterd: huddle ${huddleTopic} — ${latest.from} took a turn${more} — ` +
+      `read it with 'musterd inbox', answer with 'musterd huddle say ${latest.thread}'.`
+    );
+  }
   return count > 1
-    ? `⚡ musterd: ${count} acts waiting (latest: ${noun} from ${head}) — run 'musterd inbox' to read them.`
+    ? `⚡ musterd: ${count} acts waiting (${noun} from ${head}, +${count - 1} more${mix}) — run 'musterd inbox' to read them.`
     : `⚡ musterd: ${noun} from ${head} — run 'musterd inbox' to read it.`;
+}
+
+type RaiseClass = ReturnType<typeof raiseClass>;
+/** How many of each class wait behind the headline — structured, so it can be said on the line. */
+type RaiseMix = Partial<Record<RaiseClass, number>>;
+
+/**
+ * The headline's precedence (ADR 225 amendment, 2026-09-06). `pendingInterrupts` sorts newest-first,
+ * which is the right order for a wake queue and the wrong one for a one-line notice: recency let a
+ * routed acceptance — an hour-scale obligation — headline over a huddle turn whose participants
+ * were waiting in the room. Rank is by what the class MEANS to a busy seat: a steer changes what
+ * it is doing; `urgent` is the scarce, capability-gated flag a sender spent on purpose; a huddle
+ * turn has people waiting on it now; an acceptance is owed on the hour. Recency breaks ties only
+ * inside a class, so the newest steer still wins among steers (ADR 103) and the newest turn among
+ * turns.
+ */
+const RAISE_RANK: Record<RaiseClass, number> = { steer: 0, urgent: 1, huddle: 2, acceptance: 3 };
+
+function describeMix(mix: RaiseMix): string {
+  return (Object.keys(RAISE_RANK) as RaiseClass[])
+    .filter((k) => (mix[k] ?? 0) > 0)
+    .map((k) => `${mix[k]} ${k}`)
+    .join(', ');
+}
+
+/**
+ * Pick the act the line headlines and tally the rest by class. Pure over the already-filtered
+ * `pending` list (newest-first): the sort is stable, so a class tie keeps the newer act.
+ */
+function headlineInterrupt(
+  pending: Envelope[],
+  messages: Envelope[],
+): { latest: Envelope; huddleTopic: string | undefined; rest: RaiseMix } {
+  const classed = pending.map((m) => {
+    const huddleTopic = huddleTopicOf(messages, m);
+    return { m, huddleTopic, cls: raiseClass(m, huddleTopic) };
+  });
+  classed.sort((a, b) => RAISE_RANK[a.cls] - RAISE_RANK[b.cls]);
+  const [top, ...others] = classed;
+  const rest: RaiseMix = {};
+  for (const o of others) rest[o.cls] = (rest[o.cls] ?? 0) + 1;
+  return { latest: top!.m, huddleTopic: top!.huddleTopic, rest };
+}
+
+/**
+ * The topic label of the huddle `latest` is a turn in, or undefined when it is not one. Resolved
+ * from the ROOT act, because a turn deliberately carries no `meta.huddle` of its own (ADR 378 §2).
+ */
+function huddleTopicOf(messages: Envelope[], latest: Envelope): string | undefined {
+  if (!latest.thread) return undefined;
+  const root = messages.find((m) => m.id === latest.thread);
+  const huddle = (root?.meta as { huddle?: { topic?: { kind?: string; id?: string } } } | null)?.[
+    'huddle'
+  ];
+  const topic = huddle?.topic;
+  if (!topic?.kind || !topic.id) return undefined;
+  return `${topic.kind}:${topic.id}`;
 }
 
 // Seat-footprint design: an explicit reap names its pids; the daemon re-verifies every one
@@ -607,7 +849,12 @@ const AddMemberBody = z.object({
    *  gets. Omitted ⇒ `'full'`, the trusted local dashboard; safe as a default only because ADR 134
    *  restricts minting to a local peer or an admin. */
   observer_scope: z.enum(['full', 'public']).optional(),
+  /** ADR 374: the seat's hue. Honoured on a DB-only team; on a file-backed team the seat file the
+   *  CLI wrote first carries it and reconcile projects it. */
+  hue: z.number().int().min(0).max(359).nullish(),
 });
+
+const HueBody = z.object({ hue: z.number().int().min(0).max(359) });
 
 /**
  * Body for `POST /teams/:slug/signin-handoff` (ADR 170). The credential is checked, not stored —
@@ -660,6 +907,20 @@ function attestedModelHeader(req: IncomingMessage): string | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return trimmed.slice(0, 120);
+}
+
+/**
+ * The tier behind `x-musterd-model`, from `x-musterd-model-source` — `observed` | `environment` |
+ * `binding`. Anything else (including `unknown`, which the wire does not carry) reads as absent, so
+ * a malformed or hostile header degrades to "tier not known" rather than to a plausible-looking
+ * one. Caller pairs it with the model and drops it when the model is absent.
+ */
+function attestedModelSourceHeader(req: IncomingMessage): string | undefined {
+  const raw = req.headers['x-musterd-model-source'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return isWireAttestationSource(trimmed) ? trimmed : undefined;
 }
 
 /**
@@ -721,7 +982,7 @@ function authTouch(
   slug: string,
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
-  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req), agentSessionLease(req));
   // Observer seats (ADR 063) watch without participating — never flip present, no presence event.
   if (auth.member.observer === 1) return auth;
   // A background poller (the notifier reads inbox on an away human's behalf) opts out: marking them
@@ -733,6 +994,8 @@ function authTouch(
   // ADR 121: model attestation is a harness fact — only agent seats re-attest from the header.
   // A human with MUSTERD_MODEL in their shell (or a buggy client) must not stamp their occupancy.
   const model = auth.member.kind === 'agent' ? attestedModelHeader(req) : undefined;
+  // Tier only travels beside a model — a source with nothing to describe is dropped, not stored.
+  const modelSource = model ? attestedModelSourceHeader(req) : undefined;
   const build = attestedBuildHeader(req); // all credentials — the binary is the binary (ADR 135)
   // Provenance describes the *current* animation source (newest-wins, owner call 2026-07-14) —
   // agent seats only, mirroring the model gate: a human shell must not label itself `wake`.
@@ -757,6 +1020,7 @@ function authTouch(
     ctx.config.presenceTimeoutMs,
     {
       ...(model !== undefined ? { model } : {}),
+      ...(modelSource !== undefined ? { model_source: modelSource } : {}),
       ...(build !== undefined ? { build } : {}),
       ...(provenance !== undefined ? { provenance } : {}),
       ...(wakeLease !== undefined ? { wake_lease: wakeLease } : {}),
@@ -802,6 +1066,15 @@ function authTouch(
 }
 
 /** Order-independent key for a lane warning — the (subject, with, kind) dedup identity (ADR 083 §4). */
+/**
+ * Has this daemon's row caught up with what the hub decided (ADR 361)? Agreement on the two fields
+ * the hub arbitrates — ownership and state — is the whole test; a local row that agrees carries
+ * the fold's stamps and is the better answer, one that lags is replaced by the hub's until it does.
+ */
+function laneAgreesWith(local: Lane | null, decided: Lane): boolean {
+  return local !== null && local.owner_seat === decided.owner_seat && local.state === decided.state;
+}
+
 function laneWarningKey(w: LaneWarning): string {
   return w.kind === 'surface_overlap'
     ? `${w.kind}:${[w.subject, w.with].sort().join(':')}`
@@ -863,7 +1136,7 @@ function deliverLaneAskAct(
   to: string,
   body: string,
   meta: Record<string, unknown>,
-): void {
+): boolean {
   try {
     const env = makeEnvelope({
       id: ulid(),
@@ -875,8 +1148,46 @@ function deliverLaneAskAct(
       meta,
     });
     routeEnvelope(ctx, team, from, env, undefined, true);
+    return true;
   } catch {
-    /* advisory only — the lane verb already succeeded */
+    /* advisory only — the lane verb already succeeded. The boolean is for the one caller that
+       must NOT treat it as advisory: a hand-named acceptor whose ask failed to mint is the silent
+       limbo lane 01M1QYHJFY closed, and the submit handler fails loudly on `false`. */
+    return false;
+  }
+}
+
+/**
+ * Close a standing acceptance ask on the seat that held it (lane 01M1QYHJFY): a daemon-composed
+ * `resolve` on the ask's own thread, so the ADR 088 interrupt line and the open-loops gauge both see
+ * it discharged, and the seat reads WHY in the body instead of finding the lane closed under them.
+ * The body is composed here from structured fields, never from a client string.
+ */
+function deliverLaneAskSuperseded(
+  ctx: Ctx,
+  team: TeamRow,
+  from: MemberRow,
+  to: string,
+  askId: string,
+  lane: Lane,
+  newAcceptor: string,
+): void {
+  try {
+    const env = makeEnvelope({
+      id: ulid(),
+      team: team.slug,
+      from: from.name,
+      to: { kind: 'member', name: to },
+      act: 'resolve',
+      thread: askId,
+      body:
+        `[lane] acceptance of "${lane.title}" re-routed to ${newAcceptor} by ${from.name} — ` +
+        `the ask you held is closed and nothing is owed on it. A verdict sent on it now binds to nothing.`,
+      meta: { lane_review_superseded: { lane: lane.id, ask: askId, reviewer: newAcceptor } },
+    });
+    routeEnvelope(ctx, team, from, env, undefined, true);
+  } catch {
+    /* advisory — the re-route itself is recorded in the audit and the new ask is what binds */
   }
 }
 
@@ -958,6 +1269,33 @@ function deliverLaneTeamAct(
   routeEnvelope(ctx, team, from, env, undefined, true);
 }
 
+/** ADR 291: a promoted Seed opens an ordinary Lane and announces that edge on the normal Team rail. */
+function deliverSeedPromotion(
+  ctx: Ctx,
+  team: TeamRow,
+  from: MemberRow,
+  seed: { id: string; linked_lane_id: string | null },
+): void {
+  if (!seed.linked_lane_id) return;
+  const lane = getLane(ctx.db, team.id, seed.linked_lane_id, team.slug);
+  if (!lane) return;
+  deliverLaneTeamAct(
+    ctx,
+    team,
+    from,
+    `[lane] opened "${lane.title}" from Seed ${seed.id} — human brainstorm recommended`,
+    {
+      lane_open: {
+        lane: lane.id,
+        title: lane.title,
+        project: lane.project,
+        seed_id: seed.id,
+        brainstorm_recommended: true,
+      },
+    },
+  );
+}
+
 /**
  * Directed wakes for fresh lane warnings (ADR 083 §4): the *affected* owner gets one targeted act —
  * never the team, never the firehose. The actor already saw the warning inline in the verb response.
@@ -998,7 +1336,7 @@ function authAdmin(
   slug: string,
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
-  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req), agentSessionLease(req));
   if (!resolveCapabilities(auth.member).is_admin)
     throw new MusterdError('forbidden', 'this resource is admin-only (visibility_level: admin)');
   return auth;
@@ -1011,16 +1349,85 @@ function authAdmin(
  * impersonate. Presence-neutral by construction (the woken session announces itself by occupying
  * via the seat's own grant).
  */
-function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage): TeamRow {
+function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage, host?: string): TeamRow {
   const team = requireTeam(ctx.db, slug);
+  const credential = findBootstrapCredential(ctx.db, team.id, bearer(req));
+  const credentialRecord =
+    credential ?? findBootstrapCredentialRecord(ctx.db, team.id, bearer(req));
+  if (credentialRecord && !credential) {
+    const expired =
+      credentialRecord.expires_at !== null && credentialRecord.expires_at <= Date.now();
+    appendAudit(ctx.db, team.id, {
+      actor: null,
+      action: expired ? 'bootstrap_credential.expired' : 'bootstrap_credential.refused',
+      target: credentialRecord.id,
+      result: 'deny',
+      detail: {
+        reason: expired ? 'expired' : credentialRecord.state,
+        target: credentialRecord.target,
+      },
+    });
+  }
+  if (credential?.use_kind === 'host' && host !== undefined && credential.target === host) {
+    recordBootstrapCredentialUse(ctx.db, credential.id);
+    appendAudit(ctx.db, team.id, {
+      actor: null,
+      action: 'bootstrap_credential.used',
+      target: credential.id,
+      result: 'allow',
+      detail: { use: 'host', target: credential.target },
+    });
+    return team;
+  }
+  if (credential && credential.use_kind !== 'legacy') {
+    appendAudit(ctx.db, team.id, {
+      actor: null,
+      action: 'bootstrap_credential.refused',
+      target: credential.id,
+      result: 'deny',
+      detail: { reason: 'host_mismatch', target: credential.target },
+    });
+  }
   const keyHash = getAgentKeyHash(ctx.db, team.id);
   if (!keyHash || hashToken(bearer(req)) !== keyHash) {
     throw new MusterdError(
       'unauthorized',
-      `the residency wake endpoints authenticate with the team agent key (mskey_) for "${slug}"`,
+      team.bootstrap_cutover_at !== null
+        ? [
+            `Team "${slug}" has retired its legacy bootstrap credential.`,
+            'Use an administrator-minted scoped credential:',
+            'musterd team bootstrap mint --seat <name>',
+            'musterd team bootstrap mint --role <role>',
+            'musterd team bootstrap mint --host <label>',
+          ].join('\n')
+        : `the residency wake endpoints authenticate with the team agent key (mskey_) for "${slug}"`,
     );
   }
   return team;
+}
+
+/** The lease's server-recorded host is the authority for host-scoped credentials. */
+function hostForWakeLease(ctx: Ctx, teamId: string, leaseId: string): string | undefined {
+  return (
+    ctx.db
+      .prepare<
+        [string, string],
+        { host: string }
+      >('SELECT host FROM wake_leases WHERE team_id = ? AND id = ?')
+      .get(teamId, leaseId)?.host ?? undefined
+  );
+}
+
+/** Authorize an agent's routine HTTP action with its credential and live Presence lease (ADR 337). */
+function authClaimedAgent(
+  ctx: Ctx,
+  slug: string,
+  req: IncomingMessage,
+): { team: TeamRow; member: MemberRow } {
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req), agentSessionLease(req));
+  if (auth.member.kind !== 'agent' || auth.member.observer === 1)
+    throw new MusterdError('forbidden', 'this operation requires a claimed agent seat');
+  return auth;
 }
 
 /**
@@ -1085,7 +1492,13 @@ function tryAuth(ctx: Ctx, slug: string, req: IncomingMessage): MemberRow | null
   const h = req.headers['authorization'];
   if (!h || !h.startsWith('Bearer ')) return null;
   try {
-    return authMember(ctx.db, slug, h.slice('Bearer '.length).trim(), actingSeat(req)).member;
+    return authMember(
+      ctx.db,
+      slug,
+      h.slice('Bearer '.length).trim(),
+      actingSeat(req),
+      agentSessionLease(req),
+    ).member;
   } catch {
     return null;
   }
@@ -1113,9 +1526,11 @@ function summarize(
   // Seats enrolled in harness residency (ADR 131) — offline reads `offline · wakeable`, and the
   // capture timestamp feeds the `resumable` badge (inc 5: a timestamp, so renderers apply the GC
   // freshness instead of trusting a stale boolean). One listResidency pass covers both facts.
-  const residency = new Map(
-    listResidency(ctx.db, teamId).map((r) => [r.member_id, r.resumable_at] as const),
-  );
+  // ADR 357: the same pass now carries host liveness (from the actuator's poll heartbeat) and
+  // workspace readability (from the last wake report), so the roster can say WHY an enrolled seat
+  // is not wakeable instead of labelling enrolment as reachability.
+  const rosterNow = Date.now();
+  const residency = seatWakeabilityFacts(ctx.db, teamId, rosterNow);
   // Steering marks you present (ADR 155 Inc 1): the humans named as `driver` on a live agent seat.
   // Derived here at read time — no synthetic presence row for the steering human (ADR 155 decision 1).
   const liveDrivers = listLiveDrivers(ctx.db, teamId, ctx.config.presenceTimeoutMs);
@@ -1131,14 +1546,14 @@ function summarize(
     const steering = s.member.kind === 'human' && liveDrivers.has(s.member.name);
     const live = s.status !== 'offline' || steering;
     const presenceStatus = steering && s.status === 'offline' ? 'online' : s.status;
-    // Humans get the ADR 155 Inc 3 idle window (reusing the presence timeout — decision 2): a human
-    // kept live by an authenticated /live tab decays working → idle once their last status_update
-    // ages past it. Agents keep the ADR 010 never-silently-revert read (window omitted).
+    // The ADR 155 Inc 3 decay window now applies to everyone (presence-honesty §2.1): humans keep
+    // the presence timeout; agents get their own generous window — `working` requires fresh
+    // evidence, and past it the read decays to `active` with the claim kept, aged.
     const activity = resolveActivity(
       live,
       latestStatusUpdate(ctx.db, s.member.id),
       steering,
-      s.member.kind === 'human' ? ctx.config.presenceTimeoutMs : undefined,
+      s.member.kind === 'human' ? ctx.config.presenceTimeoutMs : ctx.config.agentIdleMs,
     );
     const member = toMember(s.member, teamSlug);
     const effectiveWorkingHours = member.working_hours ?? teamWorkingHours;
@@ -1150,8 +1565,9 @@ function summarize(
       live,
       reclaimable: isReclaimable,
       availability: member.availability ?? null,
-      lastOfflineReason:
-        sticky === 'disconnected' || sticky === 'signed_off' ? (sticky as OfflineReason) : null,
+      lastOfflineReason: STICKY_OFFLINE_REASONS.has(sticky ?? '')
+        ? (sticky as OfflineReason)
+        : null,
     });
     return {
       ...(seesCaps ? member : needToKnow),
@@ -1166,7 +1582,25 @@ function summarize(
       ...(offlineReason ? { offline_reason: offlineReason } : {}),
       reclaimable: isReclaimable,
       wakeable: residency.has(s.member.id),
-      resumable_at: residency.get(s.member.id) ?? null,
+      resumable_at: residency.get(s.member.id)?.resumable_at ?? null,
+      // ADR 357: the ADR 189 enum beside the boolean. `wakeable` stays "enrolled" for every
+      // consumer that reads it today; `wakeability` is the honest answer to "can a directed act
+      // reach this seat right now" — and it is the SAME derivation the ADR 191 offline-acceptor
+      // pick uses (review.ts), so the roster and the picker cannot disagree.
+      wakeability: wakeabilityFromFacts({
+        enrolled: residency.has(s.member.id),
+        ...wakeabilityInputs(residency.get(s.member.id)),
+        ...(lastAction.get(s.member.name) === undefined
+          ? {}
+          : {
+              seat_quiet:
+                resolveQuiescence(
+                  lastAction.get(s.member.name) ?? null,
+                  quiescenceNow,
+                  QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
+                ).state === 'quiet',
+            }),
+      }),
       quiescence: resolveQuiescence(
         lastAction.get(s.member.name) ?? null,
         quiescenceNow,
@@ -1183,6 +1617,21 @@ export async function handleHttp(
   res: ServerResponse,
 ): Promise<void> {
   try {
+    // Apply the same Host/Origin boundary to HTTP that protects WebSocket upgrades. In particular,
+    // bearer-free local identity requests must not be callable by a hostile browser origin on loopback.
+    const requestCheck = checkUpgrade(
+      { host: req.headers.host, origin: req.headers.origin },
+      {
+        boundHost: ctx.config.host,
+        allowedHosts: ctx.config.allowedHosts,
+        allowedOrigins: ctx.config.allowedOrigins,
+      },
+    );
+    if (!requestCheck.ok) {
+      return sendJson(res, 403, {
+        error: { code: 'forbidden', message: 'request Host or Origin is not allowed' },
+      });
+    }
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
     const method = req.method ?? 'GET';
@@ -1219,6 +1668,69 @@ export async function handleHttp(
       });
     }
 
+    /**
+     * `POST /node/enroll` (ADR 328 §2) — the local half of enrollment.
+     *
+     * The CLI does not call the hub itself. This daemon holds the v47 `nodes` row whose id must be
+     * presented (ADR 331 §Decision 1) and is what will hold the resulting credential, so it makes
+     * the call and writes `node.json`. Localhost-only, like every other operator verb: enrolling
+     * this machine somewhere is not something a remote caller gets to initiate.
+     *
+     * The response deliberately omits the credential — it went to disk, and the CLI has no use for
+     * it. Printing it would put a long-lived machine secret in a terminal's scrollback for no gain.
+     */
+    if (method === 'POST' && path === '/node/enroll') {
+      requireLocalPeer(ctx, req, 'enrolling this machine with a hub');
+      const body = parseOrBadRequest(NodeEnrollRequestSchema, await readJson(req));
+      const team = requireTeam(ctx.db, body.team);
+      const local = ctx.db
+        .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+        .get(team.id);
+      if (!local) {
+        throw new MusterdError(
+          'conflict',
+          `this daemon has no node row for "${body.team}" yet — it is minted on the team's first ` +
+            'logged act, so send something on this machine before enrolling it',
+        );
+      }
+      // A hub cannot enroll (ADR 376 §3): a machine with joiners attached is the team's authority,
+      // and flipping its loops to the joiner branch would strand every event they push. Refused
+      // here, before any secret leaves the machine — the target hub is never contacted.
+      if (hasEnrolledJoiners(ctx.db, team.id, local.node_id)) {
+        throw new MusterdError(
+          'conflict',
+          `this machine is the hub of "${body.team}" — it has enrolled joiners, and a hub does not ` +
+            'enroll elsewhere (ADR 376). Revoke them first, or enroll the other machine here instead',
+        );
+      }
+
+      const hubRes = await fetch(new URL(`/teams/${body.team}/nodes/join`, body.hub_url), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          code: body.code,
+          node_id: local.node_id,
+          label: hostname(),
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const hubBody: unknown = await hubRes.json().catch(() => null);
+      // Relay the hub's refusal rather than reinterpreting it: the hub is the authority on whether
+      // this machine is admitted, and a daemon that softened a 409 into a success would write a
+      // credential the hub never issued.
+      if (!hubRes.ok) return sendJson(res, hubRes.status, hubBody);
+
+      const minted = NodeJoinResponseSchema.parse(hubBody);
+      saveNodeEnrollment({
+        team: body.team,
+        hub_url: body.hub_url,
+        node_id: minted.node_id,
+        credential: minted.node_credential,
+        enrolled_at: Date.now(),
+      });
+      return sendJson(res, 200, { node_id: minted.node_id, team: body.team });
+    }
+
     if (method === 'POST' && path === '/teams') {
       const body = parseOrBadRequest(CreateTeamBody, await readJson(req));
       const team = createTeam(ctx.db, { slug: body.slug, display: body.display ?? null });
@@ -1253,6 +1765,53 @@ export async function handleHttp(
         human_credential: credential,
         agent_key,
         policy: getPolicy(ctx.db, team.id),
+      });
+    }
+
+    if (method === 'POST' && path === '/agent-bootstrap-migrations') {
+      const body = parseOrBadRequest(BootstrapMigrationRequestSchema, await readJson(req));
+      const migrated = migrateLegacyBootstrapCredential(ctx.db, {
+        legacyKey: body.legacy_key,
+        seatCredential: body.seat_credential,
+      });
+      const credential = migrated.credential;
+      if (migrated.replaced_credential_id) {
+        appendAudit(ctx.db, credential.team_id, {
+          actor: credential.created_by,
+          action: 'bootstrap_credential.migration_replaced',
+          target: migrated.replaced_credential_id,
+          result: 'allow',
+          detail: {
+            successor_credential_id: credential.id,
+            target_member_id: credential.migration_target_member_id,
+          },
+        });
+      }
+      appendAudit(ctx.db, credential.team_id, {
+        actor: credential.created_by,
+        action: 'bootstrap_credential.migrated',
+        target: credential.id,
+        result: 'allow',
+        detail: {
+          predecessor_credential_id: migrated.predecessor_credential_id,
+          successor_credential_id: credential.id,
+          target_member_id: credential.migration_target_member_id,
+        },
+      });
+      return sendJson(res, 201, {
+        credential: {
+          id: credential.id,
+          use: credential.use_kind,
+          target: credential.target,
+          label: credential.label,
+          state: credential.state,
+          expires_at: credential.expires_at,
+          created_by: credential.created_by,
+          created_at: credential.created_at,
+          rotated_at: credential.rotated_at,
+          revoked_at: credential.revoked_at,
+        },
+        agent_key: migrated.agent_key,
       });
     }
 
@@ -1336,6 +1895,7 @@ export async function handleHttp(
           role: body.role ?? '',
           ...(body.lifecycle ? { lifecycle: body.lifecycle } : {}),
           lifecycleUntil: body.lifecycle_until ?? null,
+          ...(body.hue !== undefined ? { hue: body.hue } : {}),
           ...(body.observer
             ? { observer: true, observerScope: body.observer_scope ?? 'full' }
             : {}),
@@ -1418,6 +1978,10 @@ export async function handleHttp(
           // the roles themselves are visible beside the seats that hold them. Additive — an older
           // client ignores it.
           roles: listRoles(ctx.db, team.id),
+          // ADR 360 follow-on: a joiner whose push the hub refuses says so on the roster — the one
+          // payload every seat session on this machine reads — naming the seat and the remedy.
+          // Null on a machine whose sync is fine (or that has no hub). Additive.
+          sync: { wedged: readPushRefusal(ctx.db, team.id) },
         });
       }
 
@@ -1621,6 +2185,18 @@ export async function handleHttp(
             throw new MusterdError('forbidden', `seat "${targetMember.name}" is ${status}`);
           }
 
+          // Settle FIRST, then mint (ADR 343 decision 3, enforced). `decideRequest` is a compare-and-set
+          // on `status = 'pending'`; the admin whose settle loses gets a conflict and mints nothing. The
+          // safety lives in this order, not in the absence of a yield between the read above and here —
+          // an `await` introduced anywhere in between makes both admins pass the pending check, and this
+          // is the line that keeps the second one from minting a duplicate grant.
+          if (!decideRequest(ctx.db, team.id, requestId, 'approved', admin.name)) {
+            throw new MusterdError(
+              'conflict',
+              `request "${requestId}" was settled by another decision`,
+            );
+          }
+
           // Issue a grant so the approved session can occupy the seat. A `ttl` grant is the ADR 087
           // resume token: reusable (single_use:false) and refreshed on each occupy — when no explicit
           // `ttl_hours` is given, fall back to the server's resume window so the token is always bounded
@@ -1644,6 +2220,104 @@ export async function handleHttp(
           // Deliver the token to the occupying session for a reusable grant (ADR 087) so it lands in
           // `binding.grant` and silently resumes on reconnect. A `once` grant is not a resume token.
           const resumeToken = body.lifetime === 'once' ? undefined : mint.token;
+          const pendingConn = ctx.hub.getConn(existing.from_session);
+
+          // A closed WS is not an occupier. Its request remains auditable and the approved grant remains
+          // available to the administrator, but it must neither create a phantom Presence nor displace
+          // a live incumbent. HTTP claim requests deliberately have no live waiter and retain their
+          // stateless approval behavior.
+          if (
+            !existing.from_session.startsWith('http:') &&
+            (!pendingConn?._claimApproved || !pendingConn.isOpen?.())
+          ) {
+            appendAudit(ctx.db, team.id, {
+              actor: admin.name,
+              action: 'request.decide',
+              target: targetMember.name,
+              result: 'allow',
+              detail: {
+                decision: 'approve',
+                request_id: requestId,
+                delivered: false,
+                authorized_by: admin.name,
+              },
+            });
+            appendAudit(ctx.db, team.id, {
+              actor: admin.name,
+              action: 'grant.issue',
+              target: targetMember.name,
+              result: 'allow',
+              detail: {
+                scope: mint.grant.scope,
+                lifetime: mint.grant.lifetime,
+                grant_id: mint.grant.id,
+                via: 'request.decide',
+                request_id: requestId,
+                authorized_by: admin.name,
+              },
+            });
+            if (body.lifetime === 'once') consumeGrant(ctx.db, mint.grant.id);
+            return sendJson(res, 200, {
+              request_id: requestId,
+              decision: 'approve',
+              delivered: false,
+              ...(resumeToken ? { grant: resumeToken } : {}),
+            });
+          }
+
+          // An approval is an authorized claim transition too. Keep it after the decision but before
+          // attachment: a pending claimant must not displace anyone, while an approved agent claimant
+          // preserves newest-wins. A live WS waiter retains its Workspace in the hub, so it follows the
+          // same deferred same-Workspace eviction behavior as a direct WS claim.
+          const sameWorkspacePredecessors: string[] = [];
+          let displacedModel: string | null = null;
+          if (targetMember.kind === 'agent' && targetMember.observer === 0) {
+            const liveConns = ctx.hub.connsForMember(targetMember.id);
+            displacedModel =
+              ctx.db
+                .prepare<
+                  [string],
+                  { model: string }
+                >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1')
+                .get(targetMember.id)?.model ?? null;
+            const orphaned = ctx.db
+              .prepare<
+                [string],
+                { count: number }
+              >('SELECT count(*) AS count FROM presence WHERE member_id = ? AND conn_id IS NULL')
+              .get(targetMember.id)?.count;
+            const sameWorkspace = (workspace?: string | null): boolean =>
+              workspace != null &&
+              pendingConn?.workspace != null &&
+              workspace === pendingConn.workspace;
+            let displaced = 0;
+            for (const old of liveConns) {
+              if (sameWorkspace(old.workspace)) {
+                sameWorkspacePredecessors.push(old.connId);
+                continue;
+              }
+              old.send?.({
+                type: 'error',
+                code: 'superseded',
+                message: `your session as "${targetMember.name}" was taken over by a newer one`,
+              });
+              old.close?.();
+              ctx.hub.remove(old.connId);
+              clearPresenceById(ctx.db, old.presenceId);
+              displaced++;
+            }
+            const evicted = displaced + (orphaned ?? 0);
+            if (evicted > 0) {
+              appendAudit(ctx.db, team.id, {
+                actor: targetMember.name,
+                action: 'claim.superseded',
+                target: targetMember.name,
+                result: 'allow',
+                detail: { same_workspace: false, evicted, via: 'request.approve' },
+              });
+            }
+            clearOrphanPresence(ctx.db, targetMember.id);
+          }
 
           // Attach presence for the approved session — carrying the claimant's attestation (ADR 101)
           // so the approved occupancy isn't born `unknown`.
@@ -1651,18 +2325,66 @@ export async function handleHttp(
             ctx.db,
             targetMember.id,
             existing.surface as import('@musterd/protocol').Surface,
-            existing.from_session,
-            { provenance: null, workspace: null, driver: null, model: existing.model ?? null },
+            pendingConn ? existing.from_session : null,
+            {
+              provenance: null,
+              workspace: pendingConn?.workspace ?? null,
+              driver: null,
+              model: existing.model ?? null,
+              // The tier the claimant declared at the gate, carried onto the occupancy it becomes —
+              // approving a claim must not launder its provenance away.
+              model_source: existing.model ? (existing.model_source ?? null) : null,
+            },
           );
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, existing.model);
+          let agentAuthority: { seat_credential?: string; session_lease?: string } = {};
+          if (targetMember.kind === 'agent' && targetMember.observer === 0) {
+            const credential =
+              targetMember.credential_hash === null
+                ? mintAgentSeatCredential(ctx.db, targetMember.id).seat_credential
+                : undefined;
+            const lease = mintSessionLease(ctx.db, {
+              teamId: team.id,
+              memberId: targetMember.id,
+              presenceId: presence.id,
+            });
+            if (credential) {
+              appendAudit(ctx.db, team.id, {
+                actor: targetMember.name,
+                action: 'agent_seat_credential.minted',
+                target: targetMember.name,
+                result: 'allow',
+                detail: { source: 'request.approve' },
+              });
+            }
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'agent_session_lease.minted',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { lease_id: lease.id, presence_id: presence.id },
+            });
+            agentAuthority = {
+              ...(credential ? { seat_credential: credential } : {}),
+              session_lease: lease.session_lease,
+            };
+          }
+          if (!existing.model && displacedModel && sameWorkspacePredecessors.length === 0) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: displacedModel, new: null, source: 'claim' },
+            });
+          } else {
+            recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, existing.model);
+          }
 
-          // Settle the request.
-          decideRequest(ctx.db, team.id, requestId, 'approved', admin.name);
+          // (The request was settled above, before the mint.)
 
           // Flip the waiting WS: find the pending connection and call _claimApproved.
-          const pendingConn = ctx.hub.getConn(existing.from_session);
           if (pendingConn?._claimApproved) {
-            pendingConn._claimApproved(presence.id);
+            pendingConn._claimApproved(presence.id, sameWorkspacePredecessors);
           }
 
           // Push the terminal occupied frame to the waiting WS, carrying the resume token (ADR 087).
@@ -1672,6 +2394,8 @@ export async function handleHttp(
             presence_id: presence.id,
             server_time: Date.now(),
             ...(resumeToken ? { grant: resumeToken } : {}),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthority,
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
 
@@ -1721,8 +2445,14 @@ export async function handleHttp(
             ...(resumeToken ? { grant: resumeToken } : {}),
           });
         } else {
-          // Deny: settle the request and push a refused frame to the waiting WS.
-          decideRequest(ctx.db, team.id, requestId, 'denied', admin.name);
+          // Deny: settle the request and push a refused frame to the waiting WS. Same compare-and-set;
+          // a deny that loses to a concurrent decision must not push a refusal over an approval.
+          if (!decideRequest(ctx.db, team.id, requestId, 'denied', admin.name)) {
+            throw new MusterdError(
+              'conflict',
+              `request "${requestId}" was settled by another decision`,
+            );
+          }
           const delivered = ctx.hub.deliverClaimDecision(existing.from_session, {
             type: 'refused',
             code: 'forbidden',
@@ -1817,6 +2547,127 @@ export async function handleHttp(
         return sendJson(res, 200, mint);
       }
 
+      const BootstrapCredentialBody = z
+        .object({
+          use: z.enum(['claim_seat', 'claim_role', 'host']),
+          target: z.string().min(1).max(120),
+          label: z.string().min(1).max(120).optional(),
+          expires_at: z.number().int().positive().optional(),
+        })
+        .strict()
+        .refine((body) => body.expires_at === undefined || body.expires_at > Date.now(), {
+          path: ['expires_at'],
+          message: 'must be in the future',
+        });
+      const credentialProjection = (
+        credential: import('../store/teams.js').BootstrapCredential,
+      ) => ({
+        id: credential.id,
+        use: credential.use_kind,
+        target: credential.target,
+        label: credential.label,
+        state: credential.state,
+        expires_at: credential.expires_at,
+        created_by: credential.created_by,
+        created_at: credential.created_at,
+        rotated_at: credential.rotated_at,
+        revoked_at: credential.revoked_at,
+      });
+
+      if (method === 'POST' && rest === '/agent-bootstrap-credentials') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const body = parseOrBadRequest(BootstrapCredentialBody, await readJson(req));
+        if (body.use === 'claim_seat' && !getMemberByName(ctx.db, team.id, body.target)) {
+          throw new MusterdError('not_found', `no seat "${body.target}" in team "${slug}"`);
+        }
+        if (
+          body.use === 'claim_role' &&
+          !ctx.db
+            .prepare<
+              [string, string],
+              { name: string }
+            >('SELECT name FROM roles WHERE team_id = ? AND name = ?')
+            .get(team.id, body.target)
+        ) {
+          throw new MusterdError('not_found', `no role "${body.target}" in team "${slug}"`);
+        }
+        const minted = mintBootstrapCredential(ctx.db, {
+          teamId: team.id,
+          useKind: body.use,
+          target: body.target,
+          ...(body.label !== undefined ? { label: body.label } : {}),
+          ...(body.expires_at !== undefined ? { expiresAt: body.expires_at } : {}),
+          createdBy: member.name,
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'bootstrap_credential.minted',
+          target: minted.credential.id,
+          result: 'allow',
+          detail: { use: body.use, target: body.target },
+        });
+        for (const predecessorId of minted.rotated) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'bootstrap_credential.rotated',
+            target: predecessorId,
+            result: 'allow',
+            detail: { successor_id: minted.credential.id, use: body.use, target: body.target },
+          });
+        }
+        return sendJson(res, 201, {
+          credential: credentialProjection(minted.credential),
+          agent_key: minted.agent_key,
+        });
+      }
+
+      if (method === 'GET' && rest === '/agent-bootstrap-credentials') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(res, 200, {
+          credentials: listBootstrapCredentials(ctx.db, team.id).map(credentialProjection),
+        });
+      }
+
+      if (method === 'GET' && rest === '/agent-bootstrap-cutover') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(res, 200, bootstrapCutoverReadiness(ctx.db, team.id));
+      }
+
+      if (method === 'POST' && rest === '/agent-bootstrap-cutover') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const body = parseOrBadRequest(BootstrapCutoverRequestSchema, await readJson(req));
+        const readiness = cutoverLegacyBootstrap(ctx.db, {
+          teamId: team.id,
+          actor: member.name,
+          force: body.force,
+        });
+        return sendJson(res, 200, {
+          ok: true,
+          already_cut_over: readiness.already_cut_over,
+          forced: body.force,
+          readiness,
+        });
+      }
+
+      const bootstrapCredentialMatch = rest.match(/^\/agent-bootstrap-credentials\/([^/]+)$/);
+      if (method === 'DELETE' && bootstrapCredentialMatch) {
+        const credentialId = decodeURIComponent(bootstrapCredentialMatch[1]!);
+        const { team, member } = authAdmin(ctx, slug, req);
+        if (!revokeBootstrapCredential(ctx.db, team.id, credentialId)) {
+          throw new MusterdError(
+            'not_found',
+            `no active scoped bootstrap credential "${credentialId}" on ${slug}`,
+          );
+        }
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'bootstrap_credential.revoked',
+          target: credentialId,
+          result: 'allow',
+        });
+        return sendJson(res, 200, { ok: true });
+      }
+
       if (method === 'POST' && rest === '/policy') {
         const { team, member } = authAdmin(ctx, slug, req);
         // ADR 185: the wire carries the SPARSE doc — only the knobs an admin chose — and the row
@@ -1824,16 +2675,36 @@ export async function handleHttp(
         // back to life. The audit records the request, not the parsed result: the old row wrote
         // `detail: policy` post-parse, which is exactly why nothing could later say whether a stored
         // value was chosen or baked in.
+        //
+        // Residence-2 census gap 1 (2026-09-03): policy is hub-authoritative (ADR 325 residence 1),
+        // and until now it never left the machine it was edited on — 21 readers, `claimWakeLeases`
+        // among them, consult the LOCAL blob, so a joiner's host ran different caps and cooldowns
+        // than the hub after every `policy set`. An enrolled joiner now forwards to the hub (the
+        // `/sync/lane` pattern, ADR 361) and learns the answer back through the fold; the hub
+        // stamps the change so every machine converges. Unreachable hub REFUSES: policy is not an
+        // act that may fork.
         const stored = parseOrBadRequest(PolicyOverrideSchema, await readJson(req));
-        const policy = setPolicy(ctx.db, team.id, stored);
-        appendAudit(ctx.db, team.id, {
-          actor: member.name,
-          action: 'policy.change',
-          target: null,
-          result: 'allow',
-          detail: stored,
-        });
-        return sendJson(res, 200, { policy, stored });
+        const enrollment = joinerEnrollment(ctx.db, team.id, team.slug);
+        if (enrollment) {
+          let answer: { policy: Policy; stored: PolicyOverride };
+          try {
+            answer = await policyAtHub(enrollment, team.slug, {
+              actor: member.name,
+              policy: stored,
+            });
+          } catch (err) {
+            if (err instanceof HubUnreachableError)
+              throw new MusterdError('hub_unreachable', err.message);
+            throw err;
+          }
+          // Best effort, as on the lane path: pull the hub's decision now so the admin's next read
+          // agrees with the answer they were just handed. A failed pull changes nothing.
+          await pullTeam(ctx, team).catch(() => undefined);
+          return sendJson(res, 200, answer);
+        }
+        const applied = applyPolicyChange(ctx.db, team.id, member.name, stored);
+        await pushTeam(ctx, team).catch(() => undefined);
+        return sendJson(res, 200, applied);
       }
 
       // The read half of the policy verb (increment 5): `musterd residency policy` does
@@ -2033,8 +2904,12 @@ export async function handleHttp(
       // orders — double-spawn is structurally impossible. Agent-key auth, no seat (the host is
       // infrastructure); the response carries structured fields only, never message bodies.
       if (method === 'POST' && rest === '/residency/wake-leases') {
-        const team = authAgentKeyOnly(ctx, slug, req);
         const body = parseOrBadRequest(WakeLeasesBodySchema, await readJson(req));
+        const team = authAgentKeyOnly(ctx, slug, req, body.host);
+        // ADR 357: this poll is the host's heartbeat. Recorded before the lease claim so a host
+        // that polls and gets nothing still counts as alive — the roster's `enrolled_host_stale`
+        // is derived from it.
+        recordHostSeen(ctx.db, team.id, body.host, Date.now());
         const orders = claimWakeLeases(
           ctx.db,
           team.id,
@@ -2054,8 +2929,13 @@ export async function handleHttp(
       // `reported` lease. No audit row per turn: the wake_turns table IS the additive record, and
       // one audit row per model turn would bloat the ledger the O&E reads.
       if (method === 'POST' && rest === '/residency/wake-turn') {
-        const team = authAgentKeyOnly(ctx, slug, req);
         const body = parseOrBadRequest(WakeTurnBodySchema, await readJson(req));
+        const team = requireTeam(ctx.db, slug);
+        const turnHost = hostForWakeLease(ctx, team.id, body.lease_id);
+        authAgentKeyOnly(ctx, slug, req, turnHost);
+        // ADR 357 correction: a host mid-actuation is not polling, but it is talking — every
+        // host-authenticated residency request is a sighting.
+        if (turnHost) recordHostSeen(ctx.db, team.id, turnHost, Date.now());
         const appended = appendWakeTurn(ctx.db, team.id, body);
         if (!appended)
           throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
@@ -2063,8 +2943,11 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/residency/wake-progress') {
-        const team = authAgentKeyOnly(ctx, slug, req);
         const body = parseOrBadRequest(WakeProgressBodySchema, await readJson(req));
+        const team = requireTeam(ctx.db, slug);
+        const progressHost = hostForWakeLease(ctx, team.id, body.lease_id);
+        authAgentKeyOnly(ctx, slug, req, progressHost);
+        if (progressHost) recordHostSeen(ctx.db, team.id, progressHost, Date.now()); // ADR 357 correction
         const row = markWakeSpawned(ctx.db, team.id, body.lease_id);
         if (!row)
           throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
@@ -2076,8 +2959,17 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/residency/wake-report') {
-        const team = authAgentKeyOnly(ctx, slug, req);
-        const body = parseWakeReportOrAudit(ctx.db, team.id, await readJson(req));
+        const rawBody = await readJson(req);
+        const team = requireTeam(ctx.db, slug);
+        const authBody = WakeReportBodySchema.safeParse(rawBody);
+        const reportHost = authBody.success
+          ? hostForWakeLease(ctx, team.id, authBody.data.lease_id)
+          : undefined;
+        authAgentKeyOnly(ctx, slug, req, reportHost);
+        // ADR 357 correction: the report is the LAST thing a serial actuation says before it polls
+        // again — stamping it here is what keeps a busy host from reading `enrolled_host_stale`.
+        if (reportHost) recordHostSeen(ctx.db, team.id, reportHost, Date.now());
+        const body = parseWakeReportOrAudit(ctx.db, team.id, rawBody);
         const lease = settleWakeLease(ctx.db, team.id, body.lease_id);
         if (!lease) {
           const settled = ctx.db
@@ -2112,6 +3004,13 @@ export async function handleHttp(
                 ...(settled.edge ? { edge: settled.edge } : {}),
                 ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
                 ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
+                // ADR 364: tokens and the reason there is no price — recorded as the harness said
+                // them; `harness_cost_usd` is its claim and never enters the totals.
+                ...(body.usage ? { usage: body.usage } : {}),
+                ...(body.unpriced_reason ? { unpriced_reason: body.unpriced_reason } : {}),
+                ...(body.harness_cost_usd !== undefined
+                  ? { harness_cost_usd: body.harness_cost_usd }
+                  : {}),
                 ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
                 ...(body.exact_match ? { exact_match: body.exact_match } : {}),
                 ...(body.transcript_bytes !== undefined
@@ -2184,20 +3083,29 @@ export async function handleHttp(
 
       // The resumable attestation (ADR 131 §5, increment 4): `musterd session start|end --stdin`
       // pushes harness CLASS + event + a one-way correlation digest — never a session id, never a
-      // transcript path (the body schema still has no field for either). Agent-key auth like the
-      // other host-side residency routes;
+      // transcript path (the body schema still has no field for either). It is a routine action
+      // by the named agent seat, so its self-identifying credential and Presence lease are required;
       // presence-neutral by nature (this handler touches no presence row) and it never claims —
       // a hook must never displace the live occupant (ADR 108).
       if (method === 'POST' && rest === '/residency/session') {
-        const team = authAgentKeyOnly(ctx, slug, req);
+        const { team, member } = authClaimedAgent(ctx, slug, req);
         const body = parseOrBadRequest(SessionAttestationBodySchema, await readJson(req));
         const target = getMemberByName(ctx.db, team.id, body.seat);
         if (!target || target.left_at !== null)
           throw new MusterdError('not_found', `no seat "${body.seat}" in team "${slug}"`);
+        if (target.id !== member.id)
+          throw new MusterdError(
+            'forbidden',
+            `agent-seat credential identifies "${member.name}", not "${body.seat}"`,
+          );
         const enrolled =
           body.event === 'start'
             ? recordSessionAttestation(ctx.db, team.id, target.id, body.harness)
             : getResidency(ctx.db, team.id, target.id) !== null;
+        // Presence-honesty §2.3 carve-out: `end` is the daemon's only clean-exit goodbye, so it
+        // stamps the sticky reason — nothing else here moves; presence rows stay untouched, so
+        // the route's presence-neutrality (comment above) holds.
+        if (body.event === 'end') markSessionEnded(ctx.db, target.id);
         appendAudit(ctx.db, team.id, {
           actor: null,
           action: body.event === 'start' ? 'residency.session_captured' : 'residency.session_ended',
@@ -2230,6 +3138,15 @@ export async function handleHttp(
           target: ClaimTargetSchema,
           grant: z.string().optional(),
           surface: SurfaceSchema,
+          // ADR 014 / ADR 368, mirroring the WS claim frame. SPEC A.7 calls this route a stateless
+          // MIRROR of that frame and its responses ARE the frame shapes — but until 2026-09-04 this
+          // schema omitted both workspace fields, so every claim through here attached with
+          // `workspace: null` and displaced unconditionally, because the comparison ADR 092 rests on
+          // had nothing to compare. `workspace` is the display label; `workspace_key` is the work
+          // tree identity displacement prefers (ADR 368). Both optional and additive: an older
+          // client that sends neither gets exactly the pre-2026-09-04 behaviour.
+          workspace: z.string().max(120).optional(),
+          workspace_key: z.string().max(200).optional(),
           // Model attestation (ADR 101), mirroring the WS claim frame — attested, never verified.
           model: z.string().max(120).optional(),
           // Build attestation (ADR 135), mirroring the WS claim frame. No requests-table carry: a
@@ -2238,28 +3155,73 @@ export async function handleHttp(
           build: z.string().max(64).optional(),
           // Feature epoch (ADR 148), mirroring the WS claim frame — the roster's skew signal.
           epoch: z.number().int().nonnegative().optional(),
+          // ADR 131 §6, mirroring the WS claim frame — what ANIMATES this session, not who it is.
+          // The 2026-09-04 workspace repair left this field behind, so the mirror still was not one:
+          // every row born here read `provenance: null` while every WS-claimed and every
+          // ambient-touched row carried a value. The two paths were exact opposites — the HTTP claim
+          // recorded a workspace and no provenance, the ambient touch a provenance and no workspace.
+          // It matters most to a wake: the actuators judge `verified.provenance !== 'wake'` to tell
+          // their own woken child from a stranger holding the seat, and a null loses that every time.
+          // Optional and additive: a client that sends nothing still lands the `session` default.
+          provenance: ProvenanceSchema.optional(),
         });
         const body = parseOrBadRequest(ClaimBody, await readJson(req));
         const team = requireTeam(ctx.db, slug);
 
-        // Step 1: verify key (agent key or human credential).
+        // Step 1: verify bootstrap key, human credential, or an agent's own credential. The latter
+        // is valid only here to reconnect and obtain a fresh Presence lease (ADR 337).
         let authenticatedMember: MemberRow | null = null;
+        const bootstrapCredential = findBootstrapCredential(ctx.db, team.id, body.key);
+        const bootstrapRecord =
+          bootstrapCredential ?? findBootstrapCredentialRecord(ctx.db, team.id, body.key);
+        if (bootstrapRecord && !bootstrapCredential) {
+          const expired =
+            bootstrapRecord.expires_at !== null && bootstrapRecord.expires_at <= Date.now();
+          const retiredLegacy =
+            bootstrapRecord.use_kind === 'legacy' && team.bootstrap_cutover_at !== null;
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: expired ? 'bootstrap_credential.expired' : 'bootstrap_credential.refused',
+            target: bootstrapRecord.id,
+            result: 'deny',
+            detail: {
+              reason: expired ? 'expired' : bootstrapRecord.state,
+              target: bootstrapRecord.target,
+            },
+          });
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: retiredLegacy
+              ? 'this Team has retired its legacy bootstrap credential'
+              : `this bootstrap credential is ${expired ? 'expired' : bootstrapRecord.state}`,
+            claimable: [],
+            hint: retiredLegacy
+              ? [
+                  'musterd team bootstrap mint --seat <name>',
+                  'musterd team bootstrap mint --role <role>',
+                  'musterd team bootstrap mint --host <label>',
+                ].join('\n')
+              : 'ask a team admin to mint a replacement credential',
+          });
+        }
         const keyHash = getAgentKeyHash(ctx.db, team.id);
-        if (!keyHash || hashToken(body.key) !== keyHash) {
+        if (!bootstrapCredential && (!keyHash || hashToken(body.key) !== keyHash)) {
           authenticatedMember =
             ctx.db
               .prepare<
                 [string, string],
                 MemberRow
-              >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'human'")
+              >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind IN ('human', 'agent')")
               .get(team.id, hashToken(body.key)) ?? null;
           if (!authenticatedMember) {
             return sendJson(res, 403, {
               type: 'refused',
               code: 'forbidden',
-              message: 'invalid key — present a valid agent key or human credential',
+              message:
+                'invalid key — present a valid agent key, agent-seat credential, or human credential',
               claimable: [],
-              hint: `POST /teams/${slug}/claim with a valid mskey_ or mscr_ key`,
+              hint: `POST /teams/${slug}/claim with a valid mskey_, msac_, or mscr_ key`,
             });
           }
         }
@@ -2330,6 +3292,73 @@ export async function handleHttp(
           });
         }
 
+        if (
+          bootstrapCredential?.use_kind === 'claim_seat' &&
+          (!('seat' in body.target) ||
+            body.target.seat !== bootstrapCredential.target ||
+            targetMember.name !== bootstrapCredential.target)
+        ) {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'bootstrap_credential.refused',
+            target: bootstrapCredential.id,
+            result: 'deny',
+            detail: { reason: 'target_mismatch', target: bootstrapCredential.target },
+          });
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: `this bootstrap credential may only claim seat "${bootstrapCredential.target}"`,
+            claimable: [],
+            hint: `musterd claim ${bootstrapCredential.target}`,
+          });
+        }
+        if (
+          bootstrapCredential?.use_kind === 'claim_role' &&
+          (!('role' in body.target) || body.target.role !== bootstrapCredential.target)
+        ) {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'bootstrap_credential.refused',
+            target: bootstrapCredential.id,
+            result: 'deny',
+            detail: { reason: 'target_mismatch', target: bootstrapCredential.target },
+          });
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: `this bootstrap credential may only claim role "${bootstrapCredential.target}"`,
+            claimable: [],
+            hint: `musterd claim --role ${bootstrapCredential.target}`,
+          });
+        }
+        if (bootstrapCredential?.use_kind === 'host') {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'bootstrap_credential.refused',
+            target: bootstrapCredential.id,
+            result: 'deny',
+            detail: { reason: 'claim_with_host_credential', target: bootstrapCredential.target },
+          });
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: 'a host bootstrap credential cannot claim a seat',
+            claimable: [],
+            hint: 'use the residency host endpoints with this credential',
+          });
+        }
+        if (bootstrapCredential) {
+          recordBootstrapCredentialUse(ctx.db, bootstrapCredential.id);
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'bootstrap_credential.used',
+            target: bootstrapCredential.id,
+            result: 'allow',
+            detail: { use: bootstrapCredential.use_kind, target: bootstrapCredential.target },
+          });
+        }
+
         // Step 3: account_status check.
         const acctStatus = resolveAccountStatus(targetMember);
         if (acctStatus === 'disabled' || acctStatus === 'banned') {
@@ -2342,13 +3371,72 @@ export async function handleHttp(
           });
         }
 
-        // Step 4: single-active is kind-scoped (ADR 042), matching the WS path. An **agent** seat is
-        // newest-wins (ADR 017): a newer claim displaces the incumbent (superseded → close its socket +
-        // clear its presence) instead of refusing. A **human**/observer seat fans out — no displacement,
-        // a second claim just attaches another presence.
-        const liveConns = ctx.hub.connsForMember(targetMember.id);
-        if (liveConns.length > 0 && targetMember.kind === 'agent' && targetMember.observer === 0) {
+        // What every occupy branch below records on its row. Written once, deliberately: the
+        // 2026-09-04 workspace repair edited ONE of the three `attach` calls and left the other two
+        // hardcoding `workspace: null`, so its own stated consequences survived on the credential
+        // and re-seat paths — and the re-seat path is the ordinary one for an agent re-claiming its
+        // own bound seat. A single object cannot drift branch to branch the way three literals did.
+        //
+        // `provenance` carries the ADR 121/131 gate the ambient-touch path already applies: agent
+        // seats only. A human shell must not be able to label its own occupancy `wake` — the wake
+        // actuators read that word to decide a seat is their child and not a stranger's session.
+        const claimAttachContext = {
+          provenance: targetMember.kind === 'agent' ? (body.provenance ?? null) : null,
+          workspace: body.workspace ?? null,
+          driver: null,
+          model: body.model ?? null,
+          build: body.build ?? null,
+          epoch: body.epoch ?? null,
+        };
+        // Single-active is kind-scoped (ADR 042), matching the WS path. Only an AUTHORIZED agent
+        // claim may invoke newest-wins (ADR 017). Keeping the transition behind the grant/self/re-seat
+        // decision makes refused and pending claims side-effect-free for the live incumbent.
+        let displacedModel: string | null = null;
+        /**
+         * Is `old` the same workspace as this claim? Identity first, label only as a fallback —
+         * byte-for-byte the rule `ws.ts` applies (lane 01M1JQYYAC / ADR 368): the label is
+         * branch-qualified and so changes under the very session it identifies, while the work tree
+         * root does not. When either side carries no key, label equality is the documented fallback.
+         * A claim that declares NEITHER field matches nothing, which is the old behaviour and the
+         * honest one — absence is not an assertion (ADR 236).
+         */
+        const sameWorkspaceAsClaim = (old: {
+          workspace?: string | null;
+          workspaceKey?: string | null;
+        }): boolean => {
+          if (body.workspace_key != null && old.workspaceKey != null) {
+            return old.workspaceKey === body.workspace_key;
+          }
+          return (
+            old.workspace != null && body.workspace != null && old.workspace === body.workspace
+          );
+        };
+        let sparedSameWorkspace = 0;
+        const displaceAgentIncumbent = (): void => {
+          const liveConns = ctx.hub.connsForMember(targetMember.id);
+          if (targetMember.kind !== 'agent' || targetMember.observer === 1) return;
+          displacedModel =
+            ctx.db
+              .prepare<
+                [string],
+                { model: string }
+              >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1')
+              .get(targetMember.id)?.model ?? null;
+          const orphaned = ctx.db
+            .prepare<
+              [string],
+              { count: number }
+            >('SELECT count(*) AS count FROM presence WHERE member_id = ? AND conn_id IS NULL')
+            .get(targetMember.id)?.count;
+          let displaced = 0;
           for (const old of liveConns) {
+            // ADR 068/092: a same-workspace successor does not evict its predecessor — it is the
+            // same folder reconnecting, and evicting there points two sessions at one working tree
+            // (or, on `claim --detach`, kills the session that just asked to stay).
+            if (sameWorkspaceAsClaim(old)) {
+              sparedSameWorkspace++;
+              continue;
+            }
             old.send?.({
               type: 'error',
               code: 'superseded',
@@ -2356,18 +3444,79 @@ export async function handleHttp(
             });
             old.close?.();
             ctx.hub.remove(old.connId);
+            clearPresenceById(ctx.db, old.presenceId);
+            displaced++;
           }
-          clearMemberPresence(ctx.db, targetMember.id);
+          // Rows with no socket are cleared whatever their workspace, including this claim's own:
+          // a socketless row in THIS folder is the previous detached attach, and this claim is its
+          // successor, not its rival. (Sparing it instead would grow a row per re-claim — the a11y
+          // fixture re-claims every few seconds to hold a Presence, ADR 377.) Only a LIVE session is
+          // spared above, which is the case ADR 092 is about: someone is actually working there —
+          // so this must NOT be `clearMemberPresence`, which would take the row just spared.
+          clearOrphanPresence(ctx.db, targetMember.id);
           // ADR 237: every displacement writes a ledger row — this branch used to evict silently,
           // leaving only the winner's claim.occupied behind.
+          const evicted = displaced + (orphaned ?? 0);
+          if (evicted > 0) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'claim.superseded',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { same_workspace: sparedSameWorkspace > 0, evicted, via: 'http' },
+            });
+          }
+        };
+        const recordHttpClaimAttestation = (
+          presenceId: string,
+          model: string | null | undefined,
+        ): void => {
+          if (!model && displacedModel) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presenceId, old: displacedModel, new: null, source: 'claim' },
+            });
+            return;
+          }
+          recordClaimAttestation(ctx.db, team.id, targetMember, presenceId, model);
+        };
+        const agentAuthorityFor = (
+          presenceId: string,
+        ): { seat_credential?: string; session_lease?: string } => {
+          if (targetMember.kind !== 'agent' || targetMember.observer === 1) return {};
+          const credential =
+            targetMember.credential_hash === null
+              ? mintAgentSeatCredential(ctx.db, targetMember.id).seat_credential
+              : undefined;
+          const lease = mintSessionLease(ctx.db, {
+            teamId: team.id,
+            memberId: targetMember.id,
+            presenceId,
+          });
+          if (credential) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'agent_seat_credential.minted',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { source: 'claim' },
+            });
+          }
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
-            action: 'claim.superseded',
+            action: 'agent_session_lease.minted',
             target: targetMember.name,
             result: 'allow',
-            detail: { same_workspace: false, evicted: liveConns.length, via: 'http' },
+            detail: { lease_id: lease.id, presence_id: presenceId },
           });
-        }
+          return {
+            ...(credential ? { seat_credential: credential } : {}),
+            session_lease: lease.session_lease,
+          };
+        };
 
         // Step 5: grant path — validate + consume, then occupy.
         if (body.grant) {
@@ -2402,15 +3551,9 @@ export async function handleHttp(
           consumeGrant(ctx.db, gv.grant.id);
           // Resume token (ADR 087): refresh a reusable grant's TTL on occupy (no-op for single_use).
           refreshGrant(ctx.db, gv.grant.id, ctx.config.resumeTtlMs);
+          displaceAgentIncumbent();
           // OCCUPY: stateless — attach presence with null connId (no persistent socket).
-          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
-            provenance: null,
-            workspace: null,
-            driver: null,
-            model: body.model ?? null,
-            build: body.build ?? null,
-            epoch: body.epoch ?? null,
-          });
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, claimAttachContext);
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
@@ -2419,7 +3562,7 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface },
           });
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, body.model);
+          recordHttpClaimAttestation(presence.id, body.model);
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -2430,6 +3573,8 @@ export async function handleHttp(
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthorityFor(presence.id),
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
@@ -2439,14 +3584,8 @@ export async function handleHttp(
         // so there is no grant and no admin-approval request. Occupy directly (Step 2 already enforced
         // the credential matches the target seat for a seat-target claim).
         if (authenticatedMember && authenticatedMember.id === targetMember.id) {
-          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
-            provenance: null,
-            workspace: null,
-            driver: null,
-            model: body.model ?? null,
-            build: body.build ?? null,
-            epoch: body.epoch ?? null,
-          });
+          displaceAgentIncumbent();
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, claimAttachContext);
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
@@ -2455,7 +3594,7 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface, auth: 'credential' },
           });
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, body.model);
+          recordHttpClaimAttestation(presence.id, body.model);
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -2466,6 +3605,8 @@ export async function handleHttp(
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthorityFor(presence.id),
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
@@ -2482,14 +3623,8 @@ export async function handleHttp(
           isHeld(targetMember) &&
           getPolicy(ctx.db, team.id).standing_reseat_known_agents
         ) {
-          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
-            provenance: null,
-            workspace: null,
-            driver: null,
-            model: body.model ?? null,
-            build: body.build ?? null,
-            epoch: body.epoch ?? null,
-          });
+          displaceAgentIncumbent();
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, claimAttachContext);
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
@@ -2498,7 +3633,7 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface, policy: 'standing_reseat_known_agents' },
           });
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, body.model);
+          recordHttpClaimAttestation(presence.id, body.model);
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -2509,6 +3644,8 @@ export async function handleHttp(
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthorityFor(presence.id),
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
@@ -2656,15 +3793,667 @@ export async function handleHttp(
             ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
           });
         }
+        // ADR 202's `lane_verdict` rides the same way (lane 01M2GQFJXG): the sender of an accept
+        // that closed a lane is told so on the spot, never left to discover it from the board.
         return sendJson(res, 201, {
           ack,
           ...(hint ? { delivery_hint: hint } : {}),
           ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
+          ...(result.lane_verdict ? { lane_verdict: result.lane_verdict } : {}),
         });
+      }
+
+      // ── Node enrollment (ADR 328), increment 3a of the ADR 325 federation build.
+      //
+      // These are NEW routes that `isLocalPeer` never guarded (§6): nothing that is localhost-only
+      // today becomes remote-reachable because of them. `join` authenticates on the invite code
+      // alone — that IS the ceremony (§2: trust-on-first-use, bounded by a short window) — and
+      // every other verb is strict admin.
+      //
+      // An `msnode_` is minted here but never accepted here: it admits its bearer to the sync
+      // surface (3b) and nothing else, so no route on this file authenticates one. A machine being
+      // admitted and a seat being authorized are independent axes (§3).
+      if (method === 'POST' && rest === '/nodes/invite') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        // The hub is the machine the team was created on (ADR 376 §2): there is one door into a
+        // team's federation and it is the hub's. An enrolled joiner minting an invite would let a
+        // third machine join IT — and a joiner's pull loop never reads its own staging, so every
+        // event that third machine pushed would sit in `sync_log` folded by nobody, silently.
+        const enrolledAt = joinerEnrollment(ctx.db, team.id, team.slug);
+        if (enrolledAt) {
+          throw new MusterdError(
+            'conflict',
+            `this machine is enrolled as a joiner of "${team.slug}" — invites are minted on the hub ` +
+              `(ADR 376): run \`musterd node invite\` from ${enrolledAt.hub_url}`,
+          );
+        }
+        const body = (await readJson(req)) as { label?: unknown };
+        const label =
+          typeof body?.label === 'string' && body.label ? body.label : 'unnamed machine';
+        const minted = mintInvite(ctx.db, team.id, label, member.name);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'node.invited',
+          target: label,
+          result: 'allow',
+          detail: { expires_at: minted.expires_at },
+        });
+        return sendJson(res, 200, NodeInviteMintSchema.parse(minted));
+      }
+
+      if (method === 'POST' && rest === '/nodes/join') {
+        const body = NodeJoinRequestSchema.parse(await readJson(req));
+        const credential = newSecret(TOKEN_PREFIXES.node);
+        // An unknown slug must fail as ONE refusal with everything else (ryder, 2026-08-27). This
+        // route is unauthenticated by design, so a 404-before-the-code-is-checked answers "does
+        // team X exist on this hub?" to anyone who asks — a free team-slug oracle on a public bind.
+        const team = getTeamBySlug(ctx.db, slug);
+
+        // Consume-then-bind is ONE transaction: a consumed invite whose bind then fails would burn
+        // the operator's code and enroll nobody, which is the worst of both outcomes.
+        //
+        // The refusal has to THROW rather than return null. better-sqlite3 commits a transaction
+        // whose function returns normally — a returned null would leave the consumption standing,
+        // so a mistyped node id would silently cost an invite and the operator would have to mint
+        // another to discover why. Throwing is what rolls the consumption back with the bind.
+        const bound = ((): { id: string } | null => {
+          if (!team) return null;
+          try {
+            return ctx.db.transaction(() => {
+              // `enrolled_by` carries the invite's row id, not the literal 'invite' (ryder,
+              // 2026-08-27): it makes node.invited → node.enrolled a joinable chain, so an auditor
+              // can say WHICH code admitted a machine and who minted it.
+              const invite = consumeInvite(ctx.db, team.id, body.code, body.node_id);
+              if (!invite) throw ENROLL_REFUSED;
+              const b = bindNode(
+                ctx.db,
+                team.id,
+                body.node_id,
+                body.label,
+                credential,
+                `invite:${invite.id}`,
+              );
+              if (!b) throw ENROLL_REFUSED;
+              return b;
+            })();
+          } catch (err) {
+            if (err === ENROLL_REFUSED) return null;
+            throw err;
+          }
+        })();
+
+        // `!team` is redundant at runtime (a missing team already yields `bound === null`) but it
+        // is what narrows the type for the audit write below — and it keeps the two conditions that
+        // mean "refuse" in one place.
+        if (!bound || !team) {
+          if (team)
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'node.enrollment_refused',
+              target: body.label,
+              result: 'deny',
+              // The node id is the operator's own diagnostic; the code never appears, hashed or not.
+              detail: { node_id: body.node_id },
+            });
+          // Deliberately one refusal for every reason — spent code, unknown code, expired code,
+          // wrong team, id already bound, id belongs to the hub. Telling an unauthenticated caller
+          // WHICH guess was close is how a short-lived code becomes searchable.
+          throw new MusterdError(
+            'conflict',
+            'enrollment refused — the invite is unknown, expired or already used, or that node ' +
+              'id is not available to bind',
+          );
+        }
+
+        appendAudit(ctx.db, team.id, {
+          actor: null,
+          action: 'node.enrolled',
+          target: body.label,
+          result: 'allow',
+          detail: { node_id: bound.id },
+        });
+        return sendJson(
+          res,
+          200,
+          // Shown once, never re-fetchable — the handling every token kind before it gets.
+          NodeJoinResponseSchema.parse({
+            node_credential: credential,
+            node_id: bound.id,
+            team: slug,
+          }),
+        );
+      }
+
+      const nodeVerb = rest.match(/^\/nodes\/([^/]+)\/(rotate|revoke)$/);
+      if (method === 'POST' && nodeVerb) {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const nodeId = decodeURIComponent(nodeVerb[1]!);
+
+        if (nodeVerb[2] === 'rotate') {
+          const rotated = rotateNode(ctx.db, team.id, nodeId);
+          if (!rotated) {
+            throw new MusterdError(
+              'conflict',
+              `node "${nodeId}" is unknown or revoked — a revoked credential is re-issued by ` +
+                'enrolling it again, not by rotating',
+            );
+          }
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'node.rotated',
+            target: nodeId,
+            result: 'allow',
+          });
+          // The id is unchanged on purpose: every `origin_node` already in the log still names it.
+          return sendJson(res, 200, { node_credential: rotated.credential, node_id: nodeId });
+        }
+
+        const revoked = revokeNode(ctx.db, team.id, nodeId);
+        if (revoked) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'node.revoked',
+            target: nodeId,
+            result: 'allow',
+          });
+        }
+        // `revoked: false` for an already-revoked or unknown node — idempotent, without claiming to
+        // have acted. Events already ingested stay either way (§5).
+        return sendJson(res, 200, { node_id: nodeId, revoked });
+      }
+
+      if (method === 'GET' && rest === '/nodes') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(
+          res,
+          200,
+          NodeListSchema.parse({
+            nodes: listNodes(ctx.db, team.id),
+            push: { wedged: readPushRefusal(ctx.db, team.id) },
+          }),
+        );
+      }
+
+      // ── The sync surface (ADR 325 increment 3b-i). Authenticated by `msnode_` and by nothing
+      // else: ADR 328 §3 admits a node here and to no other route, so this is the first and only
+      // consumer of `authenticateNode`. Pushed events land in `sync_log`; nothing here writes to
+      // `messages` — that fold is 3b-ii.
+      // Federation 3c: the hub arbitrates a joiner's self-claim (ADR 325 residence 1). Same machine
+      // credential as the sync surface; the guarded CAS and the live-incumbent rule run against the
+      // hub's row, and the hub's own `lane.claimed` event carries the decision back out.
+      if (method === 'POST' && rest === '/sync/claim') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        // Every authenticated sync contact stamps the node alive (presence replication §3): this
+        // is the clock a remote presence row's liveness reads.
+        touchNode(ctx.db, node.id, Date.now());
+        const body = parseOrBadRequest(SyncClaimRequestSchema, await readJson(req));
+        try {
+          const lane = arbitrateClaim(ctx, team, node, body);
+          // Stage the decision now rather than on the push timer, so the joiner's pull — which it
+          // runs the moment it has our answer — finds the row it was just told about. Best effort:
+          // the timer stages it anyway if this fails. No act is emitted here: the origin speaks
+          // (ADR 361 §2) — the joiner's handler delivers `[lane] claimed` as the seat, and a
+          // second copy from the hub was a duplicate on every machine.
+          await pushTeam(ctx, team).catch(() => undefined);
+          return sendJson(res, 200, { lane });
+        } catch (err) {
+          if (err instanceof ClaimRefusedError) {
+            // Hand-built for the same reason the sync gap is: the refusal carries fields the error
+            // envelope has no room for, and `error: { code, message }` stays byte-compatible.
+            return sendJson(res, 409, {
+              error: { code: 'conflict', message: err.message },
+              holder: err.holder,
+              state: err.state,
+            });
+          }
+          if (err instanceof SeatBoundElsewhereError) {
+            return sendJson(res, 403, {
+              error: { code: 'bound_elsewhere', message: err.message },
+              node_id: err.nodeId,
+              node_label: err.nodeLabel,
+            });
+          }
+          throw err;
+        }
+      }
+
+      // ADR 361, hub side: every ownership/state edge a joiner's resident seat takes — release,
+      // handoff, submit, close, and the claim the route above still speaks — decided here against
+      // the hub's row with the joiner's expectation as the CAS. Refusals carry the same fields the
+      // claim's do; the joiner relays them verbatim and runs the post-effects on the answer.
+      if (method === 'POST' && rest === '/sync/lane') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        touchNode(ctx.db, node.id, Date.now());
+        const body = parseOrBadRequest(SyncLanePatchRequestSchema, await readJson(req));
+        try {
+          const { lane, closed } = arbitrateLanePatch(ctx, team, node, body);
+          await pushTeam(ctx, team).catch(() => undefined);
+          return sendJson(res, 200, { lane, ...(closed ? { closed } : {}) });
+        } catch (err) {
+          if (err instanceof ClaimRefusedError) {
+            return sendJson(res, 409, {
+              error: { code: 'conflict', message: err.message },
+              holder: err.holder,
+              state: err.state,
+            });
+          }
+          if (err instanceof SeatBoundElsewhereError) {
+            return sendJson(res, 403, {
+              error: { code: 'bound_elsewhere', message: err.message },
+              node_id: err.nodeId,
+              node_label: err.nodeLabel,
+            });
+          }
+          throw err;
+        }
+      }
+
+      // Residence-2 census gap 1, hub side: a joiner forwards its admin's policy change. The node
+      // credential proves the MACHINE; the actor is re-authorized against the hub's own roster,
+      // because a joiner saying "this seat is an admin" is a claim about a roster it does not own.
+      if (method === 'POST' && rest === '/sync/policy') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        touchNode(ctx.db, node.id, Date.now());
+        const body = parseOrBadRequest(SyncPolicyRequestSchema, await readJson(req));
+        const actor = getMemberByName(ctx.db, team.id, body.actor);
+        if (!actor) throw new MusterdError('not_found', `no seat "${body.actor}" on this roster`);
+        try {
+          // Residence before capability, the order `/sync/lane` uses: an unentitled node learns
+          // nothing, not even whether the name it guessed is an admin. This is the check gptbot's
+          // review of #1228 found missing — authenticating the machine and then trusting the
+          // caller-supplied `actor` let ANY enrolled node forward a change as the admin seat,
+          // because a node credential says which machine speaks and never for whom.
+          //
+          // The STRICT form, not `assertSeatResident`: this act changes the team, so an unbound
+          // seat must not be claimable by whoever names it first. For a human admin trusted on
+          // several machines (ADR 358) every one of them is in the set and passes.
+          assertSeatAlreadyResident(ctx.db, team.id, actor, node, 'policy change');
+        } catch (err) {
+          if (err instanceof TrustRefusedError) return sendTrustRefusal(res, err);
+          throw err;
+        }
+        // The same capability the local admin route resolves — not a string compare on `role`,
+        // which ADR 227 made one of several the seat may hold.
+        if (!resolveCapabilities(actor).is_admin) {
+          throw new MusterdError('forbidden', `"${body.actor}" is not an admin on ${slug}`);
+        }
+        const applied = applyPolicyChange(ctx.db, team.id, actor.name, body.policy);
+        await pushTeam(ctx, team).catch(() => undefined);
+        return sendJson(res, 200, applied);
+      }
+
+      // ADR 358, hub side: a joiner forwards its resident human's trust act. The authenticated
+      // node is the speaker and must already be in the seat's set — the check that stops a fresh
+      // machine, or any admitted credential, from widening a seat it does not hold.
+      if (method === 'POST' && rest === '/sync/trust') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        touchNode(ctx.db, node.id, Date.now());
+        const body = parseOrBadRequest(SyncTrustRequestSchema, await readJson(req));
+        const seat = getMemberByName(ctx.db, team.id, body.seat);
+        if (!seat) throw new MusterdError('not_found', `no seat "${body.seat}" on this roster`);
+        try {
+          return sendJson(res, 200, applyTrust(ctx.db, team.id, seat, node, body.node_id));
+        } catch (err) {
+          if (err instanceof TrustRefusedError) return sendTrustRefusal(res, err);
+          throw err;
+        }
+      }
+
+      // ADR 358, the seat-facing act: "trust this node for my seat". Authenticated as the seat, for
+      // the caller's own seat only; the daemon this request lands on is the vouching node. On an
+      // enrolled joiner it is forwarded to the hub (the binding lives there); otherwise it is
+      // decided here with the local row as speaker.
+      if (method === 'POST' && rest === '/nodes/trust') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(
+          SyncTrustRequestSchema.pick({ node_id: true }),
+          await readJson(req),
+        );
+        const enrollment = joinerEnrollment(ctx.db, team.id, team.slug);
+        try {
+          if (enrollment) {
+            const trusted = await trustAtHub(enrollment, team.slug, {
+              seat: member.name,
+              node_id: body.node_id,
+            });
+            return sendJson(res, 200, trusted);
+          }
+          return sendJson(
+            res,
+            200,
+            applyTrust(ctx.db, team.id, member, localNodeWithLabel(ctx.db, team.id), body.node_id),
+          );
+        } catch (err) {
+          if (err instanceof TrustRefusedError) return sendTrustRefusal(res, err);
+          if (err instanceof HubUnreachableError)
+            throw new MusterdError('hub_unreachable', err.message);
+          throw err;
+        }
+      }
+
+      // ADR 328 §4's explicit re-bind act: an admin drops a seat's residence binding so the next
+      // node to speak for it may take it. Idempotent — `unbound: null` for a seat nobody held.
+      const unbindMatch = rest.match(/^\/nodes\/bindings\/([^/]+)$/);
+      if (method === 'DELETE' && unbindMatch) {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const seatName = decodeURIComponent(unbindMatch[1]!);
+        const seat = getMemberByName(ctx.db, team.id, seatName);
+        if (!seat) throw new MusterdError('not_found', `no seat "${seatName}" on this roster`);
+        const unbound = unbindSeat(ctx.db, seat.id);
+        if (unbound) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'seat.unbound',
+            target: seat.name,
+            result: 'allow',
+            detail: { node: unbound.node_id, by: member.name },
+          });
+        }
+        return sendJson(res, 200, { seat: seat.name, unbound: unbound?.node_id ?? null });
+      }
+
+      if (method === 'POST' && rest === '/sync/push') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          // Deliberately the same refusal for an absent, a wrong-kind and a revoked credential: the
+          // sync surface must not tell an unauthenticated caller which of those it is holding.
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        touchNode(ctx.db, node.id, Date.now());
+        const body = parseOrBadRequest(SyncPushRequestSchema, await readJson(req));
+        try {
+          const result = ingestBatch(ctx.db, team.id, node.id, body.events);
+          return sendJson(res, 200, SyncPushResponseSchema.parse(result));
+        } catch (err) {
+          if (err instanceof SyncResidenceError) {
+            // ADR 328 §4 at ingest: the same 403 shape the claim route hands back, plus the seat,
+            // so the pusher can name what to unbind.
+            return sendJson(res, 403, {
+              error: { code: 'bound_elsewhere', message: err.message },
+              seat: err.seat,
+              node_id: err.boundTo,
+              node_label: err.boundLabel,
+              kind: err.kind,
+            });
+          }
+          // Both refusals are things the caller can act on, not faults. A 500 here would read as
+          // "the hub is broken" for what is actually "resend from seq N".
+          if (err instanceof SyncGapError) {
+            // Hand-built rather than thrown as a MusterdError because it carries a field the error
+            // envelope has no room for. `error: { code, message }` stays byte-compatible with
+            // ErrorBodySchema so the CLI's parser still finds the message — a flat
+            // `{ error, message }` was the 3a bug that rendered every refusal as "server error".
+            return sendJson(res, 409, {
+              error: { code: 'conflict', message: err.message },
+              expected_seq: err.expectedSeq,
+            });
+          }
+          if (err instanceof SyncOriginError) throw new MusterdError('forbidden', err.message);
+          if (err instanceof SyncDuplicateIdError) {
+            // Terminal, and it must SAY so. Left as a bare constraint violation this reaches the
+            // pusher as a 500, indistinguishable from a hub that is merely down — so the loop
+            // resends the identical poison batch every tick, forever, behind a warn line that reads
+            // as "offline" (dolly, 2026-08-28). 422: the batch is well-formed but unprocessable,
+            // and no retry of it will ever succeed.
+            return sendJson(res, 422, {
+              error: { code: 'validation', message: err.message },
+              event_id: err.eventId,
+              terminal: true,
+            });
+          }
+          throw err;
+        }
+      }
+
+      // The pull side (3b-ii): one page of the canonical order after a hub_seq. Same credential,
+      // same refusal shape. The fold that consumes it runs on the puller (sync/pull.ts).
+      if (method === 'GET' && rest === '/sync/pull') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        touchNode(ctx.db, node.id, Date.now());
+        const after = Number(url.searchParams.get('after') ?? '0');
+        const limit = Math.min(
+          Number(url.searchParams.get('limit') ?? SYNC_PULL_MAX_BATCH),
+          SYNC_PULL_MAX_BATCH,
+        );
+        if (!Number.isInteger(after) || after < 0 || !Number.isInteger(limit) || limit < 1) {
+          throw new MusterdError(
+            'bad_request',
+            'after must be a non-negative integer and limit a positive one',
+          );
+        }
+        const head = hubHead(ctx.db, team.id);
+        // Mirrors push's 409/expected_seq: the hub is the authority on what it holds, and a puller
+        // asking to resume past that is out of step with it — hand back the head so it can re-anchor.
+        if (after > head) {
+          return sendJson(res, 409, {
+            error: {
+              code: 'conflict',
+              message: `hub head is ${head}; cannot resume after ${after}`,
+            },
+            hub_seq_high: head,
+          });
+        }
+        // Node liveness rides the page (presence replication §3). The hub's own row reads "now":
+        // a hub answering a pull is alive by definition, and nothing else stamps it.
+        const now = Date.now();
+        const self = localNodeForTeam(ctx.db, team.id).id;
+        const nodes = listNodeLiveness(ctx.db, team.id).map((n) =>
+          n.id === self ? { ...n, last_seen_at: now } : n,
+        );
+        return sendJson(
+          res,
+          200,
+          SyncPullResponseSchema.parse({
+            events: readStaged(ctx.db, team.id, after, limit),
+            hub_seq_high: head,
+            nodes,
+            lane_genesis: laneGenesis(ctx.db, team.id),
+          }),
+        );
       }
 
       // ── Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } board. All
       // member-authed; every mutation returns { lane, warnings } (warn-only, never a rejection).
+      if (method === 'GET' && rest === '/seeds') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        return sendJson(res, 200, SeedListSchema.parse({ seeds: listSeeds(ctx.db, team.id) }));
+      }
+
+      // ── Team memory search (ADR 327): pull-only retrieval over `insight` acts via the derived
+      // FTS fold (store/teamMemory.ts). Read like every team-scoped GET; no write path here —
+      // insights are saved as ordinary acts through the message routes.
+      if (method === 'GET' && rest === '/memory/search') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const url = new URL(req.url ?? '/', 'http://localhost');
+        const limitRaw = Number(url.searchParams.get('limit') ?? '');
+        return sendJson(
+          res,
+          200,
+          TeamMemorySearchResponseSchema.parse({
+            results: searchInsights(
+              ctx.db,
+              team.id,
+              url.searchParams.get('q') ?? '',
+              Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined,
+            ),
+          }),
+        );
+      }
+
+      // ADR 373 increment 2: a document-recorded intention enters as a Seed through the front door
+      // of its own repo, the way a Slack idea enters through the relay. Idempotent on `ref`.
+      if (method === 'POST' && rest === '/seeds/repo') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const body = parseOrBadRequest(CaptureRepoSeedSchema, await readJson(req));
+        const before = ctx.db
+          .prepare<
+            [string, string],
+            { id: string }
+          >('SELECT id FROM seeds WHERE team_id = ? AND relay_id = ?')
+          .get(team.id, `repo:${body.ref.trim()}`);
+        const seed = captureRepoSeed(ctx.db, team.id, member, body);
+        if (!before) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'seed.ingested',
+            target: seed.id,
+            result: 'allow',
+            detail: { seed_id: seed.relay_id, source: 'repo', lane_id: body.lane_id ?? null },
+          });
+        }
+        return sendJson(res, before ? 200 : 201, SeedResultSchema.parse({ seed }));
+      }
+
+      const seedReadMatch = rest.match(/^\/seeds\/([^/]+)$/);
+      if (method === 'GET' && seedReadMatch) {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const seedId = parseSeedPathId(seedReadMatch[1]!);
+        const seed = getSeed(ctx.db, team.id, seedId);
+        if (!seed) throw new MusterdError('not_found', `Seed "${seedId}" not found`);
+        return sendJson(res, 200, SeedResultSchema.parse({ seed }));
+      }
+
+      const seedMutationMatch = rest.match(
+        /^\/seeds\/([^/]+)\/(claim|clarification|answer|brief|promote)$/,
+      );
+      if (method === 'POST' && seedMutationMatch) {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const seedId = parseSeedPathId(seedMutationMatch[1]!);
+        const operation = seedMutationMatch[2]!;
+        const raw = await readJson(req);
+        const before = getSeed(ctx.db, team.id, seedId);
+        let seed: ReturnType<typeof claimSeed>;
+        if (operation === 'claim') {
+          parseOrBadRequest(ClaimSeedSchema, raw);
+          seed = claimSeed(ctx.db, team.id, seedId, member);
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'seed.claimed',
+            target: seed.id,
+            result: 'allow',
+            detail: { seed_id: seed.id, from: before?.state ?? null, to: seed.state },
+          });
+        } else if (operation === 'clarification') {
+          const body = parseOrBadRequest(AskSeedClarificationSchema, raw);
+          seed = askSeedClarification(ctx.db, team.id, seedId, member, body.body);
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'seed.clarification_asked',
+            target: seed.id,
+            result: 'allow',
+            detail: { seed_id: seed.id, from: before?.state ?? null, to: seed.state },
+          });
+        } else if (operation === 'answer') {
+          const body = parseOrBadRequest(AnswerSeedClarificationSchema, raw);
+          seed = answerSeedClarification(ctx.db, team.id, seedId, member, body.body);
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'seed.clarification_answered',
+            target: seed.id,
+            result: 'allow',
+            detail: { seed_id: seed.id, from: before?.state ?? null, to: seed.state },
+          });
+        } else if (operation === 'brief') {
+          const body = parseOrBadRequest(SubmitSeedBriefSchema, raw);
+          seed = ctx.db.transaction(() => {
+            const transitioned = submitSeedBrief(ctx.db, team.id, team.slug, seedId, member, body);
+            if (before?.state !== 'promoted') {
+              appendAudit(ctx.db, team.id, {
+                actor: member.name,
+                action: 'seed.brief_submitted',
+                target: transitioned.id,
+                result: 'allow',
+                detail: { seed_id: transitioned.id, result: body.result },
+              });
+              appendAudit(ctx.db, team.id, {
+                actor: member.name,
+                action: body.result === 'promote' ? 'seed.promoted' : 'seed.completed',
+                target: transitioned.id,
+                result: 'allow',
+                detail: {
+                  seed_id: transitioned.id,
+                  from: before?.state ?? null,
+                  to: transitioned.state,
+                  ...(transitioned.linked_lane_id ? { lane_id: transitioned.linked_lane_id } : {}),
+                  ...(transitioned.promotion ? { promotion: transitioned.promotion.kind } : {}),
+                },
+              });
+              if (transitioned.state === 'promoted')
+                deliverSeedPromotion(ctx, team, member, transitioned);
+            }
+            return transitioned;
+          })();
+        } else {
+          const body = parseOrBadRequest(PromoteSeedSchema, raw);
+          seed = ctx.db.transaction(() => {
+            const transitioned = promoteSeed(ctx.db, team.id, team.slug, seedId, member, body);
+            if (before?.state !== 'promoted') {
+              appendAudit(ctx.db, team.id, {
+                actor: member.name,
+                action: 'seed.promoted',
+                target: transitioned.id,
+                result: 'allow',
+                detail: {
+                  seed_id: transitioned.id,
+                  from: before?.state ?? null,
+                  to: transitioned.state,
+                  lane_id: transitioned.linked_lane_id,
+                  promotion: 'manual',
+                  research_skipped: transitioned.promotion?.research_skipped ?? false,
+                },
+              });
+              deliverSeedPromotion(ctx, team, member, transitioned);
+            }
+            return transitioned;
+          })();
+        }
+        return sendJson(res, 200, SeedResultSchema.parse({ seed }));
+      }
+
       if (method === 'GET' && rest === '/lanes') {
         const { team, member } = authTouch(ctx, slug, req);
         const lanes = listLanes(ctx.db, team.id, team.slug, {
@@ -2687,11 +4476,18 @@ export async function handleHttp(
         ];
         // ADR 169: annotate done lanes with the derived verified-ness of their close — read from the
         // lane.closed audit rows, never stored on the lane. Absent = unknown (pre-169 closes).
-        const verdicts = verifiedCloses(ctx.db, team.id);
+        const verdicts = closeVerdicts(ctx.db, team.id);
         const annotated = lanes.map((l) =>
-          l.state === 'done' && verdicts.has(l.id) ? { ...l, verified: verdicts.get(l.id)! } : l,
+          l.state === 'done' ? annotateClose(l, verdicts.get(l.id)) : l,
         );
         return sendJson(res, 200, { lanes: annotated, warnings });
+      }
+
+      // The brief's per-turn numbers (lane 01M2GTB0RA): what the statusline and the orient nudge
+      // actually read, from three bounded queries — never the whole brief on every turn.
+      if (method === 'GET' && rest === '/next/summary') {
+        const { team, member } = authTouch(ctx, slug, req);
+        return sendJson(res, 200, deriveNextSummary(ctx.db, team.id, team.slug, member.name));
       }
 
       // The orientation brief (ADR 049/084) — derived floor over the daemon's own lane/act state.
@@ -2765,7 +4561,8 @@ export async function handleHttp(
       if (method === 'POST' && rest === '/telemetry/tool-calls') {
         const { team, member } = authTouch(ctx, slug, req);
         const body = parseOrBadRequest(ToolTelemetryReportSchema, await readJson(req));
-        recordToolCalls(ctx.db, team.id, member.name, member.role || null, body.events);
+        // Stamped and replicated (ADR 371 §1): the report on every machine counts this flush.
+        applyToolCalls(ctx.db, team.id, member.name, member.role || null, body.events);
         if (body.surface) recordSurfaceRender(ctx.db, team.id, member.name, body.surface);
         return sendJson(res, 200, {});
       }
@@ -2824,6 +4621,27 @@ export async function handleHttp(
         return sendJson(res, 201, { goal: goal ?? null });
       }
 
+      // goal-retract design: withdraw a Goal from the board — an ordinary `message` act carrying
+      // `meta.goal_retract`, folded on read. Never a row deletion (ADR 048's bet): declaration and
+      // retraction both stay in the append-only log, and a later re-declaration un-retracts.
+      if (method === 'POST' && rest === '/goals/retract') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(PostGoalRetractSchema, await readJson(req));
+        const env = makeEnvelope({
+          id: ulid(),
+          team: team.slug,
+          from: member.name,
+          to: { kind: 'team' },
+          act: 'message',
+          body: `[goal] retracted — ${body.goal_id}`,
+          meta: { goal_retract: { goal_id: body.goal_id } },
+        });
+        routeEnvelope(ctx, team, member, env);
+        // Pre-declaration retractions queue in the replay, not lost — `goal: null` says so honestly.
+        const goal = listGoals(ctx.db, team.id, team.slug).find((g) => g.id === body.goal_id);
+        return sendJson(res, 201, { goal: goal ?? null });
+      }
+
       if (method === 'POST' && rest === '/lanes') {
         const { team, member } = authTouch(ctx, slug, req);
         // Ledger seats hold no lanes (ADR 232 §1) — a service is an accountable actor, never a
@@ -2835,28 +4653,10 @@ export async function handleHttp(
             `"${member.name}" is a service seat — ledger seats never open or hold lanes (ADR 232)`,
           );
         const body = parseOrBadRequest(OpenLaneSchema, await readJson(req));
-        const lane = openLane(ctx.db, team.id, team.slug, member.name, body);
-        // The acquisition ledger (ADR 203) must cover every edge that decides who owns work. The
-        // PATCH handler records claims and handoffs; this is the third edge — a lane born owned via
-        // `{claim:true}` — which is the most common acquisition of all and was the one left
-        // unwritten, so a ledger reconstruction would have missed the ordinary case. No collision is
-        // possible here (the lane did not exist), hence no guard: just the row, marked `at_open` so
-        // a reader can tell a birth from a takeover.
-        if (lane.owner_seat) {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'lane.claimed',
-            target: lane.id,
-            result: 'allow',
-            detail: {
-              lane: lane.id,
-              owner: lane.owner_seat,
-              previous_owner: null,
-              kind: 'claim',
-              at_open: true,
-            },
-          });
-        }
+        // The `lane.opened` birth row and the `lane.claimed at_open` row (ADR 203's third
+        // acquisition edge) are written by the store inside the insert's transaction, as the
+        // creator (lane-replication spec §Hole 3, Finding 4).
+        const lane = openLane(ctx.db, team.id, team.slug, member.name, body, Date.now());
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         deliverLaneWarnings(ctx, team, member, warnings); // all warnings are fresh at open
         // goals-front-door design: an unclaimed open isn't contending, so laneWarnings stays quiet —
@@ -2878,52 +4678,81 @@ export async function handleHttp(
         const body = parseOrBadRequest(UpdateLaneSchema, await readJson(req));
         const before = getLane(ctx.db, team.id, laneId, team.slug);
         if (!before) throw new MusterdError('not_found', `no lane "${laneId}" on ${slug}`);
-        // Ledger seats hold no lanes (ADR 232 §1): a service can neither claim a lane for itself
-        // nor be handed one — both edges land here as an `owner_seat` PATCH, so both are refused
-        // at the same door.
-        if (body.owner_seat !== undefined && member.kind === 'service')
-          throw new MusterdError(
-            'forbidden',
-            `"${member.name}" is a service seat — ledger seats never claim or hold lanes (ADR 232)`,
-          );
-        if (body.owner_seat) {
-          const newOwner = getMemberByName(ctx.db, team.id, body.owner_seat);
-          if (newOwner?.kind === 'service')
-            throw new MusterdError(
-              'forbidden',
-              `"${body.owner_seat}" is a service seat — a lane cannot be handed to a ledger seat (ADR 232)`,
-            );
-        }
-        // Claiming a lane someone else already holds is the one thing the board exists to prevent
-        // ("never build in a lane a teammate owns"), and until now nothing checked it: `lane_claim`
-        // is a bare PATCH of `owner_seat`, so a second claimant silently took the lane, got a
-        // success back, and broadcast `[lane] claimed` to the team. Two seats then built the same
-        // lane ~6 minutes apart (2026-08-01, lanes 01KYX8J5XD / 01KYXWNX9R).
+        // The policy before the write — service seats, the live-incumbent rule, the ADR 305
+        // merged-strip — lives in `decideLanePatch`, shared with the hub's arbitration so both
+        // paths refuse the same things for the same reasons. Here it runs against THIS daemon's
+        // row; on the hub it runs against the hub's.
         //
-        // A CLAIM is distinguishable from a HANDOFF by the one signal the server already holds: who
-        // the new owner is. Taking it for yourself is a claim; naming someone else is a handoff, a
-        // deliberate give-away that must keep working. So this refuses only self-directed takeovers,
-        // and only while the incumbent is LIVE — an offline or departed owner stays claimable, which
-        // is the same posture ADR 196 took when it released departed seats' in-flight lanes.
-        const takingForSelf =
+        // Federation residence 1 (ADR 325 §Authority split; the claim since ADR 355, every
+        // ownership/state edge since ADR 361): on an enrolled JOINER a patch that moves
+        // `owner_seat` or `state` — claim, release, handoff, submit, close — is not this daemon's
+        // to decide. It goes to the hub, which runs the same policy and the guarded CAS against its
+        // row and answers with the lane or a refusal naming the holder; this daemon writes nothing
+        // and converges from the hub's log. Unreachable hub ⇒ refuse with its own code, never a
+        // provisional write. Edits that touch neither field (title, scope, branch, detail) stay
+        // local and replicate as before — a partitioned machine keeps its coordination layer.
+        const claimingForSelf =
           body.owner_seat !== undefined &&
           body.owner_seat === member.name &&
-          before.owner_seat !== null &&
           before.owner_seat !== member.name;
-        if (takingForSelf) {
-          const incumbent = getMemberByName(ctx.db, team.id, before.owner_seat!);
-          const incumbentLive =
-            incumbent !== undefined &&
-            hasLivePresence(ctx.db, incumbent.id, ctx.config.presenceTimeoutMs);
-          if (incumbentLive) {
-            throw new MusterdError(
-              'conflict',
-              `lane "${laneId}" is owned by ${before.owner_seat}, who is live — claiming it would ` +
-                `duplicate their work. Pick another lane, or ask them to hand it over ` +
-                `(lane_handoff) or release it.`,
-            );
+        const enrollment = isOwnershipOrStatePatch(body)
+          ? joinerEnrollment(ctx.db, team.id, team.slug)
+          : null;
+        let arbitrated: ArbitratedLanePatch | undefined;
+        if (enrollment) {
+          try {
+            arbitrated = await patchAtHub(enrollment, team.slug, {
+              lane: laneId,
+              seat: member.name,
+              patch: body,
+              expect: { owner_seat: before.owner_seat, state: before.state },
+            });
+          } catch (err) {
+            if (err instanceof ClaimRefusedError) {
+              return sendJson(res, 409, {
+                error: { code: 'conflict', message: err.message },
+                holder: err.holder,
+                state: err.state,
+              });
+            }
+            if (err instanceof SeatBoundElsewhereError) {
+              return sendJson(res, 403, {
+                error: { code: 'bound_elsewhere', message: err.message },
+                node_id: err.nodeId,
+                node_label: err.nodeLabel,
+              });
+            }
+            if (err instanceof HubUnreachableError)
+              throw new MusterdError('hub_unreachable', err.message);
+            throw err;
+          }
+          // Best effort: pull the hub's decision now so the caller's next read agrees with the
+          // answer they were just given. A failed pull changes nothing — the claim already holds.
+          await pullTeam(ctx, team).catch(() => undefined);
+        } else if (claimingForSelf) {
+          // ADR 328 §4 on the local path: a self-claim decided here binds the seat to THIS node,
+          // first-writer-wins, so a hub's own residents are bound to it before any joiner can
+          // speak for them — and a seat a joiner has bound is refused here with the same code.
+          // On a single-machine install this is a no-op in effect and a binding in the record.
+          try {
+            assertSeatResident(ctx.db, team.id, member, localNodeWithLabel(ctx.db, team.id));
+          } catch (err) {
+            if (err instanceof SeatBoundElsewhereError) {
+              return sendJson(res, 403, {
+                error: { code: 'bound_elsewhere', message: err.message },
+                node_id: err.nodeId,
+                node_label: err.nodeLabel,
+              });
+            }
+            throw err;
           }
         }
+        // Decided locally only when this daemon is the authority for the edge; an arbitrated patch
+        // was decided on the hub against the hub's row, and re-running the policy here against a
+        // stale row could refuse what the hub just allowed.
+        const decided = arbitrated
+          ? { patch: body, guard: undefined }
+          : decideLanePatch(ctx.db, team.id, member, before, body, ctx.config.presenceTimeoutMs);
         const beforeKeys = new Set(
           laneWarnings(ctx.db, team.id, team.slug, before).map(laneWarningKey),
         );
@@ -2932,31 +4761,77 @@ export async function handleHttp(
         const goalShippedBefore =
           before.goal_id !== null &&
           deriveGoalStatus(lanesForGoal(ctx.db, team.id, team.slug, before.goal_id)) === 'shipped';
-        const lane = updateLane(ctx.db, team.id, laneId, team.slug, body)!;
-        // The claim edge is the one that decides who owns work, and it was the only lane edge
-        // writing no audit row at all — which is why reconstructing the collision above from the
-        // audit log turned up nothing but the release. Record every ownership acquisition.
-        if (
-          body.owner_seat !== undefined &&
-          lane.owner_seat &&
-          lane.owner_seat !== before.owner_seat
-        ) {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'lane.claimed',
-            target: lane.id,
-            result: 'allow',
-            detail: {
-              lane: lane.id,
-              owner: lane.owner_seat,
-              previous_owner: before.owner_seat,
-              // A handoff and a self-claim are the same PATCH; only the audit can tell them apart
-              // after the fact, so say which this was rather than leaving it to be inferred.
-              kind: lane.owner_seat === member.name ? 'claim' : 'handoff',
-              ...(before.owner_seat ? { takeover_of_offline_owner: true } : {}),
-            },
-          });
+        // Resolve a named acceptor BEFORE the state write. The routing itself happens after (it
+        // needs the updated lane), but validating there would move the lane into
+        // awaiting_acceptance and *then* refuse — leaving a submitted lane with no ask and no
+        // acceptor, which is the exact silent limbo `acceptor` exists to remove. There is no
+        // rollback on this path: the write is not in a transaction with what follows it.
+        const namedAcceptorPick =
+          body.acceptor !== undefined
+            ? namedAcceptor(ctx.db, team.id, before.owner_seat ?? member.name, body.acceptor)
+            : undefined;
+        if (namedAcceptorPick && 'refused' in namedAcceptorPick) {
+          throw new MusterdError(
+            'bad_request',
+            namedAcceptorPick.refused === 'unknown_seat'
+              ? `no such seat "${body.acceptor}" on this team`
+              : namedAcceptorPick.refused === 'observer'
+                ? `"${body.acceptor}" is an observer — it cannot accept a lane`
+                : `"${body.acceptor}" owns this lane; an owner accepting their own work records ` +
+                  `an unverified close, so naming yourself is refused`,
+          );
         }
+        // An acceptor is a routing request, and routing happens only on a lane that is (or is
+        // becoming) awaiting_acceptance. Naming one on any other patch would validate the name and
+        // then have nowhere to route it — the drop lane 01M1QYHJFY found, one door over. Refused
+        // BEFORE the write so the patch it rode on is not half-applied.
+        if (namedAcceptorPick && !isAwaitingAcceptance(body.state ?? before.state)) {
+          throw new MusterdError(
+            'bad_request',
+            `acceptor "${body.acceptor}" names who accepts this lane, so it rides a submit — ` +
+              `the lane must be entering or already in awaiting_acceptance (it is ${before.state}` +
+              `${body.state !== undefined ? `, patch sets ${body.state}` : ''})`,
+          );
+        }
+        let lane: Lane;
+        try {
+          lane = arbitrated
+            ? // The hub decided; this daemon's row is whatever the fold has applied so far, and the
+              // hub's answer stands in until it has. "Has it" is the row agreeing with the answer
+              // on the two fields the hub arbitrates — NOT "the row names me as owner", which was
+              // the test until lane 01M2GPX0HP: a close keeps the owner, so the stale local row
+              // (still `active`) passed it and was echoed back as the resolve's own result, and
+              // every terminal post-effect below keyed off that row and never ran.
+              laneAgreesWith(getLane(ctx.db, team.id, laneId, team.slug), arbitrated.lane)
+              ? getLane(ctx.db, team.id, laneId, team.slug)!
+              : arbitrated.lane
+            : updateLane(
+                ctx.db,
+                team.id,
+                laneId,
+                team.slug,
+                decided.patch,
+                Date.now(),
+                decided.guard,
+                {
+                  actor: member.name,
+                },
+              )!;
+        } catch (err) {
+          if (err instanceof LaneConflictError) {
+            throw new MusterdError(
+              'conflict',
+              `lane "${laneId}" changed while this update was being decided — it is now ` +
+                `${err.actual.owner_seat ? `owned by ${err.actual.owner_seat}` : 'unowned'} ` +
+                `(${err.actual.state}). Re-read the lane and retry.`,
+            );
+          }
+          throw err;
+        }
+        // `lane.claimed` / `lane.updated` / `lane.state_changed` / `lane.released` are written by
+        // the store inside the write's transaction (lane-replication spec §Hole 3): a row that
+        // cannot be written fails the transition rather than leaving the log behind the table.
+        // This handler keeps only the team-visible notes.
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         // Directed-wake dedup (ADR 083 §4): only warnings the mutation *introduced* wake the other
         // owner — re-surfacing unchanged conditions is the board's job, not the inbox's.
@@ -3009,13 +4884,6 @@ export async function handleHttp(
         // same pair: a team-visible note and an audit row naming who held it. The `lane_state`
         // broadcast below is suppressed for this edge — one event, not two.
         if (before.owner_seat !== null && lane.state === 'open' && before.state !== 'open') {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'lane.released',
-            target: lane.id,
-            result: 'allow',
-            detail: { lane: lane.id, released_by: member.name, owner_before: before.owner_seat },
-          });
           deliverLaneTeamAct(ctx, team, member, `[lane] released "${lane.title}" — open again`, {
             lane_release: { lane: lane.id, title: lane.title, owner_before: before.owner_seat },
           });
@@ -3037,6 +4905,12 @@ export async function handleHttp(
         // picker chose. No acceptor ⇒ no ask, and the response says self-close is sanctioned (the
         // ADR 145 degradation — never a wedge). Audit action stays `lane.ready_for_review` (frozen).
         let review: Record<string, unknown> | undefined;
+        // Lane 01M1QYHJFY's invariant: a named acceptor that produces no ask is a contradiction.
+        // Every arm below that honours `namedAcceptorPick` sets this; the check after the arms
+        // turns "validated, then silently unread" into a loud failure instead of a 200.
+        const named =
+          namedAcceptorPick && !('refused' in namedAcceptorPick) ? namedAcceptorPick : undefined;
+        let namedAskMinted = false;
         if (isAwaitingAcceptance(lane.state) && !isAwaitingAcceptance(before.state)) {
           // ADR 188 two-stage: for a risky lane the picker returns the PEER (agents-only ladder);
           // when no peer exists the human ask is not gated behind a stage that cannot happen —
@@ -3047,9 +4921,29 @@ export async function handleHttp(
           // picker's ladder still means exactly what it meant — and it means an exempt submit never
           // leases a wake or trips the review-loop breaker on the way to being skipped.
           const exemption = acceptanceExemption(lane);
-          const peerPick = exemption.exempt
-            ? null
-            : pickReviewCounterpart(ctx.db, team.id, lane, worker, ctx.config.presenceTimeoutMs);
+          // A named acceptor short-circuits the ladder entirely: the namer has already decided, and
+          // running the picker to overrule (or to "confirm") them would either discard the decision
+          // or dress it up as the picker's. Refusals are loud — see `namedAcceptor`. The named
+          // routing also skips the exemption: naming an acceptor IS asking for one, so a
+          // declared-low lane whose acceptance someone routed by hand gets the ask it asked for.
+          const peerSelection =
+            named || exemption.exempt
+              ? {
+                  pick: null,
+                  snapshot: {
+                    selected: null,
+                    worker_family: workerFamily(ctx.db, team.id, worker),
+                    candidates: [],
+                  },
+                }
+              : selectReviewCounterpart(
+                  ctx.db,
+                  team.id,
+                  lane,
+                  worker,
+                  ctx.config.presenceTimeoutMs,
+                );
+          const peerPick = named ?? peerSelection.pick;
           const humanFallback =
             lane.risk.length > 0 && !peerPick
               ? pickHumanReviewer(ctx.db, team.id, worker, ctx.config.presenceTimeoutMs)
@@ -3060,14 +4954,18 @@ export async function handleHttp(
           // ADR 191: when nobody live is eligible, try a marked-wakeable offline seat — only if the
           // review loop is enabled AND that seat is flow:auto AND the circuit breaker has not tripped.
           const teamPolicy = getPolicy(ctx.db, team.id);
-          // ADR 234 increment 2: an exempt lane has no posture to explain. `family_posture` answers
-          // "why was nobody eligible" — a question an exempt submit never asked. Recording one here
-          // would put an empty-pool diagnosis on a row where the pool was never consulted, and the
-          // ADR 172 remedy list (wake a seat / enrol one) would be advice about a non-problem.
-          const posture =
-            pick || exemption.exempt
-              ? undefined
-              : teamFamilyPosture(ctx.db, team.id, ctx.config.presenceTimeoutMs);
+          // ADR 234 increment 2: an exempt lane has no posture to explain. `family_posture` began
+          // as the answer to "why was nobody eligible" (ADR 172), but recording it ONLY on the
+          // degraded paths conditioned the sample on routing having already failed — miley's
+          // decline of lane 01M08AMC4F showed the roster-diversity instrument reading "92% of
+          // DEGRADED submits were monoculture" as if it were the unconditional rate (floor 32.5%).
+          // So the posture is now computed on every non-exempt submit, clean routes included: the
+          // row answers "what did the roster look like when this review was needed", whether or
+          // not the ladder found someone. Exempt submits still record nothing — the pool was never
+          // consulted, and a diagnosis on that row would still be advice about a non-problem.
+          const posture = exemption.exempt
+            ? undefined
+            : teamFamilyPosture(ctx.db, team.id, ctx.config.presenceTimeoutMs);
           if (!pick && !exemption.exempt && lane.risk.length === 0 && posture) {
             if (reviewLoopBounceCount(ctx.db, team.id, lane.id) >= REVIEW_LOOP_BREAKER_N) {
               breakerTripped = true;
@@ -3102,8 +5000,9 @@ export async function handleHttp(
           // ADR 172: when nobody is eligible, record WHY nobody was — the derived family posture.
           // Without it a run of no_candidate rows says "the pool was empty" but not what the pool
           // looked like, and the remedy (wake an enrolled seat vs. enroll one) is undecidable later.
-          // Keep posture on wake_queued / breaker rows too — the remedy list still matters.
-          const postureForAudit = pick && !wakeQueued && !breakerTripped ? undefined : posture;
+          // Recorded on CLEAN routes too (see the computation above): an instrument that only sees
+          // the degraded rows reports a share of a population it never observed.
+          const postureForAudit = posture;
           // ADR 217: the tier is decided HERE rather than at the ask, so the ready row can record
           // the wait the acceptor was actually promised. Without it the close edge has nothing to
           // compare `time_in_review_ms` against, and an owner closing after 8 seconds is recorded
@@ -3113,7 +5012,8 @@ export async function handleHttp(
             : humanRequired && pick?.grade === 'human'
               ? 'blocking'
               : 'standard';
-          appendAudit(ctx.db, team.id, {
+          // A lane transition: the replicated, required form (lane-replication spec §Hole 3).
+          appendLaneEventRequired(ctx.db, team.id, {
             actor: member.name,
             action: 'lane.ready_for_review',
             target: lane.id,
@@ -3135,6 +5035,26 @@ export async function handleHttp(
               // was built on top of.
               stakes_provenance: lane.stakes_provenance,
               ...(lane.merged ? { merged: lane.merged } : {}),
+              // ADR 303: preserve the evidence the picker actually saw, not a reconstruction from
+              // today's roster. The terminal outcome is explicit because a peer miss can lead to a
+              // human fallback or a queued wake; neither should masquerade as a peer selection.
+              review_selection: {
+                outcome: exemption.exempt
+                  ? 'acceptance_exempt'
+                  : wakeQueued
+                    ? 'wake_queued'
+                    : pick?.grade === 'human'
+                      ? 'human_fallback'
+                      : pick
+                        ? 'peer_selected'
+                        : 'no_candidate',
+                selected: pick ? { reviewer: pick.reviewer, grade: pick.grade } : null,
+                // The asker's family at decision time. `unknown` here plus `worker_unattested` on
+                // the candidates is "we could not grade the asker", which is not "the team had
+                // nobody" — the two read identically before 2026-09-01.
+                worker_family: peerSelection.snapshot.worker_family,
+                candidates: peerSelection.snapshot.candidates,
+              },
               // ADR 188: the achieved rung of the diversity ladder rides beside the historical
               // two-value route, so a cross_model routing is never mistaken for a cross_family one.
               //
@@ -3210,7 +5130,7 @@ export async function handleHttp(
             // audit query and never narrows the candidate pool.
             const priorOwners = laneOwnerHistory(ctx.db, team.id, lane.id);
             const overlapNotice = priorOwnerNotice(pick.reviewer, priorOwners);
-            deliverLaneAskAct(
+            const minted = deliverLaneAskAct(
               ctx,
               team,
               member,
@@ -3237,6 +5157,7 @@ export async function handleHttp(
                 },
               },
             );
+            if (named) namedAskMinted = minted;
             review = {
               reviewer: pick.reviewer,
               route: pick.route,
@@ -3313,6 +5234,115 @@ export async function handleHttp(
         } else if (
           isAwaitingAcceptance(lane.state) &&
           isAwaitingAcceptance(before.state) &&
+          named
+        ) {
+          // A RE-ROUTE (lane 01M1QYHJFY): the lane was already awaiting acceptance and the caller
+          // named a different acceptor. The edge-triggered block above is right to skip this — it
+          // is the SUBMIT (audit row, picker, wake lease, breaker count) and this is not a second
+          // submit — but the explicit request must still be honoured: naming an acceptor IS asking
+          // for one. Measured 2026-09-04: two seats in one hour named a seat here, got a 200 with a
+          // lane that looked right and a hint sanctioning self-close, and no ask was ever minted.
+          //
+          // What a re-route does, decided here and recorded in its own audit verb:
+          //   · mints a fresh lane_review ask to the named seat (route 'named', like the submit);
+          //   · leases NO wake — the named path never did (the namer's judgement is the authority,
+          //     and the ask waits in the inbox as it does at submit);
+          //   · supersedes the STANDING ask, if one is open to a different seat: that seat gets a
+          //     daemon-composed `resolve` on the ask saying where the acceptance went, and a late
+          //     verdict on the old ask no longer moves the lane (route.ts). Leaving both asks open
+          //     would let two seats each believe they hold it — miley hand-wrote this courtesy
+          //     note on 2026-09-04, which is the tool's job.
+          //   · naming the seat that ALREADY holds the open ask mints nothing and reports the
+          //     standing state — a re-route to the same seat is a repeat submit, not a new ask.
+          const worker = lane.owner_seat ?? member.name;
+          const standingAsk = openAcceptanceAsk(ctx.db, team.id, lane.id);
+          if (standingAsk && standingAsk.to === named.reviewer) {
+            namedAskMinted = true;
+            const standing = standingAcceptance(ctx.db, team.id, lane.id);
+            review = {
+              standing: true,
+              ...(standing ?? { reviewer: named.reviewer, route: 'named' }),
+            };
+          } else {
+            const humanRequired = lane.risk.length > 0;
+            const acceptanceTier: AskTier =
+              humanRequired && named.grade === 'human' ? 'blocking' : 'standard';
+            appendLaneEventRequired(ctx.db, team.id, {
+              actor: member.name,
+              action: 'lane.review_rerouted',
+              target: lane.id,
+              result: 'allow',
+              detail: {
+                lane: lane.id,
+                owner: worker,
+                stakes: lane.stakes,
+                stakes_provenance: lane.stakes_provenance,
+                ...(lane.merged ? { merged: lane.merged } : {}),
+                reviewer: named.reviewer,
+                route: named.route,
+                review_grade: named.grade,
+                // Who held it before, and which ask is now void. `null` both ways when nothing was
+                // standing (the submit found no candidate) — absent would be ambiguous with legacy.
+                from_reviewer: standingAsk?.to ?? null,
+                superseded_ask: standingAsk?.id ?? null,
+                human_required: humanRequired,
+                ask_tier: acceptanceTier,
+                ask_timeout_ms: askContract(acceptanceTier).timeout_ms,
+              },
+            });
+            if (standingAsk) {
+              deliverLaneAskSuperseded(
+                ctx,
+                team,
+                member,
+                standingAsk.to,
+                standingAsk.id,
+                lane,
+                named.reviewer,
+              );
+            }
+            const priorOwners = laneOwnerHistory(ctx.db, team.id, lane.id);
+            namedAskMinted = deliverLaneAskAct(
+              ctx,
+              team,
+              member,
+              named.reviewer,
+              acceptanceAskBody(lane.title, {
+                overlapNotice: priorOwnerNotice(named.reviewer, priorOwners),
+                noGoalNotice: noGoalNotice(lane.goal_id),
+              }),
+              {
+                species: 'approve',
+                tier: acceptanceTier,
+                lane_review: {
+                  lane: lane.id,
+                  title: lane.title,
+                  branch: lane.branch,
+                  ...(lane.merged ? { merged: lane.merged } : {}),
+                  route: named.route,
+                  grade: named.grade,
+                },
+              },
+            );
+            review = {
+              reviewer: named.reviewer,
+              route: named.route,
+              grade: named.grade,
+              tier: acceptanceTier,
+              rerouted: true,
+              // The seat whose ask was closed, so the caller's hint can say it was told.
+              ...(standingAsk ? { superseded: standingAsk.to } : {}),
+              ...(humanRequired
+                ? {
+                    human_review_required: true,
+                    human_ask: named.grade === 'human' ? 'immediate' : 'gated',
+                  }
+                : {}),
+            };
+          }
+        } else if (
+          isAwaitingAcceptance(lane.state) &&
+          isAwaitingAcceptance(before.state) &&
           body.state !== undefined &&
           isAwaitingAcceptance(body.state)
         ) {
@@ -3329,6 +5359,20 @@ export async function handleHttp(
             : // Nothing standing to report — the original submit found no candidate (or predates
               // recording). The sanction was and remains honest here: nobody was ever asked.
               { standing: true, self_close_sanctioned: true };
+        }
+        // Lane 01M1QYHJFY, the durable half. `acceptor` was named, validated, and the lane is
+        // awaiting acceptance — so exactly one of the arms above must have minted (or found
+        // standing) an ask to that seat. If none did, the caller would get the success shape of a
+        // request that was not performed, and a hint that sanctions an unconfirmed close. That is
+        // a server bug by construction, and it fails here as one — loud, never 200. The lane's
+        // state write already happened; the message says so, and says what to do.
+        if (named && !namedAskMinted) {
+          throw new MusterdError(
+            'server_error',
+            `acceptor "${named.reviewer}" was named and validated but no acceptance ask was ` +
+              `minted — a daemon bug, not a routing outcome. The lane is ${lane.state} with no ` +
+              `ask to ${named.reviewer}: submit again naming them, and report this.`,
+          );
         }
         // ADR 192: an acceptor moving an awaiting_acceptance lane back to a live state is the
         // rejection — the counterpart said "not what we wanted". Audited; the lane_state broadcast above
@@ -3349,6 +5393,9 @@ export async function handleHttp(
         }
         // A resolve/abandon is a board-shape change — worth a team-visible note, same as an open.
         const notices: string[] = [];
+        // ADR 283: what the close actually recorded, carried back to the closer. Undefined on every
+        // non-terminal patch — absence means "this patch closed nothing", never a default verdict.
+        let closed: LaneCloseVerdict | undefined;
         if (LANE_TERMINAL_STATES.has(lane.state) && !LANE_TERMINAL_STATES.has(before.state)) {
           const verb = lane.state === 'abandoned' ? 'abandoned' : 'resolved';
           deliverLaneTeamAct(ctx, team, member, `[lane] ${verb} "${lane.title}"`, {
@@ -3357,7 +5404,21 @@ export async function handleHttp(
           // The close's whole audit — verified-ness, reason, the ADR 172/173 abstentions, the ADR
           // 188 grade, and the ADR 109 merge join — lives in `recordLaneClose` because an acceptor's
           // `accept` act closes lanes too (ADR 202) and the two paths must derive it identically.
-          recordLaneClose(ctx.db, team.id, member, before, lane, body.merged);
+          // An arbitrated close was recorded ON THE HUB, in the write's own transaction, and its
+          // verdict rides the answer: this daemon writes no second `lane.closed` (it would fold
+          // back as a duplicate transition) and reports the ledger's own label (ADR 283).
+          closed =
+            arbitrated?.closed ??
+            recordLaneClose(
+              ctx.db,
+              team.id,
+              member,
+              before,
+              lane,
+              // ADR 305: a counterpart's close carries no merge attestation of its own — unless
+              // the lane has none (amendment 1); `decideLanePatch` already stripped it if so.
+              decided.patch.merged ?? undefined,
+            );
           // ADR 271: a resolved incident owes its reporters an answer — they parked work behind it.
           // Best-effort and after the close: the resolve is already durable and a delivery failure
           // must not undo it. No-op for every ordinary lane.
@@ -3397,6 +5458,10 @@ export async function handleHttp(
           lane,
           warnings,
           ...(review ? { review: { ...review, ...backstop } } : {}),
+          // ADR 283: the recorded close verdict, so the closer's surface can name the label the
+          // ledger holds instead of inferring one. Same discipline as `close_records` on the submit
+          // side (ADR 234) — the ledger label is never a surprise found afterwards.
+          ...(closed ? { closed } : {}),
           ...(notices.length ? { notices } : {}),
         });
       }
@@ -3407,21 +5472,55 @@ export async function handleHttp(
       // is the agent's explicit follow-up (`musterd inbox`). The line is **daemon-composed** from the
       // envelope's structured fields (sender, act, count) — never `env.body` (§4 injection surface).
       if (method === 'GET' && rest === '/inbox/interrupt-check') {
-        const { team, member } = authTouch(ctx, slug, req);
+        let auth: { team: TeamRow; member: MemberRow };
+        try {
+          auth = authTouch(ctx, slug, req);
+        } catch (err) {
+          // ADR 391: this is the ONE route where "who was refused" is the finding. A valid seat
+          // credential with a missing or dead lease is a live session whose bell is silently off —
+          // the deaf state the 2026-09-05 bell check measured at 26 of 102 probes and could not
+          // attribute. The seat name here comes from the credential the store already verified,
+          // never from `x-musterd-seat` (a header proves nothing); the row carries a two-word lease
+          // state and no token. Every other route's 401 stays exactly as it was.
+          if (err instanceof SessionLeaseRefused) {
+            const team = getTeamBySlug(ctx.db, slug);
+            log.warn({
+              msg: 'interrupt_probe_refused',
+              seat: err.seat,
+              lease: err.leaseState,
+              ...(team ? { team: team.slug } : {}),
+            });
+            if (team && !hasRecentInterruptRefusal(ctx.db, team.id, err.seat)) {
+              appendAudit(ctx.db, team.id, {
+                actor: err.seat,
+                action: 'interrupt.refused',
+                target: err.seat,
+                result: 'deny',
+                detail: { lease: err.leaseState },
+              });
+            }
+          }
+          throw err;
+        }
+        const { team, member } = auth;
         assertSeatCanRead(member);
         const cursor = getCursor(ctx.db, member.id);
-        const rows = listInbox(ctx.db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
-        const messages = rows.map((r) => {
-          const from = getMemberById(ctx.db, r.from_member);
-          const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
-          return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
-        });
+        // Only the shapes the fold can use (see `listInterruptCandidates`): this route runs at every
+        // tool boundary of every live agent, so it must not carry the seat's whole unread window back
+        // into V8 to discover that nothing is raised.
+        const rows = listInterruptCandidates(ctx.db, member, { cursorTs: cursor.last_read_ts });
+        const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
         // obligations: true — this is the live rail (ADR 225). A routed acceptance belongs on it and
         // costs nothing here; the wake rail keeps its ADR 191 policy gate by NOT passing this.
-        const pending = pendingInterrupts(messages, member.name, { obligations: true });
+        const pending = pendingInterrupts(messages, member.name, {
+          obligations: true,
+          huddles: true,
+        });
         recordInterruptCheck(pending.length > 0 ? 'raised' : 'silent');
         if (pending.length === 0) return sendJson(res, 200, { raised: false });
-        const latest = pending[0]!;
+        // Headline by class, not recency (ADR 225 amendment): the wake queue's newest-first order
+        // is not the notice's — see `headlineInterrupt`.
+        const { latest, huddleTopic, rest } = headlineInterrupt(pending, messages);
         // Audit the delivery once per (recipient, act) — who grabbed the mic, when, at whom (§Obs).
         if (!hasInterruptRaised(ctx.db, team.id, member.name, latest.id)) {
           appendAudit(ctx.db, team.id, {
@@ -3432,14 +5531,14 @@ export async function handleHttp(
             detail: {
               act: latest.id,
               act_kind: latest.act,
-              tier: raiseClass(latest),
+              tier: raiseClass(latest, huddleTopic),
               count: pending.length,
             },
           });
         }
         return sendJson(res, 200, {
           raised: true,
-          line: composeInterruptLine(latest, pending.length),
+          line: composeInterruptLine(latest, pending.length, huddleTopic, rest),
           count: pending.length,
           act: { id: latest.id, from: latest.from, act: latest.act },
         });
@@ -3453,18 +5552,62 @@ export async function handleHttp(
         const limitRaw = Number(url.searchParams.get('limit') ?? '');
         const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
         const cursor = getCursor(ctx.db, member.id);
+        // A caller that named no limit still gets a bounded response: this read was the last
+        // unbounded one on the request path, and a seat returning after time away pulled its whole
+        // unread history in a single reply. The bound is a PREFIX (`headLimit`), never the newest
+        // tail — see InboxOpts: truncating to the tail and letting the reader advance its cursor to
+        // the newest row it received would step over everything cut, which is ADR 287's loss
+        // reintroduced by a latency fix. `truncated` tells the caller to come back for the rest.
         const rows = listInbox(ctx.db, member, {
           unreadOnly: unread,
           cursorTs: cursor.last_read_ts,
+          cursorId: cursor.last_read_message_id,
           ...(since ? { since: Number(since) } : {}),
-          ...(limit ? { limit } : {}),
+          ...(limit ? { limit } : { headLimit: INBOX_DEFAULT_LIMIT }),
         });
-        const toEnvelope = (r: (typeof rows)[number]) => {
-          const from = getMemberById(ctx.db, r.from_member);
-          const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
-          return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
-        };
-        const messages = rows.map(toEnvelope);
+        // How much this reply could NOT carry. A caller that advances a read cursor needs this and
+        // cannot derive it: a full-looking page may sit on top of thousands the bound cut off, and
+        // ADR 287's rule — the cursor never passes what you did not see — has to hold across the
+        // fetch boundary, not just inside a client's own slicing.
+        //
+        // Counted from the SAME floor `listInbox` selected on — the later of the cursor and `since`,
+        // exactly as the unreadOnly branch does. A paging caller deliberately does not advance its
+        // cursor mid-drain (that would step past rows it has not rendered), so counting from the
+        // cursor alone re-counts every row the earlier pages already delivered and reports a number
+        // that grows stale the further it walks. It is stated as a count, so it has to be one.
+        // `>=`, not `===`: a prefix page is completed past the bound rather than cut through a tie
+        // group (see listInbox), so a full page can be LONGER than INBOX_DEFAULT_LIMIT. Testing for
+        // equality would read an over-long page as a short one and report `truncated: false` — which
+        // is the same silent stranding the completion exists to prevent, reintroduced one layer up.
+        const full = rows.length >= INBOX_DEFAULT_LIMIT;
+        // The cursor tiebreak only applies when the floor IS the cursor; once a paging caller has
+        // walked past it, `since` is a plain position and carries no id. Every position here is
+        // `created_at` — receipt order, the order the cursor walks — never the envelope's `ts`.
+        const sinceTs = since ? Number(since) : 0;
+        const useCursorId = sinceTs <= cursor.last_read_ts;
+        const unreadFloor = Math.max(cursor.last_read_ts, sinceTs);
+        const unreadRemaining =
+          rows.length > 0 && (limit !== undefined || full)
+            ? Math.max(
+                0,
+                countUnread(
+                  ctx.db,
+                  member,
+                  unreadFloor,
+                  useCursorId ? cursor.last_read_message_id : null,
+                ) -
+                  rows.filter(
+                    (r) =>
+                      r.created_at > unreadFloor ||
+                      (useCursorId &&
+                        r.created_at === unreadFloor &&
+                        cursor.last_read_message_id !== null &&
+                        r.id > cursor.last_read_message_id),
+                  ).length,
+              )
+            : 0;
+        const truncated = limit === undefined && full;
+        const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
 
         // ADR 211 §3: pendingness is unread-by-cursor OR deferred-and-raised. The cursor is a single
         // monotonic ts and is NOT touched here — a raised act is re-included after the query, so an
@@ -3475,17 +5618,13 @@ export async function handleHttp(
         // so folding over the inbox would find no deferrals at all. The scan is bounded — a deferral
         // older than this many messages stops being tracked, which degrades to today's behaviour
         // (the act is simply unread) rather than to a wrong answer.
-        const scan = listTeamMessages(ctx.db, team.id, {
-          forMemberId: member.id,
-          limit: DEFERRAL_SCAN_LIMIT,
-        }).map(toEnvelope);
-        const held = deferrals(scan, member.name);
-        const raised = raisedDeferrals(scan, member.name);
+        const { held, raised, own } = deferralFold(ctx.db, team.slug, member, DEFERRAL_SCAN_LIMIT);
         if (raised.size > 0) {
           const shown = new Set(messages.map((m) => m.id));
-          for (const r of listInbox(ctx.db, member, {})) {
-            if (raised.has(r.id) && !shown.has(r.id)) messages.push(toEnvelope(r));
-          }
+          const back = listInbox(ctx.db, member, {}).filter(
+            (r) => raised.has(r.id) && !shown.has(r.id),
+          );
+          messages.push(...rowsToEnvelopes(ctx.db, team.slug, back));
           messages.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
         }
         const deferred = [...held.values()].map((d) => ({
@@ -3493,6 +5632,46 @@ export async function handleHttp(
           until: d.until,
           raised: raised.has(d.target),
         }));
+
+        // Doorbell contract clause 7(iv): rendering a steer or an urgent act to its addressee IS
+        // its discharge — an act with no answering move has nothing else that could be. The ADR
+        // 287 watermark cannot record this (an elided backlog pins the cursor behind the act
+        // forever), so it is one audit row per (recipient, act), written here and read by
+        // `listInterruptCandidates`. Interrupt-check itself never writes it: the one-line notice
+        // is not a read. Steers and urgent acts are rare, so the dedupe read is near-free.
+        const renderable = messages.filter(
+          (m) =>
+            m.from !== member.name &&
+            m.to.kind === 'member' &&
+            m.to.name === member.name &&
+            (m.act === 'steer' ||
+              (m.meta as { urgent?: unknown } | null | undefined)?.['urgent'] === true),
+        );
+        // Captured BEFORE the write below: the read that renders an act for the first time must
+        // still COUNT it (a seat that has never seen the act cannot have been shown it), so the
+        // clause 7(iv) discharge in `discharged` lands from the NEXT read on. Same set, read once.
+        const shownBeforeThisRead =
+          renderable.length === 0
+            ? new Set<string>()
+            : listRenderedActs(
+                ctx.db,
+                team.id,
+                member.name,
+                renderable.map((m) => m.id),
+              );
+        if (renderable.length > 0) {
+          const already = shownBeforeThisRead;
+          for (const m of renderable) {
+            if (already.has(m.id)) continue;
+            appendAudit(ctx.db, team.id, {
+              actor: member.name,
+              action: 'inbox.rendered',
+              target: member.name,
+              result: 'allow',
+              detail: { act: m.id, act_kind: m.act },
+            });
+          }
+        }
 
         // Which of my asks I have already answered — same reason the deferral fold reads the team
         // timeline rather than the inbox, and off the SAME scan, so it costs no extra query.
@@ -3508,8 +5687,7 @@ export async function handleHttp(
         // closes an ask this way (web/src/live/asks.ts); this is that rule where the inbox can see it.
         const answered = [
           ...new Set(
-            scan
-              .filter((m) => m.from === member.name)
+            own
               .map((m) => (m.meta as { in_reply_to?: unknown } | null)?.in_reply_to)
               .filter((id): id is string => typeof id === 'string'),
           ),
@@ -3553,7 +5731,56 @@ export async function handleHttp(
                     GROUP BY ref`,
                 )
                 .all(team.id, ...owed)
-                .map((r) => ({ id: r.ref, by: r.by }));
+                .map((r) => ({ id: r.ref, by: r.by, reason: 'answered' as const }));
+
+        // Doorbell contract clause 7, shapes (ii) and (iv), on the OTHER surface. #1383 taught the
+        // interrupt line to drop these in `listInterruptCandidates`; the human-facing count is
+        // folded CLIENT-side (`openActionNeeded` over `dischargedIds`), so it never saw them.
+        // Measured 2026-09-14 on the laptop daemon carrying abc462cb: an acceptance ask whose lane
+        // was `done` left `musterd inbox --interrupt-check` silent and `musterd inbox --waiting`
+        // still counting it. A bell that is quiet while the number beside it is wrong is the same
+        // defect clause 7 named, pointed at the human instead of the model.
+        //
+        // Each entry carries its own `reason` and only (iii) carries `by`: (ii) and (iv) have no
+        // answering seat — the lane closed, or the seat was shown the act — and borrowing `by`
+        // would invent an answerer.
+
+        // (ii) An acceptance ask whose lane has LEFT awaiting_acceptance. An UNKNOWN lane keeps
+        // ringing: dropping on absence would silence a real obligation, the one direction this
+        // must never err (same rule, same reason, as listInterruptCandidates).
+        const laneOfAsk = new Map<string, string>();
+        for (const m of messages) {
+          if (m.act !== 'ask') continue;
+          const review = (m.meta as Record<string, unknown> | null)?.['lane_review'] as
+            | { lane?: unknown }
+            | undefined;
+          if (review && typeof review.lane === 'string') laneOfAsk.set(m.id, review.lane);
+        }
+        const laneClosed: { id: string; reason: 'lane_closed' }[] = [];
+        if (laneOfAsk.size > 0) {
+          const laneIds = [...new Set(laneOfAsk.values())];
+          const states = new Map(
+            ctx.db
+              .prepare<unknown[], { id: string; state: string }>(
+                `SELECT id, state FROM lanes WHERE team_id = ? AND id IN (${laneIds
+                  .map(() => '?')
+                  .join(',')})`,
+              )
+              .all(team.id, ...laneIds)
+              .map((l) => [l.id, l.state] as const),
+          );
+          for (const [askId, laneId] of laneOfAsk) {
+            const state = states.get(laneId);
+            if (state !== undefined && !isAwaitingAcceptance(state)) {
+              laneClosed.push({ id: askId, reason: 'lane_closed' });
+            }
+          }
+        }
+
+        // (iv) A steer or urgent act this seat had already been SHOWN before this read — the set
+        // `shownBeforeThisRead` captured above, so the first read counts the act and every read
+        // after it discharges it.
+        const readAlready = [...shownBeforeThisRead].map((id) => ({ id, reason: 'read' as const }));
 
         // `total` is the full inbox size (visibility-scoped) so a bounded client can show "N of total".
         return sendJson(res, 200, {
@@ -3562,7 +5789,9 @@ export async function handleHttp(
           total: countInbox(ctx.db, member),
           deferred,
           answered,
-          discharged,
+          discharged: [...discharged, ...laneClosed, ...readAlready],
+          ...(truncated ? { truncated: true } : {}),
+          ...(unreadRemaining > 0 ? { unread_remaining: unreadRemaining } : {}),
         });
       }
 
@@ -3587,11 +5816,7 @@ export async function handleHttp(
           ...(limit ? { limit: Math.min(Math.max(Number(limit), 1), 1000) } : {}),
           ...(scoped ? { forMemberId: member.id } : {}),
         });
-        const messages = rows.map((r) => {
-          const from = getMemberById(ctx.db, r.from_member);
-          const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
-          return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
-        });
+        const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
         return sendJson(res, 200, { messages });
       }
 
@@ -3600,16 +5825,25 @@ export async function handleHttp(
         const body = (await readJson(req)) as { last_read_message_id?: string };
         if (!body.last_read_message_id)
           throw new MusterdError('bad_request', 'last_read_message_id required');
-        const row = ctx.db
-          .prepare<[string], { ts: number }>('SELECT ts FROM messages WHERE id = ?')
+        const exists = ctx.db
+          .prepare<[string], { id: string }>('SELECT id FROM messages WHERE id = ?')
           .get(body.last_read_message_id);
-        if (!row) throw new MusterdError('not_found', 'unknown message id');
+        if (!exists) throw new MusterdError('not_found', 'unknown message id');
         const prev = getCursor(ctx.db, member.id);
-        const cursor = setCursor(ctx.db, member.id, body.last_read_message_id, row.ts);
+        // The position is the row's `created_at`, read by setCursor itself — receipt order, never
+        // the envelope's `ts` (see store/cursors.ts). Stamped for replication (ADR 366) carrying
+        // the MESSAGE ID only: the receiver re-reads the position against its own rows.
+        const cursor = applyCursorAdvance(ctx.db, team.id, member, body.last_read_message_id);
         // seen_latency (ADR 090): each act this advance crossed was just "seen" — emit the
         // send→seen histogram, the read-side twin of loop_latency. Watermark semantics: every act
         // covered by one advance shares this instant. Scope lives in crossedBySeen (store).
-        for (const m of crossedBySeen(ctx.db, team.id, member.id, prev.last_read_ts, row.ts)) {
+        for (const m of crossedBySeen(
+          ctx.db,
+          team.id,
+          member.id,
+          prev.last_read_ts,
+          cursor.last_read_ts,
+        )) {
           recordSeenLatency(
             slug,
             member.name,
@@ -3633,7 +5867,13 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/presence') {
-        const { member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         const body = parseOrBadRequest(PresenceBody, await readJson(req));
         const p = attach(ctx.db, member.id, body.surface, null, {
           provenance: body.provenance ?? null,
@@ -3668,22 +5908,23 @@ export async function handleHttp(
       // cross-seat read path (team admins included, ADR 093 §4). `authMember` resolves the seat from
       // the presented token; a mismatched/absent token is its own 401/403.
       if (method === 'PUT' && rest === '/memory') {
-        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { team, member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         assertSeatCanRead(member); // inert seats (disabled/banned/archived) can't touch memory either
         const parsed = parseOrBadRequest(MemorySaveBody, await readJson(req));
         const input = { headline: parsed.headline, body: parsed.body ?? '' };
-        saveMemory(ctx.db, member.id, input); // enforces the caps, throws bad_request with the limit named
-        appendAudit(ctx.db, team.id, {
-          actor: member.name,
-          action: 'memory.save',
-          target: member.name,
-          result: 'allow',
-          // Sizes only, never the content (hard rule 5): the audit log is not a copy of the note.
-          detail: {
-            size_bytes: Buffer.byteLength(input.body, 'utf8'),
-            headline_len: input.headline.length,
-          },
-        });
+        // ADR 366: the save and its stamped `continuity.memory_saved` row are one transaction, and
+        // the row CARRIES THE NOTE. This is where ADR 093's hard rule 5 ("sizes only, never the
+        // content: the audit log is not a copy of the note") used to be enforced, and it is
+        // overturned here by decision (nick, 2026-09-03): a headline is not continuity, and a human
+        // on a second machine (ADR 358) needs the note itself. Daemon-side only, never git; bounded
+        // by the 8 KiB cap `saveMemory` still enforces (it throws bad_request naming the limit).
+        applyMemorySave(ctx.db, team.id, member, input);
         return sendNoContent(res);
       }
 
@@ -3691,7 +5932,13 @@ export async function handleHttp(
       // the ADR 093 §3 delivery shape for surfaces that render the one-line pointer without occupying
       // (`musterd status`). The bare GET stays the explicit full-body read.
       if (method === 'GET' && rest === '/memory') {
-        const { member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         assertSeatCanRead(member);
         if (url.searchParams.get('envelope') === '1') {
           const env = memoryEnvelope(ctx.db, member.id);
@@ -3704,24 +5951,52 @@ export async function handleHttp(
       }
 
       if (method === 'DELETE' && rest === '/memory') {
-        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { team, member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         assertSeatCanRead(member);
-        const existed = clearMemory(ctx.db, member.id);
-        // Idempotent: DELETE always 204s. Only audit an actual clear (nothing happened otherwise).
-        if (existed) {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'memory.clear',
-            target: member.name,
-            result: 'allow',
-          });
-        }
+        // Idempotent: DELETE always 204s. The stamped `continuity.memory_cleared` row is written
+        // even when nothing was here to clear (ADR 366) — a peer may hold a note this daemon has
+        // not folded yet, and the clear is a fact with a clock that must reach it. `had_memory`
+        // says which case this was.
+        applyMemoryClear(ctx.db, team.id, member);
         return sendNoContent(res);
       }
 
       // Operator escape hatch (ADR 017 follow-up): forcibly drop a member's live session so it can
       // rejoin — for a stuck/orphaned presence newest-wins can't displace (no new session is coming).
       // Admin-gated (ADR 071, P2) with the empty-admin fallback so an un-migrated team keeps the hatch.
+      // ADR 374 — a member's hue, on a DB-only team. The member themself or a team admin; a
+      // collision is refused by name. On a file-backed team the seat file owns the hue, so the
+      // route points at the file rather than writing a value reconcile would overwrite.
+      const hueMatch = rest.match(/^\/members\/([^/]+)\/hue$/);
+      if (method === 'POST' && hueMatch) {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(HueBody, await readJson(req));
+        const targetName = decodeURIComponent(hueMatch[1]!);
+        const target = getMemberByName(ctx.db, team.id, targetName);
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', `no member "${targetName}" in "${slug}"`);
+        if (target.id !== member.id && !resolveCapabilities(member).is_admin)
+          throw new MusterdError(
+            'forbidden',
+            'only the member themself or a team admin may set a hue',
+          );
+        const roots = [...new Set([...ctx.rosterRoots, ...resolveRosterRoots()])];
+        if (teamSpecForSlug(roots, slug))
+          throw new MusterdError(
+            'conflict',
+            `"${slug}" is file-backed — set \`hue = ${body.hue}\` in seats/${targetName}.toml (the file owns it; \`musterd team hue\` does this)`,
+          );
+        setMemberHue(ctx.db, target, body.hue);
+        const me = summarize(ctx, team.slug, team.id, member).find((m) => m.name === targetName);
+        return sendJson(res, 200, { member: me });
+      }
+
       const reclaimMatch = rest.match(/^\/members\/([^/]+)\/reclaim$/);
       if (method === 'POST' && reclaimMatch) {
         const { team, member: caller, viaFallback } = authGovernance(ctx, slug, req);
@@ -3764,13 +6039,19 @@ export async function handleHttp(
       // `remove` (deletes the seat) and `reclaim` (operator force-frees someone else's).
       if (method === 'POST' && rest === '/unbind') {
         // authMember (not authTouch) so we don't write an ambient presence row we're about to clear.
-        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { team, member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         for (const old of ctx.hub.connsForMember(member.id)) {
           old.close?.();
           ctx.hub.remove(old.connId);
         }
         clearMemberPresence(ctx.db, member.id);
-        markSignedOff(ctx.db, member.id);
+        markSeatReleased(ctx.db, member.id);
         clearBound(ctx.db, member.id);
         ctx.hub.broadcastTeam(team.id, {
           type: 'presence',
@@ -3802,6 +6083,42 @@ export async function handleHttp(
        * credential to lose; minting one for it would manufacture exactly the human-seat authority the
        * claim-kind guard refuses.
        */
+      const agentCredentialRotateMatch = rest.match(
+        /^\/members\/([^/]+)\/agent-seat-credential\/rotate$/,
+      );
+      if (method === 'POST' && agentCredentialRotateMatch) {
+        const team = requireTeam(ctx.db, slug);
+        authProvision(ctx, slug, req);
+        const targetName = decodeURIComponent(agentCredentialRotateMatch[1]!);
+        const target = getMemberByName(ctx.db, team.id, targetName);
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', `no member "${targetName}" in ${slug}`);
+        if (target.kind !== 'agent' || target.observer === 1)
+          throw new MusterdError('bad_request', `"${target.name}" is not an agent seat`);
+        const { seat_credential } = mintAgentSeatCredential(ctx.db, target.id);
+        const revoked = revokeMemberSessionLeases(ctx.db, target.id);
+        const actor = tryAuth(ctx, slug, req)?.name ?? null;
+        appendAudit(ctx.db, team.id, {
+          actor,
+          action: 'agent_seat_credential.rotated',
+          target: target.name,
+          result: 'allow',
+          detail: {
+            via: isLocalPeer(req.socket.remoteAddress, ctx.config.trustProxy) ? 'local' : 'admin',
+          },
+        });
+        for (const leaseId of revoked) {
+          appendAudit(ctx.db, team.id, {
+            actor,
+            action: 'agent_session_lease.revoked',
+            target: target.name,
+            result: 'allow',
+            detail: { lease_id: leaseId, reason: 'credential_rotated' },
+          });
+        }
+        return sendJson(res, 200, { member: target.name, seat_credential });
+      }
+
       const credentialRotateMatch = rest.match(/^\/members\/([^/]+)\/credential\/rotate$/);
       if (method === 'POST' && credentialRotateMatch) {
         const team = requireTeam(ctx.db, slug);

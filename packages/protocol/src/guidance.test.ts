@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   GUIDANCE_CONTENT_VERSION,
+  renderOrientFrontmatter,
+  renderOrientSkill,
   GUIDANCE_STAMP_PREFIX,
   parseContentStamp,
   renderContentStamp,
@@ -17,7 +19,7 @@ import {
   SKILL_CLI_COMMANDS,
   SKILL_MCP_TOOLS,
 } from './guidance.js';
-import { renderPrimer } from './primer.js';
+import { renderRepositoryPrimer } from './primer.js';
 
 describe('renderSkillBody', () => {
   const body = renderSkillBody({ team: 'dawn' });
@@ -72,6 +74,49 @@ describe('content stamp', () => {
   });
 });
 
+describe('orient tier 1 owns addressed work (ADR 326 amendment 2026-08-27 UTC)', () => {
+  // The defect this pins: seats surfaced acceptance requests routed to them and then asked the
+  // human's permission to take them — because the skill's tier 2 said "owed reviews: surface,
+  // do not handle". The autonomy line sits between ADDRESSED and UNADDRESSED work.
+  it('a routed acceptance/review request is DONE unprompted, never asked about', () => {
+    const skill = renderOrientSkill();
+    expect(skill).toMatch(/acceptance or review request routed to you: DO the review/);
+    expect(skill).toMatch(/never ask the human whether to take it/);
+    // Anchor-free by construction (stanley + miley, #1087): an ordered form like
+    // `/tier 2\).*owed reviews/s` passes on two mutants that DO carry the defect — the phrase
+    // reinserted above the anchor, and the anchor itself renamed. The claim is that the phrase is
+    // gone from the skill, so assert exactly that.
+    expect(skill).not.toMatch(/owed reviews/);
+    expect(skill).toMatch(/tier 2\) — work nobody routed to you/);
+  });
+
+  // The dedup half (dolly, #1087): telling every addressee of an eligible set to execute
+  // unprompted removes the human arbitration that used to bound duplicates. ADR 254 discharge is
+  // written ONLY by an accept/decline naming the request, so the announcement is the mechanism.
+  it('teaches the announce-before-you-start step that discharges for co-addressees', () => {
+    const skill = renderOrientSkill();
+    expect(skill).toMatch(/Announce before you start/);
+    expect(skill).toMatch(/act:'accept', reply_to:<the request act id>/);
+    expect(skill).toMatch(/two\n?\s*seats review the same thing/);
+  });
+
+  // Lane 01M2GQFJXG (stanley, 2026-09-14): the announce clause above was written for the
+  // eligible-set `request_help`, and step 3 prescribed it for "an acceptance or review request"
+  // too. A lane_review ask is directed to ONE seat and its `accept` IS the verdict (ADR 202), so
+  // following the skill closed ryder's lane on the announcement, before a line of the diff was
+  // read. The skill has to say which acts the announcement is for, and what an accept does on the
+  // other kind.
+  it('does not prescribe accept as the announcement on a lane_review ask — there accept is the verdict', () => {
+    const skill = renderOrientSkill();
+    expect(skill).toMatch(/lane_review/);
+    expect(skill).toMatch(/accept.*IS the verdict|IS the verdict/);
+    // The announce clause is scoped to the acts that carry an eligible set, never to a review ask.
+    const announce = skill.slice(skill.indexOf('Announce before you start'));
+    expect(announce).toMatch(/eligible/);
+    expect(announce).not.toMatch(/review request.*Announce/s);
+  });
+});
+
 describe('version-bump discipline (ADR 085)', () => {
   // Snapshot the full rendered guidance surface, keyed by content version. If you change any skill or
   // slash-command prose, this fails — the fix is to BUMP `GUIDANCE_CONTENT_VERSION` and add its new
@@ -92,6 +137,15 @@ describe('version-bump discipline (ADR 085)', () => {
     12: '30bf29a8c1e89fc9',
     13: '18db5d31ab51fe37', // + the tick installs when the lockfile moved; a failed tick notifies (pinned, not down) // + daemon refresh: the auto-refresher owns the bounce; never prescribe `service refresh`
     14: '8c1b079d28c39788', // + shared blockers: blocked_by report-and-park + incident convergence (spec 2026-08-14 inc 1)
+    15: 'bab60b1f09b5234b', // lane-close step 3 follows ADR 235: backstop armed ⇒ no self-close on silence; self-close stays sanctioned only for nobody-asked / acceptance-exempt (ADR 234)
+    16: 'fc1472575867804e', // ADR 296 tier 2: lane_open teaches `scope` (was `surface_globs`)
+    17: '0fe7e98a513e636e', // + musterd-orient skill unit + team_wake_context in the tool reference (session-orientation spec 2026-08-25)
+    18: 'c5ea40b9c6cdd791', // + team memory: insight save/search + the search-before-you-re-derive playbook (ADR 327)
+    19: '3b7db362a4f5eeb9', // + rename team_memory_search → team_insight_search, alias retained one epoch (ADR 327 amendment, ADR 296)
+    21: 'f3ee0a5d2a4808b7', // − the `lane_ready` / `musterd lane ready` alias line: both deprecated aliases (and team_memory_search) removed after their one-epoch retention (surface survey #1245, item 2)
+    20: '199e0096a14dec89', // orient tier 1 = everything ADDRESSED to the seat: a routed acceptance/review request is done, not asked about, and announced with accept+reply_to so it discharges for co-addressees (ADR 326 amendment 2026-08-27 UTC)
+    22: '70084e92e29476ed', // the skill catches up with four surfaces that moved under it (lane 01M1VD1CQV): `done` records submit-vs-unconfirmed and says which; `--wait` (blocks) vs `--waiting` (returns) named as the twins they are; team_availability + the goal tools get their tool form; and a "when you were woken" playbook for team_wake_context, which had a name in the reference and no prose in the body
+    23: '414d3a6cbc654871', // orient step 3 scopes the announce clause to eligible-set acts and says a lane_review ask's accept IS the verdict (ADR 202) — announcing with accept closed ryder's lane before review (lane 01M2GQFJXG, 2026-09-14)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
@@ -108,6 +162,8 @@ describe('version-bump discipline (ADR 085)', () => {
       renderSelfLabelSessionFrontmatter(),
       renderNudgeRelaySkill(),
       renderNudgeRelayFrontmatter(),
+      renderOrientSkill(),
+      renderOrientFrontmatter(),
     ].join('\n---\n');
     const hash = createHash('sha256').update(rendered).digest('hex').slice(0, 16);
     expect(SNAPSHOTS[GUIDANCE_CONTENT_VERSION]).toBeDefined();
@@ -116,7 +172,7 @@ describe('version-bump discipline (ADR 085)', () => {
 });
 
 describe('primer is the loop kernel (ADR 085)', () => {
-  const primer = renderPrimer({ member: 'Ada', team: 'dawn' });
+  const primer = renderRepositoryPrimer({ team: 'dawn' });
 
   it('stays short and points at the skill for depth', () => {
     // The always-loaded block should be a kernel, not a manual.
@@ -132,5 +188,76 @@ describe('skill body — shared-blocker norm (spec 2026-08-14 inc 1)', () => {
     const body = renderSkillBody({ team: 'revive' });
     expect(body).toContain('meta.blocked_by');
     expect(body).toContain('park behind it');
+  });
+});
+
+describe('lane-close step 3 follows ADR 235, not the retired self-resolve-on-silence', () => {
+  const body = renderSkillBody({ team: 'dawn' });
+
+  it('no longer prescribes unconditional self-resolve on silence', () => {
+    expect(body).not.toMatch(/On silence \/ no candidate/);
+  });
+
+  it('tells the closer to follow the submit response and names the armed backstop', () => {
+    expect(body).toMatch(/follow the submit response/i);
+    expect(body).toMatch(/do \*\*not\*\* self-close on silence/i);
+    expect(body).toContain('ADR 235');
+  });
+
+  it('keeps the sanctioned branches: nobody asked, or acceptance-exempt', () => {
+    expect(body).toMatch(/no eligible\s+acceptor/i);
+    expect(body).toMatch(/acceptance-exempt/i);
+    expect(body).toMatch(/\*\*unconfirmed\*\*, never a wedge/);
+  });
+});
+
+/*
+ * The four surfaces that moved under the skill while it kept teaching the old shape (lane
+ * 01M1VD1CQV). Each assertion below is the *distinction* the skill got wrong, not its wording —
+ * these exist so the next surface change breaks a named test instead of quietly rotting one line
+ * of prose in every member workspace at once. `guidance:check` cannot catch any of them: it
+ * verifies that names resolve, never that the prose around a name is still true.
+ */
+describe('the skill teaches the surface as it is (lane 01M1VD1CQV)', () => {
+  const body = renderSkillBody({ team: 'dawn' });
+
+  it('`done` is taught as two records, not one — attested submit vs unconfirmed self-close', () => {
+    // The defect: "closes your live lane and shows what is next" pointed at the path ADR 192 exists
+    // to avoid. Both branches must be named wherever `done` is.
+    expect(body).toMatch(/`musterd done`[\s\S]{0,200}records two different things/i);
+    expect(body).toMatch(/with a merge attestation[\s\S]{0,120}awaiting_acceptance/i);
+    expect(body).toMatch(/without one it is an \*\*unconfirmed\*\*/i);
+    // …and the closing section must name `done` as the one-step form, not send readers elsewhere.
+    expect(body).toMatch(/musterd done\s+--pr <n> --sha <sha>` is the same path in one step/i);
+  });
+
+  it('names `--wait` and `--waiting` as distinct, and says which answers which question', () => {
+    // One letter apart, opposite blocking behaviour: the exact two-meanings class the surface
+    // survey (01M1MKSMBP) catalogued. Teaching only `--wait` was the gap.
+    expect(body).toMatch(/`--wait` and `--waiting` are one letter apart/i);
+    expect(body).toMatch(/`--wait` \*blocks\*/);
+    expect(body).toMatch(/`--waiting` \*returns immediately\*/);
+  });
+
+  it('gives availability and goals their tool form, per the channel note', () => {
+    // CHANNEL_NOTE promises tool-form / CLI-form throughout; availability shipped as a tool and the
+    // skill kept teaching only the CLI, invisible to guidance:check.
+    expect(body).toMatch(/`team_availability` \/ `musterd availability/);
+    expect(SKILL_MCP_TOOLS).toContain('team_availability');
+    // Assert the PROSE pairs them, not merely that the name appears: the reference footer prints
+    // every SKILL_MCP_TOOLS entry, so a bare `toContain` here would pass on the footer alone and
+    // tell us nothing about whether the body teaches the tool (docs/wiki/correct-by-coincidence.md).
+    expect(body).toMatch(/`team_goal_declare` \/\s+`musterd goal declare`/);
+  });
+
+  it('teaches team_wake_context in prose, not only in the name reference', () => {
+    // It sat in SKILL_MCP_TOOLS since v17 with no body text: a woken session got a name and no
+    // playbook. The packet's defining property — no bodies, only pointers — is the load-bearing bit.
+    expect(body).toMatch(/## When you were woken/);
+    expect(body).toMatch(/team_wake_context[\s\S]{0,300}no message or memory bodies/i);
+  });
+
+  it('dates the acceptors-came-back measurement instead of asserting it timelessly', () => {
+    expect(body).toMatch(/as of 2026-08 acceptors had\s+come back 20 of 20 times/i);
   });
 });

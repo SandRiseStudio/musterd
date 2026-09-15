@@ -13,7 +13,7 @@ ADR decisions). You are running headless in CI on a schedule. Work autonomously,
 
 Group findings by `task`. For each task that has findings, create a branch `steward/<task>`, make the edits below, and open **one draft PR** (`gh pr create --draft`), assigned to the repo owner, titled `steward: <task>` — with a body that lists the findings it addresses and what you changed. **Never merge. Draft PRs only.**
 
-- **`roadmap-reconcile`** (a shipped-but-unmarked item): the item's freezing ADR is accepted, so it shipped — mark it shipped. In `packages/web/src/content/roadmap.data.ts`, change that item's `plan: '…'` to `shipped: { prs: [<N>] }`, where `<N>` is the PR that shipped it. Find `<N>` from the freezing ADR's `Status:` line (it usually names the PR, e.g. "shipped … (PR #169)") or the merged `feat` commit implementing it (`git log --grep`). **If you cannot determine the PR with confidence, do NOT guess** — leave the item as-is and note it in the PR body for a human.
+- **`roadmap-reconcile`** (a shipped-but-unmarked item): the item's freezing ADR is accepted, so it shipped — mark it shipped. In `content/roadmap.data.ts` (repo root), change that item's `plan: '…'` to `shipped: { prs: [<N>] }`, where `<N>` is the PR that shipped it. Find `<N>` from the freezing ADR's `Status:` line (it usually names the PR, e.g. "shipped … (PR #169)") or the merged `feat` commit implementing it (`git log --grep`). **If you cannot determine the PR with confidence, do NOT guess** — leave the item as-is and note it in the PR body for a human.
 
 - **`undeclared-work`** (a merged feature with no roadmap item): add a new item to `roadmap.data.ts` in the most fitting category cluster. Derive `id` (kebab-case), `title`, `blurb`, and a concise `detail` **honestly from the PR subject/body and any ADR it cites** — do not invent capabilities. Anchor it `shipped: { prs: [<N>] }`. Set `dependsOn` only if a clear predecessor exists. If you can't write a faithful narrative from the available facts, add a minimal honest stub and say so in the PR body — a human will flesh it out (curated is a feature).
 
@@ -21,7 +21,7 @@ Group findings by `task`. For each task that has findings, create a branch `stew
 
 ## Hard rules
 
-1. **Only edit:** `packages/web/src/content/roadmap.data.ts`, `ROADMAP.md`, and files under `docs/`. Touch nothing else.
+1. **Only edit:** `content/roadmap.data.ts` (repo root — not `packages/web/`, which is where it lived before #487 moved it), `ROADMAP.md`, and files under `docs/`. Touch nothing else.
 2. After editing `roadmap.data.ts`, run `pnpm roadmap:gen` to regenerate `ROADMAP.md` (never hand-edit its generated region).
 3. **The seatbelt:** before opening each PR, run `pnpm roadmap-truth:check` and `pnpm steward:scan`. The PR must leave `roadmap-truth:check` green. If your edit can't make it pass, open the PR as a draft anyway with a clear "⚠ needs human — couldn't satisfy the check because …" note; never force a red change or disable the check.
 4. **Never** run `gh pr merge`, never enable auto-merge, never push to `main`, never force-push.

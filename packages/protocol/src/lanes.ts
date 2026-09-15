@@ -1,10 +1,12 @@
 import { z } from 'zod';
 import { GoalSchema } from './goals.js';
+import { LANE_STAKES, LANE_STAKES_PROVENANCE, LANE_STATES, type LaneState } from './lanes.wire.js';
+import { SEED_SOURCES } from './seeds.wire.js';
 
 /**
- * Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } unit that makes
- * work-ownership contention-aware. Declarations only in P1: `surface_globs` + `depends_on` are the
- * whole engine; the two checks (unmet dependency, surface overlap) are **warn-only, never blocking**,
+ * Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × scope } unit that makes
+ * work-ownership contention-aware. Declarations only in P1: `scope` + `depends_on` are the
+ * whole engine; the two checks (unmet dependency, scope overlap) are **warn-only, never blocking**,
  * and git is optional throughout (`branch` is just a carried artifact label).
  */
 
@@ -25,6 +27,20 @@ import { GoalSchema } from './goals.js';
  */
 export const DEFAULT_PROJECT = 'default';
 
+/** The lane vocabulary itself is validator-free (`lanes.wire.js`); this module is its zod face. */
+export {
+  ACCEPTANCE_STALE_MS,
+  LANE_STAKES,
+  LANE_STAKES_PROVENANCE,
+  LANE_STATES,
+  MERGE_VERIFICATION_TIERS,
+  isAwaitingAcceptance,
+  type LaneStakes,
+  type LaneStakesProvenance,
+  type LaneState,
+  type MergeVerification,
+} from './lanes.wire.js';
+
 /**
  * Declared stakes for acceptance (ADR 234) — an ordered ladder, cheapest first.
  *
@@ -36,12 +52,10 @@ export const DEFAULT_PROJECT = 'default';
  * whether declared stakes predict the answer rate **before** anything is built on the assumption
  * that they do. If they do not, the routing flip is aimed at nothing and should not ship.
  */
-export const LaneStakesSchema = z.enum(['low', 'normal', 'high']);
-export type LaneStakes = z.infer<typeof LaneStakesSchema>;
+export const LaneStakesSchema = z.enum(LANE_STAKES);
 
 /** Who set a lane's stakes (ADR 244) — see {@link LaneSchema.shape.stakes_provenance}. */
-export const LaneStakesProvenanceSchema = z.enum(['declared', 'defaulted']);
-export type LaneStakesProvenance = z.infer<typeof LaneStakesProvenanceSchema>;
+export const LaneStakesProvenanceSchema = z.enum(LANE_STAKES_PROVENANCE);
 
 /**
  * One admin-set default-stakes rule (ADR 244): lanes whose declared surface lies entirely under
@@ -77,9 +91,9 @@ export type StakesDefault = z.infer<typeof StakesDefaultSchema>;
  */
 export function resolveStakesDefault(
   rules: readonly StakesDefault[],
-  surfaceGlobs: readonly string[],
+  scope: readonly string[],
 ): StakesDefault | undefined {
-  if (surfaceGlobs.length === 0) return undefined;
+  if (scope.length === 0) return undefined;
   return rules.find((rule) => {
     // `packages/web/**`, `packages/web/` and `packages/web` all mean "under packages/web". Normalize
     // to a prefix ending at a path boundary: without that last step `packages/web` also matches
@@ -87,34 +101,86 @@ export function resolveStakesDefault(
     // their own rule across a sibling package. A rule that changes who reviews the team's work has
     // to mean exactly what it looks like it means.
     const prefix = rule.surface.replace(/\*+$/, '').replace(/\/$/, '') + '/';
-    return surfaceGlobs.every((g) => g.startsWith(prefix));
+    return scope.every((g) => g.startsWith(prefix));
   });
 }
 
-export const LaneStateSchema = z.enum([
-  'open',
-  'claimed',
-  'active',
-  'blocked',
-  /** Canonical post-merge outcome-acceptance stage (ADR 192). */
-  'awaiting_acceptance',
-  /**
-   * Legacy alias for `awaiting_acceptance` (ADR 169 name). Dual-accepted for fleet skew; new writes
-   * use `awaiting_acceptance`. Prefer {@link isAwaitingAcceptance} over raw equality.
-   */
-  'ready_for_review',
-  'done',
+export const LaneStateSchema = z.enum(LANE_STATES);
+
+/**
+ * Why a lane's close landed the way it did (ADR 283) — the vocabulary the `lane.closed` audit row
+ * has recorded since ADR 217/229/234, lifted onto the wire so a reader can act on it.
+ *
+ * The order is the ladder `laneClose.ts` walks, and the grouping is the one that matters to a
+ * reader: the first two are settled outcomes, the middle three mean NOBODY WAS ASKED, and the last
+ * three mean SOMEBODY WAS ASKED AND DID NOT ANSWER. Any new member must be added deliberately —
+ * an unrecognised value is dropped by the projection rather than passed through, so a future
+ * daemon's vocabulary degrades to "unknown" instead of leaking a string this build cannot explain.
+ */
+export const CloseReasonSchema = z.enum([
+  /** A counterpart accepted it. The only reason that means `verified: true`. */
+  'counterpart_confirm',
+  /** The owner closed their own lane, no acceptance stage involved. */
+  'self_close',
+  /** Never entered acceptance: declared `low` stakes and not drawn into the sample (ADR 234). */
+  'acceptance_exempt',
+  /** The picker found no eligible counterpart — the sanctioned degradation (ADR 172). */
+  'no_candidate',
+  /** A risk tag REQUIRED a human and none was live — a requirement with no one to meet it. */
+  'human_review_missed',
+  /** Asked, and the wait ran past the promise (ADR 217). */
+  'review_timeout',
+  /** Asked, and the owner closed it themselves before the promise elapsed (ADR 217). */
+  'review_cut_short',
+  /** Asked, and the promise itself was never knowable — abstains on the elapsed claim (ADR 217). */
+  'review_unanswered',
+  /** The ADR 229 24h sweep closed it. The clock, not a seat — see `ask_outcome` on the audit row. */
+  'review_swept',
+  /** Abandoned rather than shipped. */
   'abandoned',
 ]);
-export type LaneState = z.infer<typeof LaneStateSchema>;
+export type CloseReason = z.infer<typeof CloseReasonSchema>;
 
-/** True when the lane is in the post-merge outcome-acceptance stage (ADR 192), either spelling. */
-export function isAwaitingAcceptance(state: string): boolean {
-  return state === 'awaiting_acceptance' || state === 'ready_for_review';
+/**
+ * What to TELL a reader about an unaccepted close (ADR 283), or `null` where the reason adds
+ * nothing to the word already on screen.
+ *
+ * Copy lives here, once, for the same reason the derivation does (ADR 084): the board, the brief,
+ * and the CLI drifted apart on `verified` for two ADRs, and the fix was one projection rather than
+ * three renderers agreeing by luck. Each phrase is written to imply its OWN next move — the
+ * distinction is only worth a wire field if a reader can act differently on each half, so "chase a
+ * person" and "look at the roster" have to be legible from the sentence alone.
+ *
+ * `counterpart_confirm` and `abandoned` return `null`: the first is what `accepted` already says,
+ * and the second is already the whole story. Repeating them would make the annotation noise on the
+ * majority of lanes and train readers to skip it on the minority where it carries the news.
+ */
+export function closeReasonCopy(reason: CloseReason): string | null {
+  switch (reason) {
+    case 'counterpart_confirm':
+    case 'abandoned':
+      return null;
+    case 'self_close':
+      return 'closed by its own owner';
+    case 'acceptance_exempt':
+      return 'no ask sent, by design — declared low stakes';
+    case 'no_candidate':
+      return 'nobody was asked — no eligible counterpart';
+    case 'human_review_missed':
+      return 'nobody was asked — the required human was never live';
+    case 'review_timeout':
+      return 'asked, and the wait ran out';
+    case 'review_cut_short':
+      return 'asked, then closed before the wait elapsed';
+    case 'review_unanswered':
+      return 'asked, and never answered';
+    case 'review_swept':
+      return 'swept by the 24h clock, not by a seat';
+  }
 }
 
-/** value-layer design: a lane in `awaiting_acceptance` longer than this warns `stale_acceptance`. */
-export const ACCEPTANCE_STALE_MS = 12 * 60 * 60 * 1000;
+/** True when the lane is in the post-merge outcome-acceptance stage (ADR 192), either spelling. */
+// `isAwaitingAcceptance` and `ACCEPTANCE_STALE_MS` live in `lanes.wire.js`; re-exported below.
 
 /** Canonical state to write when entering outcome acceptance (ADR 192). */
 export const AWAITING_ACCEPTANCE: LaneState = 'awaiting_acceptance';
@@ -134,6 +200,9 @@ export const LANE_CONTENDING_STATES: ReadonlySet<LaneState> = new Set([
   'ready_for_review',
 ]);
 export const LANE_TERMINAL_STATES: ReadonlySet<LaneState> = new Set(['done', 'abandoned']);
+
+// ADR 296 tier 2's `surface_globs` wire mirror (dual-send + dual-populate for one-epoch skew) was
+// dropped at epoch 16, on-touch, with the fleet verified at 14 — `scope` is the only wire token.
 
 export const LaneSchema = z.object({
   id: z.string(),
@@ -159,8 +228,9 @@ export const LaneSchema = z.object({
   owner_seat: z.string().nullable(),
   /** Assignment hint (backend/frontend/…); advisory only in P1. */
   role: z.string().nullable(),
-  /** Declared surface, e.g. ["packages/server/src/store/**"]. The overlap-check input. */
-  surface_globs: z.array(z.string()),
+  /** Declared scope, e.g. ["packages/server/src/store/**"] — the paths this lane touches, and the
+   *  overlap-check input. Canonical token (ADR 296; was `surface_globs`). */
+  scope: z.array(z.string()),
   /** Lane ids this lane builds on. The unmet-dependency-check input. */
   depends_on: z.array(z.string()),
   /** The git branch/artifact carrying the work — what `lane_handoff` transfers. */
@@ -220,6 +290,16 @@ export const LaneSchema = z.object({
       pr: z.number().int().optional(),
       sha: z.string().optional(),
       authorized_by: z.string().optional(),
+      /**
+       * Seat-side verification tier stamped by `lane_submit` (merge-verified submit):
+       * `ancestor` (SHA reachable from origin/main — landed), `unknown_object` (SHA not in the
+       * submitting worktree's repo — cross-repo lane), `fetch_failed` (could not refresh
+       * origin/main — abstained), `unattested` (no SHA given). `not_ancestor` never appears
+       * here: it is refused at submit, before any lane mutation. A z.string rather than an
+       * enum so a newer client's tier parses instead of rejecting; consumers compare against
+       * {@link MERGE_VERIFICATION_TIERS} and say nothing on values they don't know.
+       */
+      verification: z.string().optional(),
     })
     .nullable()
     .default(null),
@@ -232,6 +312,23 @@ export const LaneSchema = z.object({
    * absent means "unknown", and the UI says nothing rather than guessing.
    */
   verified: z.boolean().optional(),
+  /**
+   * Board-projection annotation (ADR 283), never stored: for a `done` lane, WHY it closed the way
+   * it did — read from the same `lane.closed` audit row `verified` is derived from.
+   *
+   * `verified: false` is two opposite situations wearing one word, and the response to each is the
+   * response the other one would waste. `review_timeout` / `review_unanswered` / `review_cut_short`
+   * mean a counterpart was asked and did not answer — go find a person. `no_candidate` /
+   * `human_review_missed` mean no ask was ever sent because the roster held nobody eligible — a
+   * degradation nobody is at fault for, answered by looking at who is on the team. Measured
+   * 2026-08-19 over 344 closes, both halves are populous (40 + 9 against 23 + 16 + 2) and neither
+   * reached a reader.
+   *
+   * Absent means unknown, exactly as `verified` does: a close predating the reason, a lane that
+   * never closed, an older daemon, or a value this build does not recognise. A consumer that
+   * defaults the absent case to any particular reason re-creates the defect this field fixes.
+   */
+  close_reason: CloseReasonSchema.optional(),
   created_by: z.string(),
   created_at: z.number().int(),
   claimed_at: z.number().int().nullable(),
@@ -276,7 +373,8 @@ export const OpenLaneSchema = z.object({
   detail: z.string().optional(),
   project: z.string().optional(),
   role: z.string().optional(),
-  surface_globs: z.array(z.string()).optional(),
+  /** The paths this lane touches (ADR 296). */
+  scope: z.array(z.string()).optional(),
   depends_on: z.array(z.string()).optional(),
   branch: z.string().optional(),
   /** Link this lane to a Goal at open (ADR 084) — the id `musterd next` groups + derives status by. */
@@ -309,7 +407,8 @@ export const UpdateLaneSchema = z.object({
    * immutable field with no escape hatch makes a mis-stamp permanent.
    */
   project: z.string().optional(),
-  surface_globs: z.array(z.string()).optional(),
+  /** Re-declare the paths this lane touches (ADR 296). */
+  scope: z.array(z.string()).optional(),
   depends_on: z.array(z.string()).optional(),
   branch: z.string().optional(),
   /** Re-link (or clear, with null) this lane's Goal (ADR 084). */
@@ -346,10 +445,41 @@ export const UpdateLaneSchema = z.object({
       pr: z.number().int().optional(),
       sha: z.string().optional(),
       authorized_by: z.string().optional(),
+      /** Seat-side verification tier — see the field's doc on {@link LaneSchema}. */
+      verification: z.string().optional(),
     })
+    // `null` CLEARS a standing attestation (ADR 305 amendment 2, lane 01M2GR0434). The store always
+    // honoured it; the wire refused it, so a lane that acquired a wrong stamp — delta's, closed
+    // from the VM with stanley's PR — kept it with no remedy. Owner or admin only; the transport
+    // refuses a counterpart's clear, the way ADR 305 refuses a counterpart's replace.
+    .nullable()
     .optional(),
+  /**
+   * Route this lane's acceptance ask to a NAMED seat instead of the daemon's pick — meaningful only
+   * on the move into `awaiting_acceptance`, ignored elsewhere.
+   *
+   * The daemon's picker exists to prove diversity, and it is the right default. But an acceptance a
+   * human routes by hand had no door at all: the acceptor got told about the lane out of band, sent
+   * a real `accept`, and it bound to nothing — `applyAcceptanceVerdict` binds only to a
+   * server-composed `lane_review` ask, deliberately. The lane sat in `awaiting_acceptance` until the
+   * owner self-closed, and the ledger recorded `verified: false` for work that HAD been reviewed by
+   * a second seat (measured 2026-09-01, lane `01M1F9QVG6XCFQAZSH7XSZ13JT`, acceptor `ghost`).
+   *
+   * So the routing gets a door, and the door is labelled: a named acceptance records
+   * `route: 'named'`, never a pick route. Recording it as a pick would assert a diversity guarantee
+   * the picker never made — the same corruption `laneClose.ts` refuses for daemon sweeps, running
+   * the other way. Whether the named seat is a good acceptor is the namer's judgement; the ledger's
+   * job is only to say that a human made it.
+   */
+  acceptor: z.string().min(1).optional(),
 });
 export type UpdateLane = z.infer<typeof UpdateLaneSchema>;
+
+/**
+ * The verification tiers a submit can persist (merge-verified submit). `not_ancestor` is
+ * deliberately not a member: it is a refusal outcome at `lane_submit`, never a stored state.
+ */
+// `MERGE_VERIFICATION_TIERS` lives in `lanes.wire.js`; re-exported below.
 
 /**
  * Every mutating lane verb returns the lane plus any contention warnings (ADR 083 §4). Under
@@ -362,7 +492,9 @@ export const LaneResultSchema = z.object({
   review: z
     .object({
       reviewer: z.string().optional(),
-      route: z.enum(['human_admin', 'cross_family']).optional(),
+      /** `named` is a seat the submitter routed to by hand (`acceptor`), not one the picker chose —
+       *  kept distinct so no reader mistakes a hand-routed acceptance for a proven-diverse one. */
+      route: z.enum(['human_admin', 'cross_family', 'named']).optional(),
       self_close_sanctioned: z.boolean().optional(),
       /**
        * The lane was ALREADY awaiting acceptance: this is a report of the standing state (who was
@@ -373,6 +505,14 @@ export const LaneResultSchema = z.object({
        * premature unverified close ADR 235 measured 20-for-20.
        */
       standing: z.boolean().optional(),
+      /**
+       * Lane 01M1QYHJFY: the lane was already awaiting acceptance and this submit named a DIFFERENT
+       * acceptor — a fresh ask was minted to `reviewer` (route `named`) and the standing ask, if
+       * any, was closed on the seat named in `superseded`, who was told. Never set beside
+       * `standing`: a re-route is a new routing decision, not a report of the old one.
+       */
+      rerouted: z.boolean().optional(),
+      superseded: z.string().optional(),
       /** ADR 234 increment 2: the submit was acceptance-exempt (declared low stakes) — no ask
        *  exists and none is owed; self-close is the designed path, not a degradation. */
       acceptance_exempt: z.boolean().optional(),
@@ -409,6 +549,24 @@ export type LaneBoard = z.infer<typeof LaneBoardSchema>;
  * one projection. The derived floor works at zero compliance: it reads the daemon's own lane/act
  * state. (The roadmap-Goal-by-wave enrichment is deferred with the Goal-source seam, ADR 048.)
  */
+/**
+ * The three numbers the per-turn surfaces need from the brief (lane 01M2GTB0RA, 2026-09-14):
+ * the statusline and the orient nudge were calling `GET /next` — the whole brief, 0.5 s on the
+ * live db and 1.8 s under load, from nine sessions on every turn and every statusline refresh —
+ * and reading `in_flight.length`, `incidents[].lane` and `owed_reviews[].{lane,ts}` out of it.
+ * `GET /next/summary` answers those from three bounded queries and nothing else.
+ */
+export const NextSummarySchema = z.object({
+  member: z.string(),
+  /** Lanes this seat holds in a live state (`in_flight.length` of the brief). */
+  carrying: z.number().int().nonnegative(),
+  /** Open incident lane ids, oldest first (`incidents[].lane` of the brief). */
+  incidents: z.array(z.string()),
+  /** Acceptance asks this seat owes a verdict on (`owed_reviews[].{lane.id, ts}` of the brief). */
+  owed: z.array(z.object({ lane: z.string(), ts: z.number().int() })),
+});
+export type NextSummary = z.infer<typeof NextSummarySchema>;
+
 export const NextBriefSchema = z.object({
   /** Whose brief this is. */
   member: z.string(),
@@ -418,6 +576,41 @@ export const NextBriefSchema = z.object({
   shipped: z.array(LaneSchema),
   /** Unowned lanes you could pick up, oldest first — what to start next. */
   up_next: z.array(LaneSchema),
+  /**
+   * Recorded intentions nobody has started: open Seeds awaiting exploration, oldest first
+   * (ADR 373 increment 4).
+   *
+   * Here, above `up_next`, because `next` answers "what should I do" and an unowned recorded
+   * intention is that same question one step earlier — a Seed is what a Lane has not become yet.
+   * Deliberately NOT in `inbox --waiting`, which carries acts addressed to a seat: an intention is
+   * addressed to nobody, which is the condition ADR 373 exists to fix, so filing it where a reader
+   * looks for their own name would hide it a second time.
+   *
+   * Compact on purpose — the brief is read on every orientation, so this carries what decides
+   * "should I pick this up" and nothing else. `ref` is the source tag: a repo path plus anchor for
+   * a document-recorded intention, `null` for a relay capture, whose source is a person.
+   * `.default([])` keeps an older daemon's brief parseable.
+   */
+  up_next_seeds: z
+    .array(
+      z.object({
+        id: z.string(),
+        source: z.enum(SEED_SOURCES),
+        /** `docs/decisions/354-….md#left-for-a-sibling-lane` for a repo Seed; null for a relay one. */
+        ref: z.string().nullable(),
+        /** The intention as written — the Seed body's first line, bounded for a one-line render. */
+        summary: z.string(),
+        submitted_by: z.string(),
+        captured_at: z.number().int().nonnegative(),
+      }),
+    )
+    .default([]),
+  /**
+   * How many Seeds are open in total — `up_next_seeds` shows at most the oldest few. Same reason
+   * `review_debt_total` exists: a window with no total reads as the whole tray, so a reader clears
+   * what is on offer and never learns how much was behind it.
+   */
+  up_next_seeds_total: z.number().int().nonnegative().default(0),
   /**
    * Verdicts someone is waiting on from YOU (ADR 233): lanes still in the acceptance stage whose
    * review ask was routed to this seat. Oldest ask first — the longest wait is the one closest to
@@ -488,6 +681,14 @@ export const NextBriefSchema = z.object({
          * `.default(false)` keeps a brief from an older daemon parseable.
          */
         no_candidate: z.boolean().default(false),
+        /**
+         * True when the lane's merge attestation carries no SHA — under merge-verified
+         * submit nothing has landed, so there is NOTHING TO ACCEPT YET: the wait is on the
+         * author's merge button, not a reviewer (dolly's #961/#963, 2026-08-21). Only
+         * grandfathered lanes and older clients can reach this state; new submits are
+         * refused unlanded. `.default(false)` keeps older-daemon briefs parseable.
+         */
+        unlanded: z.boolean().default(false),
       }),
     )
     .optional(),

@@ -11,6 +11,7 @@ import {
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
+import { registerAvailability } from './availability.js';
 import { formatMessage, notJoinedMessage, textResult } from './format.js';
 import { registerInboxCheck } from './inboxCheck.js';
 import { registerJoin } from './join.js';
@@ -616,6 +617,8 @@ describe('team_inbox_check handler', () => {
       expect(text(r)).toContain('answered by izzo');
       expect(text(r)).toContain('no longer owe');
       expect((r.structuredContent as any).messages[0].discharged_by).toBe('izzo');
+      // A pre-clause-7 daemon sends no `reason`; the entry still reads as the answer it is.
+      expect((r.structuredContent as any).messages[0].discharged_reason).toBe('answered');
     });
 
     it('stays silent on an act nobody has answered', async () => {
@@ -628,6 +631,48 @@ describe('team_inbox_check handler', () => {
       const r = await handler({ unread_only: true, limit: 50 });
       expect(text(r)).not.toContain('answered by');
       expect((r.structuredContent as any).messages[0].discharged_by).toBeUndefined();
+    });
+
+    /**
+     * Doorbell clause 7 shapes (ii) and (iv). Neither has an answerer. Saying "answered by" would
+     * name a teammate who did nothing; saying nothing would retire the act silently, which is the
+     * defect ADR 254 rejected for shape (iii). The trace says WHY.
+     */
+    it('names the lane closing, and never invents an answerer', async () => {
+      const handler = capture(
+        registerInboxCheck,
+        inboxClient({
+          fetchInbox: (async () => ({
+            messages: [asked],
+            cursor: null,
+            discharged: [{ id: 'el-1', reason: 'lane_closed' }],
+          })) as any,
+        }),
+      );
+      const r = await handler({ unread_only: true, limit: 50 });
+      expect(text(r)).toContain('the lane closed');
+      expect(text(r)).toContain('no longer owe');
+      expect(text(r)).not.toContain('answered by');
+      const m = (r.structuredContent as any).messages[0];
+      expect(m.discharged_reason).toBe('lane_closed');
+      expect(m.discharged_by).toBeUndefined();
+    });
+
+    it('names the read for an act with no answering move', async () => {
+      const handler = capture(
+        registerInboxCheck,
+        inboxClient({
+          fetchInbox: (async () => ({
+            messages: [asked],
+            cursor: null,
+            discharged: [{ id: 'el-1', reason: 'read' }],
+          })) as any,
+        }),
+      );
+      const r = await handler({ unread_only: true, limit: 50 });
+      expect(text(r)).toContain('already been shown');
+      expect(text(r)).not.toContain('answered by');
+      expect((r.structuredContent as any).messages[0].discharged_reason).toBe('read');
     });
 
     it('degrades quietly against an older daemon that sends no trace', async () => {
@@ -643,15 +688,109 @@ describe('team_inbox_check handler', () => {
     });
   });
 
-  it('reports no new messages when empty', async () => {
+  it('reports no new messages when empty, and names the way back to what was already read', async () => {
     const handler = capture(
       registerInboxCheck,
       inboxClient({ fetchInbox: (async () => ({ messages: [], cursor: null })) as any }),
     );
     const r = await handler({ unread_only: true, limit: 50 });
     expect(text(r)).toBe(
+      'no new messages — nothing waiting on you; check again at your next task boundary' +
+        '\nlooking for one you already read? unread_only: false returns it',
+    );
+  });
+
+  // The recall route is advice for a seat looking at the unread slice. A caller who ALREADY passed
+  // unread_only: false is looking at everything there is — telling them to do what they just did
+  // would be the noise this line is trying to avoid being.
+  it('omits the recall route when the caller is already reading everything', async () => {
+    const handler = capture(
+      registerInboxCheck,
+      inboxClient({ fetchInbox: (async () => ({ messages: [], cursor: null })) as any }),
+    );
+    const r = await handler({ unread_only: false, limit: 50 });
+    expect(text(r)).toBe(
       'no new messages — nothing waiting on you; check again at your next task boundary',
     );
+  });
+
+  it('does not say the inbox is empty when unread remain behind the fetch bound', async () => {
+    const handler = capture(
+      registerInboxCheck,
+      inboxClient({
+        fetchInbox: (async () => ({
+          messages: [],
+          cursor: null,
+          unread_remaining: 12,
+        })) as any,
+      }),
+    );
+    const r = await handler({ unread_only: true, limit: 50 });
+    expect(text(r)).not.toContain('nothing waiting on you');
+    expect(text(r)).toContain('12 older unread not shown');
+    expect(text(r)).toContain('limit: 12');
+  });
+
+  it('names a drain limit that covers elided unread, not the fetched slice', async () => {
+    const mk = (id: string, ts: number) =>
+      makeEnvelope({
+        id,
+        team: 'dawn',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'message',
+        body: id,
+        ts,
+      });
+    const messages = Array.from({ length: 50 }, (_, i) => mk(`n${i}`, 1000 + i));
+    const handler = capture(
+      registerInboxCheck,
+      inboxClient({
+        fetchInbox: (async () => ({
+          messages,
+          cursor: null,
+          unread_remaining: 100,
+        })) as any,
+      }),
+    );
+    const r = await handler({ unread_only: true, limit: 50 });
+    expect(text(r)).toContain('100 older unread not shown');
+    expect(text(r)).toContain('Call again with limit: 150');
+    expect(text(r)).not.toContain('Call again with limit: 50 to');
+  });
+
+  it('a complete fetch past the limit digests the oldest rows and walks the cursor over them', async () => {
+    // Lane 01M2GT874Y: with the cursor held entirely on any elision, a seat past its limit never
+    // advanced. Now the oldest unread render as digest lines and the watermark passes them.
+    const mk = (id: string, ts: number) =>
+      makeEnvelope({
+        id,
+        team: 'dawn',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: `body of ${id}`,
+        ts,
+      });
+    const messages = Array.from({ length: 120 }, (_, i) => mk(`n${i}`, 1000 + i));
+    const markRead = vi.fn(async () => undefined);
+    const handler = capture(
+      registerInboxCheck,
+      inboxClient({
+        fetchInbox: (async () => ({ messages, cursor: null })) as any,
+        markRead,
+      }),
+    );
+    const r = await handler({ unread_only: true, limit: 50 });
+    expect(text(r)).toContain('ℹ 70 older unread digested below and marked read');
+    expect(text(r)).not.toContain('older unread not shown');
+    expect(text(r)).toContain('— 70 older unread, now read (oldest first) —');
+    expect(text(r)).toContain('· nick [status_update] → @team: body of n0 (id=n0)');
+    expect(text(r)).not.toContain('Nothing was marked read');
+    // Everything was rendered in one form or the other, so the cursor goes to the newest.
+    expect(markRead).toHaveBeenCalledWith('n119');
+    expect((r as any).structuredContent.digested_unread).toHaveLength(70);
+    expect((r as any).structuredContent.elided_unread).toBe(0);
   });
 
   it('merges buffered + fetched, dedups by id, sorts by ts, and advances the cursor', async () => {
@@ -1205,12 +1344,14 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
       {
         joined: true,
         holdsSeat: true,
+        charter: 'Own the rails.',
         memory: { headline: 'mid-refactor', saved_at: Date.now() - 60_000, size_bytes: 7 },
       },
       config,
     );
     const out = text(await handler({}));
     expect(out).toContain('Already joined dawn as Ada');
+    expect(out).toContain('Your Team Role charter:\nOwn the rails.');
     expect(out).toContain('Saved memory from 1m ago: "mid-refactor"');
   });
 
@@ -1220,6 +1361,21 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
     const out = text(await handler({ as: 'Ada' }));
     expect(out).toContain('Joined dawn as Ada (claude-code)');
     expect(out).toContain('team_inbox_check');
+  });
+
+  it('surfaces the Team Role charter delivered by authenticated occupancy', async () => {
+    const cfg = { ...config, member: undefined };
+    const handler = capture(
+      registerJoin,
+      pendingClient(cfg, { charter: 'Own the rails. Ask before changing deployment.' } as never),
+      cfg,
+    );
+
+    const out = text(await handler({ as: 'Ada' }));
+
+    expect(out).toContain('Your Team Role charter:');
+    expect(out).toContain('Own the rails. Ask before changing deployment.');
+    expect(out).not.toContain('charter + the team working-loop are in AGENTS.md');
   });
 
   it('renders the saved-memory one-liner when the occupy delivered an envelope (ADR 093)', async () => {
@@ -1332,7 +1488,7 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
       detail: null,
       owner_seat: 'Ada',
       role: null,
-      surface_globs: [],
+      scope: [],
       depends_on: [],
       branch: null,
       goal_id: null,
@@ -1381,12 +1537,21 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
   });
 
   it('passes the merge attestation through as merged {pr, sha, authorized_by} (ADR 109)', async () => {
+    // Worker self-close. A counterpart omits these fields (ADR 305); the server ignores them if sent.
     const updateLane = vi.fn(async () => ({ lane: lane({ branch: 'feat/x' }), warnings: [] }));
-    const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);
-    await handlers['lane_resolve']!({ id: 'lane1', pr: 167, sha: 'abc123', authorized_by: 'nick' });
+    const handlers = captureAll(
+      (s: any, c: any) => registerLanes(s, c, async () => 'ancestor' as any),
+      { updateLane } as Partial<MusterdClient>,
+    );
+    await handlers['lane_resolve']!({
+      id: 'lane1',
+      pr: 167,
+      sha: 'abc123f',
+      authorized_by: 'nick',
+    });
     expect(updateLane).toHaveBeenCalledWith('lane1', {
       state: 'done',
-      merged: { pr: 167, sha: 'abc123', authorized_by: 'nick' },
+      merged: { pr: 167, sha: 'abc123f', authorized_by: 'nick', verification: 'ancestor' },
     });
   });
 
@@ -1395,6 +1560,80 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
     const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);
     await handlers['lane_resolve']!({ id: 'lane1' });
     expect(updateLane).toHaveBeenCalledWith('lane1', { state: 'done' });
+  });
+
+  /**
+   * The close nudge reports the RECORDED reason (ADR 283), not ownership.
+   *
+   * `lane_submit` already refuses to conflate the by-design exemption with the ADR 172
+   * degradation — "no ask by DESIGN ... and the wording must not conflate them". The resolve side
+   * fired on `owner_seat === member` alone, so an exempt lane was told "unconfirmed close
+   * recorded — prefer lane_submit" moments after submit told it "none is owed: lane_resolve when
+   * ready". Two calls, opposite instructions, over a close the ledger had already labelled
+   * `acceptance_exempt` — and it defeated the reason `close_records` is sent at submit at all:
+   * so the ledger label is never a surprise found afterwards.
+   */
+  it('names the exemption instead of calling a by-design close unconfirmed (ADR 234/283)', async () => {
+    const updateLane = vi.fn(async () => ({
+      lane: lane({ owner_seat: 'Ada' }),
+      warnings: [],
+      closed: { verified: false, reason: 'acceptance_exempt' as const },
+    }));
+    const handlers = captureAll(registerLanes, {
+      updateLane,
+      member: 'Ada',
+    } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).toContain('acceptance_exempt');
+    expect(out).toContain('no acceptance was owed');
+    // The degradation vocabulary must not appear: this close degraded nothing.
+    expect(out).not.toContain('unconfirmed');
+    expect(out).not.toContain('prefer lane_submit');
+  });
+
+  it('still nudges the owner on a self-close that WAS owed an acceptance', async () => {
+    const updateLane = vi.fn(async () => ({
+      lane: lane({ owner_seat: 'Ada' }),
+      warnings: [],
+      closed: { verified: false, reason: 'review_timeout' as const },
+    }));
+    const handlers = captureAll(registerLanes, {
+      updateLane,
+      member: 'Ada',
+    } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).toContain('unconfirmed close recorded');
+    expect(out).toContain('prefer lane_submit');
+  });
+
+  /**
+   * An older daemon sends no `closed` block. Abstaining would drop the ADR 192 nudge for every
+   * seat on a lagging daemon, so absence keeps the pre-existing ownership-based advice — the
+   * same "the fallback is the safe one" discipline the backstop field documents.
+   */
+  it('falls back to the ownership nudge when the daemon reports no close reason', async () => {
+    const updateLane = vi.fn(async () => ({ lane: lane({ owner_seat: 'Ada' }), warnings: [] }));
+    const handlers = captureAll(registerLanes, {
+      updateLane,
+      member: 'Ada',
+    } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).toContain('unconfirmed close recorded');
+  });
+
+  it('says nothing about acceptance when a counterpart closed the lane', async () => {
+    const updateLane = vi.fn(async () => ({
+      lane: lane({ owner_seat: 'Bo' }),
+      warnings: [],
+      closed: { verified: true, reason: 'counterpart_confirm' as const },
+    }));
+    const handlers = captureAll(registerLanes, {
+      updateLane,
+      member: 'Ada',
+    } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).not.toContain('unconfirmed');
+    expect(out).not.toContain('no acceptance was owed');
   });
 });
 
@@ -1408,7 +1647,7 @@ describe('value layer: goal outcome + review debt + claim-time linking', () => {
       detail: null,
       owner_seat: 'Ada',
       role: null,
-      surface_globs: [],
+      scope: [],
       depends_on: [],
       branch: null,
       goal_id: null,
@@ -1452,6 +1691,54 @@ describe('value layer: goal outcome + review debt + claim-time linking', () => {
     const handlers = captureAll(registerGoals, { goalOutcome } as Partial<MusterdClient>);
     const out = text(await handlers['team_goal_outcome']!({ goal_id: 'ghost', outcome: 'x' }));
     expect(out).toContain('queued');
+  });
+
+  it('team_goal_retract round-trips and renders the withdrawal', async () => {
+    const goalRetract = vi.fn(async () => ({
+      goal: {
+        id: 'g1',
+        title: 'G1',
+        wave: null,
+        depends_on: [],
+        declared_by: 'nick',
+        declared_at: 0,
+        status: 'planned',
+        epoch: 0,
+        retracted: { by: 'dolly', at: 5 },
+      },
+    }));
+    const { registerGoals } = await import('./goals.js');
+    const handlers = captureAll(registerGoals, { goalRetract } as Partial<MusterdClient>);
+    const out = text(await handlers['team_goal_retract']!({ goal_id: 'g1' }));
+    expect(goalRetract).toHaveBeenCalledWith({ goal_id: 'g1' });
+    expect(out).toContain('goal retracted');
+    expect(out).toContain('retracted by dolly');
+  });
+
+  it('team_goals hides retracted goals by default and counts them', async () => {
+    const base = {
+      title: 'T',
+      wave: null,
+      depends_on: [],
+      declared_by: 'nick',
+      declared_at: 0,
+      status: 'planned',
+      epoch: 0,
+    };
+    const goals = vi.fn(async () => ({
+      goals: [
+        { ...base, id: 'live' },
+        { ...base, id: 'gone', retracted: { by: 'dolly', at: 5 } },
+      ],
+    }));
+    const { registerGoals } = await import('./goals.js');
+    const handlers = captureAll(registerGoals, { goals } as Partial<MusterdClient>);
+    const out = text(await handlers['team_goals']!({}));
+    expect(out).toContain('live');
+    expect(out).not.toContain('gone [');
+    expect(out).toContain('1 retracted');
+    const all = text(await handlers['team_goals']!({ include_retracted: true }));
+    expect(all).toContain('gone');
   });
 
   it('lane_claim passes goal_id through to updateLane in the same call', async () => {
@@ -1498,5 +1785,200 @@ describe('value layer: goal outcome + review debt + claim-time linking', () => {
     // The owner is the field that reveals whose work this is — dropping it invited
     // silent self-acceptance whenever a stale brief still listed the reader's own lane.
     expect(out).toContain('owner=June');
+  });
+});
+
+describe('lane_submit merge verification (merge-verified submit)', () => {
+  const submittedLane: Lane = {
+    id: 'L1',
+    team: 'dawn',
+    project: 'default',
+    title: 't',
+    detail: null,
+    owner_seat: 'Ada',
+    role: null,
+    scope: [],
+    depends_on: [],
+    branch: null,
+    goal_id: null,
+    state: 'awaiting_acceptance',
+    created_by: 'Ada',
+    created_at: 0,
+    claimed_at: null,
+    resolved_at: null,
+    updated_at: 0,
+  };
+
+  function submitWith(tier: string) {
+    const updateLane = vi.fn(async () => ({ lane: submittedLane, warnings: [] }));
+    const handlers = captureAll((s: any, c: any) => registerLanes(s, c, async () => tier as any), {
+      updateLane,
+    } as Partial<MusterdClient>);
+    return { submit: handlers['lane_submit']!, updateLane };
+  }
+
+  it('refuses pr without sha — an open PR is not a landed artifact', async () => {
+    const { submit, updateLane } = submitWith('ancestor');
+    const out = text(await submit({ id: 'L1', pr: 42 }));
+    expect(out).toMatch(/open PR/i);
+    expect(out).toMatch(/arm auto-merge/i);
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('refuses a malformed sha before any lane mutation', async () => {
+    const { submit, updateLane } = submitWith('ancestor');
+    const out = text(await submit({ id: 'L1', sha: 'not-a-sha!' }));
+    expect(out).toMatch(/not a git SHA/i);
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('refuses not_ancestor with actionable guidance and no lane mutation', async () => {
+    const { submit, updateLane } = submitWith('not_ancestor');
+    const out = text(await submit({ id: 'L1', sha: 'abc123f' }));
+    expect(out).toContain('not on origin/main');
+    expect(out).toContain('arm auto-merge');
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('proceeds on ancestor and stamps the tier on the attestation', async () => {
+    const { submit, updateLane } = submitWith('ancestor');
+    await submit({ id: 'L1', pr: 42, sha: 'abc123f' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'awaiting_acceptance',
+      merged: { pr: 42, sha: 'abc123f', verification: 'ancestor' },
+    });
+  });
+
+  it('proceeds on fetch_failed (degrade, never wedge) with the tier recorded', async () => {
+    const { submit, updateLane } = submitWith('fetch_failed');
+    await submit({ id: 'L1', sha: 'abc123f' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'awaiting_acceptance',
+      merged: { sha: 'abc123f', verification: 'fetch_failed' },
+    });
+  });
+
+  it('artifact-less submit proceeds, stamped unattested', async () => {
+    const { submit, updateLane } = submitWith('unattested');
+    await submit({ id: 'L1' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'awaiting_acceptance',
+      merged: { verification: 'unattested' },
+    });
+  });
+});
+
+describe('lane_resolve merge verification (done means landed — the #997/#998 aliasing)', () => {
+  // lane_submit verified its attestation while lane_resolve — the worker self-close that writes
+  // the SAME merged object — verified nothing. Two lanes sat `done` for 3 days with open PRs
+  // while five seats cited the unmerged page. Resolve now runs the same checks as submit.
+  const doneLane: Lane = {
+    id: 'L1',
+    team: 'dawn',
+    project: 'default',
+    title: 't',
+    detail: null,
+    owner_seat: 'Ada',
+    role: null,
+    scope: [],
+    depends_on: [],
+    branch: null,
+    goal_id: null,
+    state: 'done',
+    created_by: 'Ada',
+    created_at: 0,
+    claimed_at: null,
+    resolved_at: null,
+    updated_at: 0,
+  };
+
+  function resolveWith(tier: string) {
+    const updateLane = vi.fn(async () => ({ lane: doneLane, warnings: [] }));
+    const handlers = captureAll((s: any, c: any) => registerLanes(s, c, async () => tier as any), {
+      updateLane,
+    } as Partial<MusterdClient>);
+    return { resolve: handlers['lane_resolve']!, updateLane };
+  }
+
+  it('refuses pr without sha — an open PR is not a landed artifact', async () => {
+    const { resolve, updateLane } = resolveWith('ancestor');
+    const out = text(await resolve({ id: 'L1', pr: 997 }));
+    expect(out).toMatch(/open PR/i);
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('refuses a malformed sha before any lane mutation', async () => {
+    const { resolve, updateLane } = resolveWith('ancestor');
+    const out = text(await resolve({ id: 'L1', sha: 'not-a-sha!' }));
+    expect(out).toMatch(/not a git SHA/i);
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('refuses not_ancestor — done with an unlanded attestation is the aliasing itself', async () => {
+    const { resolve, updateLane } = resolveWith('not_ancestor');
+    const out = text(await resolve({ id: 'L1', sha: 'abc123f' }));
+    expect(out).toContain('not on origin/main');
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('proceeds on ancestor and stamps the tier on the attestation', async () => {
+    const { resolve, updateLane } = resolveWith('ancestor');
+    await resolve({ id: 'L1', pr: 42, sha: 'abc123f' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'done',
+      merged: { pr: 42, sha: 'abc123f', verification: 'ancestor' },
+    });
+  });
+
+  it('proceeds on fetch_failed (degrade, never wedge) with the tier recorded', async () => {
+    const { resolve, updateLane } = resolveWith('fetch_failed');
+    await resolve({ id: 'L1', sha: 'abc123f' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'done',
+      merged: { sha: 'abc123f', verification: 'fetch_failed' },
+    });
+  });
+
+  it('an attestation-less resolve still sends no merged object (counterpart accepts, ADR 305)', async () => {
+    const { resolve, updateLane } = resolveWith('unattested');
+    await resolve({ id: 'L1' });
+    expect(updateLane).toHaveBeenCalledWith('L1', { state: 'done' });
+  });
+
+  it('an attestation without a sha is stamped unattested, same as submit', async () => {
+    const { resolve, updateLane } = resolveWith('ancestor');
+    await resolve({ id: 'L1', authorized_by: 'nick' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'done',
+      merged: { authorized_by: 'nick', verification: 'unattested' },
+    });
+  });
+});
+
+describe('team_availability — the MCP twin of `musterd availability` (surface survey #1245 item 6)', () => {
+  it('sets away with an until and names the roster it shows on', async () => {
+    const setAvailability = vi.fn(async () => ({ member: { name: 'Ada' } }));
+    const h = captureAll(registerAvailability, { setAvailability } as Partial<MusterdClient>);
+    const out = text(
+      await h['team_availability']!({ status: 'away', until: '2026-09-04T09:00:00Z' }),
+    );
+    expect(setAvailability).toHaveBeenCalledWith({
+      status: 'away',
+      until: Date.parse('2026-09-04T09:00:00Z'),
+    });
+    expect(out).toContain('availability set to away until 2026-09-04T09:00:00.000Z');
+    expect(out).toContain('team_status');
+  });
+
+  it('refuses `until` on anything but away, and an unparseable until, before any call', async () => {
+    const setAvailability = vi.fn();
+    const h = captureAll(registerAvailability, { setAvailability } as Partial<MusterdClient>);
+    expect(
+      text(await h['team_availability']!({ status: 'dnd', until: '2026-09-04T09:00:00Z' })),
+    ).toContain('only applies to `away`');
+    expect(text(await h['team_availability']!({ status: 'away', until: 'tomorrowish' }))).toContain(
+      'not a valid date',
+    );
+    expect(setAvailability).not.toHaveBeenCalled();
   });
 });

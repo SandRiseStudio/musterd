@@ -1,6 +1,6 @@
 # Membership, Identity, Seats & Presence — design proposal (v0.3 target)
 
-> **Status: SHIPPED (v0.3 P0–P3, ADRs 069–077).** This is the full **shared-teams governance** model (seats, agent key + grants, capabilities, request/approval lane, audit) — and it landed on `main`: seats/roles/capabilities (P0/P1), in-band enforcement + audit (P2, ADR 071), and the breaking agent-key + grant + credential cutover with the `claim` handshake and the request/approval lane (P3, ADR 077, 2026-06-30). Only P4 (credentialed remote join over the secured off-loopback bind) remains of the epic. The body below is the design as built; the historical v0.2 minimal down-payment (per-member tokens, explicit activation, single-active + grace) is in `docs/archive/membership-impl-plan.md` + ADR 007. Companion: `spec-v0.3-draft.md`, `security.md`, SPEC Appendix A.
+> **Status: SHIPPED (v0.3 P0–P3, ADRs 069–077).** This is the full **shared-teams governance** model (seats, agent key + grants, capabilities, request/approval lane, audit) — and it landed on `main`: seats/roles/capabilities (P0/P1), in-band enforcement + audit (P2, ADR 071), and the breaking agent-key + grant + credential cutover with the `claim` handshake and the request/approval lane (P3, ADR 077, 2026-06-30). Only P4 (credentialed remote join over the secured off-loopback bind) remains of the arc. The body below is the design as built; the historical v0.2 minimal down-payment (per-member tokens, explicit activation, single-active + grace) is in `docs/archive/membership-impl-plan.md` + ADR 007. Companion: `spec-v0.3-draft.md`, `security.md`, SPEC Appendix A.
 
 > **Living document.** Found an error or better approach? Record it in `docs/decisions/NNN-<slug>.md`, make the smallest correct change, update this doc in the same commit.
 
@@ -151,7 +151,7 @@ A Role is more than a label: it carries **capabilities** (what a seat may do) at
 - **Non-admin seats/agents see a projection** — their teammates' handles + presence + the acts addressed to them; **not** credentials, grants, audit, team policy, or other roles' charters.
 - The roster/info endpoints return a _viewer-scoped_ view; the server enforces it.
 
-> **Known gap (2026-07-02):** the **roster/capabilities** projection above is enforced; **message content is not yet scoped.** `GET /teams/:slug/messages` and the `team-all` firehose return every envelope on the team (incl. others' DMs), gated only on `can_observe` (default `true`) — not on recipient. So "the acts addressed to them" is aspirational for message content today. Recipient-scoped reads belong with the v0.3 Shared/remote-team hardening work and gate the derived insight layer (ADRs 048/050/084). See `security.md` § Capabilities & visibility for the full note.
+> **Shipped (ADR 128/136):** the server scopes `GET /teams/:slug/messages` and the `team-all` firehose to a regular Member's sent, received, and Team-broadcast Acts. Admins and full-grade observers retain full visibility; a public watch-link observer receives Team-broadcast traffic only. Watch links remain identified observers rather than anonymous access: roster handles and Presence remain visible. See `security.md` § Capabilities & visibility for the full policy.
 
 **Enforce vs declare (keeps Principle 4 intact):**
 

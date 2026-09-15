@@ -1,10 +1,18 @@
-import { compareGoals, isAwaitingAcceptance, type Lane, type NextBrief } from '@musterd/protocol';
+import {
+  compareGoals,
+  isAwaitingAcceptance,
+  type Lane,
+  type NextBrief,
+  type NextSummary,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { handoffNamedLaneOutOfPlay, handoffNamesNoLane } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
 import { incidentPolicy, openIncidents } from './incidents.js';
 import { acceptanceEnteredAt, listLanes, readyForReviewHadNoCandidate } from './lanes.js';
 import { getMemberByRole } from './members.js';
+import { annotateClose, closeVerdicts } from './review.js';
+import { openSeedsForBrief } from './seeds.js';
 
 /**
  * The orientation brief (ADR 049), computed server-side so CLI + MCP render one projection (ADR 084 —
@@ -79,6 +87,48 @@ interface HandoffRow {
   ts: number;
 }
 
+/**
+ * The brief's three per-turn numbers from three bounded queries (lane 01M2GTB0RA). Must agree with
+ * `deriveNext` on the same db — pinned by orientation.test.ts — without listing every lane, reading
+ * every close verdict, scanning handoffs, or deriving goals, which is what the brief does and what
+ * nine sessions were paying for on every turn.
+ */
+export function deriveNextSummary(
+  db: Database,
+  teamId: string,
+  _teamSlug: string,
+  member: string,
+): NextSummary {
+  const carrying = db
+    .prepare<[string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM lanes
+        WHERE team_id = ? AND owner_seat = ?
+          AND state IN ('claimed', 'active', 'blocked', 'awaiting_acceptance', 'ready_for_review')`,
+    )
+    .get(teamId, member)!.n;
+  const incidents = db
+    .prepare<[string], { id: string }>(
+      `SELECT id FROM lanes WHERE team_id = ? AND kind = 'incident'
+          AND state NOT IN ('done', 'abandoned') ORDER BY created_at`,
+    )
+    .all(teamId)
+    .map((r) => r.id);
+  const owed = db
+    .prepare<[string, string, string], { lane: string; ts: number }>(
+      `SELECT l.id AS lane, m.ts AS ts
+         FROM messages m
+         JOIN members mt ON mt.id = m.to_member
+         JOIN lanes l ON l.team_id = m.team_id
+                     AND l.id = json_extract(m.meta, '$.lane_review.lane')
+        WHERE m.team_id = ? AND m.act = 'ask' AND mt.name = ?
+          AND l.state IN ('awaiting_acceptance', 'ready_for_review')
+          AND (l.owner_seat IS NULL OR l.owner_seat != ?)
+        ORDER BY m.ts ASC, m.id ASC`,
+    )
+    .all(teamId, member, member);
+  return { member, carrying, incidents, owed };
+}
+
 export function deriveNext(
   db: Database,
   teamId: string,
@@ -86,23 +136,51 @@ export function deriveNext(
   member: string,
   shippedLimit = 3,
   upNextLimit = 5,
-  opts: { now?: number } = {},
+  opts: { now?: number; upNextSeedLimit?: number } = {},
 ): NextBrief {
   const now = opts.now ?? Date.now();
   const all = listLanes(db, teamId, teamSlug);
   const mine = all.filter((l) => l.owner_seat === member);
 
   const in_flight = mine.filter((l) => LIVE.has(l.state));
+  // ADR 169/192: annotate what just landed with the DERIVED verified-ness of its close, exactly as
+  // the `/lanes` endpoint already does (http.ts) — which is why the web board has rendered
+  // accepted/unconfirmed chips since ADR 169 while this brief said only `✓`.
+  //
+  // That asymmetry is the defect: humans saw the distinction on the board and agents did not see it
+  // anywhere, and the brief is the one place a seat reads what just landed. Lane 01M016D5GA — 44
+  // files joining typecheck, every CI-deciding gate among them — was swept unreviewed at 24h and
+  // listed here indistinguishable from a peer-accepted lane.
+  //
+  // Absent stays absent: a close that recorded no verdict (pre-ADR-169) is left un-annotated rather
+  // than defaulted to `false`. "We do not know" and "nobody confirmed it" are different claims.
+  //
+  // ADR 283 adds the other half of that sentence — WHY an unaccepted close was unaccepted. The two
+  // readings of `unconfirmed` send a seat in opposite directions: `review_timeout` means go chase
+  // the person who was asked, `no_candidate` means nobody was ever asked and the roster is the
+  // thing to look at. Same audit row, same abstain-by-absence rule, one more field.
+  const verdicts = closeVerdicts(db, teamId);
   const shipped = mine
     .filter((l) => l.state === 'done')
     .sort((a, b) => (b.resolved_at ?? b.updated_at) - (a.resolved_at ?? a.updated_at))
-    .slice(0, shippedLimit);
+    .slice(0, shippedLimit)
+    .map((l) => annotateClose(l, verdicts.get(l.id)));
   const up_next: Lane[] = all
     .filter((l) => l.state === 'open')
     .sort((a, b) => a.created_at - b.created_at)
     // goals-front-door design: goal-attached lanes served first (stable within each group).
     .sort((a, b) => Number(b.goal_id !== null) - Number(a.goal_id !== null))
     .slice(0, upNextLimit);
+
+  // ADR 373 increment 4: recorded intentions nobody started, above the open lanes. Fewer than the
+  // lanes on purpose — the tray held 31 open Seeds the day this shipped, and a brief that leads with
+  // 31 of anything is a brief nobody reads to the end. The total rides along so the window does not
+  // read as the whole tray.
+  const { seeds: up_next_seeds, total: up_next_seeds_total } = openSeedsForBrief(
+    db,
+    teamId,
+    opts.upNextSeedLimit ?? 3,
+  );
 
   // Owed reviews (ADR 233): lanes still in the acceptance stage whose review ask came to ME.
   //
@@ -221,6 +299,10 @@ export function deriveNext(
     // all three on an all-claude roster. Reporting it does not change the routing doctrine — it
     // stops the silence from reading as health.
     no_candidate: readyForReviewHadNoCandidate(db, teamId, lane.id),
+    // Merge-verified submit: an attestation without a SHA means nothing landed — the wait is
+    // on the author's merge, not a reviewer. New submits can't reach this state (refused
+    // seat-side); this badge covers grandfathered lanes and older clients.
+    unlanded: lane.merged?.sha === undefined,
   }));
   // The TOTAL, not the shown count. A cap with no total is a queue that looks as deep as its
   // window: clear the three on offer and the next three appear, with nothing having said they were
@@ -258,6 +340,8 @@ export function deriveNext(
     in_flight,
     shipped,
     up_next,
+    up_next_seeds,
+    up_next_seeds_total,
     owed_reviews,
     review_debt_total,
     why,

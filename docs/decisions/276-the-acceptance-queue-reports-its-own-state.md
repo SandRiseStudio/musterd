@@ -100,10 +100,32 @@ reconstructible from message rows alone. That proxy can call an ask open that wa
 way (a `resolve`, a lane closed directly), so 32 is an upper bound. The unfiltered count is 35; the
 direction and the spread across seats do not depend on which of the two you take.
 
-**Eval.** Re-run that query after 30 days. **PASS: zero new rows.** **FAIL: any new row**, which
-would mean the guard is reachable around some path this decision did not consider. Separately,
-count `review_debt` entries carrying `no_candidate: true` — a sustained nonzero share is evidence
-about the monoculture, and it is the number the ADR 260 concentration work should read next.
+**Eval.** ~~Re-run that query after 30 days.~~ **AMENDED 2026-08-16 — read it at 50 threaded
+accepts of exposure, not on a date** (see below). **PASS: zero new rows.** **FAIL: any new row**,
+which would mean the guard is reachable around some path this decision did not consider.
+Separately, count `review_debt` entries carrying `no_candidate: true` — a sustained nonzero share is
+evidence about the monoculture, and it is the number the ADR 260 concentration work should read next.
+
+> **Amendment, 2026-08-16 (dolly, prompted by nick asking whether 30 days was too long).**
+>
+> It was, and the original unit was wrong besides. This Eval is a binary "did the guard hold", and
+> what it needs is not elapsed time but **exposure** — un-threaded accepts actually sent.
+>
+> Measured on the live ledger the day this landed: **174 accepts in 30d, 75 in the last 7d
+> (~10.7/day)**. The pre-fix mis-binding rate was **32/280 = 11.4%**, so at that volume roughly
+> **one mis-bound accept per day** would be expected if the guard failed. Fifty accepts of exposure
+> — about **5 days** at the current rate — already represents ~6 expected-and-absent failures. That
+> is decisive for a binary; thirty days buys confidence nobody needs and delays a signal worth
+> having early.
+>
+> **The trigger is now 50 threaded accepts, and the report must state the exposure count it read
+> at.** A PASS with the exposure unstated is not a result: "zero mis-bound rows" is trivially true
+> over a window where nobody accepted anything, and on this team a quiet week is a real possibility
+> (accept volume swings from 5.8/day averaged over 30d to 10.7/day over the last 7).
+>
+> The general point, which applies past this ADR: a date-triggered Eval on a bursty team fires when
+> the calendar says so, sometimes with almost no data, and reports INCONCLUSIVE — which reads
+> identically to the instrument not existing. Keying on sample count self-adjusts to activity.
 
 **Experiment.** The falsifier that drove the build: with a lane acceptance open and a plain ask
 newer, an un-threaded `accept` must refuse and name the lane ask. Verified failing against the

@@ -65,10 +65,10 @@ describe('ResolvedSessionSchema (ADR 034 live-claim channel)', () => {
 describe('BindingSchema (P3 v0.3, ADR 075) — agent_key + claim policy, no member/token', () => {
   it('auto-claims when agent_key + a seat policy are present', () => {
     const b = BindingSchema.parse({
+      version: 2,
       server: 'http://localhost:4849',
       team: 'dawn',
       agent_key: 'mskey_x',
-      surface: 'cli',
       claim: { mode: 'seat', name: 'Ada' },
     });
     expect(autoClaims(b)).toBe(true);
@@ -76,10 +76,10 @@ describe('BindingSchema (P3 v0.3, ADR 075) — agent_key + claim policy, no memb
 
   it('auto-claims a role-pool policy (role is non-chat)', () => {
     const b = BindingSchema.parse({
+      version: 2,
       server: 'http://localhost:4849',
       team: 'dawn',
       agent_key: 'mskey_x',
-      surface: 'claude-code',
       claim: { mode: 'role', role: 'backend' },
     });
     expect(autoClaims(b)).toBe(true);
@@ -88,10 +88,10 @@ describe('BindingSchema (P3 v0.3, ADR 075) — agent_key + claim policy, no memb
 
   it('does NOT auto-claim a chat policy (assign-in-chat)', () => {
     const b = BindingSchema.parse({
+      version: 2,
       server: 'http://localhost:4849',
       team: 'dawn',
       agent_key: 'mskey_x',
-      surface: 'cli',
       claim: { mode: 'chat' },
     });
     expect(autoClaims(b)).toBe(false);
@@ -99,9 +99,9 @@ describe('BindingSchema (P3 v0.3, ADR 075) — agent_key + claim policy, no memb
 
   it('does NOT auto-claim without an agent_key (human/chat folder)', () => {
     const b = BindingSchema.parse({
+      version: 2,
       server: 'http://localhost:4849',
       team: 'dawn',
-      surface: 'web',
       claim: { mode: 'seat', name: 'Ada' },
     });
     expect(autoClaims(b)).toBe(false);
@@ -109,10 +109,10 @@ describe('BindingSchema (P3 v0.3, ADR 075) — agent_key + claim policy, no memb
 
   it('does NOT auto-claim without a claim policy', () => {
     const b = BindingSchema.parse({
+      version: 2,
       server: 'http://localhost:4849',
       team: 'dawn',
       agent_key: 'mskey_x',
-      surface: 'cli',
     });
     expect(autoClaims(b)).toBe(false);
   });

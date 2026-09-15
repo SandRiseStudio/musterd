@@ -40,13 +40,13 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set<string>([
   'team_memory_save',
   'team_goal_declare',
   'team_goal_outcome',
+  'team_seed_update',
   'lane_open',
   'lane_claim',
   'lane_release',
   'lane_handoff',
   'lane_update',
   'lane_submit',
-  'lane_ready',
   'lane_resolve',
 ]);
 

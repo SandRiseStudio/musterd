@@ -75,6 +75,23 @@ describe('buildClaimFrame (SPEC A.3, ADR 078)', () => {
     });
     expect(bare.build).toBeUndefined();
   });
+  it('carries provenance when supplied (ADR 131 §6), omits it otherwise', () => {
+    const f = buildClaimFrame({
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'cli',
+      provenance: 'wake',
+    });
+    expect(f.provenance).toBe('wake');
+    const bare = buildClaimFrame({
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(bare.provenance).toBeUndefined();
+  });
   it('throws on a bad target shape', () => {
     expect(() =>
       buildClaimFrame({

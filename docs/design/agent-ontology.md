@@ -77,6 +77,16 @@ identity is only as trustworthy as one process's filesystem. musterd's position:
 the team layer; harnesses borrow it.** A seat can be animated by Claude Code today, Codex tomorrow, and
 audited the same way both days.
 
+**Update 2026-08-24 — the counter-position went first-party.** The harness-owned-identity bet is now
+the *labs'* bet, productized: Anthropic Claude Managed Agents (public beta 2026-04), LangChain Managed
+Deep Agents (public beta 2026-08-12), and Grok Bot (out of beta 2026-08, a persistent cloud computer
+per agent) all ship durable, named, hosted agents — with identity bound to the platform's runtime and
+the operator's account (landscape.md §13b). This strengthens rather than weakens the doctrine: durable
+agent identity is now a mainstream product primitive, and every mainstream version binds it to one
+runtime inside one owner's walls. The differentiating claim is unchanged and now easier to state —
+*their* agent is durable within the platform; *our* seat is durable across platforms, because the team
+layer owns it.
+
 ---
 
 ## 3. The eighth concern
@@ -104,6 +114,7 @@ harness currently animating the seat:
 | **turn-scoped** | Claude Code CLI/extension, Cursor, Pi | needs machinery: `inbox --wait` (idle), background-wait, external resume | tool-boundary hooks (the interrupt line) |
 | **resident** | OpenClaw, Hermes, musterd's own daemon | solved by architecture — a gateway is always listening and invokes the model on events | **not solved**: runs are serialized per session, so a steer *queues* behind the in-flight run — deafness becomes queue latency |
 | **scheduled** | heartbeat/cron, Claude Code routines | latency = time to next tick | same as turn-scoped once running |
+| **hosted-resident** *(added 2026-08-24)* | Claude Managed Agents, LangChain Managed Deep Agents, Grok Bot | solved by the platform — the vendor's infra holds state and invokes on API/channel events | same shape as resident: platform serializes runs per agent/session; a steer queues |
 
 Two consequences:
 
@@ -142,6 +153,15 @@ Record the model per seat on the roster; let the report engine flag same-model r
 approval chain was Opus end-to-end — treat agreement as weak evidence"). Research track (ADR 056):
 measure agreement correlation between same-model vs cross-model reviewer pairs on real coordination
 traces — a dataset nobody else has.
+
+**Corroborated first-party, 2026-08-24:** Anthropic's Frontier Red Team reached the same conclusion
+experimentally — ["Patterns and problems in multiagent systems"](https://www.anthropic.com/research/multiagent-systems)
+(2026-08-13) reports individual agents are *"low variance"* and produce **correlated failures** in
+identical contexts (18/30 agents independently choosing the same git branch name; simultaneous
+defection in social-dilemma games), plus consensus-preserving dismissal of private dissenting
+information. The doctrinal statement of this thesis, with falsifiers, belongs to the diversity-charter
+ADR (in flight as of this note); this section records only that the monoculture claim now has a
+first-party experimental citation.
 
 ---
 

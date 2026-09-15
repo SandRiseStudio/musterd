@@ -86,6 +86,23 @@ describe('EnvelopeSchema', () => {
     expect(makeEnvelope({ ...base, act: 'message' }).meta).toBeNull();
   });
 
+  it('meta.confidence is an optional probability in (0, 1] on any act (ADR 294 decision 5)', () => {
+    const ok = makeEnvelope({ ...base, act: 'status_update', meta: { confidence: 0.8 } });
+    expect(ok.meta).toMatchObject({ confidence: 0.8 });
+    expect(
+      makeEnvelope({ ...base, act: 'accept', meta: { in_reply_to: 'm', confidence: 1 } }).meta,
+    ).toMatchObject({ confidence: 1 });
+    // Absent is absent — never coerced to 1.0, never required. Omission must not be the cheapest hedge.
+    expect(makeEnvelope({ ...base, act: 'status_update' }).meta).toBeNull();
+    // Malformed values are refused rather than silently carried into the ledger.
+    for (const bad of [0, -0.1, 1.01, 2, NaN, '0.8', 'high', true, null]) {
+      expect(
+        () => makeEnvelope({ ...base, act: 'status_update', meta: { confidence: bad } }),
+        String(bad),
+      ).toThrow(/meta\.confidence/);
+    }
+  });
+
   it('round-trips the steering acts steer/challenge (ADR 103)', () => {
     expect(makeEnvelope({ ...base, act: 'steer', body: 'use v2' }).act).toBe('steer');
     expect(makeEnvelope({ ...base, act: 'challenge', body: 'why this task?' }).act).toBe(
@@ -348,5 +365,50 @@ describe('meta.eligible (the eligible set)', () => {
 
   it('ELIGIBLE_ACTS is exactly the three question-shaped acts', () => {
     expect([...ELIGIBLE_ACTS].sort()).toEqual(['challenge', 'message', 'request_help']);
+  });
+});
+
+describe('insight act meta rules (ADR 327)', () => {
+  const insight = (meta: Record<string, unknown>, body = 'the daemon crashloops from node 20') =>
+    EnvelopeSchema.safeParse({
+      ...base,
+      v: PROTOCOL_VERSION,
+      act: 'insight',
+      to: { kind: 'team' },
+      body,
+      meta,
+    });
+
+  it('accepts a well-formed insight', () => {
+    expect(
+      insight({
+        headline: 'daemon install needs node >= 22',
+        tags: ['daemon', 'node'],
+        repo: 'musterd',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('requires meta.headline', () => {
+    expect(insight({}).success).toBe(false);
+    expect(insight({ headline: '' }).success).toBe(false);
+    expect(insight({ headline: 'x'.repeat(121) }).success).toBe(false);
+  });
+
+  it('caps headline at 120 chars exactly', () => {
+    expect(insight({ headline: 'x'.repeat(120) }).success).toBe(true);
+  });
+
+  it('rejects more than 8 tags or a non-string tag', () => {
+    expect(
+      insight({ headline: 'h', tags: Array.from({ length: 9 }, (_, i) => `t${i}`) }).success,
+    ).toBe(false);
+    expect(insight({ headline: 'h', tags: ['ok', 3] }).success).toBe(false);
+    expect(insight({ headline: 'h', tags: [] }).success).toBe(true);
+  });
+
+  it('rejects an empty meta.repo when present, accepts a slug', () => {
+    expect(insight({ headline: 'h', repo: '' }).success).toBe(false);
+    expect(insight({ headline: 'h', repo: 'musterd' }).success).toBe(true);
   });
 });

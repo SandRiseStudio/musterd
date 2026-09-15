@@ -1,8 +1,11 @@
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import viteReact from '@vitejs/plugin-react';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+
+import { blogEntries, siteFiles } from './scripts/site-files.ts';
 
 // In dev, the /live dashboard talks to the daemon same-origin and Vite proxies the daemon paths
 // (/teams, /ws, /health) to it — set MUSTERD_DAEMON to point at a daemon (default :4849). We strip
@@ -20,12 +23,57 @@ const stripOrigin = (proxy: any) => {
 };
 const proxyEntry = { target: daemon, changeOrigin: true, configure: stripOrigin };
 
+/** One id for one build: the checkout's sha (what the /live publisher stamps as `.published-sha`),
+ * or a timestamp outside a checkout. Baked into the bundle as `__WEB_BUILD__` AND written to
+ * `build.json` beside index.html — buildSync.ts compares the two so a long-lived page (the broadcast
+ * machine's Chrome above all) reloads itself once onto the build the daemon serves. */
+function buildId(): string {
+  const r = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
+  const sha = r.status === 0 ? r.stdout.trim() : '';
+  // Outside a checkout the timestamp still changes every build, which is all convergence needs.
+  return /^[0-9a-f]{40}$/.test(sha) ? sha : `t${Date.now().toString(36)}`;
+}
+
+/**
+ * Emit the crawler- and agent-facing text files (robots.txt, sitemap.xml, llms.txt, _headers) into
+ * the build. They are generated rather than checked into a `public/` folder because the URL set is
+ * derived from DOCS_MANIFEST and the blog filenames — see scripts/site-files.ts for why that
+ * matters. `stage-allowlist.mjs` decides they may ship; this only puts them in the build.
+ */
+function siteTextFiles(): Plugin {
+  return {
+    name: 'musterd-site-files',
+    apply: 'build',
+    generateBundle() {
+      for (const [fileName, source] of Object.entries(siteFiles())) {
+        this.emitFile({ type: 'asset', fileName, source });
+      }
+    },
+  };
+}
+
+/** Emit `build.json` into every build output; only the client dist (the published web-root) is read. */
+function buildStamp(id: string): Plugin {
+  return {
+    name: 'musterd-build-stamp',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'build.json', source: `{"build":"${id}"}\n` });
+    },
+  };
+}
+
 // The roadmap page is content, not an app: we prerender `/` to static HTML so the
 // build output can be served by any static host (and, later, by @musterd/server).
 // TanStack Start stays underneath so the future stateful dashboard adds routes without a
 // framework change. This Start version doesn't inject a React plugin, so we add @vitejs/plugin-react
 // ourselves (required for the dev-mode React Refresh runtime).
-export default defineConfig(({ command }) => ({
+export default defineConfig(({ command }) => {
+  // One id per `vite build` invocation, shared by the bundle define and the emitted build.json —
+  // dev deliberately gets neither, so buildSync stays inert there.
+  const id = command === 'build' ? buildId() : null;
+  return {
+  ...(id ? { define: { __WEB_BUILD__: JSON.stringify(id) } } : {}),
   // `vite dev` evaluates modules instead of bundling them, so @musterd/protocol's barrel drags
   // enforcement.ts — and its `node:crypto` import — into the browser, where Vite's externalized
   // stub throws on first access and takes /live down into its error boundary. The production build
@@ -66,8 +114,20 @@ export default defineConfig(({ command }) => ({
       // Three retries a second apart absorb a busy machine; a page that fails four times is a real
       // bug and still fails the build (failOnError stays default-true).
       prerender: { enabled: true, crawlLinks: true, retryCount: 3, retryDelay: 1000 },
-      pages: [{ path: '/' }],
+      // The ADR 302 public set's static roots; the slug pages (/docs/<slug>, /blog/<slug>) are
+      // discovered by crawlLinks from exactly the index pages' <a> lists. /blog is a root only
+      // while a post exists — with none, the section is not prerendered at all, so it 404s rather
+      // than serving an empty index that the nav and sitemap have already stopped pointing at.
+      pages: [
+        { path: '/' },
+        { path: '/roadmap' },
+        { path: '/docs' },
+        ...(blogEntries().length > 0 ? [{ path: '/blog' }] : []),
+      ],
     }),
     viteReact(),
+    ...(id ? [buildStamp(id)] : []),
+    siteTextFiles(),
   ],
-}));
+  };
+});

@@ -7,7 +7,7 @@ import { openDb } from '../db/open.js';
 import { appendAudit, listAudit } from '../store/audit.js';
 import { addMember } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
-import { attach, release } from '../store/presence.js';
+import { attach, presenceById, release } from '../store/presence.js';
 import { createRequest } from '../store/requests.js';
 import {
   HOST_SUSPEND_GAP_MS,
@@ -63,12 +63,66 @@ describe('startReaper', () => {
     const broadcast = vi.spyOn(hub, 'broadcastTeam');
 
     stop = startReaper(ctx);
+    // A freshly started loop has not heard a full timeout window yet, so it judges nobody: before
+    // this, a daemon bounce reaped every presence on its first tick and every session lease with it
+    // (lane 01M1HNY302). The row survives until the loop has actually been listening that long.
     vi.advanceTimersByTime(config.reaperIntervalMs);
+    expect(broadcast).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(config.presenceTimeoutMs);
 
     expect(broadcast).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({ type: 'presence', member: 'Ada', status: 'offline' }),
     );
+  });
+
+  it('a stall as long as the timeout restarts the listening window — a row is not reaped on the tick that notices the gap', () => {
+    const broadcast = vi.spyOn(hub, 'broadcastTeam');
+
+    stop = startReaper(ctx);
+    // Run continuously long enough that the loop is entitled to judge, then take a live seat.
+    vi.advanceTimersByTime(config.presenceTimeoutMs + config.reaperIntervalMs);
+    const { presenceId } = seatWithPresence('Cy');
+
+    // The process stalls (a suspend, a blocked event loop): the clock moves, no tick runs, and no
+    // heartbeat could have been heard either. The row goes stale purely because nobody was there.
+    vi.setSystemTime(Date.now() + config.presenceTimeoutMs * 4);
+    vi.advanceTimersByTime(config.reaperIntervalMs);
+    expect(broadcast).not.toHaveBeenCalled();
+    expect(presenceById(db, presenceId)).toBeDefined();
+
+    // Given a full window with the loop actually running and still no heartbeat, it is silent.
+    vi.advanceTimersByTime(config.presenceTimeoutMs);
+    expect(broadcast).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ type: 'presence', member: 'Cy', status: 'offline' }),
+    );
+  });
+
+  it('a tick that itself blocks past the timeout reaps nothing — the guard and the cutoff run on the clock the tick started with', () => {
+    const broadcast = vi.spyOn(hub, 'broadcastTeam');
+
+    stop = startReaper(ctx);
+    vi.advanceTimersByTime(config.presenceTimeoutMs + config.reaperIntervalMs);
+    const { presenceId } = seatWithPresence('Di');
+
+    // The next tick starts on time and then blocks inside its own body for longer than the timeout
+    // (a wedged daemon straight after a host resume — measured 2026-09-14 15:57:46Z, one tick of
+    // ~104s that reaped ghost, wanderer and dolly 51s in while their sockets were open). Every
+    // Date.now() after the tick's first read returns a clock past the timeout; the seat's
+    // heartbeat is in the socket buffer, unreadable until the tick returns.
+    const faked = Date.now;
+    let reads = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => {
+      reads += 1;
+      return reads === 1 ? faked() : faked() + config.presenceTimeoutMs + 1;
+    });
+    vi.advanceTimersByTime(config.reaperIntervalMs);
+    vi.restoreAllMocks();
+
+    expect(broadcast).not.toHaveBeenCalled();
+    expect(presenceById(db, presenceId)).toBeDefined();
   });
 
   it('does not broadcast offline when only a grace-held row expires', () => {

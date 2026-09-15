@@ -9,6 +9,14 @@ import {
   shortWorkTitle,
 } from './presenceLabel';
 
+describe('shortSurface — first-class harnesses keep their own name', () => {
+  it('names grok as grok, not grok-cli and not the model family crumb', () => {
+    expect(shortSurface('grok')).toBe('grok');
+    expect(shortSurface('claude-code')).toBe('claude code');
+    expect(shortSurface('opencode')).toBe('opencode');
+  });
+});
+
 describe('shortModel — the Claude families', () => {
   it('names every Claude family with its version, Fable included', () => {
     expect(shortModel('claude-opus-5')).toBe('opus 5');
@@ -24,6 +32,13 @@ describe('shortModel — the Claude families', () => {
       expect(shortModel(id)).not.toContain('claude');
       expect(shortModel(id)).toMatch(/\d/);
     }
+  });
+
+  it('keeps the muse-spark version crumb (ghost plate defect)', () => {
+    // The fallback kept "muse spark" and dropped the rev, so 1.2 and 1.3 read identically.
+    expect(shortModel('muse-spark-1.3-contributor-free')).toBe('muse spark 1.3');
+    expect(shortModel('muse-spark-1.2-contributor-free')).toBe('muse spark 1.2');
+    expect(plateModel('muse-spark-1.3-contributor-free')).toBe('muse spark 1.3');
   });
 });
 

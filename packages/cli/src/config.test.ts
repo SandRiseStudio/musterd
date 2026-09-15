@@ -8,12 +8,17 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   excludeCredentialFromGit,
+  findBinding,
+  findWorkspaceSpec,
+  loadBinding,
   loadConfig,
+  loadWorkspace,
   rememberIdentity,
   removeBinding,
+  requireUsableBinding,
   saveBinding,
   saveConfig,
   type Config,
@@ -32,10 +37,10 @@ describe('binding registry (ADR 020)', () => {
   });
 
   const binding = {
+    version: 2 as const,
     server: 'http://localhost:4849',
     team: 'dawn',
     agent_key: 'mskey_secret',
-    surface: 'claude-code' as const,
     claim: { mode: 'seat' as const, name: 'Ada' },
   };
 
@@ -43,7 +48,7 @@ describe('binding registry (ADR 020)', () => {
     saveBinding(dir, binding);
     const cfg = loadConfig();
     const ref = cfg.bindings[resolve(dir)];
-    expect(ref).toEqual({ team: 'dawn', seat: 'Ada', surface: 'claude-code' });
+    expect(ref).toEqual({ team: 'dawn', seat: 'Ada' });
     // The registry must never carry the agent key — secrets live only in the 0600 binding file.
     expect(JSON.stringify(cfg.bindings)).not.toContain('mskey_secret');
   });
@@ -238,9 +243,9 @@ describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
   afterEach(() => delete process.env['MUSTERD_CONFIG']);
 
   const base = {
+    version: 2 as const,
     server: 'http://s1',
     team: 'dawn',
-    surface: 'claude-code' as const,
     claim: { mode: 'seat' as const, name: 'scout' },
     agent_key: 'mskey_1',
   };
@@ -266,6 +271,21 @@ describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
     const newer = { ...capture, id: 'sid-2' };
     saveBinding(dir, { ...base, session: newer });
     expect(onDisk()['session']).toEqual(newer);
+  });
+
+  it('a credential-less write preserves the claimed seat credential', () => {
+    saveBinding(dir, { ...base, seat_credential: 'msac_kept' });
+    saveBinding(dir, { ...base, model: 'claude-test-1' });
+    expect(onDisk()['seat_credential']).toBe('msac_kept');
+  });
+
+  it('does not carry a credential to a different claimed seat', () => {
+    saveBinding(dir, { ...base, seat_credential: 'msac_scout' });
+    saveBinding(dir, {
+      ...base,
+      claim: { mode: 'seat', name: 'nick' },
+    });
+    expect(onDisk()['seat_credential']).toBeUndefined();
   });
 
   it('an observation-less write preserves the on-disk model observation', () => {
@@ -301,6 +321,29 @@ describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
     // And a later omit still must not invent an observation that is gone.
     saveBinding(dir, { ...base });
     expect(onDisk()['model_observed']).toBeUndefined();
+  });
+
+  it('a host_key-less write preserves the actuator credential (ADR 395)', () => {
+    // Finding 14: occupy / wire / persistBinding rebuild the binding without host_key. If the
+    // merge-guard does not restore it, the next wake poll 401s with a claim-scoped agent_key.
+    saveBinding(dir, { ...base, host_key: 'mskey_host' });
+    saveBinding(dir, { ...base, agent_key: 'mskey_claim_seat' });
+    expect(onDisk()['host_key']).toBe('mskey_host');
+    expect(onDisk()['agent_key']).toBe('mskey_claim_seat');
+  });
+
+  it('an explicit host_key on the argument wins over the on-disk one', () => {
+    saveBinding(dir, { ...base, host_key: 'mskey_host_old' });
+    saveBinding(dir, { ...base, host_key: 'mskey_host_new' });
+    expect(onDisk()['host_key']).toBe('mskey_host_new');
+  });
+
+  it('an explicit drop clears the on-disk host_key (residency off)', () => {
+    saveBinding(dir, { ...base, host_key: 'mskey_host' });
+    saveBinding(dir, { ...base }, { drop: { host_key: true } });
+    expect(onDisk()['host_key']).toBeUndefined();
+    saveBinding(dir, { ...base });
+    expect(onDisk()['host_key']).toBeUndefined();
   });
 
   it('leaves no tmp file behind (atomic rename)', () => {
@@ -436,5 +479,201 @@ describe('excludeCredentialFromGit — a team home is never committable with its
     } finally {
       chmodSync(readonly, 0o700);
     }
+  });
+});
+
+/**
+ * The discriminated identity loaders (ADR 282): parse failures never collapse to `null` again.
+ * `legacy` is exactly the recognized version-1 shape (otherwise-valid, carrying `surface`, no
+ * `version`); everything else unparseable is `invalid`. The compat wrappers (`findBinding`,
+ * `findWorkspaceSpec`) keep mapping `missing` → null but THROW a repair diagnostic on both
+ * `legacy` and `invalid` — a broken or pre-281 workspace must say so, not go quiet (#508).
+ */
+describe('classified identity loads (ADR 281/282)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-load-'));
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+  });
+  afterEach(() => delete process.env['MUSTERD_CONFIG']);
+
+  const v2spec = {
+    version: 2,
+    server: 'http://localhost:4849',
+    team: 'dawn',
+    claim: { mode: 'seat', name: 'Ada' },
+  };
+  const v1spec = {
+    server: 'http://localhost:4849',
+    team: 'dawn',
+    surface: 'claude-code',
+    claim: { mode: 'seat', name: 'Ada' },
+  };
+  const writeSpec = (value: unknown) => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'workspace.json'),
+      typeof value === 'string' ? value : JSON.stringify(value),
+    );
+  };
+  const writeBindingFile = (value: unknown) => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      typeof value === 'string' ? value : JSON.stringify(value),
+    );
+  };
+
+  it('absent → missing', () => {
+    expect(loadWorkspace(dir).kind).toBe('missing');
+    expect(loadBinding(dir).kind).toBe('missing');
+  });
+
+  it('current valid version → valid', () => {
+    writeSpec(v2spec);
+    writeBindingFile({ ...v2spec, agent_key: 'mskey_x' });
+    const spec = loadWorkspace(dir);
+    expect(spec.kind).toBe('valid');
+    const binding = loadBinding(dir);
+    expect(binding.kind).toBe('valid');
+    if (binding.kind === 'valid') expect(binding.value.agent_key).toBe('mskey_x');
+  });
+
+  it('the recognized version-1 shape → legacy', () => {
+    writeSpec(v1spec);
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x', model: 'claude-opus-4-8' });
+    expect(loadWorkspace(dir).kind).toBe('legacy');
+    expect(loadBinding(dir).kind).toBe('legacy');
+  });
+
+  it('unknown versions, invalid JSON, malformed values, unknown keys → invalid, never legacy', () => {
+    writeSpec({ ...v2spec, version: 3 });
+    expect(loadWorkspace(dir).kind).toBe('invalid');
+    writeSpec('{ not json');
+    expect(loadWorkspace(dir).kind).toBe('invalid');
+    writeSpec({ ...v2spec, team: 42 });
+    expect(loadWorkspace(dir).kind).toBe('invalid');
+    writeSpec({ ...v2spec, extra: true });
+    expect(loadWorkspace(dir).kind).toBe('invalid');
+    // v1-with-junk is NOT a recognized legacy shape when its values are malformed.
+    writeBindingFile({ ...v1spec, claim: { mode: 'nope' } });
+    expect(loadBinding(dir).kind).toBe('invalid');
+  });
+
+  it('invalid issues carry paths and messages, never contents or secrets', () => {
+    writeBindingFile({
+      ...v2spec,
+      agent_key: 'mskey_super_secret',
+      session: { harness: '', id: '', started_at: 1.5 },
+    });
+    const got = loadBinding(dir);
+    expect(got.kind).toBe('invalid');
+    if (got.kind === 'invalid') {
+      expect(JSON.stringify(got.issues)).not.toContain('mskey_super_secret');
+    }
+  });
+
+  it('findBinding is ADVISORY: missing → null; legacy/invalid → warn once + null, never a throw', () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      errors.push(a.join(' '));
+    });
+    try {
+      expect(findBinding(dir, {})).toBeNull();
+      writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+      // The streamwatch class (#928 fallout): a verb that only touches the binding advisorily —
+      // `stream ensure` via serverProvenance — must keep working in an unconverted worktree.
+      expect(findBinding(dir, {})).toBeNull();
+      expect(findBinding(dir, {})).toBeNull(); // and again — the warning fires ONCE per path
+      const joined = errors.join('\n');
+      expect(joined).toContain('musterd harness configure');
+      expect(joined).not.toContain('mskey_x'); // never file contents or secrets
+      expect(errors.filter((e) => e.includes('harness configure'))).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('requireUsableBinding is STRICT: legacy/invalid → thrown repair; missing → null', () => {
+    expect(requireUsableBinding(dir, {})).toBeNull();
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+    expect(() => requireUsableBinding(dir, {})).toThrow(/musterd harness configure/);
+    writeBindingFile('{ not json');
+    expect(() => requireUsableBinding(dir, {})).toThrow(/binding/);
+    try {
+      requireUsableBinding(dir, {});
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).not.toContain('mskey_x');
+    }
+    // The valid case resolves exactly like findBinding.
+    writeBindingFile({ ...v2spec, agent_key: 'mskey_x' });
+    expect(requireUsableBinding(dir, {})?.agent_key).toBe('mskey_x');
+  });
+
+  it('findWorkspaceSpec is ADVISORY: missing → null; legacy → warn + null', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(findWorkspaceSpec(dir)).toBeNull();
+      writeSpec(v1spec);
+      expect(findWorkspaceSpec(dir)).toBeNull();
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  /**
+   * A roster home is not an agent worktree and runs no harnesses. Measured 2026-08-24: the live
+   * `/Users/nick/musterd/revive` — `.git`, `.gitignore`, `.musterd`, zero harness artifacts — was
+   * told "this WORKSPACE has no usable identity … confirm the desired HARNESS SET", while
+   * `~/.musterd/config.json` already carried `rosterHome: {"revive": "/Users/nick/musterd/revive"}`.
+   * The registry that names the folder correctly was on disk the whole time.
+   */
+  const registerRosterHome = (slug: string, home: string): void => {
+    const config = loadConfig();
+    config.rosterHome[slug] = resolve(home);
+    saveConfig(config);
+  };
+
+  it('a registered roster home is named as one, and never asked for a harness set', () => {
+    registerRosterHome('dawn', dir);
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+    let message = '';
+    try {
+      requireUsableBinding(dir, {});
+      expect.unreachable();
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain("dawn's roster home");
+    expect(message).toContain("--select ''");
+    // The two words that were wrong for this folder.
+    expect(message).not.toContain('this workspace has no usable identity');
+    expect(message).not.toContain('confirm the desired harness set');
+  });
+
+  it('leaves the wording of every other folder exactly as it was', () => {
+    registerRosterHome('dawn', join(dir, 'elsewhere'));
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+    expect(() => requireUsableBinding(dir, {})).toThrow(
+      /this workspace has no usable identity until it is converted/,
+    );
+    expect(() => requireUsableBinding(dir, {})).toThrow(/confirm the desired harness set/);
+  });
+
+  it('an unreadable config never turns a diagnostic into the failure', () => {
+    writeFileSync(join(dir, 'config.json'), '{ not json');
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+    // Still the repair, not a JSON parse error escaping from the diagnostic path.
+    expect(() => requireUsableBinding(dir, {})).toThrow(/musterd harness configure/);
+  });
+
+  it('saveBinding refuses to write the version-1 shape at all', () => {
+    expect(() =>
+      saveBinding(dir, { ...v1spec, agent_key: 'mskey_x' } as unknown as Parameters<
+        typeof saveBinding
+      >[1]),
+    ).toThrow();
   });
 });

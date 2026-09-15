@@ -18,7 +18,6 @@ const LINKS = [
 export function GetStarted() {
   return (
     <section className="gs shell" id="get-started">
-      <p className="gs__eyebrow mono">Get started</p>
       <h2 className="gs__title">Zero to a working team in one command</h2>
       <p className="gs__body">
         <span className="mono gs__cmd-inline">musterd init</span> starts the daemon, creates a team,

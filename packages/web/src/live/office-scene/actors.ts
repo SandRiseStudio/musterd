@@ -17,8 +17,9 @@ import {
   STRIP_CAP,
 } from './layout';
 import { FLOOR } from './iso';
+import { CANVAS_EASE } from './motion';
 import { findPath, walkable, type P } from './nav';
-import type { Placement } from './seating';
+import { carriesLaptop, workingAtDesk, type Placement } from './seating';
 import { chairShift, chairYaw, GESTURE, STRIDE } from './skeleton';
 import type { Bubble, CarryKind, Dir, OfficeNode, Pose } from './types';
 
@@ -36,12 +37,11 @@ type Spot = (typeof LEISURE_SPOTS)[number];
  */
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
-const easeInOut = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
-const easeIn = (t: number): number => t * t;
-const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
 /** Velocity profile of one walk leg — see `legsAlong`, which picks these so speed is continuous. */
 type Ease = 'in' | 'out' | 'inOut' | 'linear';
-const EASE: Record<Ease, (t: number) => number> = { in: easeIn, out: easeOut, inOut: easeInOut, linear: (t) => t };
+/** The scene's easings live in `motion.ts` with the durations they belong beside (spec 2026-08-25).
+ *  Same four curves, same maths — this is a move, not a retune. */
+const EASE: Record<Ease, (t: number) => number> = CANVAS_EASE;
 
 /** How fast a member swivels to a new facing (radians/sec) — a quarter turn in ~0.17s, brisk but visible. */
 const TURN_RATE = 9;
@@ -77,6 +77,7 @@ const GESTURE_DUR: Record<number, number> = {
   [GESTURE.sip]: 3.2,
   [GESTURE.swivel]: 3.5,
   [GESTURE.roll]: 3.0,
+  [GESTURE.settle]: 5.0, // the longest of them: getting comfortable is not a quick motion
 };
 /** Move `cur` toward `target` at a constant rate (the blend is shaped by `smooth()` where it's consumed). */
 function toward(cur: number, target: number, rate: number): number {
@@ -118,8 +119,19 @@ export function homePoses(
     .filter(([, p]) => p.kind === 'nook')
     .map(([n]) => n)
     .sort();
+  // The laptop is docked ⟺ the member is working at their desk; every other moment it is on their
+  // person (laptop/dock design §0). This is the home pose's SETTLED end state — a home is where the
+  // member ends up, sat down (`sit: 1` for a desk), so the roster half is the whole answer here and
+  // there is no pose to ask yet. `posesNow` re-reads it every frame against the live `sit`, which is
+  // what keeps the hand and the dock on the same threshold while a member is still lowering into the
+  // chair; a member whose posture flips between placement passes is never drawn holding a laptop
+  // their dock also holds.
+  const laptop = (name: string): CarryKind | null => (carriesLaptop(byName.get(name)) ? 'laptop' : null);
   for (const [name, pl] of placements) {
     if (!byName.has(name)) continue;
+    // An owned desk is furniture-with-a-name (presence-honesty §4): the offline owner keeps the
+    // desk but has no body on the floor — the desk itself renders the ownership.
+    if (pl.kind === 'desk' && pl.owned) continue;
     if (pl.kind === 'desk') {
       const slot = DESK_SLOTS[pl.slot];
       if (!slot) continue;
@@ -129,11 +141,12 @@ export function homePoses(
         ly: slot.ly - f[1] * SEAT_BACK,
         dir: slot.dir,
         small: false,
-        carry: null,
+        carry: laptop(name),
         bubble: null,
         alpha: 1,
         ...AT_REST,
         sit: 1, // a desk member's home *is* the chair — they belong seated
+        casual: false, // there is a keyboard in front of them; the hands belong on it
       });
     } else if (pl.kind === 'leisure') {
       const spot = LEISURE_SPOTS[pl.spot];
@@ -145,11 +158,14 @@ export function homePoses(
         ly: spot.ly,
         dir: spot.dir,
         small: false,
-        carry: null,
+        carry: laptop(name),
         bubble: null,
         alpha: 1,
         ...AT_REST,
         sit: spot.sit,
+        // Every seated leisure spot is deskless — couch, meeting chair, waiting chair. The reader at
+        // the shelves stands (`sit: 0`), so the default already excludes them.
+        casual: spot.casual ?? spot.sit > 0,
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
@@ -162,7 +178,7 @@ export function homePoses(
         ly: NOOK.ly + spot.dy,
         dir: 'S',
         small: true,
-        carry: null,
+        carry: laptop(name),
         bubble: null,
         alpha: 1,
         ...AT_REST,
@@ -177,11 +193,74 @@ export function homePoses(
         ly: ENTRANCE.ly - 10 - pl.index * 6,
         dir: 'N',
         small: true,
-        carry: null,
+        carry: laptop(name),
         bubble: null,
         alpha: 1,
         ...AT_REST,
       });
+    }
+  }
+  return out;
+}
+
+/**
+ * Row-mate desk pairs, pure over roster inputs (E1 spec §2): two present desk members are
+ * neighbours when their desks face the same way exactly one desk apart across the pod — the same
+ * geometry `deskNeighbours()` reads off the homes, but with no eligibility filter. This is the
+ * *shared* pair pool every viewer computes identically; whether a chosen pair can actually chat
+ * (`chatReady`) stays a local execution guard, so local busy-state can skip a beat but never
+ * change what was chosen. Output is canonically ordered — Map history never leaks in.
+ */
+export function deskNeighbourPairs(
+  placements: Map<string, Placement>,
+  byName: Map<string, OfficeNode>,
+): Array<[string, string]> {
+  const seated: Array<{ name: string; lx: number; ly: number; dir: string }> = [];
+  for (const [name, pl] of placements) {
+    if (pl.kind !== 'desk' || pl.owned || !byName.has(name)) continue;
+    const slot = DESK_SLOTS[pl.slot];
+    if (slot) seated.push({ name, lx: slot.lx, ly: slot.ly, dir: slot.dir });
+  }
+  seated.sort((a, b) => (a.name < b.name ? -1 : 1));
+  const out: Array<[string, string]> = [];
+  for (let i = 0; i < seated.length; i++) {
+    for (let j = i + 1; j < seated.length; j++) {
+      const a = seated[i]!;
+      const b = seated[j]!;
+      if (a.dir !== b.dir) continue;
+      if (Math.abs(Math.hypot(a.lx - b.lx, a.ly - b.ly) - ROW_GAP) > 12) continue;
+      out.push([a.name, b.name]);
+    }
+  }
+  /*
+   * LEISURE PAIRS (2026-09-14). The pair beat existed but could only ever fire between two desk
+   * row-mates, so the lounge, the meeting table and reception — the parts of the room that exist
+   * BECAUSE people talk in them — were the only places two people never turned to each other.
+   *
+   * Paired by ZONE rather than by distance. `deskChat` turns each toward the other and needs no
+   * facing agreement, so the desk rule's `a.dir === b.dir` (a proxy for "same pod row") has nothing
+   * to say here: two people on a couch and an armchair face each other by design. Zone equality is
+   * the honest predicate — "in the same place" — and unlike a distance threshold it cannot pair two
+   * members across the room because the numbers happened to land, and needs no tuning when the floor
+   * plan moves.
+   *
+   * Desk pairs above are untouched: their rule is tuned to the pod geometry and this must not
+   * silently widen it. A member seated ACROSS a pod faces their row-mate through a shared privacy
+   * screen and two monitors, which is not a conversation the room should draw.
+   */
+  const lounging: Array<{ name: string; zone: string }> = [];
+  for (const [name, pl] of placements) {
+    if (pl.kind !== 'leisure' || !byName.has(name)) continue;
+    const spot = LEISURE_SPOTS[pl.spot];
+    if (spot && spot.sit > 0) lounging.push({ name, zone: spot.zone });
+  }
+  lounging.sort((a, b) => (a.name < b.name ? -1 : 1));
+  for (let i = 0; i < lounging.length; i++) {
+    for (let j = i + 1; j < lounging.length; j++) {
+      const a = lounging[i]!;
+      const b = lounging[j]!;
+      if (a.zone !== b.zone) continue;
+      out.push([a.name, b.name]);
     }
   }
   return out;
@@ -321,6 +400,15 @@ const CHAT_S: [number, number] = [5, 10];
 /** Distance between the two desks of one pod row — see `podDesks`. Row-mates are exactly this far apart. */
 const ROW_GAP = POD_ACROSS * 2;
 
+/** The gesture pairs a chat can be built from — one each, traded. `chin`/`lean` is the original and
+ *  stays first so the familiar exchange remains the most common shape at a glance; the other two lean
+ *  on beats that read at office scale without a hand (see the 2026-09-14 gesture pass). */
+const EXCHANGES: ReadonlyArray<readonly [number, number]> = [
+  [GESTURE.chin, GESTURE.lean],
+  [GESTURE.glance, GESTURE.chin],
+  [GESTURE.shoulders, GESTURE.lean],
+];
+
 export interface Actors {
   /** Reconcile to a new roster: seat everyone, and (when `animate`) walk arrivals in, departures out,
    * and away/return drifts between desk and nook. The first call just snaps (no entrance stampede). */
@@ -338,7 +426,7 @@ export interface Actors {
    * the empty plate at the counter sink, return. False when ineligible or the lounge is full. */
   /** Returns the lounge seat the meal is headed for (so the dog knows where to go beg), or null if the
    * errand couldn't start — the lounge is full, or this member isn't a seated desk member. */
-  errandFridge(from: string): Spot | null;
+  errandFridge(from: string, rng?: () => number): Spot | null;
   /** Scene effects derived from the walks' *current* legs (never stored): whether the fridge door
    * stands open, and whose desk water bottle is in their hand (so the desk copy hides). */
   sceneFx(): { fridgeOpen: boolean; bottleCarriers: Set<string> };
@@ -347,13 +435,13 @@ export interface Actors {
    * back down. The one errand with **no destination** — the aimlessness is what makes it read as a call
    * rather than a trip to fetch something. False when the member is ineligible (see `ambientWalk`).
    */
-  errandPhone(from: string): boolean;
+  errandPhone(from: string, rng?: () => number): boolean;
   /**
    * Two desk neighbours turn and talk to each other for a few seconds, then go back to their monitors.
    * Both stay seated throughout; the swivel is the whole beat. False unless both are seated desk
    * members, free, and actually next to each other.
    */
-  deskChat(a: string, b: string): boolean;
+  deskChat(a: string, b: string, rng?: () => number): boolean;
   /** Pairs of seated, free desk members sitting side by side in the same pod row — the candidates for
    * `deskChat`. Empty when nobody has a neighbour to turn to. */
   deskNeighbours(): Array<[string, string]>;
@@ -405,6 +493,9 @@ export function createActors(): Actors {
   const anim = new Map<string, Anim>();
   const exiting = new Set<string>();
   let initialized = false;
+  /** The placements the homes were last built from — `deskNeighbours` needs them to ask the same
+   *  question `deskNeighbourPairs` answers, rather than re-deriving the rule from poses. */
+  let lastPlacements: Map<string, Placement> = new Map();
   let doorPulses = 0; // members that entered/left since the last takeDoorPulses()
   let arrivals = 0; // members that entered since the last takeArrivals() — the dog's cue to go and greet
 
@@ -488,6 +579,23 @@ export function createActors(): Actors {
     return home ? DIR_ANGLE[home.dir] : null;
   }
 
+  /**
+   * The laptop AT HOME — docked only for a member who is working at the desk they are sitting at.
+   * Read off `live` every frame rather than off the baked home pose, so the object in the hand and
+   * the object in the dock swap on the same roster update; `homes` only rebuilds when placements
+   * change, and posture can move without them.
+   *
+   * It takes `sit` and asks `workingAtDesk` — the SAME predicate, on the SAME frame's pose, that
+   * fills the dock in `render.ts`. Asking the roster half alone (`carriesLaptop`) put the two on
+   * different thresholds: the hand emptied the moment posture said `working`, while the dock waits
+   * for `sit > 0.9`, so through the whole sit-down blend the laptop was in neither place (gptbot,
+   * reviewing #1304; reproduced at sit 0.083 on the return from a water errand). A biconditional
+   * evaluated at two different times is not a biconditional.
+   */
+  function laptopAtHome(name: string, sit: number): CarryKind | null {
+    return workingAtDesk(live.get(name), sit) ? null : 'laptop';
+  }
+
   function posesNow(): Map<string, Pose> {
     const out = new Map<string, Pose>();
     // At-home members carry any active in-place gesture (a stationary ambient beat overlaid on idle).
@@ -505,6 +613,8 @@ export function createActors(): Actors {
         ...p,
         lx: p.lx - f[0] * shift,
         ly: p.ly - f[1] * shift,
+        carry: laptopAtHome(n, a.sit), // a member at home carries only their laptop — errands are walks
+
         gesture: g?.kind ?? p.gesture,
         gestureT: gT,
         phase: a.phase,
@@ -539,7 +649,17 @@ export function createActors(): Actors {
         ly: leg.fy + (leg.ty - leg.fy) * e,
         dir: dirOfHeading(a.head), // the 4-way legibility read follows the swivel, flipping at 45°
         small: w.small,
-        carry: leg.carry,
+        // A WALKING MEMBER HAS THEIR LAPTOP, full stop — the design's biconditional is "docked ⟺
+        // working AT THEIR DESK", and someone crossing the floor is not at their desk whatever the
+        // roster says about their posture. Reading posture here instead was the bug: a member who
+        // came online already `working` walked in empty-handed, because the predicate said their
+        // laptop was in a dock they had not reached yet (nick, 2026-09-04).
+        //
+        // Carry precedence is the `??`: an errand's carry WINS for its duration — you set the laptop
+        // down to take the plate, the bottle, the call or the handoff box — and it is back on the arm
+        // when the errand ends. A leg that asked for nothing gets the laptop, which is what makes the
+        // entrance and exit walks carry one without either of them naming it.
+        carry: leg.carry ?? 'laptop',
         bubble: leg.bubble,
         alpha,
         // Travelling (not the hold leg) → `walking`; urgent walks → `run`.
@@ -553,6 +673,9 @@ export function createActors(): Actors {
         stride: a.stride,
         sit: a.sit, // eased through stands and errand sits alike (see `sitTargetOf`)
         heading: a.head,
+        // An errand sit (eating on the couch) is casual; a beat that holds a desk member in their own
+        // chair is not, and says so on its fabricated spot. Off a sit leg, their home seat decides.
+        casual: leg.sitAt ? (leg.sitAt.casual ?? leg.sitAt.sit > 0) : (homes.get(name)?.casual ?? false),
         // An errand sitter on the couch composite-sorts with it, exactly like a leisure placement.
         ...(leg.sitAt?.depthAt ? { depthAt: leg.sitAt.depthAt } : {}),
       });
@@ -619,7 +742,7 @@ export function createActors(): Actors {
 
   /** A free lounge seat (couch cushion / armchair) for an errand meal: not a member's home, and not
    * already the target of another in-flight errand's sit leg. Null when the lounge is full. */
-  function freeLoungeSpot(): Spot | null {
+  function freeLoungeSpot(rng: () => number): Spot | null {
     const open = LEISURE_SPOTS.filter((s) => {
       if (s.zone !== 'lounge') return false;
       for (const h of homes.values()) {
@@ -632,7 +755,7 @@ export function createActors(): Actors {
       }
       return true;
     });
-    return open.length ? open[Math.floor(Math.random() * open.length)]! : null;
+    return open.length ? open[Math.floor(rng() * open.length)]! : null;
   }
 
   /** Where the sit blend is heading for this member: 1 seated (home seat, or an errand's sit leg). */
@@ -695,6 +818,7 @@ export function createActors(): Actors {
 
   return {
     setHomes(placements, byName, animate) {
+      lastPlacements = placements;
       const newHomes = homePoses(placements, byName);
       const prevHomes = homes;
       const prevLive = live;
@@ -760,6 +884,8 @@ export function createActors(): Actors {
     },
     walk(from, req) {
       if (!homes.has(from) || !homes.has(req.to) || from === req.to || exiting.has(from)) return false;
+      // dnd is do-not-interrupt made physical (§4 lane 4): nobody walks over to them.
+      if (live.get(req.to)?.dnd) return false;
       const inflight = walks.get(from);
       if (inflight && (inflight.ambient || inflight.yield)) {
         // A real act preempts a low-priority stroll (or its yield-home) *instantly* — it must never queue
@@ -829,11 +955,11 @@ export function createActors(): Actors {
       });
       return true;
     },
-    errandFridge(from) {
+    errandFridge(from, rng = Math.random) {
       const trip = errandStart(from);
       if (!trip) return null;
       const { home, avoid } = trip;
-      const spot = freeLoungeSpot();
+      const spot = freeLoungeSpot(rng);
       if (!spot) return null; // every lounge seat taken — the scheduler picks another beat
       // The full meal arc: open the fridge, browse, take a plate to the lounge, eat, leave the empty
       // plate at the counter sink, come home. Every scene effect (open door, the plate) is derived from
@@ -877,7 +1003,7 @@ export function createActors(): Actors {
       }
       return { fridgeOpen, bottleCarriers };
     },
-    errandPhone(from) {
+    errandPhone(from, rng = Math.random) {
       const trip = errandStart(from);
       if (!trip) return false;
       const { home, avoid } = trip;
@@ -887,11 +1013,11 @@ export function createActors(): Actors {
       // still on a call is unbearable, and that is exactly the read.
       const stops: P[] = [];
       let cur = at;
-      const hops = 3 + Math.floor(Math.random() * 3);
+      const hops = 3 + Math.floor(rng() * 3);
       for (let i = 0; i < hops; i++) {
         let next: P | null = null;
         for (let tries = 0; tries < 24 && !next; tries++) {
-          const p = { lx: Math.random() * FLOOR, ly: Math.random() * FLOOR };
+          const p = { lx: rng() * FLOOR, ly: rng() * FLOOR };
           if (walkable(p.lx, p.ly) && Math.hypot(p.lx - cur.lx, p.ly - cur.ly) > PACE_MIN_LEG) next = p;
         }
         if (!next) break;
@@ -910,7 +1036,7 @@ export function createActors(): Actors {
         legs.push(...run);
         from2 = endOf(run);
         // A pause at each stop: the bit of the call where you are listening rather than moving.
-        legs.push(hold(from2, travelDir(from2.lx, from2.ly, at.lx, at.ly), 2.2 + Math.random() * 2.4, {
+        legs.push(hold(from2, travelDir(from2.lx, from2.ly, at.lx, at.ly), 2.2 + rng() * 2.4, {
           carry: 'phone',
           overlay: GESTURE.call,
         }));
@@ -921,42 +1047,51 @@ export function createActors(): Actors {
       return true;
     },
     deskNeighbours() {
-      // Derived from the home poses rather than from seat placements: two desk members are row-mates
-      // when they face the same way and sit exactly one desk apart across the pod. That is true by
-      // construction of `podDesks`, and reading it off positions means this needs no extra state and
-      // cannot drift out of sync with the seating.
-      const seated = [...homes.entries()].filter(([n]) => chatReady(n));
-      const out: Array<[string, string]> = [];
-      for (let i = 0; i < seated.length; i++) {
-        for (let j = i + 1; j < seated.length; j++) {
-          const [na, a] = seated[i]!;
-          const [nb, b] = seated[j]!;
-          if (a.dir !== b.dir) continue;
-          if (Math.abs(Math.hypot(a.lx - b.lx, a.ly - b.ly) - ROW_GAP) > 12) continue;
-          out.push(na < nb ? [na, nb] : [nb, na]);
-        }
-      }
-      return out;
+      /*
+       * The SAME pool as `deskNeighbourPairs`, with the eligibility filter applied — delegated
+       * rather than re-derived.
+       *
+       * This used to be a second hand-written copy of the row-mate rule, read off the home poses
+       * instead of the placements. The header above says the two are "the same geometry ... with no
+       * eligibility filter", and that was true only for as long as nobody edited one of them: adding
+       * the leisure-zone pairs to the exported function on 2026-09-14 made them disagree the moment a
+       * member sits somewhere other than a desk, and the invariant test did not catch it because a
+       * twelve-desk fixture has no leisure sitters. One rule, one home — the drift is not possible to
+       * reintroduce by editing a single place.
+       */
+      return deskNeighbourPairs(lastPlacements, live).filter(([a, b]) => chatReady(a) && chatReady(b));
     },
-    deskChat(a, b) {
+    deskChat(a, b, rng = Math.random) {
       const ha = homes.get(a);
       const hb = homes.get(b);
       if (!ha || !hb || !chatReady(a) || !chatReady(b)) return false;
-      const dur = CHAT_S[0] + Math.random() * (CHAT_S[1] - CHAT_S[0]);
+      const dur = CHAT_S[0] + rng() * (CHAT_S[1] - CHAT_S[0]);
+      const pick = rng();
       // Each turns toward the other and stays seated. `sitAt` is what holds the sit blend at 1 through a
       // walk that never goes anywhere; the facing comes from the leg's `dir`, which the actor system
       // eases into rather than snapping — so this reads as two people swivelling to talk.
       const turn = (self: Pose, other: Pose, lead: boolean): Leg[] => {
-        const seat = { zone: 'lounge' as const, lx: self.lx, ly: self.ly, dir: self.dir, sit: 1 };
+        // `casual: false` — this holds a member seated at their OWN DESK, keyboard and all. The zone
+        // label is only there to satisfy the spot shape; nothing reads it on this path.
+        const seat = { zone: 'lounge' as const, lx: self.lx, ly: self.ly, dir: self.dir, sit: 1, casual: false };
         const face = travelDir(self.lx, self.ly, other.lx, other.ly);
         const beat = (d: number, overlay: number): Leg => ({
           fx: self.lx, fy: self.ly, tx: self.lx, ty: self.ly,
           dir: face, dur: d, carry: null, bubble: null, ease: 'inOut', overlay, sitAt: seat,
         });
-        // Alternating beats so it reads as turn-taking rather than two people gesturing in unison.
+        /* Alternating beats so it reads as turn-taking rather than two people gesturing in unison.
+         *
+         * Three exchanges rather than one (2026-09-14). Every chat this room had ever drawn was the
+         * same chin/lean swap, which is fine once and a tell the third time you notice it. The pair
+         * is picked ONCE per chat from the caller's seeded rng and both members are built from the
+         * same pick, so the two halves always belong to the same conversation — a `lead` that thinks
+         * it is in exchange 0 while the follower is in exchange 2 would be two people talking past
+         * each other, which is exactly what this beat exists not to look like. */
+        const exchange = EXCHANGES[Math.floor(pick * EXCHANGES.length)] ?? EXCHANGES[0]!;
+        const [first, second] = exchange;
         return lead
-          ? [beat(dur * 0.45, GESTURE.chin), beat(dur * 0.55, GESTURE.lean)]
-          : [beat(dur * 0.45, GESTURE.lean), beat(dur * 0.55, GESTURE.chin)];
+          ? [beat(dur * 0.45, first), beat(dur * 0.55, second)]
+          : [beat(dur * 0.45, second), beat(dur * 0.55, first)];
       };
       walks.set(a, { legs: turn(ha, hb, true), i: 0, t: 0, small: false, ambient: true });
       walks.set(b, { legs: turn(hb, ha, false), i: 0, t: 0, small: false, ambient: true });

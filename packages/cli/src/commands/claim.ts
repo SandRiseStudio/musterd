@@ -1,8 +1,23 @@
-import { resolveWorkspace } from '@musterd/mcp';
-import { bindingSeat, type Binding, type ClaimPolicy, type Surface } from '@musterd/protocol';
+import {
+  bindingSeat,
+  type Binding,
+  type ClaimPolicy,
+  resolveAttestation,
+  resolveAttestedModel,
+  type Surface,
+  TOKEN_PREFIXES,
+} from '@musterd/protocol';
+import { resolveWorkspace, resolveWorkspaceKey } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient, watchClaim } from '../client.js';
-import { findBinding, loadConfig, saveBinding, wsBase } from '../config.js';
+import {
+  loadConfig,
+  rememberIdentity,
+  requireUsableBinding,
+  saveBinding,
+  saveConfig,
+  wsBase,
+} from '../config.js';
 import { CliError } from '../errors.js';
 import { liveBindingClobber } from '../onboard/guard.js';
 import {
@@ -13,6 +28,7 @@ import {
 } from '../onboard/pending.js';
 import { setSeatGitIdentity } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
+import { success } from '../render/ui.js';
 import { WAIT_TIMEOUT_EXIT } from './inbox.js';
 import { renderMemoryLine } from './memory.js';
 
@@ -26,17 +42,31 @@ export type ClaimSeatTarget = { seat: string } | { role: string };
 
 /**
  * `musterd claim <name>` / `--role <x>` — the v0.3 claim handshake (SPEC A.3, ADR 075). The folder's
- * harness presents the **team agent key** (`mskey_`, from `--key`/`MUSTERD_AGENT_KEY`/the binding) and
- * asks to occupy a seat; the server resolves it (a role pool assigns the next free `<role>-<n>`
+ * harness presents the **team agent key** (`mskey_`, from `--key`/`MUSTERD_AGENT_KEY`/the binding) for
+ * bootstrap, or its own claimed authority when reoccupying its bound seat; the server resolves it (a
+ * role pool assigns the next free `<role>-<n>`
  * server-side) and returns the `occupied` seat — or `pending` (an admin must approve) / `refused` (with
  * a no-dead-end hint, ADR 055). The resolved seat is written into `.musterd/binding.json` as the
  * folder's standing claim policy so both the CLI and a (re)launched adapter re-occupy it. No per-seat
- * token is minted — the agent key is the authenticator and a `grant` (`msgr_`) skips the approval lane.
+ * agent-seat credential and Presence lease are minted for routine HTTP authority; a grant (`msgr_`)
+ * skips the approval lane.
  */
+
+/** ms → a compact human age: 2d, 3h, 12m, 45s. Local by the same precedent as `report.ts` et al. */
+function pendingAge(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec >= 86400) return `${Math.floor(sec / 86400)}d`;
+  if (sec >= 3600) return `${Math.floor(sec / 3600)}h`;
+  if (sec >= 60) return `${Math.floor(sec / 60)}m`;
+  return `${sec}s`;
+}
+
 export async function claimCommand(parsed: Parsed): Promise<number> {
   const flags = parsed.flags;
   const config = loadConfig();
-  const binding = findBinding();
+  // Strict read (ADR 281/282): claim consumes the binding AS identity (key, grant, claim target),
+  // so a legacy/invalid one refuses with the configure repair instead of claiming as someone else.
+  const binding = requireUsableBinding();
   const server =
     flagStr(flags, 'server') ?? process.env['MUSTERD_SERVER'] ?? binding?.server ?? config.server;
   const team =
@@ -45,20 +75,34 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     throw new CliError('no team — run init, or pass --team <slug>', 2);
   }
 
-  // v0.3: claiming presents the TEAM AGENT KEY (mskey_), not a per-seat mint. Resolve it from
-  // --key / MUSTERD_AGENT_KEY / this folder's binding.
-  const agentKey = flagStr(flags, 'key') ?? process.env['MUSTERD_AGENT_KEY'] ?? binding?.agent_key;
-  if (!agentKey) {
+  // Bootstrap claims present the team agent key. A reoccupy of this binding's exact seat may present
+  // its claimed agent credential; never use that credential to target a different member.
+  const agentKey =
+    flagStr(flags, 'key') ??
+    process.env['MUSTERD_AGENT_KEY'] ??
+    binding?.agent_key ??
+    // The ADR 059 vault: a fresh folder claiming a seat this machine has held before needs no key
+    // pasted — the same fallback `musterd join` always had, so folding join into claim (ADR 377)
+    // loses nothing.
+    (parsed.positionals[0]
+      ? config.knownIdentities.find((i) => i.team === team && i.name === parsed.positionals[0])?.key
+      : undefined);
+  const grant = flagStr(flags, 'grant') ?? process.env['MUSTERD_GRANT'] ?? binding?.grant;
+  const target = resolveTarget(parsed, binding);
+  const boundSeat = binding ? bindingSeat(binding) : undefined;
+  const reoccupyingBoundSeat =
+    'seat' in target && boundSeat !== undefined && target.seat === boundSeat;
+  const claimKey = (reoccupyingBoundSeat ? binding?.seat_credential : undefined) ?? agentKey;
+  if (!claimKey) {
     throw new CliError(
-      'no agent key — claiming a seat needs the team agent key. Set MUSTERD_AGENT_KEY or pass ' +
-        '--key mskey_… (get it from `musterd team create` or a team admin).',
+      'no agent authority — bootstrap claiming needs a team agent key; reconnecting needs this ' +
+        'workspace’s agent-seat credential.',
       4,
     );
   }
-  const grant = flagStr(flags, 'grant') ?? process.env['MUSTERD_GRANT'] ?? binding?.grant;
-  const target = resolveTarget(parsed, binding);
-  // The seat the adapter will occupy keeps its harness surface; a bare CLI claim defaults to `cli`.
-  const surface = (flagStr(flags, 'surface') ?? binding?.surface ?? 'cli') as Surface;
+  // A CLI claim is intrinsically `cli` (ADR 286) — identity files no longer declare a surface.
+  // `--surface` stays a deliberate manual override (headless/testing), never a stored default.
+  const surface = (flagStr(flags, 'surface') ?? 'cli') as Surface;
 
   const http = new HttpClient({ server, surface });
   const { members } = await http.roster(team);
@@ -68,7 +112,6 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
   // bound seat is already live *in this workspace* is a "who am I" confirmation, not a re-claim — print
   // the identity and stop, folding whoami into the one verb an agent reaches for. An explicit target, or
   // a seat that's offline or live in another workspace, still runs the claim handshake below.
-  const boundSeat = binding ? bindingSeat(binding) : undefined;
   const bareClaim = !parsed.positionals[0] && flagStr(flags, 'role') === undefined;
   if (bareClaim && boundSeat) {
     const liveHere = members
@@ -109,6 +152,27 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     );
   }
 
+  // `--detach` (ADR 377 increment 1): the one-shot HTTP claim `musterd join` always ran. It
+  // occupies the seat, binds the folder and EXITS, leaving a Presence with no session lease — so the
+  // seat stays present, on the surface named here, after the process is gone (until PRESENCE_TIMEOUT
+  // reaps it). The default WS handshake below holds the Presence through a session lease that dies
+  // with the process (ADR 337). The fold made a difference visible that the ADR's "byte-for-byte"
+  // line missed: fixtures and scripts that want a room to STAY occupied (scripts/a11y) need this
+  // path, and it is now a flag on the one verb rather than a second verb's hidden behaviour.
+  if (flags['detach']) {
+    return detachedClaim({
+      http,
+      config,
+      server,
+      team,
+      key: claimKey,
+      target,
+      surface,
+      grant,
+      json: Boolean(flags['json']),
+    });
+  }
+
   // Disambiguate which pending session (if any) this claim is for. Informational + lets `--for`
   // scope the marker that gets cleared; the resolved seat is delivered via the resolution sidecar.
   // Scope to *this* workspace so a marker written by a sibling launch sharing the same `.musterd`
@@ -116,9 +180,15 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
   const pendings = listPendingForWorkspace(process.cwd(), team, workspace);
   const forCode = flagStr(flags, 'for');
   if (!forCode && pendings.length > 1) {
+    const now = Date.now();
     const list = pendings
       .map(
-        (p) => `  ${theme.bold(p.code)}  ${p.surface}${p.driver ? ` · driven by ${p.driver}` : ''}`,
+        (p) =>
+          `  ${theme.bold(p.code)}  ${p.surface}${p.driver ? ` · driven by ${p.driver}` : ''}` +
+          // The age is the whole diagnosis when this fires on junk: a marker is stamped once at
+          // adapter boot and never refreshed, so a days-old one is a session that is long gone and
+          // was never reaped. Without it the list reads as three equally-plausible live sessions.
+          theme.meta(` · ${pendingAge(now - p.ts)} old`),
       )
       .join('\n');
     throw new CliError(
@@ -166,24 +236,41 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     };
     process.on('SIGINT', onSigint);
 
+    const model = resolveAttestation({
+      observed: binding?.model_observed,
+      env: resolveAttestedModel(process.env),
+      binding: binding?.model,
+    }).model;
     const session = watchClaim({
       wsUrl: wsBase(server) + '/ws',
       team,
-      key: agentKey,
+      key: claimKey,
       target,
       surface,
       workspace,
       ...(grant !== undefined ? { grant } : {}),
-      onOccupied: (occupiedSeat, _presenceId, resumeGrant, memory) => {
+      ...(model !== undefined ? { model } : {}),
+      onOccupied: (
+        occupiedSeat,
+        _presenceId,
+        resumeGrant,
+        memory,
+        seatCredential,
+        sessionLease,
+      ) => {
         const seat = occupiedSeat.name;
         // Prefer a freshly-delivered resume token (ADR 087, first approval) over any grant we claimed
         // with, so `binding.grant` carries the reusable token that re-occupies this seat silently.
         const effectiveGrant = resumeGrant ?? grant;
         const next: Binding = {
+          version: 2,
           server,
           team,
-          agent_key: agentKey,
-          surface: surface as Binding['surface'],
+          ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
+          ...((seatCredential ?? binding?.seat_credential)
+            ? { seat_credential: seatCredential ?? binding?.seat_credential }
+            : {}),
+          ...(sessionLease !== undefined ? { session_lease: sessionLease } : {}),
           // Record the resolved seat as the folder's standing policy so re-launches re-occupy it.
           claim: { mode: 'seat', name: seat },
           ...(effectiveGrant !== undefined ? { grant: effectiveGrant } : {}),
@@ -286,4 +373,85 @@ function resolveTarget(parsed: Parsed, binding: Binding | null): ClaimSeatTarget
 
 function bindingPolicy(_parsed: Parsed, binding: Binding | null): ClaimPolicy {
   return binding?.claim ?? { mode: 'chat' };
+}
+
+/**
+ * The one-shot HTTP claim (`POST /teams/<slug>/claim`): resolve now, bind the folder, remember the
+ * identity in the ADR 059 vault, and return — no socket held, no lease. `pending` is reported and
+ * left for an admin; the caller re-runs once approved (it does not block the way the WS path does).
+ */
+async function detachedClaim(input: {
+  http: HttpClient;
+  config: ReturnType<typeof loadConfig>;
+  server: string;
+  team: string;
+  key: string;
+  target: ClaimSeatTarget;
+  surface: Surface;
+  grant: string | undefined;
+  json: boolean;
+}): Promise<number> {
+  const { http, config, server, team, key, target, surface, grant, json } = input;
+  const outcome = await http.claim(team, {
+    key,
+    target,
+    surface,
+    // The detached Presence names where it is, and is protected by that name (ADR 014/092/368):
+    // without these the server attached `workspace: null` and evicted this folder's own live
+    // session on every re-claim.
+    workspace: resolveWorkspace(),
+    workspaceKey: resolveWorkspaceKey(),
+    ...(grant !== undefined ? { grant } : {}),
+  });
+  if (outcome.state === 'refused') {
+    const tail = outcome.hint ? ` — ${outcome.hint}` : '';
+    throw new CliError(`claim refused (${outcome.code}): ${outcome.message}${tail}`, 4);
+  }
+  if (outcome.state === 'pending') {
+    if (json) {
+      process.stdout.write(
+        JSON.stringify({ team, pending: true, request: outcome.requestId }) + '\n',
+      );
+    } else {
+      process.stdout.write(
+        `${theme.meta('⧖')} ${outcome.message} ${theme.meta(`(request ${outcome.requestId}) — approve, then re-run musterd claim`)}\n`,
+      );
+    }
+    return 0;
+  }
+  const seat = outcome.seat.name;
+
+  config.server = server;
+  config.current = team;
+  // The identity carries the surface: every later act from this config goes out on it, which is what
+  // lets a detached seat render as its harness rather than falling back to `cli`.
+  config.identities[team] = { name: seat, key, surface };
+  rememberIdentity(config, { team, name: seat, key, surface }); // ADR 059 vault
+  saveConfig(config);
+  const binding: Binding = {
+    version: 2,
+    server,
+    team,
+    agent_key: key,
+    claim: { mode: 'seat', name: seat },
+    ...(grant !== undefined ? { grant } : {}),
+  };
+  saveBinding(process.cwd(), binding);
+  // ADR 197: agents get the seat git identity; humans keep their real email (same gate as doctor).
+  if (key.startsWith(TOKEN_PREFIXES.agent_key)) {
+    setSeatGitIdentity(seat, process.cwd(), team);
+  }
+
+  if (json) {
+    process.stdout.write(JSON.stringify({ team, member: seat, surface, detached: true }) + '\n');
+    return 0;
+  }
+  process.stdout.write(
+    success(`${theme.memberName(seat, 'agent')} — occupied on ${team}`, { next: 'musterd next' }) +
+      '\n',
+  );
+  process.stdout.write(
+    `${theme.presenceDot('online')} ${theme.meta(`${seat} online via ${surface} (detached — no session held)`)}\n`,
+  );
+  return 0;
 }

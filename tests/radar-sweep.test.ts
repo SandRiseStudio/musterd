@@ -119,11 +119,11 @@ describe('dedup', () => {
     const dir = mkdtempSync(join(tmpdir(), 'radar-seen-'));
     const path = join(dir, 'seen.json');
     writeFileSync(path, JSON.stringify({ arxiv: ['1111.22222'], hf: [] }));
-    expect(loadSeen(path)).toEqual({ arxiv: ['1111.22222'], hf: [] });
+    expect(loadSeen(path)).toEqual({ arxiv: ['1111.22222'], hf: [], exn: [] });
   });
 
   it('partitionBySeen splits fresh vs known (incl. cross-source)', () => {
-    const seen: SeenLedger = { arxiv: ['2503.13657'], hf: [] };
+    const seen: SeenLedger = { arxiv: ['2503.13657'], hf: [], exn: [] };
     const { fresh, alreadySeen } = partitionBySeen(
       [
         cand({ source: 'arxiv' }),
@@ -174,6 +174,9 @@ describe('runSweep (mocked fetch)', () => {
       if (url.includes('huggingface.co/api/daily_papers')) {
         return new Response(JSON.stringify(SAMPLE_HF), { status: 200 });
       }
+      if (url.includes('ingest.sandrise.io/feed')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
       return new Response('not found', { status: 404 });
     };
 
@@ -198,6 +201,7 @@ describe('runSweep (mocked fetch)', () => {
       sinceDays: 14,
       limit: 3,
       triage: true,
+      emit: false,
     });
   });
 });

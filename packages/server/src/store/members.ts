@@ -7,13 +7,15 @@ import {
   type WorkingHours,
   TOKEN_PREFIXES,
 } from '@musterd/protocol';
+import { HUE_MIN_SEPARATION, assignHue, defaultHue, hueConflict } from '@musterd/protocol/hue';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { MusterdError } from '../errors.js';
+import { MusterdError, SessionLeaseRefused } from '../errors.js';
 import { releaseInFlightClaimsForSeat } from './lanes.js';
 import type { MemberRow, TeamRow } from './rows.js';
-import { parseRoles, resolveCapabilities } from './rows.js';
-import { getAgentKeyHash, requireTeam } from './teams.js';
+import { parseRoles, resolveAccountStatus, resolveCapabilities } from './rows.js';
+import { hasValidSessionLease } from './session-leases.js';
+import { requireTeam } from './teams.js';
 
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -130,6 +132,22 @@ export function mintCredential(db: Database, memberId: string): CredentialMint {
   return { credential };
 }
 
+/** Mint a fresh self-identifying credential for an agent Member (ADR 337). */
+export function mintAgentSeatCredential(
+  db: Database,
+  memberId: string,
+): { seat_credential: string } {
+  const member = getMemberById(db, memberId);
+  if (!member || member.kind !== 'agent' || member.observer === 1)
+    throw new MusterdError(
+      'bad_request',
+      'agent-seat credentials may only be minted for agent seats',
+    );
+  const seat_credential = newSecret(TOKEN_PREFIXES.agent_seat);
+  setCredentialHash(db, memberId, hashToken(seat_credential));
+  return { seat_credential };
+}
+
 export interface AddMemberInput {
   name: string;
   kind: MemberKind;
@@ -138,6 +156,12 @@ export interface AddMemberInput {
   lifecycleUntil?: number | null;
   availability?: Record<string, unknown> | null;
   workingHours?: WorkingHours | null;
+  slackUserId?: string | null;
+  /** The seat's colour (ADR 374). Three statements, not two: a number is stored (refused if it
+   *  collides with a live teammate); `null` is "the file has no hue" and is stored as null —
+   *  reconcile's word, never argued with; `undefined` is "nobody said" and the daemon assigns,
+   *  which is right only on a DB-only team, where the daemon is the source. */
+  hue?: number | null;
   /** Provision a read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. */
   observer?: boolean;
   /** Observer grade (ADR 136): `'public'` sees only team/broadcast traffic — what a shared watch-link
@@ -165,6 +189,7 @@ export function addMember(
   if (lifecycle === 'until' && !input.lifecycleUntil) {
     throw new MusterdError('bad_request', 'lifecycle "until" requires a timestamp');
   }
+  const hue = resolveHue(db, team.id, input.name, input.hue, existing?.hue ?? null, existing?.id);
   // A *tombstoned* row (soft-removed, `left_at` set) still squats the (team, name) UNIQUE index, so a
   // plain INSERT would dead-end on a constraint error with no CLI way out — the recurring "departed
   // name can't be reused" trap (ADR 065). Re-adding a removed name is a revive, not a new row: reuse
@@ -175,6 +200,9 @@ export function addMember(
       role: input.role ?? '',
       lifecycle,
       lifecycleUntil: input.lifecycleUntil ?? null,
+      workingHours: input.workingHours ?? null,
+      slackUserId: input.slackUserId ?? null,
+      hue,
     });
     const row = getMemberById(db, existing.id)!;
     return { row, token };
@@ -194,6 +222,8 @@ export function addMember(
     lifecycle_until: input.lifecycleUntil ?? null,
     availability: input.availability ? JSON.stringify(input.availability) : null,
     working_hours: input.workingHours ? JSON.stringify(input.workingHours) : null,
+    slack_user_id: input.slackUserId ?? null,
+    hue,
     token_hash: hashToken(token),
     // A freshly minted seat is *declared*, not yet *held* — bound_at is stamped on first auth touch
     // (ADR 058). The INSERT omits the column, so it defaults to NULL; kept here for the typed row.
@@ -214,11 +244,78 @@ export function addMember(
   };
   db.prepare(
     `INSERT INTO members
-       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, working_hours, token_hash, observer, observer_scope, account_status, capabilities, left_at, created_at, updated_at)
+       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, working_hours, slack_user_id, hue, token_hash, observer, observer_scope, account_status, capabilities, left_at, created_at, updated_at)
      VALUES
-       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @working_hours, @token_hash, @observer, @observer_scope, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
+       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @working_hours, @slack_user_id, @hue, @token_hash, @observer, @observer_scope, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
   ).run(row);
   return { row, token };
+}
+
+/** The hues the LIVE members of a team hold — the set a new colour must clear. A departed seat's
+ *  hue is not held against anyone; `except` leaves the member being recoloured out of its own way. */
+export function takenHues(db: Database, teamId: string, except?: string): number[] {
+  return db
+    .prepare<[string], { id: string; hue: number | null }>(
+      'SELECT id, hue FROM members WHERE team_id = ? AND left_at IS NULL AND hue IS NOT NULL',
+    )
+    .all(teamId)
+    .filter((r) => r.id !== except)
+    .map((r) => r.hue!);
+}
+
+/**
+ * The hue a member ends up with (ADR 374), from what the caller said:
+ *   - a number — kept, once it clears every live teammate; a collision names the neighbour;
+ *   - `null` — kept as null: the seat file has no hue and the daemon never invents one;
+ *   - `undefined` — nobody said: keep what the seat already had (a revive), else assign the nearest
+ *     clear hue to the name's default. Only a DB-only caller says nothing; reconcile always says.
+ */
+function resolveHue(
+  db: Database,
+  teamId: string,
+  name: string,
+  asked: number | null | undefined,
+  had: number | null,
+  except?: string,
+): number | null {
+  if (asked === null) return null;
+  if (asked !== undefined) {
+    assertHueClear(db, teamId, asked, except);
+    return asked;
+  }
+  if (had !== null) return had;
+  // The name comes from the caller, never from a row lookup: a NEW member has no row yet, and the
+  // first cut looked one up by id and seeded every fresh seat from `defaultHue('')` — one colour for
+  // everyone, walked apart by `assignHue` so nobody noticed until gptbot read it (#1258 acceptance).
+  return assignHue(defaultHue(name), takenHues(db, teamId, except));
+}
+
+/** Refuse a hue within `HUE_MIN_SEPARATION` of a live teammate's, naming them. */
+export function assertHueClear(db: Database, teamId: string, hue: number, except?: string): void {
+  if (!Number.isInteger(hue) || hue < 0 || hue > 359)
+    throw new MusterdError('bad_request', `hue must be an integer 0–359, got ${hue}`);
+  const near = hueConflict(hue, takenHues(db, teamId, except));
+  if (near === null) return;
+  const who = db
+    .prepare<
+      [string, number],
+      { name: string }
+    >('SELECT name FROM members WHERE team_id = ? AND left_at IS NULL AND hue = ?')
+    .get(teamId, near);
+  throw new MusterdError(
+    'conflict',
+    `hue ${hue} is within ${HUE_MIN_SEPARATION}° of "${who?.name ?? '?'}" (${near}) — pick another`,
+  );
+}
+
+/** Set a live member's hue in place (the DB-only `team hue` path; ADR 374). */
+export function setMemberHue(db: Database, member: MemberRow, hue: number): void {
+  assertHueClear(db, member.team_id, hue, member.id);
+  db.prepare('UPDATE members SET hue = ?, updated_at = ? WHERE id = ?').run(
+    hue,
+    Date.now(),
+    member.id,
+  );
 }
 
 export function getMemberByName(db: Database, teamId: string, name: string): MemberRow | undefined {
@@ -285,56 +382,67 @@ export function authMember(
   teamSlug: string,
   token: string,
   actingSeat?: string,
+  sessionLease?: string,
 ): { team: TeamRow; member: MemberRow } {
   const team = requireTeam(db, teamSlug);
+  let member: MemberRow;
 
   if (token.startsWith(TOKEN_PREFIXES.agent_key)) {
-    return { team, member: authByAgentKey(db, team, token, actingSeat) };
-  }
-  if (token.startsWith(TOKEN_PREFIXES.credential)) {
-    return { team, member: authByCredential(db, team, token, actingSeat) };
-  }
-  if (token.startsWith(TOKEN_PREFIXES.seat)) {
-    return { team, member: authByServiceToken(db, team, token, actingSeat) };
-  }
-
-  // v0.3 hard cutover (ADR 069 decision 2): the v0.2 per-seat token (`mskd_`) auth path is removed
-  // for peer seats — the only credentials are the team agent key (`mskey_`), a human credential
-  // (`mscr_`), and a service seat's own token (`mskd_`, ADR 232 — kind-bound, see above).
-  throw new MusterdError(
-    'unauthorized',
-    `unrecognized credential for team "${teamSlug}" — present a team agent key (mskey_) or a human credential (mscr_)`,
-  );
-}
-
-/**
- * Agent-key (`mskey_`) auth: a valid team agent key + an acting seat the caller names (SPEC A.7 §253).
- * The key authorizes "an authorized harness on this team"; the seat is the identity it is acting as.
- */
-function authByAgentKey(
-  db: Database,
-  team: TeamRow,
-  key: string,
-  actingSeat: string | undefined,
-): MemberRow {
-  const keyHash = getAgentKeyHash(db, team.id);
-  if (!keyHash || hashToken(key) !== keyHash)
-    throw new MusterdError('unauthorized', `invalid agent key for team "${team.slug}"`);
-  if (!actingSeat)
     throw new MusterdError(
       'unauthorized',
-      'agent-key auth must name the acting seat — set the Envelope `from` (send) or the `x-musterd-seat` ' +
-        'header (reads), per SPEC A.7 §253',
+      'the team agent key is bootstrap-only — claim an agent seat and present its seat credential',
     );
-  const member = getMemberByName(db, team.id, actingSeat);
-  if (!member || member.left_at !== null)
-    throw new MusterdError('unauthorized', `no active seat "${actingSeat}" in team "${team.slug}"`);
-  // SECURITY — occupancy binds key→seat (focal point 2). The team agent key is **shared** across all the
-  // team's agent harnesses, so it must NOT be able to act as a *human* seat: otherwise any agent could
-  // set `x-musterd-seat: <admin>` and impersonate the human admin → privilege escalation (admin ops).
-  // A human seat is reachable only via that human's own `mscr_` credential (authByCredential, kind-bound).
-  if (member.kind !== 'agent')
-    throw new MusterdError('forbidden', agentKeySeatKindRefusal(actingSeat, member.kind).message);
+  } else if (token.startsWith(TOKEN_PREFIXES.agent_seat)) {
+    member = authByAgentSeatCredential(db, team, token, actingSeat, sessionLease);
+  } else if (token.startsWith(TOKEN_PREFIXES.credential)) {
+    member = authByCredential(db, team, token, actingSeat);
+  } else if (token.startsWith(TOKEN_PREFIXES.seat)) {
+    member = authByServiceToken(db, team, token, actingSeat);
+  } else {
+    // v0.3 hard cutover (ADR 069 decision 2): the v0.2 per-seat token (`mskd_`) auth path is removed
+    // for peer seats — the only credentials are the team agent key (`mskey_`), a human credential
+    // (`mscr_`), and a service seat's own token (`mskd_`, ADR 232 — kind-bound, see above).
+    throw new MusterdError(
+      'unauthorized',
+      `unrecognized credential for team "${teamSlug}" — present a team agent key (mskey_) or a human credential (mscr_)`,
+    );
+  }
+
+  const accountStatus = resolveAccountStatus(member);
+  if (accountStatus === 'disabled' || accountStatus === 'banned' || accountStatus === 'archived') {
+    throw new MusterdError('forbidden', `seat "${member.name}" is ${accountStatus}`);
+  }
+  return { team, member };
+}
+
+/** Agent HTTP proof is self-identifying and inseparable from its current Presence lease (ADR 337). */
+function authByAgentSeatCredential(
+  db: Database,
+  team: TeamRow,
+  credential: string,
+  actingSeat: string | undefined,
+  sessionLease: string | undefined,
+): MemberRow {
+  const member = db
+    .prepare<
+      [string, string],
+      MemberRow
+    >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'agent'")
+    .get(team.id, hashToken(credential));
+  if (!member)
+    throw new MusterdError('unauthorized', `invalid agent-seat credential for team "${team.slug}"`);
+  if (actingSeat && actingSeat !== member.name)
+    throw new MusterdError(
+      'forbidden',
+      `agent-seat credential identifies "${member.name}", not "${actingSeat}"`,
+    );
+  // ADR 391: from here down the seat IS proven — the credential matched a live agent row. A lease
+  // failure is still a refusal, but it must not throw the proof away with it: the interrupt line
+  // needs to say which seat went deaf, and only this function ever knew.
+  if (!sessionLease?.startsWith(TOKEN_PREFIXES.session_lease))
+    throw new SessionLeaseRefused(member.name, 'missing');
+  if (!hasValidSessionLease(db, { teamId: team.id, memberId: member.id, token: sessionLease }))
+    throw new SessionLeaseRefused(member.name, 'dead');
   return member;
 }
 
@@ -342,10 +450,8 @@ function authByAgentKey(
  * SECURITY — the one statement of the agent-key seat-kind rule: **the shared team agent key may only
  * reach an AGENT seat.**
  *
- * It lives here, beside `authByAgentKey`, because three surfaces enforce it and they must not drift:
- * `authByAgentKey` (acting as a seat), the HTTP claim path, and both WebSocket claim branches. The
- * claim surfaces enforced it nowhere until this was extracted — `authByAgentKey` blocked *acting* as
- * a human seat, but claim resolves its target separately, so an agent key aimed at the human admin
+ * It lives here because the HTTP and WebSocket claim surfaces enforce it and must not drift. The
+ * claim surfaces enforced it nowhere until this was extracted: an agent key aimed at the human admin
  * seat was accepted and queued as a pending request (observed: HTTP 202) for an admin to approve.
  * That is the privilege-escalation path the acting check exists to close, reached one step earlier.
  *
@@ -367,10 +473,9 @@ export function agentKeyMayOccupy(member: Pick<MemberRow, 'kind' | 'observer'>):
  *
  * Deliberately states what is *refused* rather than what is allowed, because the two callers enforce
  * slightly different rules and one enumeration cannot be true for both: the claim surfaces admit
- * agent **and** observer seats ({@link agentKeyMayOccupy}), while `authByAgentKey` admits agent seats
- * only — an observer is `kind: 'human'` and read-only, so it may be *occupied* with the team key but
- * never *acted as*. Naming the refused seat is accurate on both paths; naming the permitted set is
- * not.
+ * agent **and** observer seats ({@link agentKeyMayOccupy}). An observer is `kind: 'human'` and
+ * read-only, so it may be *occupied* with the team key but never use it for a routine action.
+ * Naming the refused seat is accurate on both claim surfaces; naming the permitted set is not.
  */
 export function agentKeySeatKindRefusal(
   seat: string,
@@ -471,6 +576,9 @@ export interface MemberIdentityFields {
   lifecycle: Lifecycle;
   lifecycleUntil: number | null;
   workingHours?: WorkingHours | null;
+  slackUserId?: string | null;
+  /** ADR 374: what the seat file says — a number, or null for "no hue". Reconcile always says. */
+  hue?: number | null;
 }
 
 /**
@@ -480,13 +588,15 @@ export interface MemberIdentityFields {
  */
 export function updateMemberIdentity(db: Database, id: string, f: MemberIdentityFields): void {
   db.prepare(
-    'UPDATE members SET kind = ?, role = ?, lifecycle = ?, lifecycle_until = ?, working_hours = ?, updated_at = ? WHERE id = ?',
+    'UPDATE members SET kind = ?, role = ?, lifecycle = ?, lifecycle_until = ?, working_hours = ?, slack_user_id = ?, hue = ?, updated_at = ? WHERE id = ?',
   ).run(
     f.kind,
     f.role,
     f.lifecycle,
     f.lifecycleUntil,
     f.workingHours ? JSON.stringify(f.workingHours) : null,
+    f.slackUserId ?? null,
+    f.hue ?? null,
     Date.now(),
     id,
   );
@@ -502,7 +612,7 @@ export function reviveMember(db: Database, id: string, f: MemberIdentityFields):
   db.prepare(
     `UPDATE members
        SET kind = ?, role = ?, lifecycle = ?, lifecycle_until = ?,
-           working_hours = ?, token_hash = ?, bound_at = NULL, left_at = NULL, updated_at = ?
+           working_hours = ?, slack_user_id = ?, hue = ?, token_hash = ?, bound_at = NULL, left_at = NULL, updated_at = ?
      WHERE id = ?`,
   ).run(
     f.kind,
@@ -510,6 +620,8 @@ export function reviveMember(db: Database, id: string, f: MemberIdentityFields):
     f.lifecycle,
     f.lifecycleUntil,
     f.workingHours ? JSON.stringify(f.workingHours) : null,
+    f.slackUserId ?? null,
+    f.hue ?? null,
     hashToken(token),
     Date.now(),
     id,
@@ -598,7 +710,7 @@ export function leaveMember(db: Database, memberId: string): void {
   const member = getMemberById(db, memberId);
   const now = Date.now();
   db.prepare(
-    "UPDATE members SET left_at = ?, last_offline_reason = 'signed_off', updated_at = ? WHERE id = ?",
+    "UPDATE members SET left_at = ?, last_offline_reason = 'left_team', updated_at = ? WHERE id = ?",
   ).run(now, now, memberId);
   // ADR 196: soft-remove must free in-flight WIP — otherwise the board asserts ownership for a
   // name every roster filter already drops. awaiting_acceptance keeps the owner (verified-ness).
@@ -607,10 +719,17 @@ export function leaveMember(db: Database, memberId: string): void {
   }
 }
 
-/** Sticky offline reason for an intentional seat release (unbind) — ADR 141. */
-export function markSignedOff(db: Database, memberId: string): void {
+/** Sticky offline reason for an intentional seat release (unbind) — ADR 141, presence-honesty §2.3. */
+export function markSeatReleased(db: Database, memberId: string): void {
   db.prepare(
-    "UPDATE members SET last_offline_reason = 'signed_off', updated_at = ? WHERE id = ?",
+    "UPDATE members SET last_offline_reason = 'seat_released', updated_at = ? WHERE id = ?",
+  ).run(Date.now(), memberId);
+}
+
+/** Sticky offline reason for a clean session exit (graceful release) — presence-honesty §2.3. */
+export function markSessionEnded(db: Database, memberId: string): void {
+  db.prepare(
+    "UPDATE members SET last_offline_reason = 'session_ended', updated_at = ? WHERE id = ?",
   ).run(Date.now(), memberId);
 }
 

@@ -15,6 +15,10 @@ Design: ADR 122/123 + docs/design/cookoff-experiment.md, cookoff-measurement.md,
 - **Provisioning a cell while other harness sessions run clobbers `~/.claude.json` mcpServers** (last-writer-wins) — re-verify immediately pre-launch.
 - score.ts flags need zsh word-splitting (`${=var}`); guardrail keys are `acceptancePassRate` + `perTicket`.
 
+## Ladder status (2026-08-31)
+
+Smoke + pilot + flagship (A / B / C2 / C3 / D) are **done** — the N comparison is finding 006, and the per-cell launch procedures are in `docs/design/cookoff-cell-runbook.md` §2 (filled from `~/cookoff-run/flagship/`, not invented). Remaining unauthorized: **D-res** (manifest §3b, defined) and **cell E**.
+
 ## Open thread
 
-Cell E ("task too big for solo" — the one experiment that could change the regime the headline applies to) is DESIGN IN PROGRESS as of 2026-08-03; every settled decision and the open arms/replicates question live in `~/cookoff-run/e-ladder/HANDOFF.md` — read it before resuming, do not re-litigate what it records. The standing sell rule survives cell E regardless of outcome.
+Cell E ("task too big for solo" — the one experiment that could change the regime the headline applies to) is DESIGN IN PROGRESS as of 2026-08-03; every settled decision and the open arms/replicates question live in `~/cookoff-run/e-ladder/HANDOFF.md` — read it before resuming, do not re-litigate what it records. A no-spend apparatus check (T9–T12 hidden suites + delivery-curve scorer) is at `~/cookoff-run/e-ladder/e1-apparatus-check.md`. **nick 2026-08-31: hold E** — do not open a launch procedure or a spend row in this lane. The standing sell rule survives cell E regardless of outcome.

@@ -29,6 +29,19 @@ Phase 2 is not optional polish. Phase 1 alone reaches `/board` and `/live` only 
 screen — one measurable element each — and everything the product is made of lives past that point.
 The first time phase 2 ran it found **eleven** more AA failures, ten of them on the goal grid.
 
+**The reduced-motion room is its own sweep.** The instrument emulates `prefers-reduced-motion:
+reduce` before navigating, so every route is measured with the media query on — but
+`/office-preview` reads its own `?reduced` flag rather than the query, deliberately, so the design
+tool still animates for a designer who has Reduce Motion set in their OS. Those two facts do not
+cancel: without `&reduced` the gate measures a hybrid room nobody is served, CSS keyframes off and
+scene motion running. `/office-preview` therefore sweeps four ways — two lights × animated and
+reduced. Measured 2026-09-14 on `d92bca0a`: all four give 49 measured, 0 below AA, the same two
+excluded rows and the same two translucent ones. The reduced room is contrast-identical to the
+animated one at rest, which is the equivalence this pins rather than a reason to skip it.
+
+To confirm the flag is not inert, count animation frames instead of trusting the row totals:
+`&still` alone runs 522 `requestAnimationFrame` callbacks in nine seconds, `&still&reduced` runs 7.
+
 It exists because measuring by hand does not scale past the person who remembers. `a11y:contrast`
 shipped in #723 and the surfaces it was pointed at went to zero — but nothing pointed it at anything
 afterwards, and by 2026-08-12 **nine live AA failures** had accumulated: eight on the approval card
@@ -42,6 +55,13 @@ which never render; text with no line box to sample or sitting off the captured 
 SKIPPED, counted per route in the summary); elements caught mid-fade, which keep their composited
 estimate rather than a frame nobody stays on; and any surface the fixture team does not seed. A
 surface nobody seeds is a surface nobody measures.
+
+**The approval card is currently in that category** (2026-08-19, lane 01M092TRQ6). `/approval-preview`
+— a synthetic route that existed only to be swept — was retired rather than kept alive as its own
+justification. The static sweep of `/approvals` reaches its sign-in screen only, and the card's
+states come back into measurement when `/approvals` becomes a signin surface (ADR 222 limits those
+to board/live) and the fixture team leaves one request pending. Until then the card's nine 2026-08-12
+failures stay fixed in the tokens, but nothing re-measures them.
 
 **The gradient blind spot is closed** (2026-08-13). It used to be the largest hole in the gate —
 13–21 elements a route, and seeding the office made it _worse_, because a loud asks rail meant more
@@ -223,6 +243,7 @@ accessibility tool must never fail in.
 | 2026-08-13 | pixel sampling — the gradient blind spot  | 12 failures nothing could previously see; `SKIPPED` 21 → 0 on `/live`                  |
 | 2026-08-13 | `.lc-seat--offline` opacity dim           | ink read 14.34, eye got 3.55 — dim the dot and avatar, not the words                   |
 | 2026-08-13 | hero eyebrow + cursor + `--text-faint`    | 1.18 / 2.54 / 4.09 on the landing page; added `--accent-ink`                           |
+| 2026-09-14 | `/office-preview` reduced-motion room     | 0 failures — 49 measured at both lights, identical to the animated room at rest        |
 
 After those three, `/live` and `/broadcast` measure **zero** live AA text-contrast failures — and
 since 2026-08-12 every prerendered route measures zero on every PR, because `pnpm a11y:check` says

@@ -1,8 +1,17 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import { LaneStateSchema, type Lane, type LaneWarning, type NextBrief } from '@musterd/protocol';
+import {
+  closeReasonCopy,
+  incidentBannerLines,
+  LaneStateSchema,
+  shortDuration,
+  type Lane,
+  type LaneWarning,
+  type NextBrief,
+} from '@musterd/protocol';
 import { resolveProject } from '@musterd/protocol/project';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
+import { SHA_FORMAT, verifyMerge } from '../mergeVerify.js';
 import { errorResult, textResult } from './format.js';
 
 /**
@@ -14,11 +23,12 @@ import { errorResult, textResult } from './format.js';
 
 function fmtLane(l: Lane): string {
   const owner = l.owner_seat ?? 'unowned';
-  const surface = l.surface_globs.length ? ` surface=[${l.surface_globs.join(', ')}]` : '';
+  const scopeGlobs = l.scope ?? [];
+  const scope = scopeGlobs.length ? ` scope=[${scopeGlobs.join(', ')}]` : '';
   const deps = l.depends_on.length ? ` deps=[${l.depends_on.join(', ')}]` : '';
   const branch = l.branch ? ` branch=${l.branch}` : '';
   const goal = l.goal_id ? ` goal=${l.goal_id}` : '';
-  return `${l.id} [${l.state}] "${l.title}" — owner=${owner} project=${l.project}${goal}${surface}${deps}${branch}`;
+  return `${l.id} [${l.state}] "${l.title}" — owner=${owner} project=${l.project}${goal}${scope}${deps}${branch}`;
 }
 
 function fmtWarnings(warnings: LaneWarning[]): string {
@@ -66,7 +76,11 @@ function branchCleanupHint(lane: Lane): string {
   );
 }
 
-export function registerLanes(server: McpServer, client: MusterdClient): void {
+export function registerLanes(
+  server: McpServer,
+  client: MusterdClient,
+  verify: typeof verifyMerge = verifyMerge,
+): void {
   server.registerTool(
     'lane_open',
     {
@@ -77,14 +91,11 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
       inputSchema: {
         title: z.string().describe('the work-item, short'),
         detail: z.string().optional().describe('acceptance criteria / notes'),
-        project: z
-          .string()
-          .optional()
-          .describe('surface-space scope; defaults to this workspace’s repo'),
-        surface_globs: z
+        project: z.string().optional().describe('surface-space; defaults to this workspace’s repo'),
+        scope: z
           .array(z.string())
           .optional()
-          .describe('declared paths, e.g. ["packages/server/src/store/**"]'),
+          .describe('paths this lane touches, e.g. ["packages/server/src/store/**"]'),
         depends_on: z.array(z.string()).optional().describe('lane ids this lane builds on'),
         branch: z.string().optional().describe('git branch carrying the work'),
         goal_id: z
@@ -96,8 +107,8 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           .enum(['low', 'normal', 'high'])
           .optional()
           .describe(
-            'how much this is worth someone’s eyes: low | normal (default) | high. Declared, not ' +
-              'inferred from the files — recorded for measurement; nothing routes on it yet',
+            'how much this is worth someone’s eyes (default normal). Declared, not inferred ' +
+              'from the files; a low lane may be exempted from acceptance (ADR 234)',
           ),
         claim: z.boolean().optional().describe('own it yourself now (recommended at task start)'),
       },
@@ -218,7 +229,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_update',
     {
       description:
-        'Update a lane: state (active/blocked/done/…), title, surface_globs, depends_on, branch, ' +
+        'Update a lane: state (active/blocked/done/…), title, scope, depends_on, branch, ' +
         'detail, project, goal_id. Going active re-runs contention checks.',
       inputSchema: {
         id: z.string().describe('lane id'),
@@ -227,14 +238,14 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         state: z.enum(LaneStateSchema.options).optional().describe('new state'),
         title: z.string().min(1).optional().describe('correct a mis-stated title'),
         detail: z.string().optional(),
-        surface_globs: z.array(z.string()).optional(),
+        scope: z.array(z.string()).optional(),
         stakes: z
           .enum(['low', 'normal', 'high'])
           .optional()
           .describe('re-declare acceptance stakes (ADR 234): low | normal | high'),
         depends_on: z.array(z.string()).optional(),
         branch: z.string().optional(),
-        project: z.string().optional().describe('re-scope the surface-space'),
+        project: z.string().optional().describe('re-declare the surface-space'),
         // Protocol UpdateLaneSchema already has this; the MCP schema omitted it, so the ADR 256
         // no_goal warning named a call (`lane_update {goal_id}`) that bounced as unknown.
         goal_id: z
@@ -242,6 +253,15 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           .nullable()
           .optional()
           .describe('link (or clear, with null) this lane to a Goal'),
+        // ADR 305 amendment 2 (lane 01M2GR0434): the one verb for NONE. A lane stamped with the
+        // wrong merge — someone else's PR, a SHA that was never this branch — had no way back.
+        merged: z
+          .null()
+          .optional()
+          .describe(
+            'pass null to CLEAR a wrong merge attestation (owner or admin only). To attest a ' +
+              'merge use lane_submit / lane_resolve, which verify the SHA.',
+          ),
       },
     },
     async (args) => {
@@ -261,16 +281,45 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     sha?: string | undefined;
     authorized_by?: string | undefined;
     branch?: string | undefined;
+    acceptor?: string | undefined;
   }) => {
     try {
+      // Merge-verified submit: awaiting_acceptance MEANS landed. The repo is the source of
+      // truth for "merged" — the attested SHA is checked against origin/main right here, at
+      // the author's own act, so the "your PR never landed" nudge reaches the one seat that
+      // owns the missing merge at the moment it can act (no poller: ADR 294 dec 2 / ADR 297).
+      // Refusals need POSITIVE evidence; abstentions (cross-repo lane, offline) proceed with
+      // the tier recorded on the attestation (ADR 145: degrade, never wedge).
+      if (args.sha !== undefined && !SHA_FORMAT.test(args.sha)) {
+        return textResult(
+          `"${args.sha}" is not a git SHA — pass the squash-merge SHA from origin/main ` +
+            `(git log --oneline -1 after the merge lands).`,
+        );
+      }
+      if (args.pr !== undefined && args.sha === undefined) {
+        return textResult(
+          `a PR number without a landed SHA is an open PR — nothing has landed, so there is ` +
+            `nothing to accept yet. Arm auto-merge (gh pr merge --squash --auto ${args.pr}), ` +
+            `wait for the merge, then resubmit with the squash SHA.`,
+        );
+      }
+      const verification = await verify({ sha: args.sha, cwd: process.cwd() });
+      if (verification === 'not_ancestor') {
+        return textResult(
+          `SHA ${args.sha} is not on origin/main — nothing landed. If the PR is still open, ` +
+            `arm auto-merge and resubmit with the real squash SHA once it lands; if this ` +
+            `landed somewhere else on purpose, that flow needs a design, not a workaround.`,
+        );
+      }
       const merged = {
         ...(args.pr !== undefined ? { pr: args.pr } : {}),
         ...(args.sha !== undefined ? { sha: args.sha } : {}),
         ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
+        verification,
       };
       const { lane, warnings, review } = await client.updateLane(args.id, {
         state: 'awaiting_acceptance',
-        ...(Object.keys(merged).length ? { merged } : {}),
+        merged,
         // ADR 083's argument for `branch` is that work should reach the next person as an ARTIFACT
         // rather than a description — and submit, which hands the lane to an acceptor, is the moment
         // that matters most. It was the one lane edge that could not set it: `branch` is valid on
@@ -280,6 +329,12 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         // terminal-or-awaiting lanes carry branch=null, so acceptors routinely get an empty pointer
         // and dig the branch out of a PR link or a status_update.
         ...(args.branch !== undefined ? { branch: args.branch } : {}),
+        // Route the acceptance to a seat you name instead of the picker's choice. Recorded as
+        // `route: 'named'`, never as a pick — the picker is what proves diversity, and it did not
+        // choose this seat. Without this the only way to route acceptance by hand was out of band,
+        // and an out-of-band acceptance binds to nothing: the named seat's `accept` had no
+        // server-composed ask to answer, so the owner self-closed reviewed work as unverified.
+        ...(args.acceptor !== undefined ? { acceptor: args.acceptor } : {}),
       });
       // ADR 235. The old advice — "wait ≤5m; on silence, lane_resolve yourself" — was correct while
       // an unaccepted lane hung forever: self-close was the only escape. With a backstop armed it
@@ -294,44 +349,51 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
       // silent. Before it did, this client read the silence as "no eligible acceptor is live" and
       // sanctioned self-close against lanes whose acceptor had a pending ask — inviting exactly the
       // premature unverified close ADR 235 measured 20-for-20 and shipped to stop.
-      const hint = review?.standing
-        ? review.reviewer
-          ? `\n\nalready awaiting acceptance from ${review.reviewer}` +
-            `${review.route ? ` (${review.route})` : ''} — attestation recorded, nothing re-routed. ` +
-            `Leave it with them.`
-          : review.acceptance_exempt
-            ? `\n\nalready awaiting close — this submit was acceptance-exempt (declared low stakes, ` +
-              `ADR 234): lane_resolve when ready.`
-            : // Nothing was ever routed (the original submit found no candidate). The sanction was
-              // and remains honest here — nobody was asked, so no verdict is coming.
-              `\n\nno acceptor was ever routed — self-close sanctioned: ` +
-              `lane_resolve when ready (recorded unconfirmed).`
-        : !review
-          ? // No routing decision AND no standing report (a pre-fix daemon, or a patch that never
-            // touched acceptance). Absence of a decision is not absence of an acceptor (ADR 173):
-            // abstain rather than assert, and never sanction self-close on silence.
-            ''
-          : review.acceptance_exempt
-            ? // ADR 234 increment 2: no ask by DESIGN, on the lane's own declared stakes — not the
-              // "nobody was eligible" degradation, and the wording must not conflate them.
-              `\n\nacceptance-exempt (declared low stakes, ADR 234) — no ask was routed and none ` +
-              `is owed: lane_resolve when ready.`
-            : !review.reviewer
-              ? // A fresh submit that found nobody. Nobody was asked, so no verdict is coming and
-                // waiting out a grace would be pure delay. This branch keeps its sanction whether or
-                // not a sweep is armed.
-                `\n\nno eligible acceptor is live — self-close sanctioned: ` +
+      const hint = review?.rerouted
+        ? // Lane 01M1QYHJFY: a submit that named a different acceptor on a lane already awaiting
+          // acceptance. Say what moved and that the previous holder was told — the caller used to
+          // get "no acceptor was ever routed" here, which was false and counselled self-close.
+          `\n\nacceptance re-routed to ${review.reviewer} (${review.route})` +
+          `${review.superseded ? ` — ${review.superseded}'s ask is closed and they were told` : ''}. ` +
+          `You are done; leave it with ${review.reviewer}.`
+        : review?.standing
+          ? review.reviewer
+            ? `\n\nalready awaiting acceptance from ${review.reviewer}` +
+              `${review.route ? ` (${review.route})` : ''} — attestation recorded, nothing re-routed. ` +
+              `Leave it with them.`
+            : review.acceptance_exempt
+              ? `\n\nalready awaiting close — this submit was acceptance-exempt (declared low stakes, ` +
+                `ADR 234): lane_resolve when ready.`
+              : // Nothing was ever routed (the original submit found no candidate). The sanction was
+                // and remains honest here — nobody was asked, so no verdict is coming.
+                `\n\nno acceptor was ever routed — self-close sanctioned: ` +
                 `lane_resolve when ready (recorded unconfirmed).`
-              : review.backstop?.armed
-                ? `\n\nacceptance asked of ${review.reviewer} (${review.route}) — you are done; leave it ` +
-                  `with them. Do NOT self-close on silence: acceptors who were offline at submit came ` +
-                  `back 20 of 20 times, and the daemon sweeps an unanswered lane after ` +
-                  `${Math.round(review.backstop.grace_ms / 3_600_000)}h anyway. lane_resolve still works ` +
-                  `if you genuinely need it shut now, and records unconfirmed. Acceptor judges ` +
-                  `intent/principles/usable/feel — not the diff.`
-                : `\n\nacceptance asked of ${review.reviewer} (${review.route}) — wait ≤5m; ` +
-                  `accept closes the lane, reject resumes it; on silence, lane_resolve yourself ` +
-                  `(recorded unconfirmed). Acceptor judges intent/principles/usable/feel — not the diff.`;
+          : !review
+            ? // No routing decision AND no standing report (a pre-fix daemon, or a patch that never
+              // touched acceptance). Absence of a decision is not absence of an acceptor (ADR 173):
+              // abstain rather than assert, and never sanction self-close on silence.
+              ''
+            : review.acceptance_exempt
+              ? // ADR 234 increment 2: no ask by DESIGN, on the lane's own declared stakes — not the
+                // "nobody was eligible" degradation, and the wording must not conflate them.
+                `\n\nacceptance-exempt (declared low stakes, ADR 234) — no ask was routed and none ` +
+                `is owed: lane_resolve when ready.`
+              : !review.reviewer
+                ? // A fresh submit that found nobody. Nobody was asked, so no verdict is coming and
+                  // waiting out a grace would be pure delay. This branch keeps its sanction whether or
+                  // not a sweep is armed.
+                  `\n\nno eligible acceptor is live — self-close sanctioned: ` +
+                  `lane_resolve when ready (recorded unconfirmed).`
+                : review.backstop?.armed
+                  ? `\n\nacceptance asked of ${review.reviewer} (${review.route}) — you are done; leave it ` +
+                    `with them. Do NOT self-close on silence: acceptors who were offline at submit came ` +
+                    `back 20 of 20 times, and the daemon sweeps an unanswered lane after ` +
+                    `${Math.round(review.backstop.grace_ms / 3_600_000)}h anyway. lane_resolve still works ` +
+                    `if you genuinely need it shut now, and records unconfirmed. Acceptor judges ` +
+                    `intent/principles/usable/feel — not the diff.`
+                  : `\n\nacceptance asked of ${review.reviewer} (${review.route}) — wait ≤5m; ` +
+                    `accept closes the lane, reject resumes it; on silence, lane_resolve yourself ` +
+                    `(recorded unconfirmed). Acceptor judges intent/principles/usable/feel — not the diff.`;
       return laneResult('lane submitted for acceptance', lane, warnings, hint);
     } catch (err) {
       return errorResult(err);
@@ -342,11 +404,10 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_submit',
     {
       description:
-        'Your work is merged — move the lane to awaiting_acceptance (ADR 192) and attest it ' +
-        '(pr/sha/branch/authorized_by). OUTCOME ACCEPTANCE, not a code review: an acceptor judges ' +
-        'intent/principles/usable/feel of the landed artifact. Accept closes the lane, reject ' +
-        'returns it to active. The response says whether to wait or self-close — follow it, not a ' +
-        'fixed timer (ADR 235). Auto-merge first, then submit.',
+        // The unlanded-refusal behavior (ADR 300) is deliberately NOT described here: the standing
+        // tools/list surface is budget-gated (context:check), and the refusal message itself
+        // teaches at the only moment it matters — when an unlanded submit is attempted.
+        'After merge, move a Lane to awaiting_acceptance with PR/SHA evidence. The response names the acceptor and whether to wait or self-close.',
       inputSchema: {
         id: z.string().describe('lane id'),
         pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
@@ -356,25 +417,12 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           .optional()
           .describe('the human whose authority the merge ran under'),
         branch: z.string().optional().describe('branch carrying the work'),
-      },
-    },
-    laneSubmitHandler,
-  );
-
-  // Deprecated alias for lane_submit (ADR 192) — keep registered so older sessions/harness memory work.
-  server.registerTool(
-    'lane_ready',
-    {
-      description: 'Deprecated alias for lane_submit (ADR 192) — prefer lane_submit.',
-      inputSchema: {
-        id: z.string().describe('lane id'),
-        pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
-        sha: z.string().optional().describe('squash-merge SHA on main'),
-        authorized_by: z
+        acceptor: z
           .string()
           .optional()
-          .describe('the human whose authority the merge ran under'),
-        branch: z.string().optional().describe('branch carrying the work'),
+          .describe(
+            'route the acceptance ask to THIS seat instead of the picker\'s choice; recorded as route "named"',
+          ),
       },
     },
     laneSubmitHandler,
@@ -387,7 +435,10 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         'Mark a lane done — clears its warnings and releases its surface. If its branch landed, ' +
         'attest the merge: pass pr, sha, and authorized_by so the audit log joins your seat to ' +
         'the landed SHA and the authorizing human. Landed without a PR? Omit pr and pass sha alone. ' +
-        'Prefer lane_submit first (ADR 192): resolving your own lane records an unconfirmed close.',
+        "Closing someone else's lane? The worker's own lane_submit stamp stands and your flags are " +
+        'ignored (ADR 305); pass them only when the lane has no attestation yet, which then ' +
+        'records yours. ' +
+        'Prefer lane_submit (ADR 192): a self-close records unconfirmed unless acceptance-exempt.',
       inputSchema: {
         id: z.string().describe('lane id'),
         // `pr` is the PR *number*. Callers reached for `pr:"local"` to mean "merged without a PR";
@@ -404,21 +455,68 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     },
     async (args) => {
       try {
-        const merged = {
+        // Same merge verification as lane_submit, for the same reason: `done` MEANS landed when an
+        // attestation is carried. This was the unverified path — resolve wrote the same merged
+        // object submit refuses, and two lanes sat done-but-unmerged for 3 days while the team
+        // cited the unlanded page by name (2026-08-24, the #997/#998 instance of
+        // docs/wiki/cannot-separate-two-causes.md). An attestation-LESS resolve is untouched:
+        // counterpart accepts and design-lane closes carry no merged object (ADR 305).
+        if (args.sha !== undefined && !SHA_FORMAT.test(args.sha)) {
+          return textResult(
+            `"${args.sha}" is not a git SHA — pass the squash-merge SHA from origin/main ` +
+              `(git log --oneline -1 after the merge lands).`,
+          );
+        }
+        if (args.pr !== undefined && args.sha === undefined) {
+          return textResult(
+            `a PR number without a landed SHA is an open PR — nothing has landed, so this lane ` +
+              `is not done. Arm auto-merge (gh pr merge --squash --auto ${args.pr}), wait for ` +
+              `the merge, then resolve with the squash SHA.`,
+          );
+        }
+        const verification =
+          args.sha !== undefined ? await verify({ sha: args.sha, cwd: process.cwd() }) : undefined;
+        if (verification === 'not_ancestor') {
+          return textResult(
+            `SHA ${args.sha} is not on origin/main — nothing landed, and marking this done would ` +
+              `record a merge that never happened. If the PR is still open, arm auto-merge and ` +
+              `resolve with the real squash SHA once it lands.`,
+          );
+        }
+        const attested = {
           ...(args.pr !== undefined ? { pr: args.pr } : {}),
           ...(args.sha !== undefined ? { sha: args.sha } : {}),
           ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
         };
-        const { lane, warnings, notices } = await client.updateLane(args.id, {
+        // A sha carries its checked tier; an attestation without one is honestly `unattested`
+        // (same semantics as submit). No attestation at all sends no merged object (ADR 305).
+        const merged = Object.keys(attested).length
+          ? { ...attested, verification: verification ?? ('unattested' as const) }
+          : {};
+        const { lane, warnings, notices, closed } = await client.updateLane(args.id, {
           state: 'done',
           ...(Object.keys(merged).length ? { merged } : {}),
         });
         // ADR 192 advisory nudge: closing your own lane is an unconfirmed close — legal, honest,
         // and worth one line. A counterpart closing someone else's lane accepts it; no nudge.
+        //
+        // ADR 283/234: but only when an acceptance was actually OWED. This branched on ownership
+        // alone, so a lane the daemon had just exempted was told it recorded an "unconfirmed close"
+        // and should have preferred `lane_submit` — the opposite of what `lane_submit` told it one
+        // call earlier ("none is owed: lane_resolve when ready"), and a surprise about its ledger
+        // label of exactly the kind `close_records` is sent at submit to prevent. The recorded
+        // reason is read here rather than re-derived from `lane.stakes`: stakes are editable after
+        // open, so re-deriving would let an edit rewrite what the submit did.
+        //
+        // Absence abstains INTO the old nudge, not out of it: an older daemon sends no `closed`,
+        // and dropping the ADR 192 line for every seat on a lagging daemon is the worse failure.
         const nudge =
-          client.member && lane.owner_seat === client.member
-            ? '\n\nunconfirmed close recorded — prefer lane_submit when an acceptor is live (ADR 192).'
-            : '';
+          closed?.reason === 'acceptance_exempt'
+            ? '\n\nno acceptance was owed — declared low stakes (ADR 234); the ledger records ' +
+              'this close as `acceptance_exempt`, not as a missing review.'
+            : client.member && lane.owner_seat === client.member
+              ? '\n\nunconfirmed close recorded — prefer lane_submit when an acceptor is live (ADR 192).'
+              : '';
         // value-layer design: the daemon's advisory notices (e.g. the ship nudge) reach the closer.
         const noticeText = notices?.length ? '\n\n' + notices.join('\n') : '';
         const hint = noticeText + nudge + branchCleanupHint(lane);
@@ -433,9 +531,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'team_next',
     {
       description:
-        'Your orientation brief at session start: what you are carrying, what just shipped, open ' +
-        "lanes to pick up, and the latest handoff's why — derived from the team's own lane and " +
-        'act state, no human prompt needed.',
+        'Read your orientation: carried work, shipped work, open Lanes, and the latest handoff.',
       inputSchema: {},
     },
     async () => {
@@ -449,41 +545,15 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
 }
 
 /** Coarse elapsed time — the reader needs "hours, not minutes", never a precise duration. */
-function waitedFor(ms: number): string {
-  const s = Math.round(ms / 1000);
-  if (s >= 86400) return `${Math.floor(s / 86400)}d`;
-  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
-  if (s >= 60) return `${Math.floor(s / 60)}m`;
-  return `${s}s`;
-}
-
 export function fmtNext(b: NextBrief): string {
   const lines: string[] = [`next — as ${b.member}`];
   // Incident banner FIRST, above everything (spec 2026-08-14 §4): most of the measured waste in the
   // motivating episode was seats starting sessions into a shared red they assumed was theirs. Same
   // `?? []` daemon-skew tolerance as owed_reviews below.
-  for (const inc of b.incidents ?? []) {
-    // ADR 271: an unclaimed incident carries a countdown. "UNCLAIMED" alone says the lane is free
-    // but not whether taking it is still this seat's decision — the window is what makes "any seat
-    // may claim, context beats role" actionable instead of merely true. Undefined from a pre-271
-    // daemon, which reads exactly as increment 1 did.
-    const left = inc.claim_closes_at == null ? null : inc.claim_closes_at - Date.now();
-    const window =
-      left == null
-        ? ''
-        : left > 0
-          ? inc.fallback_role
-            ? ` — yours to claim for ${waitedFor(left)}, then it falls to ${inc.fallback_role}`
-            : ` — yours to claim for ${waitedFor(left)}; NOBODY holds the fallback role, so after that it just sits`
-          : inc.fallback_role
-            ? ` — claim window closed, routing to ${inc.fallback_role}`
-            : ` — claim window closed and NOBODY holds the fallback role: this will sit unowned until someone takes it`;
-    lines.push(
-      `⚠ incident: ${inc.gate} — ${inc.owner_seat ? `owned by ${inc.owner_seat}` : 'UNCLAIMED'} ` +
-        `(lane ${inc.lane}, open ${waitedFor(Date.now() - inc.opened_at)})${window}.`,
-      `  If your red matches, it is not yours. Report blocked_by and park behind it.`,
-    );
-  }
+  // The words come from the protocol package, not from here (ADR 084). They used to live inline in
+  // this function only — which is exactly why `musterd next` showed no banner at all for two whole
+  // increments. A shared derivation with a per-surface renderer drifts the moment one copy is edited.
+  for (const inc of b.incidents ?? []) lines.push(...incidentBannerLines(inc));
   // FIRST, above your own work, on purpose (ADR 233). This is the one item in the brief that
   // someone else is blocked on, and it is the one that loses when a seat is busy: half the
   // unverified closes had the named reviewer online for ~40 minutes and still never answering.
@@ -509,7 +579,7 @@ export function fmtNext(b: NextBrief): string {
     lines.push(`\n⧗ owed by you — ${owed.length} lane(s) waiting on your verdict:`);
     for (const r of owed) {
       lines.push(
-        `  ${r.lane.id} "${r.lane.title}" — ${r.from} has waited ${waitedFor(now - r.ts)}`,
+        `  ${r.lane.id} "${r.lane.title}" — ${r.from} has waited ${shortDuration(now - r.ts)}`,
       );
       lines.push(
         `    answer: team_send {act:'accept', to:'${r.from}', reply_to:'${r.ask_id}', body:'…'}`,
@@ -536,8 +606,27 @@ export function fmtNext(b: NextBrief): string {
         `  ${r.id} "${r.title}"${r.owner ? ` — owner=${r.owner}` : ''} — waiting ${Math.floor(r.waited_ms / 3_600_000)}h` +
           // Not "nobody has answered" — nobody was ASKED. The distinction is the whole point:
           // waiting on a slow reviewer and waiting on no reviewer look identical here otherwise.
-          (r.no_candidate ? ' — NO REVIEWER WAS ASKED (no eligible counterpart at submit)' : ''),
+          (r.no_candidate ? ' — NO REVIEWER WAS ASKED (no eligible counterpart at submit)' : '') +
+          // Merge-verified submit: no SHA on the attestation means nothing landed — the wait
+          // is on the author's merge button, and holding for it wastes an acceptor's cycle.
+          (r.unlanded
+            ? ' — NO MERGE ATTESTATION (nothing landed — waiting on its author, not you)'
+            : ''),
       );
+  }
+  // ADR 373 increment 4: recorded intentions above the open lanes (see the CLI renderer's note).
+  const seeds = b.up_next_seeds ?? [];
+  if (seeds.length) {
+    const total = b.up_next_seeds_total ?? seeds.length;
+    lines.push(
+      `\nup next — recorded intentions nobody has started${total > seeds.length ? ` (${seeds.length} of ${total})` : ''}:`,
+    );
+    for (const s of seeds) {
+      lines.push(`  ${s.id} ${s.summary}`);
+      lines.push(
+        `    ${s.ref ?? `from ${s.submitted_by}`} · take it: team_seed_update {action:"claim", id:"${s.id}"}`,
+      );
+    }
   }
   if (b.up_next.length) {
     lines.push('\nup next — open lanes you could pick up:');
@@ -550,7 +639,19 @@ export function fmtNext(b: NextBrief): string {
   if (b.shipped.length) {
     lines.push('\nrecently shipped:');
     for (const l of b.shipped)
-      lines.push(`  ✓ "${l.title}"${l.goal_id ? ` goal=${l.goal_id}` : ''}`);
+      lines.push(
+        `  ✓ "${l.title}"${l.goal_id ? ` goal=${l.goal_id}` : ''}` +
+          // ADR 192's copy, the same the web board's chip has carried since ADR 169: `verified` is
+          // the wire name, "unconfirmed" is what a reader is told. Only on an explicit `false` — an
+          // absent verdict is unknown, not unconfirmed, and saying otherwise would accuse a close
+          // nobody recorded anything about.
+          (l.verified === false ? ' — unconfirmed' : '') +
+          // ADR 283: and WHY. `unconfirmed` alone sends every reader the same way; these two halves
+          // send them opposite ways, so the reason rides wherever the word does.
+          (l.close_reason !== undefined && closeReasonCopy(l.close_reason) !== null
+            ? ` (${closeReasonCopy(l.close_reason)!})`
+            : ''),
+      );
   }
   if (b.next_goal) {
     const g = b.next_goal;
@@ -563,7 +664,7 @@ export function fmtNext(b: NextBrief): string {
     // took 15 days the last time, and 38 for the copy 19 other seats were reading.
     lines.push(
       `\nwhy — handoff from ${b.why.from}${b.why.goal_id ? ` goal=${b.why.goal_id}` : ''}` +
-        ` (${waitedFor(Math.max(0, Date.now() - b.why.ts))} ago):`,
+        ` (${shortDuration(Math.max(0, Date.now() - b.why.ts))} ago):`,
     );
     lines.push('  ' + b.why.body);
   }
@@ -572,6 +673,7 @@ export function fmtNext(b: NextBrief): string {
     !owed.length &&
     !b.in_flight.length &&
     !b.up_next.length &&
+    !seeds.length &&
     !b.shipped.length &&
     !b.next_goal &&
     !b.why

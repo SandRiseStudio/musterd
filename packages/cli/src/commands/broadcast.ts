@@ -201,6 +201,24 @@ export function keychainLookup(service: string): Promise<string | null> {
  * silence is cheaper than explaining that in a runbook. Keyframe every 2s (`-g 2*fps`), the spacing
  * Twitch asks for. File mode keeps the same encode so a local proof exercises the streaming path.
  */
+/**
+ * Packets ffmpeg may buffer per input before the producer blocks. Applies to each real input, so it
+ * goes before the `-i` it belongs to — an ffmpeg input option is positional, and one written after
+ * its input silently belongs to the next one.
+ *
+ * The default is 8, which the 2026-09-03 hosted run reported against BOTH inputs within a second of
+ * going live: `Thread message queue blocking; consider raising the thread_queue_size option
+ * (current value: 8)`. Eight packets is a third of a second at 25fps, so a single missed frame
+ * deadline in Chrome — on a box measured at ~3.1 of 4 cores, where the wiki already records Chrome's
+ * render as the bottleneck — blocks the reader instead of being absorbed, and the viewer sees it.
+ * 512 buys ~20s of video at 25fps for a few MB of RAM on an 8 GB machine, which is the right side
+ * of that trade by a wide margin. `anullsrc` is exempt: a synthetic source cannot fall behind.
+ *
+ * This raises the CEILING on a hiccup, it does not make the pipeline faster. If `speed=` sits below
+ * 1.0x the encoder is genuinely behind and no queue size fixes that.
+ */
+const INPUT_QUEUE = ['-thread_queue_size', '512'] as const;
+
 /** The null sink the hosted entrypoint creates. Chrome plays into it; ffmpeg reads its monitor. */
 export const PULSE_SINK = 'musterd';
 
@@ -220,6 +238,7 @@ export function ffmpegArgs(
     '-stats_period',
     '10',
     // video: image frames on stdin (codec sniffed per-frame), already constant-rate via the pump
+    ...INPUT_QUEUE,
     '-f',
     'image2pipe',
     '-framerate',
@@ -229,7 +248,7 @@ export function ffmpegArgs(
     // audio: the page's own output when --audio (a Pulse null sink the entrypoint created), else
     // silence — ingests require an audio track either way.
     ...(opts.audio
-      ? ['-f', 'pulse', '-i', `${PULSE_SINK}.monitor`]
+      ? [...INPUT_QUEUE, '-f', 'pulse', '-i', `${PULSE_SINK}.monitor`]
       : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo']),
     '-c:v',
     vcodec,
@@ -478,6 +497,32 @@ function startPerfRecording(
 
 /** How long a single CDP call may go unanswered before we stop waiting on a socket that may be dead. */
 const CDP_TIMEOUT_MS = 15_000;
+
+/**
+ * `Page.navigate`'s own deadline. It is the only startup call that leaves the machine.
+ *
+ * The others — `Page.enable`, `Runtime.enable`, `Emulation.setDeviceMetricsOverride` — are local
+ * bookkeeping and answer in microseconds, so 15s is a generous ceiling for them. `Page.navigate`
+ * resolves when the navigation COMMITS: Chrome has to reach the laptop's daemon across Tailscale
+ * and begin the document, on a cold machine, with a Chrome that started seconds ago, beside an
+ * encoder already burning most of a core. On 2026-09-03 that cost machine 8799e4b0267668 its life
+ * 27s in, and the run that survived spent 16s between `streaming` and `◉ live` — a span containing
+ * navigate AND waitBroadcastReady's poll, so navigate was sitting close enough to the bar that
+ * which side it landed on was chance.
+ *
+ * 60s is sized against that observation with room for a slow tailnet, and it is deliberately NOT a
+ * new global default: the 15s ceiling is what makes a wedged compositor detectable, and raising it
+ * everywhere would trade a startup flake for a hang nothing reports.
+ */
+const CDP_NAVIGATE_TIMEOUT_MS = 60_000;
+
+/**
+ * The deadline for one CDP call. A network call gets a network budget; everything else keeps the
+ * short ceiling that makes a dead socket look dead.
+ */
+export function cdpTimeoutFor(method: string): number {
+  return method === 'Page.navigate' ? CDP_NAVIGATE_TIMEOUT_MS : CDP_TIMEOUT_MS;
+}
 
 /** How often a live stream checks whether the code under it has moved. Well inside the ADR 152
  * auto-refresher's 120s tick, so a rebuild is picked up on the next poll rather than the next hour. */
@@ -810,7 +855,7 @@ async function connectCdp(debugPort: number): Promise<Cdp> {
         const id = ++msgId;
         const timer = setTimeout(() => {
           if (pending.delete(id)) rej(new CliError(`Chrome did not answer ${method} in time`, 1));
-        }, CDP_TIMEOUT_MS);
+        }, cdpTimeoutFor(method));
         pending.set(id, {
           res: (v) => {
             clearTimeout(timer);

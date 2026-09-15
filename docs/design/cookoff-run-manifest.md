@@ -37,20 +37,53 @@ cell's `scoring.config.json` `actors` list; a commit attributed to no configured
 (ADR 123 §2). The reference-solution's `alix`/`boro`/`cyra` seats are the fixture's own validation
 identities, not a cell's.
 
-## 2. Spend authorization (owner-gated, 2026-07-10)
+## 2. Spend authorization (owner-gated, 2026-07-10; ladder climbed 2026-07-20)
 
 Owner (Nick) authorized **the smoke rung only**, then a check-in before more. Real money goes in one
-rung at a time; each rung gates the next.
+rung at a time; each rung gates the next. Smoke ran 2026-07-17; nick authorized the pilot the same
+morning; flagship followed the same day after the pilot check-in (finding
+[006](../research/006-enforcement-induces-coordination-cookoff-pilot.md)).
 
-| Rung         | Cells               | Runs     | Authorized             |
-| ------------ | ------------------- | -------- | ---------------------- |
-| **Smoke**    | D                   | 1        | ✅ now                 |
-| **Pilot**    | A + D               | 2 each   | ⏸ after smoke check-in |
-| **Flagship** | A / B / C2 / C3 / D | 3–5 each | ⏸ after pilot check-in |
+| Rung         | Cells               | Runs     | Authorized                          |
+| ------------ | ------------------- | -------- | ----------------------------------- |
+| **Smoke**    | D                   | 1        | ✅ 2026-07-17                       |
+| **Pilot**    | A + D               | 2 each   | ✅ 2026-07-20 (after smoke check-in) |
+| **Flagship** | A / B / C2 / C3 / D | 3 each   | ✅ 2026-07-20 (after pilot check-in) |
+| **D-res**    | D + residency       | —        | ⏸ defined §3b, not authorized      |
+| **E**        | too-big-for-solo    | —        | ⏸ design in progress, not authorized |
+| **Refresh**  | A / B / C2 / C3 / D | 3 each   | ✅ 2026-09-06 authorized (nick: "full one"); **launch held** on nick's separate go — see below |
 
 The apparatus checks that carry **no model spend** (archaeology recalibration, scoring-harness
-validation — §3) are done ahead of the paid smoke build; only the cell-D agent build itself draws the
-authorized smoke spend.
+validation — §3) ran ahead of the paid smoke build. D-res and E still have no spend row — do not
+launch them on leftover flagship authorization.
+
+### 2b. The refresh rung (authorized 2026-09-06, lane `01M1VDRC6BAGMF7J0PCM0X3XKR`)
+
+The flagship number the pitch cites (D 1.9% vs C3 72.2%, finding 006) was measured on musterd
+`0ed4fd3` (2026-07-20) — 994 commits behind `main` on the day of authorization, and before the
+two-stage close, eligible sets, huddles, the live board and residency existed. nick authorized a
+**full five-arm re-run** (3 runs per arm, 15 cells) so the receipt carries a September date, and
+then held the launch: "dont actually launch the full cookoff just yet". Authorization and launch
+are two words on purpose; this row records the first. Nothing spends until the second.
+
+What changes against the flagship pins, recorded here so the delta is named before the data:
+
+| pin                    | flagship (2026-07-20)          | refresh                                                 |
+| ---------------------- | ------------------------------ | ------------------------------------------------------- |
+| musterd build (B, D)   | `0ed4fd3` (`~/cookoff-run/bin-flagship`) | `1d7aebc6` = `main` at authorization (`~/cookoff-run/bin-refresh`, detached checkout `~/cookoff-run/musterd-refresh`) |
+| Harness                | Claude Code `2.1.205`          | Claude Code `2.1.263` (what the machine runs; not re-pinnable downward) |
+| Model                  | `claude-sonnet-5`              | unchanged                                               |
+| Fixture / kickoff      | `ea5c6d4`                      | unchanged                                               |
+| Scoring                | `score.ts` + `musterd archaeology` v1 | unchanged predicate set; archaeology from the refresh build |
+| Tags / ports / artifacts | `F*` / 4880–4887 / `run-artifacts-flagship` | `R*` / 4890–4897 / `run-artifacts-refresh`; scripts `~/cookoff-run/refresh/` |
+
+Everything else in §1 holds. The harness version moved because the July pin is not installable
+beside the current one; it is a confound to name, not one to hide. The report will show the July
+and September tables side by side and state that two things moved (musterd, harness), not one.
+
+Pre-registered, at count 0: the sell comparison stays **D vs C3**; the July number is not
+overwritten but superseded with its date; a refresh D worse than July's 1.9% is reported as-is.
+
 
 ## 3. Smoke-rung apparatus de-risking (done 2026-07-10, no model spend)
 
@@ -110,15 +143,17 @@ latency / answer rate** for acts that arrive while a seat is between sessions (f
 `musterd report residency`). Runs when the ladder resumes, after the pilot rung, under its own
 spend authorization row in §2 — this section defines it so the definition predates the data.
 
-## 4. Still open (flagged for the smoke run, not this freeze)
+## 4. Still open (flagged at freeze; status as of 2026-08-31)
 
-- **Wall-clock cap `T`** — proposed 90 min/run; calibrate against the smoke cell-D build's actual
-  time-to-done before the pilot (like the W3 dup-hunk thresholds, ADR 123 §7).
-- **Billed-cost roll-up** — tokens-to-done gets its public-pricing multiplier now the model is pinned
-  (Sonnet 5); wire it into `score.ts` before the pilot so the tokens support number is comparable.
-- **Per-cell setup runbook** — ✅ **cell D authored** (smoke rung) in
-  [`cookoff-cell-runbook.md`](cookoff-cell-runbook.md): clone/seed/identity/permission-policy +
-  Goals/Lanes seeding. A/B/C2/C3/D-res are stubbed there, to be filled at their rung.
+- **Wall-clock cap `T`** — proposed 90 min/run. Calibrated by the runs themselves: pilot A finished
+  in 2m45s–4m36s, D in ~7–35 min; flagship stayed inside the cap. 90 min remains the safety cap, not
+  a pass/fail deadline. Cell E treats it as a **censoring boundary** (incomplete-at-cap), not a
+  hidden acceptance threshold (`~/cookoff-run/e-ladder/e1-apparatus-check.md`).
+- **Billed-cost roll-up** — still open. Tokens-to-done is reported raw (finding 006: D ≈7.7× solo
+  output tokens). The public-pricing multiplier was not wired into `score.ts` before the flagship.
+- **Per-cell setup runbook** — ✅ **A / B / C2 / C3 / D filled** in
+  [`cookoff-cell-runbook.md`](cookoff-cell-runbook.md) from the 2026-07-17 smoke + 2026-07-20
+  pilot/flagship scripts. D-res and E stay unfilled until their spend gates (honesty rule).
 
 ## Related
 

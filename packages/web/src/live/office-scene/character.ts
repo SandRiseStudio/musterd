@@ -53,13 +53,31 @@ interface Proj {
  * Project one joint. Character space (x right, y up, z forward) is rotated onto the floor by the facing,
  * added to the member's floor point, projected, then lifted by the joint's height.
  */
-function projector(lx: number, ly: number, dir: Dir, fit: Fit, s: number, heading?: number): (j: V3) => Proj {
+function projector(
+  lx: number,
+  ly: number,
+  dir: Dir,
+  fit: Fit,
+  s: number,
+  heading?: number,
+  /**
+   * Idle sway, in character-space x per unit of joint height (see `drawCharacter`).
+   *
+   * Folded in HERE rather than applied to the joints, for two reasons. It is free: one multiply-add
+   * per joint, against the ~3.5 points of one core that rebuilding a Skel per character per frame
+   * measured at 19 members and 19fps (2026-09-14). And scaling it by `j.y` makes the body pivot at
+   * the hips — the feet stay planted, the shoulders travel furthest — which is what a weight shift
+   * actually looks like and what a flat offset on five joints did not.
+   */
+  sway = 0,
+): (j: V3) => Proj {
   // A continuous heading rotates the basis to any angle mid-turn; the cardinal is the resting case.
   const f: readonly [number, number] = heading !== undefined ? [Math.cos(heading), Math.sin(heading)] : FWD[dir];
   const r: [number, number] = [f[1], -f[0]]; // the character's right, on the floor
   return (j: V3): Proj => {
-    const wx = lx + (f[0] * j.z + r[0] * j.x) * s;
-    const wy = ly + (f[1] * j.z + r[1] * j.x) * s;
+    const jx = sway === 0 ? j.x : j.x + sway * j.y;
+    const wx = lx + (f[0] * j.z + r[0] * jx) * s;
+    const wy = ly + (f[1] * j.z + r[1] * jx) * s;
     const p = project(wx, wy, fit);
     return { p: { x: p.x, y: p.y - j.y * s * fit.scale }, d: wx + wy };
   };
@@ -138,14 +156,46 @@ export function drawCharacter(
   armsOnly = false,
 ): void {
   const { skel: k, node, dir, size } = o;
-  const px = projector(o.lx, o.ly, dir, fit, size, o.heading);
+  /*
+   * IDLE SWAY — the weight-shift a person makes when they are not doing anything (nick, 2026-09-14).
+   *
+   * Between beats a member used to be geometrically perfect and perfectly still, which is the single
+   * biggest thing separating this room from a room. This is a very slow, very small lean of the upper
+   * body, seeded per member so nineteen people are never in phase — an office breathing in unison is
+   * worse than an office holding its breath. Two periods beat against each other so it never reads as
+   * a metronome.
+   *
+   * It needs NO reduced-motion or STILL gate of its own, which is the point of driving it off the
+   * SCENE CLOCK rather than wall time: under reduced motion the loop never starts, and under `?still`
+   * it parks after the one play-through, so in both cases the clock stops and the sway freezes with
+   * it. The a11y sweep's settle detector therefore still sees a page that stops changing.
+   */
+  const swayT = o.t * 0.7 + o.seed * 11;
+  const sway = (Math.sin(swayT) * 0.026 + Math.sin(swayT * 0.37) * 0.011) * size;
+  const px = projector(o.lx, o.ly, dir, fit, size, o.heading, sway);
   const u = fit.scale * size; // one logical unit, in screen px, at this character's size
-  const look = o.look ?? appearanceOf(node);
+  // dnd wears the headphones whatever their hashed accessory is — the room-readable signal (§4).
+  const look =
+    o.look ?? (node.dnd ? { ...appearanceOf(node), accessory: 'headphones' as const } : appearanceOf(node));
   const acc = node.color; // the identity hue — the top, and only the top
   const accDark = hslL(acc, 0.72);
 
   const prev = ctx.globalAlpha;
   if (o.alpha < 1) ctx.globalAlpha = Math.max(0, o.alpha);
+
+  /*
+   * IDLE SWAY — the weight-shift a person makes when they are not doing anything (nick, 2026-09-14).
+   *
+   * Between beats a member used to be geometrically perfect and perfectly still, which is the single
+   * biggest thing separating this room from a room. This is a very slow, very small drift of the
+   * upper body: about a unit and a half over a ~9s period, seeded per member so nineteen people are
+   * never in phase — an office breathing in unison is worse than an office holding its breath.
+   *
+   * It needs NO reduced-motion or STILL gate of its own, which is the point of driving it off the
+   * scene clock rather than wall time: under reduced motion the loop never starts, and under `?still`
+   * it parks after the one play-through, so in both cases the clock stops and the sway freezes with
+   * it. The a11y sweep's settle detector therefore still sees a page that stops changing.
+   */
 
   interface Part {
     d: number;
@@ -206,9 +256,38 @@ export function drawCharacter(
   const sipMug =
     o.mug !== undefined && o.gesture === GESTURE.sip && (o.gestureT ?? 0) > 0.12 && (o.gestureT ?? 0) < 0.95;
 
+  /**
+   * What is being carried, as a depth-sortable part rather than a final overpaint.
+   *
+   * It used to be `if (o.carry) drawCarry(...)` after the sort, which meant the carried thing ALWAYS
+   * painted last — over the torso, the arms, everything. That is wrong exactly when the object is on
+   * the far side of the body: a member walking away from the camera with their laptop tucked under
+   * the far arm showed the laptop THROUGH their own back (nick, 2026-09-14). A carried object is not
+   * chrome; it is a thing in the room at a place, and it occludes and is occluded like one.
+   *
+   * The key is the depth of the point `drawCarry` actually draws at, which is why the two agree here
+   * rather than each deciding for itself — the laptop rides between the right wrist and the chest,
+   * the plate between both wrists, and everything else at the right wrist.
+   */
+  const carryPart = (): Part | null => {
+    if (!o.carry) return null;
+    const wr = px(k.wrist[1]);
+    const d =
+      o.carry === 'laptop'
+        ? wr.d * 0.6 + px(k.chest).d * 0.4
+        : o.carry === 'plate'
+          ? (wr.d + px(k.wrist[0]).d) / 2
+          : o.carry === 'box'
+            ? px({ x: 0, y: k.chest.y - 1, z: k.chest.z + 13 }).d
+            : wr.d;
+    return { d, fn: () => drawCarry(ctx, px, k, u, o.carry!) };
+  };
+
   if (armsOnly) {
-    for (const p of [arm(0), arm(1)].sort((a, b) => a.d - b.d)) p.fn();
-    if (o.carry) drawCarry(ctx, px, k, u, o.carry);
+    const overlay: Part[] = [arm(0), arm(1)];
+    const c = carryPart();
+    if (c) overlay.push(c);
+    for (const p of overlay.sort((a, b) => a.d - b.d)) p.fn();
     if (sipMug) drawSipMug(ctx, px, k, u, o.mug!);
     ctx.globalAlpha = prev;
     return;
@@ -260,6 +339,8 @@ export function drawCharacter(
   });
 
   parts.push(arm(0), arm(1));
+  const carried = carryPart();
+  if (carried) parts.push(carried);
   parts.sort((a, b) => a.d - b.d);
   for (const p of parts) p.fn();
 
@@ -269,7 +350,6 @@ export function drawCharacter(
   if (sipMug && px(k.wrist[1]).d <= px(k.head).d) drawSipMug(ctx, px, k, u, o.mug!);
   drawHead(ctx, px, k, node, look, dir, u, acc, o.t, o.seed);
   if (sipMug && px(k.wrist[1]).d > px(k.head).d) drawSipMug(ctx, px, k, u, o.mug!);
-  if (o.carry) drawCarry(ctx, px, k, u, o.carry);
 
   ctx.globalAlpha = prev;
 }
@@ -556,8 +636,15 @@ function drawSipMug(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel,
   disc(ctx, { x: wr.p.x, y: wr.p.y - h * 0.7 }, w / 2, w / 4.2, '#3a2416'); // the coffee surface
 }
 
+/** The closed laptop's aluminium, its shut-lid seam, and the logo dot — the same silver the desk dock
+ * stands one in, so the object you watched walk in is the object that lands in the dock. */
+const LAPTOP_SILVER = '#c7ccd2';
+const LAPTOP_SEAM = '#8e959d';
+const LAPTOP_LOGO = '#a3a9b1';
+
 /** Whatever's being carried, at the hands that hold it: the handoff box at the chest, an errand's
- * plate of food flat between both hands, a water bottle or mug riding the right hand. */
+ * plate of food flat between both hands, a water bottle or mug riding the right hand, or the
+ * member's own closed laptop tucked at their side. */
 function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, u: number, kind: CarryKind): void {
   if (kind === 'box') {
     const c = px({ x: 0, y: k.chest.y - 1, z: k.chest.z + 13 });
@@ -573,6 +660,38 @@ function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, 
     const c = { x: (l.p.x + px(k.wrist[1]).p.x) / 2, y: (l.p.y + px(k.wrist[1]).p.y) / 2 };
     disc(ctx, { x: c.x, y: c.y - 1.5 * u }, 8.5 * u, 3.2 * u, '#f2e7d5'); // the plate
     disc(ctx, { x: c.x, y: c.y - 3 * u }, 4.5 * u, 2.4 * u, '#c9744a'); // the food
+    return;
+  }
+  if (kind === 'laptop') {
+    // The member's own laptop, closed, tucked at the side. It rides a point between the chest and the
+    // right wrist, which is the whole trick: standing, those joints put it under the arm; seated, they
+    // put it flat in the lap. One drawing, because the skeleton has already done the deciding — nothing
+    // here reads a pose name.
+    //
+    // SIZE, in two steps and now at the honest proportion. It was 15×9u — 0.56× `TORSO_W` at a 1.67
+    // aspect — and read as a wallet rather than a machine (nick, 2026-09-14). A closed 16-inch
+    // MacBook Pro is ~35.6cm wide and ~24.8cm deep against a ~45cm torso: 0.79× at 1.44. The first
+    // move went to 18×12u (0.67× at 1.50), deliberately short, hedging against nineteen of these
+    // across the floor reading as nineteen held-out objects rather than a shape at the elbow.
+    //
+    // Looked at on the floor, the hedge was the wrong call: at 0.67× it still read small for the
+    // thing it is, and the feared clutter did not materialise — the slab is tucked at the elbow and
+    // occluded by the body at most facings, so its silhouette cost is far below its area. 21×14.5u
+    // is the true 0.79× at 1.44, and the room is the evidence rather than the arithmetic.
+    const wr = px(k.wrist[1]);
+    const ch = px(k.chest);
+    const c = { x: wr.p.x * 0.6 + ch.p.x * 0.4, y: wr.p.y * 0.6 + ch.p.y * 0.4 };
+    const w = 21 * u;
+    const h = 14.5 * u;
+    ctx.fillStyle = LAPTOP_SILVER;
+    ctx.fillRect(c.x - w / 2, c.y - h / 2, w, h);
+    // The shut lid's dark seam along the bottom edge — it reads as closed. Proportional to the lid
+    // rather than a flat `u` count, so the seam stays a seam if the slab is ever resized again; at a
+    // fixed 1.4u it turned into a hairline the moment the lid grew.
+    const seam = h * 0.15;
+    ctx.fillStyle = LAPTOP_SEAM;
+    ctx.fillRect(c.x - w / 2, c.y + h / 2 - seam, w, seam);
+    disc(ctx, { x: c.x, y: c.y - u * 0.4 }, 2.3 * u, 2.3 * u, LAPTOP_LOGO); // the quiet logo dot
     return;
   }
   const wr = px(k.wrist[1]);

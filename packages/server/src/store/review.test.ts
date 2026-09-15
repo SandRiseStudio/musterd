@@ -422,6 +422,133 @@ describe('pickReviewCounterpart — graded ladder (ADR 188)', () => {
   });
 });
 
+describe('selectReviewCounterpart — decision-time audit snapshot (ADR 303)', () => {
+  it('records the selected grade and a bounded reason for every rejected seat', async () => {
+    const { openLane } = await import('./lanes.js');
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team } = seed();
+    agent(db, team, 'worker', 'claude-opus-5');
+    agent(db, team, 'cross-model', 'claude-opus-4-8');
+    agent(db, team, 'winner', 'gpt-5.6-sol');
+    agent(db, team, 'twin', 'claude-opus-5');
+    const { row: unknown } = addMember(db, team, { kind: 'agent', name: 'unknown', role: '' });
+    attach(db, unknown.id, 'cli', 'conn-unknown'); // live but deliberately without a model attestation
+    agent(db, team, 'busy', 'grok-4.5');
+    const { row: service } = addMember(db, team, {
+      kind: 'service',
+      name: 'autorefresh',
+      role: '',
+    });
+    attach(db, service.id, 'cli', 'conn-autorefresh', { model: 'gpt-5.6-sol' });
+    const { row: observer } = addMember(db, team, {
+      kind: 'human',
+      name: 'watcher',
+      role: '',
+      observer: true,
+    });
+    attach(db, observer.id, 'cli', 'conn-watcher');
+    const { row: offline } = addMember(db, team, { kind: 'agent', name: 'offline', role: '' });
+    // `offline` intentionally has no Presence.
+    expect(offline.name).toBe('offline');
+    db.prepare(
+      `INSERT INTO audit (id, team_id, actor, action, target, result, ts, created_at)
+         VALUES (?, ?, ?, 'x.did', NULL, 'allow', ?, ?)`,
+    ).run('aud-busy', team.id, 'busy', Date.now() - 5_000, Date.now() - 5_000);
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'a change', claim: true });
+
+    expect(selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT)).toMatchObject({
+      pick: expect.objectContaining({ reviewer: 'winner', grade: 'cross_family' }),
+      snapshot: {
+        selected: { reviewer: 'winner', grade: 'cross_family' },
+        candidates: expect.arrayContaining([
+          { member: 'worker', family: 'claude', eligible: false, exclusion: 'self' },
+          {
+            member: 'autorefresh',
+            family: 'gpt',
+            eligible: false,
+            exclusion: 'service_or_observer',
+          },
+          { member: 'watcher', family: 'human', eligible: false, exclusion: 'service_or_observer' },
+          { member: 'offline', family: 'unknown', eligible: false, exclusion: 'no_live_presence' },
+          { member: 'busy', family: 'grok', eligible: false, exclusion: 'busy' },
+          { member: 'unknown', family: 'unknown', eligible: false, exclusion: 'unknown_grade' },
+          { member: 'twin', family: 'claude', eligible: false, exclusion: 'same_model' },
+          { member: 'cross-model', family: 'claude', eligible: false, exclusion: 'lower_grade' },
+          { member: 'winner', family: 'gpt', eligible: true, grade: 'cross_family' },
+        ]),
+      },
+    });
+  });
+
+  // An ungradeable WORKER is not an absent candidate set. Before this, `reviewGrade` returned null
+  // for every candidate when the worker's live occupancy attested nothing, and the picker filed each
+  // of those nulls as the CANDIDATE's `unknown_grade` — so one unattested asker knocked out every
+  // eligible reviewer, and the row read as "the team had nobody" (10 of 129 no_candidate rows,
+  // measured 2026-09-01: worker unattested in all 10, every excluded candidate a known family).
+  //
+  // ADR 351 (2026-09-02): an unattested worker now ROUTES, at the bottom rung `ungraded`. The
+  // pairing proves nothing about diversity and says so — the grade is not one of ADR 188's three,
+  // the route is its own value so the ADR 260 eval keeps it out of `liveRouted`, and the close edge
+  // abstains (`review_grade_unknown`). An ungraded review beats no review; a false grade beats neither.
+  it('an unattested worker routes to a live attested reviewer at the `ungraded` rung (ADR 351)', async () => {
+    const { openLane } = await import('./lanes.js');
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team } = seed();
+    const { row: worker } = addMember(db, team, { kind: 'agent', name: 'worker', role: '' });
+    attach(db, worker.id, 'cli', 'conn-worker'); // live, attests nothing (the bare-CLI-claim shape)
+    agent(db, team, 'gptbot', 'gpt-5.6-sol'); // live, attested — would be cross_family if we knew
+    agent(db, team, 'dolly', 'claude-opus-4-8'); // live, attested — could be cross_model or same
+    const { row: unknown } = addMember(db, team, { kind: 'agent', name: 'unknown', role: '' });
+    attach(db, unknown.id, 'cli', 'conn-unknown'); // a candidate that is itself unattested
+
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'a change', claim: true });
+    const selection = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    // Roster order among equals: gptbot was added first. No rung above `ungraded` is claimable
+    // because nothing can be graded against an unknown worker — gptbot's gpt family is NOT a
+    // cross_family claim here, and the pick must not say it is.
+    expect(selection.pick).toMatchObject({
+      reviewer: 'gptbot',
+      route: 'ungraded',
+      grade: 'ungraded',
+      reviewer_family: 'gpt',
+    });
+    expect(selection.snapshot).toMatchObject({
+      selected: { reviewer: 'gptbot', grade: 'ungraded' },
+      worker_family: 'unknown',
+      candidates: expect.arrayContaining([
+        { member: 'worker', family: 'unknown', eligible: false, exclusion: 'self' },
+        { member: 'gptbot', family: 'gpt', eligible: true, grade: 'ungraded' },
+        { member: 'dolly', family: 'claude', eligible: false, exclusion: 'tie_break' },
+        // A candidate that attests nothing is still its own `unknown_grade` — never routed, at
+        // any rung: two unknowns prove even less than one.
+        { member: 'unknown', family: 'unknown', eligible: false, exclusion: 'unknown_grade' },
+      ]),
+    });
+    // The attested snapshot names the worker's family too, so a reader need not join the close row.
+    const attested = selectReviewCounterpart(db, team.id, lane, 'gptbot', TIMEOUT);
+    expect(attested.snapshot.worker_family).toBe('gpt');
+  });
+
+  it('`ungraded` is a bottom rung, never a substitute: an attested worker still grades every candidate (ADR 351)', async () => {
+    const { openLane } = await import('./lanes.js');
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team } = seed();
+    agent(db, team, 'worker', 'claude-opus-5');
+    agent(db, team, 'twin', 'claude-opus-5'); // same_model — must stay excluded, not fall to ungraded
+    const { row: unknown } = addMember(db, team, { kind: 'agent', name: 'unknown', role: '' });
+    attach(db, unknown.id, 'cli', 'conn-unknown');
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'a change', claim: true });
+    const selection = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(selection.pick).toBeNull();
+    expect(selection.snapshot.candidates).toEqual(
+      expect.arrayContaining([
+        { member: 'twin', family: 'claude', eligible: false, exclusion: 'same_model' },
+        { member: 'unknown', family: 'unknown', eligible: false, exclusion: 'unknown_grade' },
+      ]),
+    );
+  });
+});
+
 describe('pickReviewCounterpart — drops busy live agents (quiet-set inc 1)', () => {
   const acted = (
     db: ReturnType<typeof seed>['db'],
@@ -549,6 +676,211 @@ describe('pickWakeReviewer (ADR 191)', () => {
     wentOffline(db, team, 'twin', 'claude-opus-5');
     const posture = teamFamilyPosture(db, team.id, TIMEOUT);
     expect(pickWakeReviewer(db, team.id, 'worker', posture)).toBeNull();
+  });
+});
+
+/**
+ * Lane 01M1S6GZ96. Both pickers sorted by grade and took [0], so an equal-grade tie fell to
+ * listMembers order — measured 32 of 32 ties in the 30 days to 2026-09-05 resolved to the earlier
+ * roster seat, while the seat that kept winning held up to 14 open acceptance asks. The ladder
+ * still decides first; these cases are all about what happens AMONG equal grades.
+ */
+describe('tie-break among equal grades: load, then recency, then roster (lane 01M1S6GZ96)', () => {
+  // Raw rows, each with its own replication stamp: (origin_node, origin_seq) is UNIQUE, and two
+  // hand-inserted rows on the default stamp collide. A fixture counter keeps them apart.
+  let seq = 1_000;
+  const ask = (
+    db: ReturnType<typeof seed>['db'],
+    team: { id: string },
+    fromId: string,
+    toId: string,
+    laneId: string,
+    id: string,
+    ts = Date.now() - 60_000,
+  ) =>
+    db
+      .prepare(
+        `INSERT INTO messages (id, team_id, from_member, to_kind, to_member, act, body, meta, ts, created_at, origin_node, origin_seq)
+         VALUES (?, ?, ?, 'member', ?, 'ask', 'accept?', ?, ?, ?, 'fixture', ?)`,
+      )
+      .run(
+        id,
+        team.id,
+        fromId,
+        toId,
+        JSON.stringify({ lane_review: { lane: laneId } }),
+        ts,
+        ts,
+        seq++,
+      );
+  const verdict = (
+    db: ReturnType<typeof seed>['db'],
+    team: { id: string },
+    fromId: string,
+    askId: string,
+    id: string,
+  ) =>
+    db
+      .prepare(
+        `INSERT INTO messages (id, team_id, from_member, to_kind, act, body, meta, ts, created_at, origin_node, origin_seq)
+         VALUES (?, ?, ?, 'team', 'accept', 'ok', ?, ?, ?, 'fixture', ?)`,
+      )
+      .run(
+        id,
+        team.id,
+        fromId,
+        JSON.stringify({ in_reply_to: askId }),
+        Date.now(),
+        Date.now(),
+        seq++,
+      );
+  const picked = (
+    db: ReturnType<typeof seed>['db'],
+    team: { id: string },
+    reviewer: string,
+    laneId: string,
+    at: number,
+  ) =>
+    db
+      .prepare(
+        `INSERT INTO audit (id, team_id, actor, action, target, result, detail, ts, created_at)
+         VALUES (?, ?, 'x', 'lane.ready_for_review', ?, 'allow', ?, ?, ?)`,
+      )
+      .run(
+        `r-${reviewer}-${String(at)}`,
+        team.id,
+        laneId,
+        JSON.stringify({ lane: laneId, reviewer }),
+        at,
+        at,
+      );
+
+  async function room() {
+    const { openLane } = await import('./lanes.js');
+    const { db, team } = seed();
+    const worker = addMember(db, team, { kind: 'agent', name: 'worker', role: '' }).row;
+    attach(db, worker.id, 'claude-code', 'conn-worker', { model: 'claude-opus-5' });
+    // `first` is created before `second`, so roster order alone would always pick `first`.
+    const first = addMember(db, team, { kind: 'agent', name: 'first', role: '' }).row;
+    attach(db, first.id, 'codex', 'conn-first', { model: 'gpt-5.6-sol' });
+    const second = addMember(db, team, { kind: 'agent', name: 'second', role: '' }).row;
+    attach(db, second.id, 'codex', 'conn-second', { model: 'gpt-5.6-sol' });
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'judge me', claim: true });
+    const other = openLane(db, team.id, 'dawn', 'worker', { title: 'held elsewhere', claim: true });
+    db.prepare(`UPDATE lanes SET state = 'awaiting_acceptance' WHERE id = ?`).run(other.id);
+    return { db, team, worker, first, second, lane, other };
+  }
+
+  it('picks the equal-grade seat holding fewer open acceptance asks, and says so', async () => {
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team, worker, first, lane, other } = await room();
+    ask(db, team, worker.id, first.id, other.id, 'ask-1');
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.pick).toMatchObject({ reviewer: 'second', grade: 'cross_family' });
+    expect(sel.snapshot.selected).toEqual({
+      reviewer: 'second',
+      grade: 'cross_family',
+      tie_decided_by: 'load',
+    });
+    expect(sel.snapshot.candidates).toContainEqual({
+      member: 'first',
+      family: 'gpt',
+      eligible: false,
+      exclusion: 'tie_break',
+    });
+  });
+
+  it('an answered ask and an ask on a closed lane are not load', async () => {
+    const { selectReviewCounterpart, openAcceptanceLoad } = await import('./review.js');
+    const { db, team, worker, second, lane, other } = await room();
+    ask(db, team, worker.id, second.id, other.id, 'ask-answered');
+    verdict(db, team, second.id, 'ask-answered', 'v-1');
+    const done = db.prepare(`SELECT id FROM lanes WHERE id = ?`).get(other.id) as { id: string };
+    db.prepare(`UPDATE lanes SET state = 'done' WHERE id = ?`).run(done.id);
+    ask(db, team, worker.id, second.id, done.id, 'ask-on-done-lane');
+    // `first` holds nothing at all; with `second`'s two asks discounted the pair ties on load.
+    expect(openAcceptanceLoad(db, team.id)).toEqual(new Map());
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.snapshot.selected?.tie_decided_by).toBe('roster');
+    expect(sel.pick?.reviewer).toBe('first');
+  });
+
+  it('on equal load, the least recently picked seat wins', async () => {
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team, lane, other } = await room();
+    picked(db, team, 'first', other.id, Date.now() - 1_000);
+    picked(db, team, 'second', other.id, Date.now() - 3_600_000);
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.pick?.reviewer).toBe('second');
+    expect(sel.snapshot.selected?.tie_decided_by).toBe('recency');
+  });
+
+  it('a full tie still falls to roster order — the last resort, and named as such', async () => {
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team, lane } = await room();
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.pick?.reviewer).toBe('first');
+    expect(sel.snapshot.selected?.tie_decided_by).toBe('roster');
+  });
+
+  it('no equal-grade rival: decided by grade, and load never reorders across rungs', async () => {
+    const { selectReviewCounterpart } = await import('./review.js');
+    // Built here rather than from room(): `second` must be cross_model from its FIRST attestation.
+    // Re-attaching it under a second model in the same millisecond made "latest attestation" a
+    // coin flip between the two rows, and the test flaked 2 in 3 runs.
+    const { openLane } = await import('./lanes.js');
+    const { db, team } = seed();
+    const worker = addMember(db, team, { kind: 'agent', name: 'worker', role: '' }).row;
+    attach(db, worker.id, 'claude-code', 'conn-worker', { model: 'claude-opus-5' });
+    const first = addMember(db, team, { kind: 'agent', name: 'first', role: '' }).row;
+    attach(db, first.id, 'codex', 'conn-first', { model: 'gpt-5.6-sol' });
+    const second = addMember(db, team, { kind: 'agent', name: 'second', role: '' }).row;
+    attach(db, second.id, 'claude-code', 'conn-second', { model: 'claude-opus-4-8' });
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'judge me', claim: true });
+    const other = openLane(db, team.id, 'dawn', 'worker', { title: 'held', claim: true });
+    db.prepare(`UPDATE lanes SET state = 'awaiting_acceptance' WHERE id = ?`).run(other.id);
+    // Load `first` (cross_family) heavily. Grade must still win over the lighter cross_model seat.
+    for (let i = 0; i < 5; i++) ask(db, team, worker.id, first.id, other.id, `ask-heavy-${i}`);
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.pick).toMatchObject({ reviewer: 'first', grade: 'cross_family' });
+    expect(sel.snapshot.selected?.tie_decided_by).toBe('grade');
+  });
+
+  it('the wake picker breaks an equal-grade tie by load too', async () => {
+    const { pickWakeReviewer } = await import('./review.js');
+    const { openLane } = await import('./lanes.js');
+    const { db, team } = seed();
+    const worker = addMember(db, team, { kind: 'agent', name: 'worker', role: '' }).row;
+    attach(db, worker.id, 'claude-code', 'conn-worker', { model: 'claude-opus-5' });
+    const offline = (name: string) => {
+      const { row } = addMember(db, team, { kind: 'agent', name, role: '' });
+      db.prepare(
+        `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+         VALUES (?, ?, ?, NULL, 'occupancy.model_attested', ?, 'allow', ?, ?)`,
+      ).run(
+        `a-${name}`,
+        team.id,
+        Date.now() - 3_600_000,
+        name,
+        JSON.stringify({ old: null, new: 'gpt-5.6-sol', source: 'claim' }),
+        Date.now() - 3_600_000,
+      );
+      enrollResidency(db, team.id, {
+        member_id: row.id,
+        harness: 'claude-code',
+        host: 'h',
+        grant_id: 'g',
+        authorized_by: 'nick',
+      });
+      return row;
+    };
+    const first = offline('first');
+    offline('second');
+    const held = openLane(db, team.id, 'dawn', 'worker', { title: 'held', claim: true });
+    db.prepare(`UPDATE lanes SET state = 'awaiting_acceptance' WHERE id = ?`).run(held.id);
+    ask(db, team, worker.id, first.id, held.id, 'ask-wake');
+    const posture = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(pickWakeReviewer(db, team.id, 'worker', posture)).toMatchObject({ reviewer: 'second' });
   });
 });
 

@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>birth fixture — the placement REQUEST lands after the freeze</title>
+    <style>
+      body {
+        background: #ffffff;
+        margin: 0;
+        font: 16px sans-serif;
+      }
+      /* Dark paint in the top-left corner — the "room papers" a stranded bubble lands on. */
+      #patch {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 420px;
+        height: 80px;
+        background: #3a4d4d;
+      }
+      /* Bubbles: dark ink. Fine over the white body; ~1.8:1 over the patch. */
+      .bub {
+        position: absolute;
+        left: 0;
+        top: 0;
+        color: #2b1f13;
+      }
+      #normal {
+        position: absolute;
+        left: 40px;
+        top: 200px;
+        color: #111;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="patch"></div>
+    <p id="normal">a normally measurable row</p>
+    <div class="bub" style="left: 40px; top: 400px">a healthy sibling speaks</div>
+    <!--
+      THE THIRD PATH. Present in the DOM from parse time, so it is in the mark set beyond any doubt —
+      no trap is needed to get it marked, unlike `birth-before-freeze.html`. It is unplaced, and the
+      frame that would place it has NOT been requested yet when the freeze lands.
+    -->
+    <!--
+      Its own class, deliberately. `rowKey` is `className|color|paperSig`, so a second `.bub` on the
+      same paint would be DEDUPED against the healthy sibling above and never measured at all — the
+      fixture would report green for a reason that has nothing to do with the freeze.
+    -->
+    <div class="bub late" id="late">requested late, never placed</div>
+    <script>
+      /*
+       * The THIRD path into the stranded state — neither `born` nor `moved` can see this one.
+       *
+       * The two modelled arms both turn on BIRTH TIME relative to the freeze:
+       *
+       *     window.__a11y_atFreeze = new WeakSet();                      // (1) assignment
+       *     for (const el of document.querySelectorAll('*')) …add(el);   // (2) the mark walk
+       *     window.requestAnimationFrame = () => 0;                      // (3) the freeze
+       *
+       *   after-freeze  — born after (3): UNMARKED, excluded as `born`. Deterministic, closed.
+       *   before-freeze — born between (1) and (2): marked, but its placement frame was ALREADY
+       *                   QUEUED when (3) landed. A queued callback is not cancelled by replacing
+       *                   the property, so it still fires: placed in time, or caught by `moved`.
+       *                   Both landings safe, which is why that arm has never failed.
+       *
+       * Neither models an element whose placement is REQUESTED after (3). Birth time is not the
+       * property that decides strandedness — the property is whether the placement request preceded
+       * the freeze. This element:
+       *
+       *   - exists from parse time            → in the mark set, so `born` is false;
+       *   - requests its frame after (3)      → the request hits the no-op, nothing is ever queued;
+       *   - is therefore never placed at all  → stranded at (0,0) over the dark patch;
+       *   - never moves after the freeze      → the rect pass and the shutter agree, so `moved` is
+       *                                         false too.
+       *
+       * Marked, stationary, and wrong. The sweep measures its ink over the patch (~1.8:1) and reports
+       * it below AA — a failure that belongs to the freeze, not to the page.
+       *
+       * WHY A REAL SCENE DOES THIS, and why it is intermittent rather than constant: a scene that
+       * creates an element and then places it on a LATER turn — after a font load, a measurement, a
+       * microtask, an observer callback — has a window between creation and request. The freeze is a
+       * single synchronous evaluation dropped in at an arbitrary moment. Land it inside that window
+       * and the request never happens; land it outside and everything is placed or safely queued.
+       * That is the shape of wanderer's /office-preview observation at light=12: `lc-speech__text`
+       * at 1.8 on #3a4d4d, then two immediate retries green.
+       *
+       * The trap is (3) itself, which is the honest hook for "the request came after the freeze".
+       * Trapping (1) would reproduce the before-freeze arm; creating the element here rather than in
+       * the markup would reproduce the after-freeze arm. Both were tried on the way to this file.
+       */
+      function place() {
+        const el = document.getElementById('late');
+        el.style.left = '40px';
+        el.style.top = '300px';
+      }
+
+      let rafImpl = window.requestAnimationFrame.bind(window);
+      Object.defineProperty(window, 'requestAnimationFrame', {
+        configurable: true,
+        get() {
+          return rafImpl;
+        },
+        set(v) {
+          // (3) has just landed: `v` is the sweep's no-op. Store it, then make the placement request
+          // THROUGH it — exactly as a scene would if its scheduling turn arrived a moment late. The
+          // request returns 0 and queues nothing, so `place()` never runs.
+          rafImpl = v;
+          window.requestAnimationFrame(place);
+        },
+      });
+    </script>
+  </body>
+</html>

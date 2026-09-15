@@ -13,6 +13,16 @@
  *
  * Hermetic (the `check-arch-trees.ts` / `check-obs-evals.ts` pattern): imports the names straight from
  * dependency-light source modules, runs on Node's native TypeScript, no build step, no extra deps.
+ *
+ * ## This check is deliberately one-directional — do not "fix" that
+ * It asserts every name the skill CLAIMS still exists. It does NOT assert the converse (every
+ * registered tool/command is named by the skill), and it must not: the skill is a playbook, not an
+ * index. It names what an agent needs mid-loop and stays silent on the rest (`team_seed_*`,
+ * `team_report`, ops commands) precisely so it can be read in one sitting — ADR 085's whole point.
+ * The cost of the asymmetry is real and was paid once: `team_availability` shipped and the skill
+ * taught only the CLI form for an epoch, invisible to this gate (lane 01M1VD1CQV). The remedy is a
+ * human reading the surface map when a tool lands, not a gate that would force every new tool into
+ * the playbook.
  */
 import { CATALOG } from '../packages/cli/src/help/catalog.ts';
 import { TOOL_NAMES } from '../packages/mcp/src/toolNames.ts';

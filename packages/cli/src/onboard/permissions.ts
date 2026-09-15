@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { RoleTemplate } from './role.js';
+import type { Toolkit } from './toolkit.js';
 
 /**
  * ADR 261 — the standard floor and the seat-dir permission installer.
@@ -78,6 +78,13 @@ export const STANDARD_FLOOR: PermissionLists = {
     'Bash(ls *)',
     'Bash(rg *)',
     'Bash(cat *)',
+    // The musterd MCP tools — ADR 261 decision 2 names them FIRST in what a working seat needs, and
+    // until 2026-09-06 the list carried only the CLI form below. A reply-only wake was handed the
+    // server on its argv and never noticed; a seat-policy wake (every work_order) is governed by
+    // this list and had team_wake_context / team_inbox_check refused, so it could not occupy the
+    // roster (finding 18, docs/perf/cloud-seat.md). The wake path now hands the server on both
+    // policies; this entry is the floor under it for a session a human opens in the same folder.
+    'mcp__musterd',
     // The musterd CLI — the coordination channel when the MCP bridge is not the one in use.
     'Bash(musterd *)',
   ],
@@ -93,12 +100,12 @@ interface SeatSettings {
 const LISTS: (keyof PermissionLists)[] = ['allow', 'ask', 'deny'];
 
 /**
- * Merge the standard floor — plus a role's permission profile, when the seat has one — into
+ * Merge the standard floor — plus a toolkit's permission lists, when the seat has one — into
  * `<dir>/.claude/settings.local.json`. Dir-aware because `musterd agent` provisions a worktree
  * that is never `process.cwd()`.
  *
  * Merge-never-clobber (the ADR 255 posture): hooks, unknown keys, and every entry outside the
- * profile's own vocabulary survive verbatim — the shape of the 2026-08-13 manual unblock (scoped
+ * toolkit's own vocabulary survive verbatim — the shape of the 2026-08-13 manual unblock (scoped
  * allow added, five hook groups preserved) is what this must produce mechanically. Deny is
  * authoritative and always written; surplus user allows are kept, not stripped (deny outranks
  * allow, so they are inert — nick's call, 2026-08-13).
@@ -106,7 +113,7 @@ const LISTS: (keyof PermissionLists)[] = ['allow', 'ask', 'deny'];
  * Returns only the entries NEWLY added per list, so the ADR 030 manifest can record an exact
  * reversal — and so idempotence is observable: a second run returns empty lists.
  */
-export function installSeatPermissions(dir: string, role?: RoleTemplate): PermissionLists {
+export function installSeatPermissions(dir: string, toolkit?: Toolkit): PermissionLists {
   const path = join(dir, '.claude', 'settings.local.json');
   let settings: SeatSettings = {};
   if (existsSync(path)) {
@@ -118,10 +125,10 @@ export function installSeatPermissions(dir: string, role?: RoleTemplate): Permis
       return { allow: [], ask: [], deny: [] };
     }
   }
-  const profile: PermissionLists = {
-    allow: [...STANDARD_FLOOR.allow, ...(role?.tools.permissions.allow ?? [])],
-    ask: [...(role?.tools.permissions.ask ?? [])],
-    deny: [...(role?.tools.permissions.deny ?? [])],
+  const wanted: PermissionLists = {
+    allow: [...STANDARD_FLOOR.allow, ...(toolkit?.tools.permissions.allow ?? [])],
+    ask: [...(toolkit?.tools.permissions.ask ?? [])],
+    deny: [...(toolkit?.tools.permissions.deny ?? [])],
   };
   settings.permissions ??= {};
   const added: PermissionLists = { allow: [], ask: [], deny: [] };
@@ -133,7 +140,7 @@ export function installSeatPermissions(dir: string, role?: RoleTemplate): Permis
     // later diff of this file into noise. Same equivalence the inspector uses — install and check
     // must agree on what "present" means, or a silent check follows a non-empty install forever.
     const have = new Set(existing.map(canonicalRuleForm));
-    for (const entry of profile[list]) {
+    for (const entry of wanted[list]) {
       if (!have.has(canonicalRuleForm(entry))) {
         existing.push(entry);
         have.add(canonicalRuleForm(entry));

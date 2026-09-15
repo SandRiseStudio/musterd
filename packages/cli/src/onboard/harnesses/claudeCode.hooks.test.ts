@@ -55,7 +55,7 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     const local = read(localPath());
     const global = read(globalPath());
     expect(cmdFor(local, 'Notification')).toContain(NOTIFICATION_HOOK_MARKER);
-    expect(cmdFor(local, 'Notification')).toContain('musterd nudge');
+    expect(cmdFor(local, 'Notification')).toContain('musterd inbox --waiting');
     // The LOCAL SessionStart is the inc-4 session-capture hook — a different marker and concern
     // from the global orientation hook; exactly one entry, piping stdin, fully silent.
     expect(local.hooks?.['SessionStart']).toHaveLength(1);
@@ -88,6 +88,10 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     const pt = cmdFor(local, 'PostToolUse');
     expect(pt).toContain(POSTTOOLUSE_HOOK_MARKER);
     expect(pt).toContain('musterd inbox --interrupt-check');
+    // ADR 088 amendment (2026-09-05): the line must ride Claude Code's PostToolUse JSON seam. Bare
+    // stdout from this event goes to the debug log, never to the model — for weeks every raise was
+    // audited and no Claude Code model saw one. The flag is what makes the hook a doorbell at all.
+    expect(pt).toContain('--interrupt-check --hook claude-code');
     expect(local.hooks?.['PostToolUse']?.[0]?.matcher).toBeUndefined(); // fires on every tool
     expect(global.hooks?.['PostToolUse']).toBeUndefined(); // PostToolUse is NOT global
 
@@ -128,12 +132,15 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     mkdirSync(join(cwd, '.claude'), { recursive: true });
     writeFileSync(localPath(), JSON.stringify({ hooks: { Notification: [] } }), 'utf8');
     const drift = inspectClaudeHookDrift(cwd);
-    expect(drift).toHaveLength(5);
+    expect(drift).toHaveLength(6);
     expect(drift[0]).toContain('PostToolUse interrupt hook is missing');
     expect(drift[1]).toContain('PreToolUse enforcement-gate hook is missing');
     expect(drift[2]).toContain('session-messaging observer hook is missing');
     expect(drift[3]).toContain('session-capture hook is missing');
     expect(drift[4]).toContain('SessionEnd hook is missing');
+    // The user-facing half (seat statusline chip) is doctored alongside the agent-facing hooks —
+    // its absence is why a correctly-oriented session could still look dead to the human.
+    expect(drift[5]).toContain('`statusLine` seat chip is missing');
 
     // Once init wires them, the drift clears.
     installMusterdHooks();

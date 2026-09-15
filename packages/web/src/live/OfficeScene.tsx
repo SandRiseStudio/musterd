@@ -1,13 +1,17 @@
-import type { LaneBoard, MemberSummary, WorkingHours } from '@musterd/protocol';
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import type { Envelope, LaneBoard, MemberSummary, WorkingHours } from '@musterd/protocol';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MusterdWord } from '../brand/MusterdWord';
-import { actLabel, actTone, memberColor, memberPosture } from './format';
+import { memberColor, memberPosture } from './format';
+import { gatheredFrom } from './huddles';
+import { HuddleRail } from './HuddleRail';
 import type { OfficeData, OfficeHandle } from './office-scene';
-import { actToEvent } from './office-scene/mapping';
+import { actToEvent, speechEventFor } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
 import { OfficeOverlay } from './OfficeOverlay';
+import { captionFor, type Caption } from './captions';
 import { WorkStack } from './WorkStack';
 import { presentCount, type RoomEntry } from './workingOn';
+import { wokenSeat } from './wokenSeat';
 import type { OfficeRoomProps } from './officeRoom';
 import { projectWallBoard } from './office-scene/wallboard';
 
@@ -24,12 +28,16 @@ function computeData(
   roster: MemberSummary[],
   entries: RoomEntry[],
   board: LaneBoard | null,
+  envelopes: Envelope[],
 ): OfficeData {
   const byName = new Map(entries.map((e) => [e.name, e]));
   return {
     teamName,
     teamWorkingHours,
     wallBoard: projectWallBoard(board),
+    // Who is in an open huddle right now (ADR 378 increment 2) — folded from the timeline the page
+    // already holds, so both surfaces gather without either route wiring anything.
+    gathered: [...gatheredFrom(envelopes)],
     nodes: roster.map((m) => {
       const kind = m.kind === 'human' ? 'human' : 'agent';
       const live =
@@ -38,11 +46,13 @@ function computeData(
       return {
         name: m.name,
         kind,
+        service: m.kind === 'service',
         presence: m.presence,
-        activity: m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle'),
+        activity: m.activity ?? (m.presence === 'offline' ? 'offline' : 'active'),
         posture: memberPosture(m),
         state: m.state ?? null,
-        color: memberColor(m.name, kind),
+        color: memberColor(m.name, kind, m.hue),
+        hue: m.hue ?? null,
         role: m.role,
         surface: live?.surface ?? null,
         model: live?.model ?? null,
@@ -50,6 +60,15 @@ function computeData(
         workSource: entry?.source ?? null,
         laneState: entry?.laneState ?? null,
         moreLanes: entry?.moreLanes ?? 0,
+        dnd: m.availability?.status === 'dnd',
+        offline_reason: m.offline_reason ?? null,
+        last_seen_at: m.presences?.length
+          ? Math.max(...m.presences.map((p) => p.last_seen_at))
+          : null,
+        // Reads the same live row `surface` and `model` came from just above, via the shared
+        // helper — a plate that took its harness from one attachment and its provenance from
+        // another would be describing two sessions as one.
+        woken: wokenSeat(m),
       };
     }),
   };
@@ -80,6 +99,7 @@ export function OfficeScene({
   onReady,
   topSlot,
   bandSlot,
+  cornerSlot,
   /** Hybrid nameplate work cues vs in-panel WorkStack (`stack`) vs neither. Default none on the
    *  plate — work lives in WorkStack on `/live` (nick, 2026-07-30). */
   workCues = 'none',
@@ -113,6 +133,9 @@ export function OfficeScene({
    * remaining pixel. `/broadcast` passes nothing and stays full-bleed.
    */
   bandSlot?: ReactNode;
+  /** Chrome stacked in the bottom-right corner above the product watermark — the route's own
+   * assertions about the page (a notice, a contact line). `/broadcast` fills it; `/live` does not. */
+  cornerSlot?: ReactNode;
   workCues?: 'hybrid' | 'stack' | 'none';
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -120,9 +143,10 @@ export function OfficeScene({
   const handleRef = useRef<OfficeHandle | null>(null);
   const emittedRef = useRef<Set<string>>(new Set());
 
+
   const data = useMemo(
-    () => computeData(teamName, teamWorkingHours, roster, entries, board),
-    [teamName, teamWorkingHours, roster, entries, board],
+    () => computeData(teamName, teamWorkingHours, roster, entries, board, envelopes),
+    [teamName, teamWorkingHours, roster, entries, board, envelopes],
   );
   // Latest-value refs for the mount effect below, which subscribes ONCE and must not re-run when a
   // prop identity changes (re-running it would tear down and rebuild the whole canvas scene).
@@ -146,6 +170,17 @@ export function OfficeScene({
     collapsedRef.current = collapsed;
   });
 
+  // The narration line (first-five-seconds §2), handed out by the scene — rendered in WorkStack's
+  // header rather than floating over the room (nick, 2026-08-31).
+  const [caption, setCaption] = useState<Caption | null>(null);
+  // The narrator's own colour, from the same roster the floor is drawn from — so the pill's dot,
+  // their floor plate and their roster chip are one identity. A caption can name someone who is not
+  // in the working list (an arrival, above all), so this reads the roster rather than the entries.
+  const narrator = caption ? roster.find((m) => m.name === caption.who) : undefined;
+  const captionColor = narrator
+    ? memberColor(narrator.name, narrator.kind === 'human' ? 'human' : 'agent', narrator.hue)
+    : undefined;
+
   useEffect(() => {
     const host = hostRef.current;
     const labelHost = labelRef.current;
@@ -162,6 +197,10 @@ export function OfficeScene({
         if (disposed || !host || !labelHost) return;
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
+          // The narration line renders in WorkStack's header (chrome), not as scene DOM.
+          onCaption: (next) => {
+            if (!disposed) setCaption(next);
+          },
           // Presence decides whether the hotspot exists at all, so gate on the mount-time prop —
           // stable per route (/live wires it, /broadcast never does) — and read through the ref after.
           ...(onBoardOpenRef.current
@@ -212,12 +251,13 @@ export function OfficeScene({
       emittedRef.current.add(e.id);
       const ev = actToEvent(e);
       if (ev) h.emit(ev);
-      // EVERY act also speaks over the sender's head (typed out, lingers, then fades) — the office's
-      // legible counterpart to the stream. Body-less acts (accept/decline/wait/resolve…) speak their act
-      // label so nothing on the team passes invisibly. The envelope id makes the bubble a click-through
-      // to the same act in the stream panel.
-      const text = e.body && e.body.trim() ? e.body : actLabel(e.act);
-      h.emit({ kind: 'speech', who: e.from, text, tone: actTone(e.act), id: e.id, act: e.act });
+      // The caption rail (first-five-seconds §2): the lazy scene owns scheduling + DOM; only the
+      // plain-sentence projection is computed here (keeps the entry chunk out of the rail's bytes).
+      const caption = captionFor(e);
+      if (caption) h.emit({ kind: 'caption', caption });
+      // EVERY act also speaks over the sender's head — constructed in mapping.ts (speechEventFor),
+      // where the passthrough of text/tone/addressee is pinned by tests this component can't carry.
+      h.emit(speechEventFor(e));
     }
   }, [envelopes, liveIds]);
 
@@ -243,23 +283,36 @@ export function OfficeScene({
             present={presentCount(roster)}
             entries={entries}
             status={status}
+            caption={caption}
+            captionColor={captionColor}
             interactive={false}
           />
         )}
         {/* Work card floats over the room (bottom of the stage) — not a band under it. */}
         {!collapsed && workCues === 'stack' && (
           <div className="lc-office__work">
-            <WorkStack entries={entries} />
+            <WorkStack entries={entries} caption={caption} captionColor={captionColor} />
           </div>
         )}
-        {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}
-        {!collapsed && topSlot && <div className="lc-office__asks">{topSlot}</div>}
+        {/* The asks rail floats over the top of the room the way the reel floats over the bottom —
+            and the huddle rail stacks directly beneath it in the same box, so the two never overlap
+            however tall either grows. The rail is mounted HERE, inside the room, rather than in a
+            route's slot: the office frames its own huddles, and one mount is what makes /live and
+            /broadcast show the same rooms without either route wiring anything (the officeRoom
+            parity argument). It renders nothing until a huddle is open. */}
+        {!collapsed && (
+          <div className="lc-office__asks">
+            {topSlot}
+            <HuddleRail envelopes={envelopes} roster={roster} roomLink={!broadcast} />
+          </div>
+        )}
         {/* The product's mark on the room itself — for every frame that leaves this app (a clip, a
             screenshot, the stream), quiet enough to live under everything. The overlay card carries
             the TEAM's name; this corner carries the product's. */}
+        {!collapsed && cornerSlot && <div className="lc-office__corner">{cornerSlot}</div>}
         {!collapsed && (
           <div className="lc-office__mark" aria-hidden="true">
-            <MusterdWord className="lc-office__mark-lockup" chipSize={15} />
+            <MusterdWord className="lc-office__mark-lockup" chipSize={15} domain />
           </div>
         )}
       </div>

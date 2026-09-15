@@ -20,22 +20,18 @@ import {
 import { renderBanner } from '../render/rows.js';
 import { paint as pc, theme } from '../render/theme.js';
 import { sym } from '../render/ui.js';
+import { acceptSurface, readDeclined } from './declined.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { CANONICAL_SKILL_PATH, establishedHarnesses, writeGuidance } from './guidance.js';
 import type { Harness } from './harness.js';
-import { HARNESSES } from './harnesses/index.js';
-import { writeProvisionManifest } from './manifest.js';
+import { HARNESSES, harnessAdapters } from './harnesses/index.js';
+import { loadProvisioning, saveProvisioning } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { installSeatPermissions } from './permissions.js';
-import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
-import {
-  GENERALIST,
-  isBuiltin,
-  listRoleNames,
-  loadRole,
-  resolveRoleLabel,
-  type RoleTemplate,
-} from './role.js';
+import { classifyPrimerTarget, renderRepositoryPrimer, upsertPrimer } from './primer.js';
+import { defaultHarnessContext } from './reconcile/context.js';
+import { reconcileHarnesses } from './reconcile/engine.js';
+import { GENERALIST, isBuiltin, listToolkitNames, loadToolkit, type Toolkit } from './toolkit.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -195,6 +191,19 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
     );
     return 0;
   }
+  // ADR 332: an explicit `--refresh-hooks` IS the user asking for these surfaces back, so it clears
+  // every tombstone in this folder — but never silently. A surface reappearing with no explanation is
+  // how someone finds the chip returned and has no idea why, which is the same absence-carries-no-
+  // intent defect one direction over. Routine drift checks still honour a refusal; only this does not.
+  // Only tombstones some present harness's refresh actually installs are resurrected. "re-installed
+  // X" for a name nothing here installs is a lie about the folder — the record stays, and the line
+  // says why (the honesty finding carried forward from #1089).
+  const installable = new Set(present.flatMap((h) => h.refreshHooks!.surfaces?.() ?? []));
+  const tombstones = readDeclined(dir);
+  const resurrected = tombstones.filter((t) => installable.has(t.surface));
+  const left = tombstones.filter((t) => !installable.has(t.surface));
+  for (const t of resurrected) acceptSurface(dir, t.surface);
+
   let refused = 0;
   for (const h of present) {
     const res = h.refreshHooks!.run(dir);
@@ -207,6 +216,32 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
       refused++;
       process.stderr.write(`${theme.warn(sym.warn)} ${w}\n`);
     }
+  }
+  for (const t of resurrected) {
+    const declined = `which was declined ${t.at.slice(0, 10)}` + `${t.by ? ` by ${t.by}` : ''} — `;
+    const again = theme.meta('`musterd surface decline ' + t.surface + '` to refuse it again.');
+    // With a refusal above, part of this refresh did not land, and per-surface attribution of which
+    // part is the harness's business — so the line vouches only for what this driver did (clear the
+    // record), not for an install it cannot confirm. `refused > 0` hedges every line run-globally,
+    // which was exact while Claude Code was the only refreshHooks implementer; with Cursor, Grok and
+    // OpenCode (ADR 392) also implementing it, the hedge is wider than the refusal — scoping it to the
+    // harness that refused is the next improvement here.
+    process.stdout.write(
+      refused > 0
+        ? `${theme.warn('↑')} cleared the refusal of ${t.surface}, ${declined}` +
+            `part of this refresh was refused (above), so verify with \`musterd init --check\`. ${again}\n`
+        : `${theme.warn('↑')} re-installed ${t.surface}, ${declined}${again}\n`,
+    );
+  }
+  for (const t of left) {
+    process.stdout.write(
+      `${theme.meta(
+        `left ${t.surface} declined (${t.at.slice(0, 10)}) — nothing in this refresh installs it; ` +
+          '`musterd surface accept ' +
+          t.surface +
+          '` clears the record anyway.',
+      )}\n`,
+    );
   }
   return refused > 0 ? 1 : 0;
 }
@@ -592,35 +627,43 @@ export async function runInit(): Promise<number> {
   }
 
   const installed = detected.filter((x) => x.d.installed);
-  if (installed.length === 0) {
-    p.note(
-      'Found nowhere to run an agent (looked for Claude Code, Cursor, and Codex).\n' +
-        `Add an agent manually with:\n  ${pc.yellow(`musterd team add <name> --kind agent`)}`,
-      'Nothing to configure',
-    );
-    p.outro('Team is ready — agents can join over MCP or the WS API.');
-    return 0;
-  }
 
-  const harness = guard(
-    await p.select({
-      message: 'Where does this agent run?',
-      options: installed.map(({ h, d }) => ({
-        value: h.id,
-        label: h.label,
-        hint: d.configured
-          ? 'musterd already set up here — will be repointed'
-          : 'not set up yet — will be configured',
-      })),
+  // The ADR 281 multi-select: any SUBSET of the registry (Claude Code, Cursor, Codex, the native
+  // musterd host), chosen once per worktree and machine. Available harnesses start selected;
+  // unavailable ones stay selectable as `pending` (the selection survives the install); empty is
+  // valid (the seat stays reachable through the native host or a later configure).
+  const adapters = harnessAdapters();
+  const installedIds = new Set(installed.map((x) => x.h.id));
+  const picked = guard(
+    await p.multiselect({
+      message: 'Which harnesses should launch this agent? (space toggles, enter confirms)',
+      options: adapters.map((a) => {
+        const legacyHarness = HARNESSES.find((x) => x.id === a.id);
+        return {
+          value: a.id,
+          label: a.id === 'musterd' ? 'musterd (native host)' : (legacyHarness?.label ?? a.id),
+          ...(a.id !== 'musterd' && !installedIds.has(a.id)
+            ? { hint: 'pending — not installed here' }
+            : {}),
+        };
+      }),
+      initialValues: adapters
+        .filter((a) => a.id === 'musterd' || installedIds.has(a.id))
+        .map((a) => a.id),
+      required: false,
     }),
-  );
-  const chosenEntry = installed.find((x) => x.h.id === harness)!;
-  const chosen = chosenEntry.h as Harness;
-  if (chosenEntry.d.configured) {
+  ) as string[];
+  const desired = adapters.map((a) => a.id).filter((id) => picked.includes(id));
+
+  // The primary EXTERNAL harness drives the human-facing bits a set can't (the manual-setup note,
+  // the role-tool provisioning target, the activation hint). Fine to be absent: native-only works.
+  const chosenEntry = installed.find((x) => desired.includes(x.h.id));
+  const chosen = chosenEntry?.h as Harness | undefined;
+  if (chosenEntry?.d.configured) {
     // Re-running over an existing binding repoints it at the new member; the old one isn't deleted.
     p.note(
-      `${pc.bold(chosen.label)} already points at a musterd member here.\n` +
-        `Setting up next mints a ${pc.bold('new')} member and repoints ${chosen.label} at it — so give it a\n` +
+      `${pc.bold(chosenEntry.h.label)} already points at a musterd member here.\n` +
+        `Setting up next mints a ${pc.bold('new')} member and repoints ${chosenEntry.h.label} at it — so give it a\n` +
         `name not already on the team (a repeat name is refused). The previous member stays on the roster.`,
       'Heads up',
     );
@@ -637,12 +680,12 @@ export async function runInit(): Promise<number> {
       }),
     ).trim() || 'Ada';
 
-  // The role template is chosen *before* the member is minted, so the roster/primer role label is
-  // derived from it — the label you see matches the tools the agent gets (ADR 038). A non-generalist
-  // pick offers an explicit override; generalist/no-template falls back to a free-text label as
-  // before. Provisioning the template's tools happens later (§5a), once the harness is wired.
-  const template = await selectRole(name);
-  const role = resolveRoleLabel({ template, freeText: await askRoleLabel(template) });
+  // The profile pick and the role label are independent (ADR 272 inc 2, superseding ADR 038's
+  // label-from-template derivation): a profile is workspace configuration and mints no team fact,
+  // so the roster label comes only from the free-text prompt. Provisioning the profile's tools
+  // happens later (§5a), once the harness is wired.
+  const template = await selectToolkit(name);
+  const role = await askRoleLabel();
 
   // 4b) Cross-folder name-reuse guard (ADR 020) -----------------------------
   // The name is known now, so this is where the registry check belongs (the early folder guard
@@ -694,16 +737,16 @@ export async function runInit(): Promise<number> {
   const driver = config.current ? config.identities[config.current]?.name?.trim() : undefined;
 
   const binding = {
+    version: 2 as const,
     server,
     team,
     agent_key: agentKey,
-    surface: chosen.surface,
     claim: { mode: 'seat' as const, name },
     ...(model !== undefined ? { model } : {}),
     ...(autojoin ? { autojoin: true } : {}),
     ...(driver ? { driver } : {}),
   };
-  const entry = buildEntry(binding);
+  const entry = chosen ? buildEntry(binding) : undefined;
 
   // ADR 018: write the workspace binding — the single file both the CLI and the MCP adapter read,
   // so an agent that shells out to `musterd` resolves to *this* member (not the global config's
@@ -721,9 +764,9 @@ export async function runInit(): Promise<number> {
   // stays out of it; the machine supplies it.
   try {
     saveWorkspaceSpec(process.cwd(), {
+      version: 2,
       server,
       team,
-      surface: chosen.surface,
       claim: { mode: 'seat', name },
     });
     p.log.info(
@@ -735,43 +778,70 @@ export async function runInit(): Promise<number> {
     p.log.warn(`Couldn't write .musterd/workspace.json (${(err as Error).message}).`);
   }
 
+  // Save the strict v2 selection BEFORE reconciliation (ADR 282): a stop right after this leaves
+  // honest intent that the next `musterd wire` resumes. Reconciliation never rewrites desire.
+  try {
+    saveProvisioning(process.cwd(), {
+      version: 3,
+      // The provisioned TOOLKIT (workspace equipment), never the roster label — the two are
+      // independent since ADR 272 inc 2.
+      toolkit: template?.toolkit ?? '',
+      desired,
+      contributions: {},
+      provisionedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    p.log.warn(`Couldn't write .musterd/provisioned.json (${(err as Error).message}).`);
+  }
+
+  const selectionLabel = desired.length > 0 ? desired.join(', ') : 'the native host only';
   const write = guard(
     await p.confirm({
-      message: `Connect musterd to ${pc.bold(chosen.label)} now? ${pc.dim('(adds the musterd tools so the agent can reach the team)')}`,
+      message: `Wire ${pc.bold(selectionLabel)} now? ${pc.dim('(adds the musterd tools so the agent can reach the team)')}`,
     }),
   );
   if (!write) {
-    p.note(printManual(chosen, entry), 'Manual setup');
-    p.outro('Configure that when ready, then `musterd inbox --watch`.');
+    if (chosen && entry) p.note(printManual(chosen, entry, team), 'Manual setup');
+    p.outro(
+      'Configure when ready with `musterd wire` (headless, uses this saved selection), then `musterd inbox --watch`.',
+    );
     return 0;
   }
 
   const sc = p.spinner();
-  sc.start(`Configuring ${chosen.label}`);
-  let activation: string;
-  try {
-    const result = await chosen.configure(entry, binding);
-    activation = result.activation;
-    sc.stop(`${chosen.label} configured ${pc.dim(`(${result.target})`)}`);
-    if (result.scope) p.log.info(pc.dim(result.scope));
-    // Anything configure deliberately did NOT do (ADR 168) — e.g. a hook left alone because a newer
-    // musterd wrote it. Loud on purpose: a silent refusal reads exactly like a silent failure.
-    for (const w of result.warnings ?? []) p.log.warn(pc.yellow(w));
-    if (result.secretPath) await warnSecretConfig(result.secretPath);
-  } catch (err) {
-    sc.stop(pc.red(`Could not configure ${chosen.label}: ${(err as Error).message}`));
-    p.note(printManual(chosen, entry), 'Configure it manually');
+  sc.start(`Wiring ${selectionLabel}`);
+  const reconcileCtx = defaultHarnessContext(process.cwd(), process.env, { team });
+  const report = await reconcileHarnesses(reconcileCtx, desired, { legacyRepair: false });
+  sc.stop(
+    report.ok
+      ? `Harness set wired ${pc.dim(`(${selectionLabel})`)}`
+      : pc.yellow('Wired with warnings — `musterd harness status` has the detail'),
+  );
+  for (const r of report.results) {
+    if (
+      r.result !== 'applied' &&
+      r.result !== 'unchanged' &&
+      r.result !== 'satisfied-unmanaged' &&
+      r.result !== 'pending'
+    ) {
+      p.log.warn(pc.yellow(`${r.harness}: ${r.result}${r.detail ? ` — ${r.detail}` : ''}`));
+    }
+  }
+  if (!report.ok) {
+    if (chosen && entry) p.note(printManual(chosen, entry, team), 'Configure it manually');
     return 1;
   }
+  const activation = activationFor(desired);
 
-  // 5a) Provision the chosen role's tools (ADR 026 Universe-2; additive/reversible/local per ADR 027)
-  // The template was picked in §4 (and already drove the roster label); now that the musterd server
-  // is wired, provision its MCP servers into this harness and pull its charter into the primer.
-  // `generalist`/no template provisions nothing extra — only the musterd server + the standard
-  // playbook (ADR 028). This is Universe-2 only; identity (the role label) was set at mint.
-  const charter = await provisionRoleTools(chosen, template);
+  // 5a) Provision the chosen profile's tools (ADR 026 Universe-2; additive/reversible/local, ADR 027)
+  // The profile was picked in §4; now that the musterd set is wired, provision its MCP servers into
+  // the primary external harness. `generalist`/no profile provisions nothing extra — only the
+  // musterd server + the standard playbook (ADR 028). Toolkit MCP-server tools ride this legacy
+  // provision path until they are fragment-modeled; the musterd entry/hooks/permissions/guidance
+  // are the reconciler's. This is Universe-2 only — nothing here touches the roster.
+  if (chosen) await provisionToolkitTools(chosen, template);
 
-  // 5b) Seed the agent primer so the agent knows the team working-loop (ADR 012) ----------
+  // 5b) Seed the repository primer so every Workspace knows the Team working-loop (ADR 307) -----
   // The prompt is honest about what writing does *at the decision point*: against an existing,
   // unmarked AGENTS.md the primer is appended (your content is kept), not overwritten — saying
   // "Write an AGENTS.md?" there reads like a clobber (2026-06-18 dogfood).
@@ -781,18 +851,15 @@ export async function runInit(): Promise<number> {
       ? `Append a musterd primer to the ${pc.bold('AGENTS.md')} already here? ${pc.dim('(your content is kept — the block goes at the end)')}`
       : primerTarget === 'managed'
         ? `Update the musterd primer in this folder's ${pc.bold('AGENTS.md')}?`
-        : `Write an ${pc.bold('AGENTS.md')} primer so ${pc.cyan(name)} knows how to use musterd?`;
+        : `Write an ${pc.bold('AGENTS.md')} primer so agents here know how to use musterd?`;
   const writePrimer = guard(await p.confirm({ message: primerPrompt, initialValue: true }));
   if (writePrimer) {
     try {
-      const { path, action } = upsertPrimer(
-        process.cwd(),
-        renderPrimer({ member: name, team, role, ...(charter ? { charter } : {}) }),
-      );
+      const { path, action } = upsertPrimer(process.cwd(), renderRepositoryPrimer({ team }));
       const verb =
         action === 'created' ? 'Wrote' : action === 'appended' ? 'Added the primer to' : 'Updated';
       p.log.success(
-        `${verb} ${pc.bold('AGENTS.md')} ${pc.dim(`(${path})`)} — ${pc.cyan(name)} now has the team playbook.`,
+        `${verb} ${pc.bold('AGENTS.md')} ${pc.dim(`(${path})`)} — agents here now have the Team playbook.`,
       );
     } catch (err) {
       p.log.warn(
@@ -801,40 +868,10 @@ export async function runInit(): Promise<number> {
     }
   }
 
-  // 5c) Write the on-demand skill + slash commands (ADR 085) -----------------
-  // The primer is the loop kernel; the depth (seat claiming, handoff-with-branch, recovery) lives in a
-  // skill the model opens on demand. Write the harness-neutral canonical skill plus the chosen harness's
-  // native skill/commands, and record them in the manifest so uninstall removes exactly these.
-  // Best-effort — never fails init.
-  try {
-    const g = writeGuidance(process.cwd(), [chosen], { team });
-    if (g.files.length) {
-      p.log.success(
-        `Wrote the musterd skill${chosen.guidance?.commandsDir ? ' + slash commands' : ''} ${pc.dim(`(${g.files.length} file${g.files.length === 1 ? '' : 's'})`)} — ${pc.cyan(name)} can open the playbooks on demand.`,
-      );
-      try {
-        writeProvisionManifest(process.cwd(), {
-          role,
-          harness: chosen.id,
-          mcpServers: [],
-          guidance: { files: g.files, contentVersion: g.contentVersion },
-        });
-      } catch {
-        /* manifest is advisory for guidance — the files themselves are stamp-gated for uninstall */
-      }
-      // Like the token config, offer to keep these per-workspace files out of git (ADR 085).
-      await offerGitignoreGuidance(g.files);
-    }
-    if (g.skipped.length) {
-      p.log.info(
-        pc.dim(
-          `Kept your own file(s): ${g.skipped.join(', ')} (re-run with --force to overwrite).`,
-        ),
-      );
-    }
-  } catch (err) {
-    p.log.warn(`Couldn't write the musterd skill (${(err as Error).message}).`);
-  }
+  // 5c) The on-demand skill + slash commands (ADR 085) now land as MANAGED FRAGMENTS: the
+  // reconciliation above wrote each selected harness's guidance fragment plus the canonical
+  // musterd-core skill, fingerprinted and ledger-owned — so uninstall releases exactly these
+  // through the same engine, and nothing here re-writes the v2 manifest with a v1 shape.
 
   // 6) Wait for the agent to actually join ----------------------------------
   p.log.info(`${pc.bold('Next:')} ${activation}.`);
@@ -848,14 +885,15 @@ export async function runInit(): Promise<number> {
   const joined = await waitForPresence(http, team, name, 180);
   if (joined) {
     sw.stop(
-      `${pc.green('●')} ${pc.cyan(name)} is online via ${chosen.surface} ${pc.green('— it worked!')}`,
+      `${pc.green('●')} ${pc.cyan(name)} is online via ${desired[0] ?? 'musterd'} ${pc.green('— it worked!')}`,
     );
   } else {
     sw.stop(pc.yellow(`Still waiting on ${name}.`));
+    const launcher = chosen?.label ?? 'a selected harness';
     p.note(
       (autojoin
-        ? `When you start ${chosen.label}, ${name} joins automatically.\n`
-        : `Start ${chosen.label} and ask ${name} to join the team.\n`) +
+        ? `When you start ${launcher}, ${name} joins automatically.\n`
+        : `Start ${launcher} and ask ${name} to join the team.\n`) +
         `Check any time with ${pc.yellow('musterd status')}.`,
       'No rush',
     );
@@ -869,6 +907,21 @@ export async function runInit(): Promise<number> {
   );
   p.outro(pc.yellow('Welcome to your team.'));
   return 0;
+}
+
+/** A one-line activation hint for the selected harness set — what to launch to bring the seat up. */
+function activationFor(desired: readonly string[]): string {
+  const hints: Record<string, string> = {
+    'claude-code':
+      'in a terminal here, run `claude` (or open this folder in the Claude Code extension)',
+    cursor: 'open this folder in Cursor (or reload its window)',
+    codex: 'open this folder in Codex (it must be a trusted project)',
+    musterd: 'the native musterd host launches it on demand (`musterd host`)',
+  };
+  const firstExternal = desired.find((id) => id !== 'musterd');
+  if (firstExternal && hints[firstExternal]) return hints[firstExternal]!;
+  if (desired.includes('musterd')) return hints['musterd']!;
+  return 'select a harness with `musterd harness configure`, then `musterd wire`';
 }
 
 async function createTeam(
@@ -937,17 +990,23 @@ async function waitForPresence(
 }
 
 /**
- * Step 4 — pick the role template *before* the member is minted (ADR 038). Lists the built-in seed
- * library plus any `.musterd/roles/*.json`; `generalist` is the default and means "no template"
- * (returns undefined). For a richer pick the template is loaded and returned so its `role` can drive
- * the roster/primer label (via {@link resolveRoleLabel}) and its tools can be provisioned later
- * (§5a). A load failure degrades to no-template (warn, return undefined) so init never wedges here.
+ * Step 4 — pick the workspace profile *before* the member is minted (ADR 038). Lists the built-in
+ * seed library plus any user profiles (`.musterd/toolkits/*.json`, legacy `.musterd/profiles/` and `.musterd/roles/`);
+ * `generalist` is the default and means "no profile" (returns undefined). For a richer pick the
+ * profile is loaded and returned so its tools can be provisioned later (§5a) and its name recorded
+ * on the guidance-path manifest. A load failure degrades to no-profile (warn, return undefined) so
+ * init never wedges here.
+ *
+ * It does NOT touch the roster label. ADR 272 severed that: the profile is local setup, the role
+ * label is a team fact, and a local file cannot grant one. This comment used to say the name drove
+ * the label "via resolveRoleLabel" — the symbol was deleted with the coupling, and the sentence
+ * outlived it long enough for ryder to find it while accepting the lane that removed it.
  */
-async function selectRole(member: string): Promise<RoleTemplate | undefined> {
-  const names = listRoleNames(process.cwd());
+async function selectToolkit(member: string): Promise<Toolkit | undefined> {
+  const names = listToolkitNames(process.cwd());
   const pick = guard(
     await p.select({
-      message: `Provision a role for ${pc.cyan(member)}? ${pc.dim('(adds tools + a charter; generalist adds nothing extra)')}`,
+      message: `Provision a profile for ${pc.cyan(member)}? ${pc.dim('(adds tools + a charter; generalist adds nothing extra)')}`,
       options: names.map((n) => ({
         value: n,
         label: n,
@@ -955,76 +1014,64 @@ async function selectRole(member: string): Promise<RoleTemplate | undefined> {
           n === GENERALIST
             ? 'nothing extra — just the musterd tools'
             : isBuiltin(n)
-              ? 'built-in role'
-              : 'from .musterd/roles/',
+              ? 'built-in profile'
+              : 'user profile',
       })),
     }),
   );
   if (pick === GENERALIST) return undefined;
   try {
-    return loadRole(process.cwd(), pick);
+    return loadToolkit(process.cwd(), pick);
   } catch (err) {
-    p.log.warn(`Couldn't load role "${pick}" (${(err as Error).message}) — skipping provisioning.`);
+    p.log.warn(
+      `Couldn't load profile "${pick}" (${(err as Error).message}) — skipping provisioning.`,
+    );
     return undefined;
   }
 }
 
 /**
- * The free-text side of the role label (ADR 038, Decision #2). With **no template** (generalist /
- * unloadable) it's the same optional free-text prompt as before. With a **template** the label is
- * already settled to `template.role`, so we only offer an explicit *override gate* (default: keep);
- * accepting it opens the free-text prompt. Returns the raw free text (or undefined when the template
- * label is kept) — {@link resolveRoleLabel} applies the precedence.
+ * The role label is a free-text team fact, independent of the profile pick (ADR 272 inc 2 —
+ * ADR 038's label-from-template derivation and its override gate are removed with the coupling
+ * they existed for). Labelling stays opt-in (the ADR 028 default-nothing posture): empty = no role.
  */
-async function askRoleLabel(template: RoleTemplate | undefined): Promise<string | undefined> {
-  if (!template) {
-    return guard(
-      await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
-    ).trim();
-  }
-  const override = guard(
-    await p.confirm({
-      message: `Override the role label ${pc.bold(template.role)}? ${pc.dim('(it matches the tools you chose — default keeps it)')}`,
-      initialValue: false,
-    }),
-  );
-  if (!override) return undefined;
+async function askRoleLabel(): Promise<string> {
   return guard(
-    await p.text({ message: 'Role label', placeholder: template.role, defaultValue: '' }),
+    await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
   ).trim();
 }
 
 /**
- * Step 5a — provision the already-chosen template's tools (ADR 026 §3, provisioning-recipe.md).
- * Provisions its MCP servers into the chosen harness (additive/local — ADR 027), records what was
- * added in the uninstall manifest (ADR 030), and returns the role's charter so the primer step can
- * inject it. No template → nothing to do. A harness without a provision renderer degrades to
- * charter-only. Best-effort: a provisioning hiccup never fails init. Returns the charter, if any.
+ * Step 5a — provision the already-chosen profile's tools (ADR 026 §3, provisioning-recipe.md).
+ * Provisions its MCP servers into the chosen harness (additive/local — ADR 027) and records what
+ * was added in the uninstall manifest (ADR 030). No profile, or a profile with nothing to render,
+ * → nothing to do. Best-effort: a provisioning hiccup never fails init. The profile's charter
+ * field is NOT applied here — charter is the role layer's (ADR 272 inc 2).
  */
 function hasPermissions(p: { allow: string[]; ask: string[]; deny: string[] }): boolean {
   return p.allow.length + p.ask.length + p.deny.length > 0;
 }
 
-async function provisionRoleTools(
+async function provisionToolkitTools(
   harness: Harness,
-  role: RoleTemplate | undefined,
-): Promise<string | undefined> {
-  if (!role) return undefined;
+  toolkit: Toolkit | undefined,
+): Promise<void> {
+  if (!toolkit) return;
 
-  const { mcp_servers: servers, permissions } = role.tools;
+  const { mcp_servers: servers, permissions } = toolkit.tools;
   if (servers.length === 0 && !hasPermissions(permissions)) {
-    p.log.info(pc.dim(`${role.role} adds no tools — applying its charter only.`));
-    return role.charter;
+    p.log.info(pc.dim(`${toolkit.toolkit} adds no tools — nothing to provision.`));
+    return;
   }
   if (!harness.provision) {
     p.log.warn(
-      `Tool provisioning isn't supported for ${harness.label} yet — applying ${role.role}'s charter only.`,
+      `Tool provisioning isn't supported for ${harness.label} yet — skipping ${toolkit.toolkit}.`,
     );
-    return role.charter;
+    return;
   }
 
   const sp = p.spinner();
-  sp.start(`Provisioning ${role.role} tools into ${harness.label}`);
+  sp.start(`Provisioning ${toolkit.toolkit} tools into ${harness.label}`);
   try {
     const result = await harness.provision({ servers, permissions }, 'local');
     const permCount =
@@ -1037,13 +1084,20 @@ async function provisionRoleTools(
         (permCount ? ` + ${permCount} permission${permCount === 1 ? '' : 's'}` : '') +
         ` ${pc.dim(`(${result.target})`)}`,
     );
+    // Recorded for exact removal in the v2 manifest's contributions — never the v1 shape, which
+    // would clobber the strict v2 file init just saved (ADR 281). Role MCP servers are not yet
+    // fragment-modeled, so they ride a plainly-named pseudo-harness key uninstall can consult.
     try {
-      writeProvisionManifest(process.cwd(), {
-        role: role.role,
-        harness: harness.id,
-        mcpServers: result.servers,
-        permissions: result.permissions,
-      });
+      const current = loadProvisioning(process.cwd());
+      if (current.kind === 'valid' && result.servers.length > 0) {
+        saveProvisioning(process.cwd(), {
+          ...current.value,
+          contributions: {
+            ...current.value.contributions,
+            'role-tools': result.servers.map((s) => `role-server ${harness.id} ${s}`),
+          },
+        });
+      }
     } catch (err) {
       p.log.warn(`Couldn't record the provisioning manifest (${(err as Error).message}).`);
     }
@@ -1053,9 +1107,8 @@ async function provisionRoleTools(
       ),
     );
   } catch (err) {
-    sp.stop(pc.yellow(`Couldn't provision ${role.role} tools: ${(err as Error).message}`));
+    sp.stop(pc.yellow(`Couldn't provision ${toolkit.toolkit} tools: ${(err as Error).message}`));
   }
-  return role.charter;
 }
 
 /**
@@ -1174,44 +1227,17 @@ export function missingGitignoreEntries(gitignoreBody: string, rels: string[]): 
  * `.gitignore` is present and doesn't already cover them, prompts once (default yes), and appends the
  * missing lines surgically under a comment. `relFiles` are relative to cwd. Best-effort — never throws.
  */
-async function offerGitignoreGuidance(relFiles: string[]): Promise<void> {
-  try {
-    const gitignore = join(process.cwd(), '.gitignore');
-    if (!existsSync(gitignore)) return; // warnSecretConfig already nudges when there's no .gitignore
-    const body = readFileSync(gitignore, 'utf8');
-    const missing = missingGitignoreEntries(body, relFiles);
-    if (missing.length === 0) return;
-    const n = missing.length;
-    const add = guard(
-      await p.confirm({
-        message: `Add musterd's provisioned guidance (skill + slash commands, ${n} file${n === 1 ? '' : 's'}) to .gitignore? They're regenerated per-workspace, so committing them just churns the repo.`,
-        initialValue: true,
-      }),
-    );
-    if (!add) return;
-    const prefix = body.length && !body.endsWith('\n') ? '\n' : '';
-    appendFileSync(
-      gitignore,
-      `${prefix}\n# musterd — provisioned guidance, regenerated by \`musterd init\` (per-workspace, personal)\n${missing.join('\n')}\n`,
-    );
-    p.log.success(`Added ${n} musterd guidance path${n === 1 ? '' : 's'} to .gitignore.`);
-  } catch {
-    /* advisory only — never fail init over a .gitignore nicety */
-  }
-}
 
-function printManual(
+export function printManual(
   harness: Harness,
   entry: { command: string; args: string[]; env: Record<string, string> },
+  team: string,
 ): string {
   const envLines = Object.entries(entry.env)
     .map(([k, v]) => `  ${k}=${v}`)
     .join('\n');
   // Also surface the primer so the manual path isn't worse off — the agent still needs to know the playbook.
-  const primer = renderPrimer({
-    member: entry.env['MUSTERD_MEMBER'] ?? 'your agent',
-    team: entry.env['MUSTERD_TEAM'] ?? 'your team',
-  });
+  const primer = renderRepositoryPrimer({ team });
   const primerNote = `\n\nThen add this to ${pc.bold('AGENTS.md')} in this folder so the agent knows the playbook:\n${primer}`;
   if (harness.id === 'claude-code') {
     const e = Object.entries(entry.env)
@@ -1221,6 +1247,9 @@ function printManual(
   }
   if (harness.id === 'codex') {
     return `Add to .codex/config.toml (this folder must be a trusted Codex project):\n  [mcp_servers.musterd]\n  command = "${entry.command}"\n  args = ${JSON.stringify(entry.args)}\n  [mcp_servers.musterd.env]\n${envLines}${primerNote}`;
+  }
+  if (harness.id === 'opencode') {
+    return `Add to .opencode/opencode.json under "mcp" (schema: McpLocalConfig — command is one array, env is "environment"):\n  "musterd": {\n    "type": "local",\n    "command": ${JSON.stringify([entry.command, ...entry.args])},\n    "enabled": true,\n    "environment": { …see below… }\n  }\n${envLines}${primerNote}`;
   }
   return `Add to .cursor/mcp.json under "mcpServers":\n  "musterd": {\n    "command": "${entry.command}",\n    "args": ${JSON.stringify(entry.args)},\n    "env": { …see below… }\n  }\n${envLines}${primerNote}`;
 }

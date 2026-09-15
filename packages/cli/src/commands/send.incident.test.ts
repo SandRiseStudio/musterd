@@ -5,6 +5,7 @@ import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { loadConfig, rememberIdentity, saveConfig } from '../config.js';
+import { claimAgentHttp } from '../test-auth.js';
 import { inboxCommand } from './inbox.js';
 import { lanesCommand } from './lane.js';
 import { sendCommand } from './send.js';
@@ -43,11 +44,19 @@ describe('a CLI seat can converge a shared blocker (incident convergence inc 2)'
         teamCommand(parseArgs(['add', seat, '--kind', 'agent', '--role', 'platform'])),
       );
       const config = loadConfig();
+      const authority = await claimAgentHttp(
+        process.env['MUSTERD_SERVER']!,
+        'dawn',
+        config.agentKeys['dawn'] as string,
+        config.identities['dawn']!.key,
+        seat,
+      );
       rememberIdentity(config, {
         team: 'dawn',
         name: seat,
-        key: config.agentKeys['dawn'] as string,
+        key: authority.key,
         surface: 'cli',
+        sessionLease: authority.sessionLease,
       });
       saveConfig(config);
     }

@@ -24,12 +24,42 @@ export const TOKEN_PREFIXES = {
   grant: 'msgr_',
   /** A human credential — what a person presents to authenticate. */
   credential: 'mscr_',
+  /** Per-agent-seat credential — self-identifies one agent Member for routine HTTP authority (ADR 337). */
+  agent_seat: 'msac_',
+  /** Short-lived proof that an agent-seat credential currently holds a specific Presence (ADR 337). */
+  session_lease: 'msls_',
+  /**
+   * A machine credential (ADR 328) — what an admitted daemon presents on the sync surface, and
+   * nothing else. Deliberately not a seat credential: a machine being *admitted* and a seat being
+   * *authorized* are independent axes, and collapsing them would make one laptop's compromise a
+   * licence to mint teammates.
+   */
+  node: 'msnode_',
+  /** A single-use, short-TTL enrollment code that mints exactly one `msnode_` (ADR 328 §2). */
+  node_invite: 'msinv_',
 } as const;
 export type TokenKind = keyof typeof TOKEN_PREFIXES;
 
 /** `POST /teams/:slug/agent-key/rotate` response — the new team agent key, shown **once**. */
 export const AgentKeyMintSchema = z.object({ agent_key: z.string() });
 export type AgentKeyMint = z.infer<typeof AgentKeyMintSchema>;
+
+/** Exchange a legacy Team key for the seat scope independently proven by `msac_` (ADR 350). */
+export const BootstrapMigrationRequestSchema = z
+  .object({
+    legacy_key: z.string().startsWith(TOKEN_PREFIXES.agent_key),
+    seat_credential: z.string().startsWith(TOKEN_PREFIXES.agent_seat),
+  })
+  .strict();
+export type BootstrapMigrationRequest = z.infer<typeof BootstrapMigrationRequestSchema>;
+
+/** Administrator acknowledgement when disabling one Team's legacy compatibility authority. */
+export const BootstrapCutoverRequestSchema = z
+  .object({
+    force: z.boolean().default(false),
+  })
+  .strict();
+export type BootstrapCutoverRequest = z.infer<typeof BootstrapCutoverRequestSchema>;
 
 /** A minted human credential, shown **once** (issued alongside a human seat). */
 export const CredentialMintSchema = z.object({ credential: z.string() });

@@ -63,7 +63,16 @@ export function sweepAbandonedAcceptance(
     const waited = now - before.updated_at;
     if (waited < graceMs) continue;
 
-    const lane: Lane | null = updateLane(db, teamId, before.id, teamSlug, { state: 'done' }, now);
+    const lane: Lane | null = updateLane(
+      db,
+      teamId,
+      before.id,
+      teamSlug,
+      { state: 'done' },
+      now,
+      undefined,
+      { actor: SYSTEM_CLOSER.name },
+    );
     if (!lane) continue;
     // The merge attestation the lane already carries rides through untouched — a swept lane is
     // still a landed one, and dropping its PR/SHA would break the ADR 109 seat→PR→SHA join for

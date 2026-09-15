@@ -17,30 +17,15 @@ import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { withTraceContext } from '../otel.js';
-import { errorResult, notReadyMessage, textResult } from './format.js';
+import { errorResult, notReadyMessage, repairHint, textResult } from './format.js';
 
-// Rewritten for concision + retrievability (ADR 144 inc 2): the act vocabulary is the API and
-// stays complete, one terse clause each; the plan-epoch/interrupt mechanics live in the skill.
-//
-// The trailing example is inc 4's `input_examples` lever, and it is spent HERE and nowhere else on
-// purpose. Examples cost surface bytes on every connect, so they only earn their place where the
-// coercion layer cannot forgive the mistake: `to`/`body` drift is now repaired silently, but
-// `ask`'s conditionally-required `meta.species`/`meta.tier` cannot be — nothing in a bare `ask`
-// says which species the caller meant, and guessing would misroute a human's attention. So the one
-// shape that must be shown is the one shape that can only be taught.
+// ADR 318: keep the Act vocabulary and ask's conditionally-required fields in standing context;
+// examples, rationale, and plan-epoch mechanics are retrievable from the musterd skill.
 const DESCRIPTION =
-  "Send an act to a teammate, '@team', or '@broadcast'. Acts: status_update = report progress; " +
-  'request_help = you are blocked; handoff = pass work; accept/decline = answer the latest open ' +
-  'ask (set reply_to to override); wait = paused; resolve = close a thread (set thread to its ' +
-  'root id); steer = redirect a teammate (interrupts; newest steer wins; meta.goal_id scopes it ' +
-  'to a Goal); challenge = demand justification (answered by an accept with evidence); defer = ' +
-  'shelve a Goal (meta.goal_id); ask = a ' +
-  'directed-to-human ask (meta.species: consult|escalate|approve, meta.tier: advisory|standard|' +
-  'blocking) — the reply tells you how long to wait and what to do if no answer comes. Goal-scoped ' +
-  'steer/defer re-sequence the plan and flag lanes building against the old one. ' +
-  'e.g. {act:"status_update",body:"…"}; an ask needs meta: ' +
-  '{act:"ask",to:"nick",body:"…",meta:{species:"consult",tier:"standard"}}. ' +
-  'to:["a","b"] (2-4) = either may answer, first reply stands the rest down.';
+  'Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to ' +
+  'transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to ' +
+  'redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires ' +
+  'meta.species and meta.tier; 2–4 to names mean any may answer.';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
@@ -99,7 +84,7 @@ const ANSWERABLE = new Set<Act>(['request_help', 'handoff', 'challenge', 'ask'])
  */
 async function openAnswerable(client: MusterdClient, me: string): Promise<Envelope[]> {
   try {
-    const { messages, answered } = await client.fetchInbox(false);
+    const { messages, answered, discharged } = await client.fetchInbox(false);
     const resolved = new Set<string>();
     for (const m of messages) if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
     // An act I already replied to is not open, and only the server can tell me so: the inbox
@@ -109,11 +94,22 @@ async function openAnswerable(client: MusterdClient, me: string): Promise<Envelo
     // asks and could push the live one out of the six it shows. Absent on an older daemon ⇒ empty ⇒
     // exactly the previous behaviour.
     const alreadyAnswered = new Set(answered ?? []);
+    // ADR 254: and an eligible-set act a CO-ELIGIBLE seat already took is not open either — the
+    // discharging accept is a DM to the asker, so this seat is not a party to it and cannot fold it
+    // out for itself. Without this an un-named `accept` could auto-target an act someone else had
+    // already answered, which is the one case where guessing wrong writes a duplicate verdict into
+    // the ledger. Absent on an older daemon ⇒ empty ⇒ exactly the previous behaviour.
+    const stoodDown = new Set((discharged ?? []).map((d) => d.id));
     const open = messages.filter((m) => {
       if (!ANSWERABLE.has(m.act)) return false;
       const directed =
         m.act === 'request_help' || m.act === 'ask' || (m.to.kind === 'member' && m.to.name === me);
-      return directed && !resolved.has(m.thread ?? m.id) && !alreadyAnswered.has(m.id);
+      return (
+        directed &&
+        !resolved.has(m.thread ?? m.id) &&
+        !alreadyAnswered.has(m.id) &&
+        !stoodDown.has(m.id)
+      );
     });
     return open.sort((a, b) => b.ts - a.ts);
   } catch {
@@ -247,6 +243,17 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
             : ` Lane ${handoffLane.lane} attached (your only live lane` +
               `${handoffLane.branch ? `, branch ${handoffLane.branch}` : ''}) — ` +
               `re-send with meta.lane_handoff.lane if this handoff was about something else.`;
+        // The verdict's consequence (ADR 202; lane 01M2GQFJXG): an accept answering a lane_review
+        // ask CLOSED a lane, and a decline sent one back. Said on the spot, in the reply to the act
+        // that did it — a reviewer who meant "taking this review" learns now, not from the board.
+        const laneVerdict = ackBody?.lane_verdict;
+        const verdictGuidance = !laneVerdict
+          ? ''
+          : laneVerdict.state === 'done'
+            ? ` Lane ${laneVerdict.lane} → done: this accept WAS the acceptance verdict (ADR 202), ` +
+              `not an announcement. If you had not reviewed yet, say so — a decline on the same ` +
+              `ask will not reopen it; lane_update {state:'active'} does.`
+            : ` Lane ${laneVerdict.lane} → active: this decline sent the work back to its owner.`;
         // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
         const text =
@@ -254,7 +261,8 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
             ? `sent ask to ${toLabel} (id=${envelope.id}). ${askGuidance}`
             : `sent ${args.act} to ${toLabel} (id=${envelope.id})`) +
           hintGuidance +
-          handoffGuidance;
+          handoffGuidance +
+          verdictGuidance;
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {
@@ -270,9 +278,24 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
               : {}),
             ...(hint ? { delivery_hint: hint } : {}),
             ...(handoffLane ? { handoff_lane: handoffLane } : {}),
+            ...(laneVerdict ? { lane_verdict: laneVerdict } : {}),
           },
         };
       } catch (err) {
+        // Hand the body back. On this surface there is no human to retype and no stderr anyone
+        // reads: if the act's text is not in the tool result, it exists nowhere and the model has to
+        // reconstruct from memory what it believed it had already said. The transport now re-joins
+        // once on a refused lease (lane 01M1PV8MFA), so this is the second line of defence — for the
+        // refusal that survives a fresh claim, and for every other reason a send can fail.
+        const composed = args.body?.trim();
+        if (composed) {
+          const message = err instanceof Error ? err.message : String(err);
+          return textResult(
+            `error: ${message}${repairHint(message)}\n\n` +
+              `NOT SENT — nothing was lost but the delivery. Your ${args.act} body, to send again ` +
+              `verbatim once the cause is fixed:\n${composed}`,
+          );
+        }
         return errorResult(err);
       }
     },

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig } from '../config.js';
+import { claimAgentHttp } from '../test-auth.js';
 import { auditCommand } from './audit.js';
 import { reclaimCommand } from './reclaim.js';
 import { teamCommand } from './team.js';
@@ -66,7 +67,8 @@ describe('audit command', () => {
     await writeReclaimRow();
     const res = await capture(() => auditCommand(parseArgs([])));
     expect(res.code).toBe(0);
-    expect(res.out).toContain('audit — dawn (1 entry)');
+    // nick's own authenticated touch writes a replicated `presence.attached` beside the reclaim.
+    expect(res.out).toMatch(/audit — dawn \(\d+ entr/);
     expect(res.out).toContain('member.reclaim');
     expect(res.out).toContain('allow');
     expect(res.out).toContain('Ada');
@@ -78,9 +80,8 @@ describe('audit command', () => {
     await writeReclaimRow();
     const res = await capture(() => auditCommand(parseArgs(['--json'])));
     expect(res.code).toBe(0);
-    const arr = JSON.parse(res.out) as unknown[];
-    expect(arr).toHaveLength(1);
-    const entry = arr[0] as Record<string, unknown>;
+    const arr = JSON.parse(res.out) as Record<string, unknown>[];
+    const entry = arr.find((e) => e['action'] === 'member.reclaim')!;
     expect(entry).toMatchObject({ action: 'member.reclaim', result: 'allow', target: 'Ada' });
     expect(typeof entry['id']).toBe('string');
     expect(typeof entry['ts']).toBe('number');
@@ -149,9 +150,9 @@ describe('audit command', () => {
       name: 'Ada2',
       kind: 'agent',
     });
-    // Post-cutover (ADR 069): a non-admin agent authenticates with the team agent key + its seat.
     const agentKey = loadConfig().agentKeys['dawn']!;
-    const client = new HttpClient({ server: serverUrl, key: agentKey, seat: 'Ada2' });
+    const authority = await claimAgentHttp(serverUrl, 'dawn', agentKey, nickToken, 'Ada2');
+    const client = new HttpClient({ server: serverUrl, ...authority });
     await expect(client.audit('dawn')).rejects.toMatchObject({ exitCode: 5 });
   });
 

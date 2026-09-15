@@ -1,5 +1,9 @@
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { addMember } from '../store/members.js';
 import { createTeam, getTeamBySlug } from '../store/teams.js';
 import { MIGRATIONS, runMigrations } from './migrations.js';
 import { openDb } from './open.js';
@@ -14,9 +18,24 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('41');
+    expect(ver?.value).toBe('66');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
+    db.close();
+  });
+
+  it('adds durable legacy-bootstrap migration and cutover evidence (ADR 350)', () => {
+    const db = openDb(':memory:');
+    const credentialCols = (
+      db.prepare('PRAGMA table_info(agent_bootstrap_credentials)').all() as { name: string }[]
+    ).map((column) => column.name);
+    expect(credentialCols).toEqual(
+      expect.arrayContaining(['migration_target_member_id', 'first_used_at']),
+    );
+    const teamCols = (db.prepare('PRAGMA table_info(teams)').all() as { name: string }[]).map(
+      (column) => column.name,
+    );
+    expect(teamCols).toContain('bootstrap_cutover_at');
     db.close();
   });
 
@@ -76,6 +95,59 @@ describe('db', () => {
       (c) => c.name,
     );
     expect(cols).toEqual(expect.arrayContaining(['resumable_harness', 'resumable_at']));
+    db.close();
+  });
+
+  it('v65 adds the hue column on members (ADR 374)', () => {
+    const db = openDb(':memory:');
+    const cols = db
+      .prepare<[], { name: string }>("SELECT name FROM pragma_table_info('members')")
+      .all()
+      .map((c) => c.name);
+    expect(cols).toContain('hue');
+    db.close();
+  });
+
+  it('v66 rebuilds seeds so slack_user_id may be NULL, carrying every relay Seed over (ADR 373 inc 2)', () => {
+    const db = openDb(':memory:');
+    const team = createTeam(db, { slug: 'revive' });
+    addMember(db, team, { name: 'nick', kind: 'human', slackUserId: 'U1' });
+    const member = db
+      .prepare<
+        [string],
+        { id: string }
+      >("SELECT id FROM members WHERE team_id = ? AND name = 'nick'")
+      .get(team.id)!;
+    // Rewind to before the rebuild and plant a relay Seed and one thread entry under the old shape.
+    db.prepare("UPDATE schema_meta SET value = '65' WHERE key = 'schema_version'").run();
+    db.prepare(
+      `INSERT INTO seeds (id, team_id, relay_id, source, body, captured_at, slack_user_id, submitted_by, state, created_at, updated_at)
+       VALUES ('s1', ?, 'relay-1', 'slack', 'idea', 1, 'U1', ?, 'open', 1, 1)`,
+    ).run(team.id, member.id);
+    db.prepare(
+      `INSERT INTO seed_thread_entries (id, seed_id, kind, body, member_id, created_at)
+       VALUES ('t1', 's1', 'clarification', 'why?', ?, 2)`,
+    ).run(member.id);
+    expect(runMigrations(db)).toBe(66);
+    const col = (db.pragma('table_info(seeds)') as { name: string; notnull: number }[]).find(
+      (c) => c.name === 'slack_user_id',
+    );
+    expect(col?.notnull).toBe(0);
+    expect(db.prepare('SELECT relay_id, slack_user_id FROM seeds').all()).toEqual([
+      { relay_id: 'relay-1', slack_user_id: 'U1' },
+    ]);
+    expect(db.prepare('SELECT seed_id FROM seed_thread_entries').all()).toEqual([
+      { seed_id: 's1' },
+    ]);
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO seeds (id, team_id, relay_id, source, body, captured_at, slack_user_id, submitted_by, state, created_at, updated_at)
+           VALUES ('s2', ?, 'repo:a.md#b', 'repo', 'x', 1, NULL, ?, 'open', 1, 1)`,
+        )
+        .run(team.id, member.id),
+    ).not.toThrow();
     db.close();
   });
 
@@ -244,7 +316,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(41); // runs v18…v40 (… + seeds cursor + wake turns + presence surface + wake_leases edge)
+    expect(runMigrations(db)).toBe(66); // runs v18…v66 (including the pull cursor, bootstrap cutover evidence, host_liveness, the seat_nodes set key, and the push wedge)
 
     const scope = (id: string) =>
       db
@@ -308,7 +380,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(41);
+    expect(runMigrations(db)).toBe(66);
 
     const policy = (id: string) =>
       db
@@ -354,6 +426,36 @@ describe('v39 — the presence surface CHECK admits `musterd` (ADR 251 §2)', ()
   });
 });
 
+describe('v44 — the presence surface CHECK admits `opencode` (ADR 321 §2)', () => {
+  it('accepts an opencode presence, and still refuses an unknown surface', () => {
+    const db = openDb(':memory:');
+    db.prepare(
+      "INSERT INTO teams (id, slug, created_at, updated_at) VALUES ('t1','dawn',1,1)",
+    ).run();
+    db.prepare(
+      `INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+       VALUES ('m1','t1','ghost','agent','','forever',0,1,1)`,
+    ).run();
+    const insert = (surface: string) =>
+      db
+        .prepare(
+          `INSERT INTO presence (id, member_id, surface, status, last_seen_at, created_at)
+           VALUES (?, 'm1', ?, 'online', 1, 1)`,
+        )
+        .run(`p-${surface}`, surface);
+
+    expect(() => insert('opencode')).not.toThrow();
+    expect(() => insert('codex')).not.toThrow();
+    // The constraint must stay a constraint — widening is not opening.
+    expect(() => insert('definitely-not-a-surface')).toThrow();
+    // model_source (migration 42) postdates v39's rebuilt column list; the enumerated copy must
+    // have carried it or this read comes back empty (and openDb itself would have thrown).
+    const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
+    expect(cols).toContain('model_source');
+    db.close();
+  });
+});
+
 describe('v41 — incident convergence (spec 2026-08-14)', () => {
   it('adds lanes.kind and the incident_reports table', () => {
     const db = openDb(':memory:');
@@ -372,6 +474,409 @@ describe('v41 — incident convergence (spec 2026-08-14)', () => {
         'created_at',
       ]),
     );
+    db.close();
+  });
+
+  it('an on-disk db and its WAL/SHM siblings are owner-only (0600), including pre-existing 644 files', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-db-mode-'));
+    const path = join(dir, 'musterd.db');
+    try {
+      // First open creates all three; each must come out 600.
+      let db = openDb(path);
+      db.prepare('CREATE TABLE IF NOT EXISTS t (x)').run();
+      db.close();
+      const mode = (p: string) => statSync(p).mode & 0o777;
+      expect(mode(path)).toBe(0o600);
+      // Simulate an existing install created before the fix: loosen, reopen, expect repair.
+      for (const suffix of ['', '-wal', '-shm']) {
+        if (existsSync(path + suffix)) chmodSync(path + suffix, 0o644);
+      }
+      db = openDb(path);
+      for (const suffix of ['', '-wal', '-shm']) {
+        if (existsSync(path + suffix)) expect(mode(path + suffix)).toBe(0o600);
+      }
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * ADR 331 eval (iv): the v47 backfill partitions by team — there is no "the local node". The
+ * fixture seeds TWO teams with interleaved timestamps on purpose: a single-team fixture passes
+ * identically under the global and the partitioned readings, so it cannot fail.
+ */
+describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', () => {
+  const buildV46 = () => {
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    for (const m of MIGRATIONS) {
+      if (m.version > 46) break;
+      m.up(db);
+    }
+    db.prepare(
+      "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '46') " +
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ).run();
+    const now = Date.now();
+    for (const t of ['t1', 't2']) {
+      db.prepare(
+        `INSERT INTO teams (id, slug, display, default_lifecycle, created_at, updated_at)
+         VALUES (?, ?, ?, 'forever', ?, ?)`,
+      ).run(t, t, t, now, now);
+      db.prepare(
+        `INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+         VALUES (?, ?, 'ada', 'agent', '', 'forever', 0, ?, ?)`,
+      ).run(`m-${t}`, t, now, now);
+    }
+    // Interleaved by ts across teams: t1 at 1000/3000/5000, t2 at 2000/4000. A global numbering
+    // would scatter each team's numbers through 1..5; the partitioned one must not.
+    const msg = db.prepare(
+      `INSERT INTO messages (id, team_id, from_member, to_kind, act, body, ts, created_at)
+       VALUES (?, ?, ?, 'team', 'message', '', ?, ?)`,
+    );
+    msg.run('m-a', 't1', 'm-t1', 1000, 1000);
+    msg.run('m-b', 't2', 'm-t2', 2000, 2000);
+    msg.run('m-c', 't1', 'm-t1', 3000, 3000);
+    msg.run('m-d', 't2', 'm-t2', 4000, 4000);
+    msg.run('m-e', 't1', 'm-t1', 5000, 5000);
+    return db;
+  };
+
+  const seqs = (db: InstanceType<typeof Database>, team: string) =>
+    db
+      .prepare<
+        [string],
+        { id: string; origin_seq: number; origin_node: string }
+      >('SELECT id, origin_seq, origin_node FROM messages WHERE team_id = ? ORDER BY ts, id')
+      .all(team);
+
+  it('backfills each team as a gapless prefix in (ts, id) order, next_seq = count + 1', () => {
+    const db = buildV46();
+    runMigrations(db);
+
+    const t1 = seqs(db, 't1');
+    const t2 = seqs(db, 't2');
+    expect(t1.map((r) => r.origin_seq)).toEqual([1, 2, 3]);
+    expect(t2.map((r) => r.origin_seq)).toEqual([1, 2]);
+    // Two node identities — per (daemon, team), never one machine row spanning both.
+    expect(t1[0]!.origin_node).not.toBe(t2[0]!.origin_node);
+    const nextSeq = (team: string) =>
+      db
+        .prepare<[string], { next_seq: number }>('SELECT next_seq FROM nodes WHERE team_id = ?')
+        .get(team)?.next_seq;
+    expect(nextSeq('t1')).toBe(4);
+    expect(nextSeq('t2')).toBe(3);
+    // The 328 shape holds, unenrolled: credential_hash and enrolled_at NULL until increment 3.
+    const node = db
+      .prepare<
+        [],
+        { credential_hash: string | null; enrolled_at: number | null; label: string }
+      >('SELECT credential_hash, enrolled_at, label FROM nodes LIMIT 1')
+      .get();
+    expect(node?.credential_hash).toBeNull();
+    expect(node?.enrolled_at).toBeNull();
+    expect(node?.label.length).toBeGreaterThan(0);
+    db.close();
+  });
+
+  it('is idempotent under rewind-and-replay: renumbers rather than doubling', () => {
+    const db = buildV46();
+    runMigrations(db);
+    const firstNodes = db
+      .prepare<[], { id: string }>('SELECT id FROM nodes ORDER BY team_id')
+      .all()
+      .map((r) => r.id);
+
+    db.prepare("UPDATE schema_meta SET value = '46' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM nodes').get()).toEqual({ n: 2 });
+    // The replay adopts the existing rows (insert-if-absent), never minting a second identity.
+    expect(
+      db
+        .prepare<[], { id: string }>('SELECT id FROM nodes ORDER BY team_id')
+        .all()
+        .map((r) => r.id),
+    ).toEqual(firstNodes);
+    expect(seqs(db, 't1').map((r) => r.origin_seq)).toEqual([1, 2, 3]);
+    expect(seqs(db, 't2').map((r) => r.origin_seq)).toEqual([1, 2]);
+    db.close();
+  });
+
+  /**
+   * v48 — the `local_node` marker (increment 3a). v47 identified the local row by `ORDER BY id
+   * LIMIT 1`, which is only correct while `nodes` holds one row per team. Enrollment is what breaks
+   * that, so the marker is recorded before enrollment can exist.
+   */
+  it('v48 marks every v47 row as local, one per team', () => {
+    const db = buildV46();
+    runMigrations(db);
+
+    const marks = db
+      .prepare<
+        [],
+        { team_id: string; node_id: string }
+      >('SELECT team_id, node_id FROM local_node ORDER BY team_id')
+      .all();
+    expect(marks.map((m) => m.team_id)).toEqual(['t1', 't2']);
+    expect(marks[0]!.node_id).toBe(seqs(db, 't1')[0]!.origin_node);
+    expect(marks[1]!.node_id).toBe(seqs(db, 't2')[0]!.origin_node);
+    db.close();
+  });
+
+  it('v48 is idempotent under rewind-and-replay: one mark per team, unchanged', () => {
+    const db = buildV46();
+    runMigrations(db);
+    const before = db
+      .prepare<
+        [],
+        { team_id: string; node_id: string }
+      >('SELECT team_id, node_id FROM local_node ORDER BY team_id')
+      .all();
+
+    db.prepare("UPDATE schema_meta SET value = '46' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+
+    expect(
+      db
+        .prepare<
+          [],
+          { team_id: string; node_id: string }
+        >('SELECT team_id, node_id FROM local_node ORDER BY team_id')
+        .all(),
+    ).toEqual(before);
+    db.close();
+  });
+
+  /**
+   * v49 — `node_invites` (ADR 328 §2). No backfill to check: an invite is a live object with a
+   * 15-minute life, so history has none. What the replay must not do is drop live codes.
+   */
+  it('v49 creates node_invites and a replay keeps the codes already minted', () => {
+    const db = buildV46();
+    runMigrations(db);
+    db.prepare(
+      `INSERT INTO node_invites (id, team_id, code_hash, label, created_by, created_at, expires_at)
+       VALUES ('i1', 't1', 'hash-1', 'laptop', 'nick', 1000, 2000)`,
+    ).run();
+
+    db.prepare("UPDATE schema_meta SET value = '46' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM node_invites').get()).toEqual({ n: 1 });
+    db.close();
+  });
+
+  it('v49 refuses two invites sharing one code hash', () => {
+    const db = buildV46();
+    runMigrations(db);
+    const insert = (id: string) =>
+      db
+        .prepare(
+          `INSERT INTO node_invites (id, team_id, code_hash, label, created_by, created_at, expires_at)
+           VALUES (?, 't1', 'same-hash', 'laptop', 'nick', 1000, 2000)`,
+        )
+        .run(id);
+    insert('i1');
+    // A replayed mint must collide rather than shadow the live code it duplicates.
+    expect(() => insert('i2')).toThrow();
+    db.close();
+  });
+
+  /**
+   * v50 — the sync staging tables (ADR 325 increment 3b-i). No backfill: nothing has ever been
+   * pushed, and history is already in `messages` under its own origin stamp. What the replay must
+   * not do is drop events a hub has staged but not yet folded.
+   */
+  const stage = (db: InstanceType<typeof Database>, id: string, seq: number, hubSeq: number) =>
+    db
+      .prepare(
+        `INSERT INTO sync_log (id, team_id, origin_node, origin_seq, hub_seq, payload, received_at)
+         VALUES (?, 't1', 'n-remote', ?, ?, '{}', 1000)`,
+      )
+      .run(id, seq, hubSeq);
+
+  const withRemoteNode = () => {
+    const db = buildV46();
+    runMigrations(db);
+    db.prepare(
+      "INSERT INTO nodes (id, team_id, label, next_seq) VALUES ('n-remote', 't1', 'remote', 1)",
+    ).run();
+    return db;
+  };
+
+  it('v50 creates the staging tables, and a replay keeps what was already staged', () => {
+    const db = withRemoteNode();
+    stage(db, 'm1', 1, 1);
+
+    db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
+    expect(runMigrations(db)).toBe(66);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
+    db.close();
+  });
+
+  // ryder, acceptance of 3b-ii (01M1FAD24JM5), 2026-09-02: v54 never ran on the dogfood daemon.
+  // #1164 landed v55 first; runMigrations is a high-water mark, so a DB already at 55 skips a 54
+  // that arrives later. Live musterd.db sat at schema 55 with no idx_messages_origin and no
+  // sync_pull_cursor. v56 re-issues v54's IF NOT EXISTS body so that DB catches up.
+  it('v56 re-issues v54 for a DB that reached 55 without it', () => {
+    const db = withRemoteNode();
+    db.exec('DROP INDEX idx_messages_origin; DROP TABLE sync_pull_cursor;');
+    db.prepare("UPDATE schema_meta SET value = '55' WHERE key = 'schema_version'").run();
+
+    expect(runMigrations(db)).toBe(66);
+
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_pull_cursor'").get(),
+    ).toEqual({ name: 'sync_pull_cursor' });
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_messages_origin'").get(),
+    ).toEqual({ name: 'idx_messages_origin' });
+    db.close();
+  });
+
+  // Lane-replication slice: `lane.*` audit rows are the second replicated kind and carry the ADR 331
+  // pair. Every other row keeps the defaults and never collides under the partial unique index.
+  it('v58 stamps audit with the origin pair, unique only where a stamp exists', () => {
+    const db = withRemoteNode();
+    db.prepare("UPDATE schema_meta SET value = '57' WHERE key = 'schema_version'").run();
+    expect(runMigrations(db)).toBe(66);
+
+    const insert = db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+       VALUES (?, 't1', 1, NULL, ?, NULL, 'allow', NULL, 1, ?, ?)`,
+    );
+    // Two unstamped rows: no collision — the index is partial on origin_seq > 0.
+    insert.run('a1', 'member.reclaim', '', 0);
+    insert.run('a2', 'member.reclaim', '', 0);
+    // Two stamped rows on one pair: refused — that is the fold's idempotence key.
+    insert.run('a3', 'lane.opened', 'N1', 1);
+    expect(() => insert.run('a4', 'lane.claimed', 'N1', 1)).toThrow();
+    db.close();
+  });
+
+  it('v50 makes a replayed push a no-op rather than a duplicate', () => {
+    const db = withRemoteNode();
+    stage(db, 'm1', 1, 1);
+    // The same origin event arriving twice — the pusher retried, or its cursor lagged. The
+    // idempotence key is (origin_node, origin_seq), so a fresh row id does NOT let it in twice.
+    expect(() => stage(db, 'm1-again', 1, 2)).toThrow();
+    db.close();
+  });
+
+  it('v50 refuses two staged rows claiming one hub_seq — the order is dense by schema', () => {
+    const db = withRemoteNode();
+    stage(db, 'm1', 1, 1);
+    // The off-by-one this guards: an allocator that hands out its DEFAULT instead of the
+    // pre-increment value issues hub_seq 1 twice, and the canonical order silently forks.
+    expect(() => stage(db, 'm2', 2, 1)).toThrow();
+    stage(db, 'm2', 2, 2);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 2 });
+    db.close();
+  });
+
+  it('v61 adds presence.node (null = local) with an index', () => {
+    const db = openDb(':memory:');
+    const cols = db
+      .prepare<[], { name: string }>('PRAGMA table_info(presence)')
+      .all()
+      .map((c) => c.name);
+    expect(cols).toContain('node');
+    const idx = db
+      .prepare<[], { name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'presence'",
+      )
+      .all()
+      .map((i) => i.name);
+    expect(idx).toContain('idx_presence_node');
+    db.close();
+  });
+
+  it('v63 rekeys seat_nodes to (member_id, node_id), carrying every existing binding over (ADR 358)', () => {
+    const db = openDb(':memory:');
+    // Rebuild the v59 shape with a row in it, then replay v60+ over it.
+    db.exec(`
+      DROP TABLE seat_nodes;
+      CREATE TABLE seat_nodes (
+        member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        team_id   TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+        node_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+        bound_at  INTEGER NOT NULL
+      );
+      INSERT INTO teams (id, slug, created_at, updated_at) VALUES ('t', 'alpha', 1, 1);
+      INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+        VALUES ('m', 't', 'nick', 'human', '', 'forever', 0, 1, 1);
+      INSERT INTO nodes (id, team_id, label, next_seq) VALUES ('nA', 't', 'a', 1), ('nB', 't', 'b', 1);
+      INSERT INTO seat_nodes VALUES ('m', 't', 'nA', 5);
+    `);
+    db.prepare("UPDATE schema_meta SET value = '62' WHERE key = 'schema_version'").run();
+    expect(runMigrations(db)).toBe(66);
+    expect(db.prepare('SELECT member_id, node_id, bound_at FROM seat_nodes').all()).toEqual([
+      { member_id: 'm', node_id: 'nA', bound_at: 5 },
+    ]);
+    // The set: a second node for the same seat is now a row, not a conflict.
+    db.prepare("INSERT INTO seat_nodes VALUES ('m', 't', 'nB', 6)").run();
+    expect(() => db.prepare("INSERT INTO seat_nodes VALUES ('m', 't', 'nB', 7)").run()).toThrow(
+      /UNIQUE|PRIMARY KEY/,
+    );
+    db.close();
+  });
+});
+
+/**
+ * ADR 325 prereq: `incident_reports.id` was the schema's only INTEGER AUTOINCREMENT — an ordering
+ * that exists only in this file and collides the moment rows originate on two machines. v45
+ * rebuilds it on ULID TEXT ids, minted in old-id order so the pool's arrival order survives even
+ * where created_at disagrees with it.
+ */
+describe('v45 — incident_reports ids become ULIDs (ADR 325 prereq)', () => {
+  it('rebuilds a populated integer-id table, preserving arrival order in the new ids', () => {
+    const db = openDb(':memory:');
+    db.exec(`
+      DROP TABLE incident_reports;
+      CREATE TABLE incident_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        team_id TEXT NOT NULL,
+        gate TEXT NOT NULL,
+        seat TEXT NOT NULL,
+        sig TEXT,
+        ref TEXT,
+        message_id TEXT,
+        lane_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_incident_reports_team_gate ON incident_reports(team_id, gate);
+    `);
+    const ins = db.prepare(
+      "INSERT INTO incident_reports (team_id, gate, seat, created_at) VALUES ('t', 'g', ?, ?)",
+    );
+    // Arrival order a, b, c — with created_at deliberately OUT of that order: the old pool
+    // ordering was ORDER BY (integer) id, i.e. arrival, and the rebuild must keep that promise.
+    ins.run('a', 3_000);
+    ins.run('b', 1_000);
+    ins.run('c', 1_000);
+    db.prepare("UPDATE schema_meta SET value = '44' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+
+    const cols = db
+      .prepare<
+        [],
+        { name: string; type: string }
+      >("SELECT name, type FROM pragma_table_info('incident_reports')")
+      .all();
+    expect(cols.find((c) => c.name === 'id')?.type).toBe('TEXT');
+    const rows = db
+      .prepare<
+        [],
+        { id: string | number; seat: string }
+      >('SELECT id, seat FROM incident_reports ORDER BY id')
+      .all();
+    expect(rows).toHaveLength(3);
+    for (const r of rows) expect(String(r.id)).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(rows.map((r) => r.seat)).toEqual(['a', 'b', 'c']);
     db.close();
   });
 });

@@ -1,19 +1,29 @@
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import {
   BINDING_DIR,
   BINDING_FILE,
   bindingSeat,
+  envelopePosition,
   resolveAttestation,
   resolveAttestedModel,
+  type Envelope,
   type MemberKind,
   type MemberSummary,
 } from '@musterd/protocol';
+import { gitOutput, gitToplevel, resolveWorkspaceKey } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
-import { HttpClient } from '../client.js';
-import { findBinding, identityFromEnv, loadConfig, type Config, type Identity } from '../config.js';
+import { HttpClient, type HttpClientOpts } from '../client.js';
+import {
+  findBinding,
+  identityFromEnv,
+  loadConfig,
+  requireUsableBinding,
+  type Config,
+  type Identity,
+} from '../config.js';
 import { CliError } from '../errors.js';
-import { openActionNeeded, renderReachabilityNudge } from '../render/rows.js';
+import { dischargedIds, openActionNeeded, renderReachabilityNudge } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 
 /** Walk up from `startDir` to the folder holding `.musterd/binding.json` (the workspace root), or
@@ -27,6 +37,27 @@ export function findWorkspaceDir(startDir: string = process.cwd()): string | nul
     if (parent === dir) return null;
     dir = parent;
   }
+}
+
+/** The same bounded Workspace label the adapter sends on a claim (ADR 014/068). */
+export function resolveClaimWorkspace(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  const declared = env['MUSTERD_WORKSPACE']?.trim();
+  if (declared) return declared.slice(0, 120);
+
+  const folder = basename(cwd) || cwd;
+  const top = gitToplevel(cwd);
+  const branch = top ? gitOutput(['rev-parse', '--abbrev-ref', 'HEAD'], cwd) : null;
+  const subpath = top ? relative(top, cwd) : '';
+  const qualifier =
+    branch && branch !== 'HEAD'
+      ? branch
+      : subpath === '' || subpath.startsWith('..')
+        ? ''
+        : subpath;
+  return (qualifier ? `${folder}@${qualifier}` : folder).slice(0, 120);
 }
 
 /**
@@ -58,6 +89,43 @@ export interface ResolvedRead {
 }
 
 /**
+ * The one shape of `HttpClientOpts` an identity-bearing CLI command uses. `resolve()` and
+ * `resolveRead()` built this literal twice by hand, which is how a field that `gather()` resolves
+ * can go missing from one or both without any signal — see lane 01M1T29EV9, where `workspaceKey`
+ * was resolved at every call and passed at none, disarming ADR 365/368 on the per-request claim.
+ * One builder, so a resolved field cannot be dropped by a call site.
+ */
+export function identityClientOpts(
+  input: {
+    server: string;
+    team: string;
+    workspace: string;
+    workspaceKey: string;
+    identity: Identity;
+    model?: string | undefined;
+  },
+  claimSeatPerRequest: boolean,
+): HttpClientOpts {
+  return {
+    server: input.server,
+    team: input.team,
+    workspace: input.workspace,
+    // The IDENTITY behind that label (ADR 365/368): the label carries a git branch, so it is renamed
+    // by a branch switch under the very session it identifies, and the server can only compare keys
+    // when BOTH sides send one. Omit it and displacement silently falls back to label equality.
+    workspaceKey: input.workspaceKey,
+    key: input.identity.key,
+    seat: input.identity.name,
+    ...(input.identity.sessionLease !== undefined
+      ? { sessionLease: input.identity.sessionLease }
+      : {}),
+    surface: input.identity.surface,
+    claimSeatPerRequest,
+    ...(input.model !== undefined ? { model: input.model } : {}),
+  };
+}
+
+/**
  * Gather candidate identities + the active team. Precedence is aligned with the MCP adapter
  * (ADR 018): explicit flags → `MUSTERD_*` env → workspace `.musterd/binding.json` → global config.
  * The binding/env paths key identity to the *workspace*, so two agents on one machine can't collide
@@ -66,7 +134,10 @@ export interface ResolvedRead {
 function gather(flags: Record<string, string | boolean>) {
   const config = loadConfig();
   const env = process.env;
-  const binding = findBinding();
+  // The STRICT read (ADR 281/282): this binding would BE the acting identity, so a legacy/invalid
+  // one throws the configure repair here rather than letting resolution fall through to the global
+  // config vault — a broken workspace must never silently act as a different member.
+  const binding = requireUsableBinding();
   const envId = identityFromEnv(env);
 
   const server =
@@ -76,16 +147,21 @@ function gather(flags: Record<string, string | boolean>) {
   const sources: { team: string; identity: Identity; source: IdentitySource }[] = [];
   if (envId) sources.push({ team: envId.team, identity: envId.identity, source: 'env' });
   // A binding yields a ready identity only when it pins a fixed seat (the name is known up front) AND
-  // carries the team agent key (v0.3, ADR 075). A role-pool / chat / keyless binding has no
-  // client-side seat — the claim flow (`musterd claim`/`join`) resolves it and caches the result.
+  // carries claimed agent authority. A role-pool / chat / bootstrap-only binding has no routine
+  // client-side identity — the claim flow (`musterd claim`/`join`) resolves it and caches the result.
   const boundSeat = binding ? bindingSeat(binding) : undefined;
-  if (binding && boundSeat && binding.agent_key) {
+  const bindingCredential = binding?.seat_credential ?? binding?.agent_key;
+  if (binding && boundSeat && bindingCredential) {
     sources.push({
       team: binding.team,
       identity: {
         name: boundSeat,
-        key: binding.agent_key,
-        surface: binding.surface,
+        key: bindingCredential,
+        // A CLI act is intrinsically `cli` (ADR 286) — identity files no longer declare a surface.
+        surface: 'cli',
+        ...(bindingCredential === binding.seat_credential && binding.session_lease !== undefined
+          ? { sessionLease: binding.session_lease }
+          : {}),
         ...(binding.grant !== undefined ? { grant: binding.grant } : {}),
       },
       source: 'binding',
@@ -100,7 +176,12 @@ function gather(flags: Record<string, string | boolean>) {
     if (config.identities[si.team]?.name === si.name) continue; // already added as the active one
     sources.push({
       team: si.team,
-      identity: { name: si.name, key: si.key, surface: si.surface },
+      identity: {
+        name: si.name,
+        key: si.key,
+        surface: si.surface,
+        ...(si.sessionLease !== undefined ? { sessionLease: si.sessionLease } : {}),
+      },
       source: 'config',
     });
   }
@@ -111,6 +192,8 @@ function gather(flags: Record<string, string | boolean>) {
     server,
     sources,
     team,
+    workspace: resolveClaimWorkspace(),
+    workspaceKey: resolveWorkspaceKey(),
     asName: flagStr(flags, 'as'),
     model: attestedModel(binding, env),
   };
@@ -150,7 +233,7 @@ export function attestedModel(
  * from silently acting as a real teammate.
  */
 export function resolve(flags: Record<string, string | boolean>): Resolved {
-  const { config, server, sources, team, asName, model } = gather(flags);
+  const { config, server, sources, team, workspace, workspaceKey, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -159,7 +242,7 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
   if (!match) {
     const who = asName ? ` as ${asName}` : '';
     throw new CliError(
-      `no identity for team "${team}"${who} — run: musterd join ${team} --as <name>`,
+      `no identity for team "${team}"${who} — run: musterd claim <name> --team ${team}`,
       4,
     );
   }
@@ -179,13 +262,12 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
     identity: match.identity,
     identitySource,
     explicit: true,
-    http: new HttpClient({
-      server,
-      key: match.identity.key,
-      seat: match.identity.name,
-      surface: match.identity.surface,
-      ...(model !== undefined ? { model } : {}),
-    }),
+    http: new HttpClient(
+      identityClientOpts(
+        { server, team, workspace, workspaceKey, identity: match.identity, model },
+        true,
+      ),
+    ),
   };
 }
 
@@ -195,8 +277,40 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
  * signal (e.g. the comeback summary) only when someone is genuinely active here (ADR 036). Never
  * refuses on a missing/ambient identity — `status` must still print the (auth-free) roster anywhere.
  */
-export function resolveRead(flags: Record<string, string | boolean>): ResolvedRead {
-  const { config, server, sources, team, asName, model } = gather(flags);
+export interface ResolveReadOptions {
+  /**
+   * Whether this client may re-claim the bound agent seat when its lease is stale (ADR 339).
+   *
+   * **Defaults to FALSE — opting in is explicit.** A reclaim is a full WS seat claim, and each
+   * claim deletes the previous claimant's presence row, which is exactly what a session lease is
+   * bound to (ADR 337). With a few concurrent sessions the hooks churn every seat's lease
+   * sub-second and no adapter's lease survives to its next HTTP call — the 2026-09-01 claim storm.
+   *
+   * #1138 made this default TRUE and opted the two known hook one-shots out, and that is precisely
+   * why the storm survived it: `gateCheck` and `nudgeCommand` opted out, but OTHER reads in the
+   * same processes had never considered the flag and reclaimed anyway (`reachabilityNudge` after
+   * every dispatched command, `inbox --interrupt-check`, `infra-gate`). Measured on main @
+   * `fcb92af8`: 2 `claim.superseded` rows per hook invocation for `gate check`, `inbox
+   * --interrupt-check` and `session label-nudge` alike, 0 with the nudge suppressed.
+   *
+   * Defaulting off inverts the failure mode. Forget it on a genuinely interactive read and that
+   * read fails closed with a lease error — loud, local, and fixed by one word. Forget it the other
+   * way and every seat on the machine flaps silently.
+   *
+   * That fail-closed argument only reaches reads the daemon actually refuses. A read whose endpoint
+   * authenticates through the server's `tryAuth` degrades a bad lease to an anonymous viewer and
+   * answers 200, so opting it in buys no safety and costs a claim — see `role.ts`, which takes the
+   * default for exactly that reason. Interactive is not the test; refusable is.
+   */
+  claimSeatPerRequest?: boolean;
+}
+
+export function resolveRead(
+  flags: Record<string, string | boolean>,
+  opts: ResolveReadOptions = {},
+): ResolvedRead {
+  const claimSeatPerRequest = opts.claimSeatPerRequest ?? false;
+  const { config, server, sources, team, workspace, workspaceKey, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -218,13 +332,10 @@ export function resolveRead(flags: Record<string, string | boolean>): ResolvedRe
     server,
     http: new HttpClient(
       identity
-        ? {
-            server,
-            key: identity.key,
-            seat: identity.name,
-            surface: identity.surface,
-            ...(model !== undefined ? { model } : {}),
-          }
+        ? identityClientOpts(
+            { server, team, workspace, workspaceKey, identity, model },
+            claimSeatPerRequest,
+          )
         : { server },
     ),
     explicit,
@@ -245,12 +356,30 @@ export async function pendingActionSummary(
   http: HttpClient,
   team: string,
   me: string,
-): Promise<{ count: number; since: number } | undefined> {
-  const res = await http.inbox(team, { unread: true });
-  const waiting = openActionNeeded(res.messages, me, res.answered ?? []);
+): Promise<{ count: number; since: number; waiting: Envelope[] } | undefined> {
+  // Walk EVERY unread page. A pageless read is a bounded PREFIX (the daemon caps it at 200 and says
+  // `truncated`, ADR 287); one page counted "acts in the oldest 200 unread" and called it the total —
+  // measured 2026-09-03 as "⚑ 8 acts waiting" on an inbox holding 120, with `since` the oldest of
+  // that page. Same walk as `inbox`: repeat the first request narrowed by `since` = the last
+  // envelope's receipt position, and union the server-computed answered/discharged sets across pages.
+  const messages: Envelope[] = [];
+  const answered = new Set<string>();
+  const discharged = new Set<string>();
+  let page = await http.inbox(team, { unread: true });
+  for (;;) {
+    messages.push(...page.messages);
+    for (const id of page.answered ?? []) answered.add(id);
+    for (const id of dischargedIds(page)) discharged.add(id);
+    if (!page.truncated || page.messages.length === 0) break;
+    page = await http.inbox(team, {
+      unread: true,
+      since: envelopePosition(page.messages[page.messages.length - 1]!),
+    });
+  }
+  const waiting = openActionNeeded(messages, me, answered, discharged);
   if (waiting.length === 0) return undefined;
   const since = waiting.reduce((min, m) => Math.min(min, m.ts), Infinity);
-  return { count: waiting.length, since };
+  return { count: waiting.length, since, waiting };
 }
 
 /**
@@ -285,6 +414,9 @@ export async function reachabilityNudge(command: string, parsed: Parsed): Promis
   if (parsed.flags['json'] === true || parsed.flags['quiet'] === true) return '';
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return '';
   try {
+    // Rides EVERY dispatched command (bin.ts), hook-fired ones included — `gate` and `session`
+    // are not in NUDGE_SKIP_COMMANDS, so under #1138's true-by-default this re-claimed the seat on
+    // the very commands that had opted out. Never reclaims: the default is off and stays off here.
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
     if (!explicit || !identity) return '';
     const pending = await pendingActionSummary(http, team, identity.name);
@@ -309,4 +441,33 @@ export function kindLookup(members: MemberSummary[]): (name: string) => MemberKi
  */
 export function inherited(stored: Record<string, unknown> | undefined, key: string): string {
   return stored && key in stored ? '' : theme.meta('  ·  default');
+}
+
+/**
+ * Send an act, and if the send fails, hand the caller back what they composed.
+ *
+ * A failed send used to destroy the body. Measured 2026-09-04 in the first live huddle
+ * (01M1PSK8FY): `musterd huddle say` was refused on a stale session lease and the turn's text was
+ * simply gone — the thread held the root and nothing else, and the only recovery was retyping it
+ * from memory. The transport now retries once after re-claiming (`isSessionLeaseRefusal`), so this
+ * is the second line of defence rather than the first: when the retry cannot help either, the text
+ * goes to stderr where a human can still copy it and a log still keeps it.
+ *
+ * stderr, not stdout: `--json` callers parse stdout, and a rescue note is not part of that contract.
+ */
+export async function sendOrEcho<T>(
+  send: () => Promise<T>,
+  composed: { act: string; body: string },
+): Promise<T> {
+  try {
+    return await send();
+  } catch (err) {
+    if (composed.body.trim().length > 0) {
+      process.stderr.write(
+        `\nnot sent — your ${composed.act} is below, nothing was lost but the delivery:\n` +
+          `${composed.body}\n\n`,
+      );
+    }
+    throw err;
+  }
 }

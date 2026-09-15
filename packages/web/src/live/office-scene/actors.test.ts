@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { createActors, homePoses, travelDir } from './actors';
-import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK, NOOK_CAP, NOOK_RUG_R, STRIP_CAP } from './layout';
+import { createActors, deskNeighbourPairs, homePoses, travelDir } from './actors';
+import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK, NOOK_RUG_R, STRIP_CAP } from './layout';
 import { GESTURE } from './skeleton';
+import { LEISURE_SPOTS } from './layout';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
+import { slotRng } from './ambientSeed';
 
 function node(name: string, presence: OfficeNode['presence'] = 'online'): OfficeNode {
   return {
     name,
     kind: 'human',
+    service: false,
+    woken: false,
     presence,
     activity: 'working',
     posture: presence === 'online' ? 'working' : presence,
@@ -21,12 +25,28 @@ function node(name: string, presence: OfficeNode['presence'] = 'online'): Office
     workSource: null,
     laneState: null,
     moreLanes: 0,
+    dnd: false,
+    offline_reason: null,
+    last_seen_at: null,
   };
 }
 function world(nodes: OfficeNode[]) {
   const placements = assignSeats(nodes);
   const byName = new Map(nodes.map((n) => [n.name, n]));
   return { placements, byName };
+}
+
+/**
+ * Step through the sit blend the way the real loop does. `actors.active()` counts walks and gestures
+ * only — it goes false the moment a trip ends, while the member is still lowering into the chair
+ * (`SIT_EASE`, 0.6s). The scene keeps drawing through exactly that gap on its `AFTERGLOW_MS` (2.6s)
+ * settling window, so a test that stops at `active()` is looking at a frame the eye never sees.
+ *
+ * It matters here because the laptop and the dock changed hands on that blend (gptbot, reviewing
+ * #1304): the hand lets go when `sit > 0.9`, which is when the dock takes it.
+ */
+function seated(actors: ReturnType<typeof createActors>, name: string): void {
+  for (let i = 0; i < 60 && (actors.poses().get(name)?.sit ?? 1) <= 0.9; i++) actors.step(0.05);
 }
 
 describe('travelDir', () => {
@@ -49,11 +69,13 @@ describe('homePoses', () => {
     for (const [name, pose] of a) expect(b.get(name)).toEqual(pose);
   });
 
-  it('seats present members full-size and sends away members to the nook (small)', () => {
+  it('seats present members full-size; an away member leaves the floor, desk kept (§4 lane 4)', () => {
     const { placements, byName } = world([node('Ada'), node('Bo', 'away')]);
     const poses = homePoses(placements, byName);
     expect(poses.get('Ada')!.small).toBe(false);
-    expect(poses.get('Bo')!.small).toBe(true);
+    // Away is declared absence: jacket over the chair, no body — the pose map omits them.
+    expect(poses.has('Bo')).toBe(false);
+    expect(placements.get('Bo')).toMatchObject({ kind: 'desk', owned: true });
   });
 
   it('omits offline (gone) members', () => {
@@ -61,6 +83,38 @@ describe('homePoses', () => {
     const poses = homePoses(placements, byName);
     expect(poses.has('Ada')).toBe(true);
     expect(poses.has('Gone')).toBe(false);
+  });
+
+  it('marks a leisure sitter casual and a desk member not — the deskless-hands read', () => {
+    // `active` posture is what claims the leisure furniture (couch / meeting chairs / waiting chair);
+    // `working` competes for a desk. The flag is what stops an idle member on the couch sitting with
+    // their arms out on a keyboard that is not there (nick, 2026-08-31).
+    const idle = node('Ada');
+    idle.posture = 'active';
+    const { placements, byName } = world([idle, node('Bo')]);
+    const poses = homePoses(placements, byName);
+    expect(placements.get('Ada')).toMatchObject({ kind: 'leisure' });
+    expect(poses.get('Ada')!.casual).toBe(true);
+    expect(placements.get('Bo')).toMatchObject({ kind: 'desk' });
+    expect(poses.get('Bo')!.casual).toBe(false);
+  });
+
+  it('leaves the standing reader alone — browsing the shelves is not sitting', () => {
+    // Fill every seated leisure spot so the next idle member probes onto a `reading` spot, which
+    // stands (`sit: 0`) and must not take the seated-casual pose.
+    const idlers = ['Ada', 'Bo', 'Cy', 'Di', 'Eli', 'Fi', 'Gus', 'Hana'].map((n) => {
+      const m = node(n);
+      m.posture = 'active';
+      return m;
+    });
+    const { placements, byName } = world(idlers);
+    const poses = homePoses(placements, byName);
+    for (const [name, pose] of poses) {
+      const pl = placements.get(name);
+      if (pl?.kind !== 'leisure') continue;
+      // Standing spots are never casual-seated; seated ones always are.
+      expect(pose.casual).toBe(pose.sit > 0);
+    }
   });
 
   it('queues overflow (past every desk) single-file receding from the entrance', () => {
@@ -95,22 +149,21 @@ describe('homePoses', () => {
     expect(stripDrawn.length).toBe(STRIP_CAP); // only the cap is drawn
   });
 
-  it('caps the nook avatars past NOOK_CAP', () => {
-    const nodes = Array.from({ length: NOOK_CAP + 3 }, (_, i) => node('A' + String(i).padStart(2, '0'), 'away'));
+  it('away members hold desks without bodies; the nook is only their overflow past every desk', () => {
+    const nodes = Array.from({ length: DESK_SLOTS.length + 3 }, (_, i) =>
+      node('A' + String(i).padStart(2, '0'), 'away'),
+    );
     const { placements, byName } = world(nodes);
     const poses = homePoses(placements, byName);
-    const drawn = nodes.filter((n) => poses.has(n.name));
-    expect(drawn.length).toBe(NOOK_CAP);
-  });
-
-  it('clusters away members compactly on the nook rug', () => {
-    const nodes = ['A', 'B', 'C', 'D', 'E'].map((n) => node(n, 'away'));
-    const { placements, byName } = world(nodes);
-    const poses = homePoses(placements, byName);
-    for (const n of nodes) {
+    const desks = nodes.filter((n) => placements.get(n.name)?.kind === 'desk');
+    const nook = nodes.filter((n) => placements.get(n.name)?.kind === 'nook');
+    expect(desks.length).toBe(DESK_SLOTS.length);
+    expect(nook.length).toBe(3);
+    // Desk-holding away members draw no body; the nook overflow still draws small.
+    for (const n of desks) expect(poses.has(n.name)).toBe(false);
+    for (const n of nook) {
       const p = poses.get(n.name)!;
       expect(p.small).toBe(true);
-      // inside the nook rug (an iso diamond about the nook anchor)
       expect(Math.abs(p.lx - NOOK.lx) + Math.abs(p.ly - NOOK.ly)).toBeLessThan(NOOK_RUG_R);
     }
   });
@@ -135,12 +188,98 @@ describe('walk choreography', () => {
     let guard = 0;
     while (actors.active() && guard++ < 2000) actors.step(0.05);
     expect(actors.active()).toBe(false);
+    seated(actors, 'Ada'); // …and down into the chair, where the dock takes the laptop
 
     const back = actors.poses().get('Ada')!;
     expect(back.lx).toBeCloseTo(home.lx, 5);
     expect(back.ly).toBeCloseTo(home.ly, 5);
     expect(back.carry).toBeNull();
     expect(back.bubble).toBeNull();
+  });
+
+  /**
+   * ADR 254 eligible sets: an act addressed to 2-4 seats makes the sender walk to EACH desk, one
+   * trip after another, because any of them can discharge it and the room must not rank them
+   * (nick, 2026-09-02). `walk` already queued per call; this pins that a set-sized burst actually
+   * drains, since the backlog guard caps `pending` at three and MAX_ELIGIBLE is four.
+   */
+  it('walks the sender to every seat of an eligible set, one desk after another', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo'), node('Cy'), node('Dee'), node('Eve')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const home = actors.poses().get('Ada')!;
+    const desks = new Map(
+      ['Bo', 'Cy', 'Dee', 'Eve'].map((n) => [n, actors.poses().get(n)!] as const),
+    );
+
+    // The MAX_ELIGIBLE cap: four names, so three queue behind the one that starts immediately.
+    for (const to of ['Bo', 'Cy', 'Dee', 'Eve']) {
+      expect(actors.walk('Ada', { kind: 'help', to, urgent: false })).toBe(true);
+    }
+
+    // Nearest approach to each desk over the whole burst — a leg that never ran stays far away.
+    const nearest = new Map([...desks.keys()].map((n) => [n, Infinity]));
+    let guard = 0;
+    while (actors.active() && guard++ < 20000) {
+      actors.step(0.05);
+      const p = actors.poses().get('Ada')!;
+      for (const [n, d] of desks) {
+        const gap = Math.hypot(p.lx - d.lx, p.ly - d.ly);
+        if (gap < nearest.get(n)!) nearest.set(n, gap);
+      }
+    }
+    expect(actors.active()).toBe(false);
+
+    // Every one of the four was actually visited, not just the first.
+    /**
+     * A visit is "came far closer to that desk than sitting at home ever would". Measured rather
+     * than guessed: a walker stops BESIDE a desk, not on it (~72 units of stand-off here), while the
+     * four baselines from Ada's own seat are 190, 318, 460 and 673. An absolute "did it touch the
+     * desk" threshold reads every leg as a miss, which is exactly the wrong conclusion — so compare
+     * each approach with its own baseline instead of with a magic number.
+     */
+    for (const [n, gap] of nearest) {
+      const d = desks.get(n)!;
+      const baseline = Math.hypot(home.lx - d.lx, home.ly - d.ly);
+      expect({ seat: n, visited: gap < baseline * 0.5 }).toEqual({ seat: n, visited: true });
+    }
+
+    // And the sender is back at its own desk when the whole trip is done.
+    const back = actors.poses().get('Ada')!;
+    expect(back.lx).toBeCloseTo(home.lx, 5);
+    expect(back.ly).toBeCloseTo(home.ly, 5);
+  });
+
+  /**
+   * The boundary the eligible-set walk sits exactly on, measured rather than assumed.
+   *
+   * `walk` holds one trip in flight plus three pending, so a four-name set — MAX_ELIGIBLE — fits
+   * only when the sender is idle. One walk already running and the last leg is refused, silently:
+   * the caller gets `false` and the room simply never shows that desk. Observed in the browser on
+   * /office-preview, whose looping script re-fires faster than an ~8.5s round trip drains; from its
+   * second loop the guard refuses legs, including a single-recipient walk that predates eligible
+   * sets. Recorded here so the next reader knows the fit is exact and not comfortable.
+   */
+  it('has no headroom at the eligible cap — a busy sender loses the last leg of a four-name set', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo'), node('Cy'), node('Dee'), node('Eve')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+
+    // One trip already running, then a full four-name set behind it.
+    expect(actors.walk('Ada', { kind: 'help', to: 'Bo', urgent: false })).toBe(true);
+    const accepted = ['Bo', 'Cy', 'Dee', 'Eve'].map((to) =>
+      actors.walk('Ada', { kind: 'help', to, urgent: false }),
+    );
+    expect(accepted).toEqual([true, true, true, false]);
+  });
+
+  it("won't walk to a dnd member — do-not-interrupt is honoured by the choreography (\u00a74 lane 4)", () => {
+    const focused = { ...node('Bo'), dnd: true };
+    const { placements, byName } = world([node('Ada'), focused]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.walk('Ada', { kind: 'help', to: 'Bo', urgent: false })).toBe(false);
+    expect(actors.active()).toBe(false);
   });
 
   it("won't play a walk when the target isn't present", () => {
@@ -475,6 +614,7 @@ describe('errands', () => {
 
     let guard = 0;
     while (actors.active() && guard++ < 2000) actors.step(0.05);
+    seated(actors, 'Ada');
     const done = actors.poses().get('Ada')!;
     expect(done.lx).toBeCloseTo(home.lx, 5);
     expect(done.carry).toBeNull();
@@ -500,6 +640,7 @@ describe('errands', () => {
     }
     expect(sawDoor).toBe(true);
     expect(sawSitWithPlate).toBe(true); // actually ate on the lounge furniture
+    seated(actors, 'Ada');
     const done = actors.poses().get('Ada')!;
     expect(done.lx).toBeCloseTo(home.lx, 5);
     expect(done.carry).toBeNull();
@@ -594,20 +735,16 @@ describe('presence transitions', () => {
     expect(actors.poses().has('Bo')).toBe(false);
   });
 
-  it('drifts to the nook (small) when a member goes away', () => {
+  it('a member going away walks off the floor — the body leaves, the desk stays theirs', () => {
     const actors = createActors();
     const present = world([node('Ada'), node('Bo')]);
     actors.setHomes(present.placements, present.byName, true);
     const away = world([node('Ada'), node('Bo', 'away')]);
-    const nookHome = homePoses(away.placements, away.byName).get('Bo')!;
     actors.setHomes(away.placements, away.byName, true);
 
-    expect(actors.active()).toBe(true);
     settle(actors);
-    const end = actors.poses().get('Bo')!;
-    expect(end.lx).toBeCloseTo(nookHome.lx, 3);
-    expect(end.ly).toBeCloseTo(nookHome.ly, 3);
-    expect(end.small).toBe(true); // nook avatars are small
+    expect(actors.poses().has('Bo')).toBe(false);
+    expect(away.placements.get('Bo')).toMatchObject({ kind: 'desk', owned: true });
   });
 
   it('snaps without animating when animate=false (reduced motion)', () => {
@@ -694,6 +831,7 @@ describe('the phone call', () => {
     expect(sawWalkingOnPhone).toBe(true);
     expect(farthest).toBeGreaterThan(120); // actually went wandering, not a lap of the desk
 
+    seated(actors, 'Ada');
     const done = actors.poses().get('Ada')!;
     expect(done.lx).toBeCloseTo(home.lx, 5);
     expect(done.ly).toBeCloseTo(home.ly, 5);
@@ -824,5 +962,248 @@ describe('the check-in beat', () => {
     const w2 = world([node('Ada'), node('Bo', 'away')]);
     actors.setHomes(w2.placements, w2.byName, true);
     expect(actors.pendingCheckIns()).toHaveLength(0);
+  });
+});
+
+describe('deskNeighbourPairs — the shared pair pool (E1 spec §2)', () => {
+  /** Same roster as fullRoom, but keeping the shared inputs to compare pure vs scene-state pools. */
+  function fullWorld() {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    const { placements, byName } = world(nodes);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    return { placements, byName, actors };
+  }
+
+  /** A room with members sitting somewhere OTHER than a desk. `active` (between claims) is what puts
+   *  someone on the leisure furniture — it is not desk overflow, which is the wrong guess I made
+   *  first and the guard assertion below caught. The 12-desk fixture above has no leisure sitters at
+   *  all, which is why it could not see the two pools disagree (2026-09-14). */
+  function loungeWorld() {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    for (let i = 0; i < 5; i++) nodes[i]!.posture = 'active';
+    const { placements, byName } = world(nodes);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    return { placements, byName, actors };
+  }
+
+  it('the two pools still agree once members sit somewhere other than a desk', () => {
+    const { placements, byName, actors } = loungeWorld();
+    const leisure = [...placements.values()].filter((p) => p.kind === 'leisure');
+    // Guard the guard: if seating ever stops overflowing, this test silently stops testing anything.
+    expect(leisure.length, 'fixture must actually seat someone off-desk').toBeGreaterThan(0);
+    expect(deskNeighbourPairs(placements, byName)).toEqual(actors.deskNeighbours());
+  });
+
+  it('pairs two members in the same leisure zone, and never across zones', () => {
+    const { placements, byName } = loungeWorld();
+    const zoneOf = new Map<string, string>();
+    for (const [name, pl] of placements) {
+      if (pl.kind === 'leisure') zoneOf.set(name, LEISURE_SPOTS[pl.spot]?.zone ?? '?');
+    }
+    const pairs = deskNeighbourPairs(placements, byName).filter(
+      ([a, b]) => zoneOf.has(a) && zoneOf.has(b),
+    );
+    for (const [a, b] of pairs) {
+      expect(zoneOf.get(a), `${a} and ${b} must share a zone`).toBe(zoneOf.get(b));
+    }
+  });
+
+  it('matches the scene-state pool exactly when nobody is busy', () => {
+    const { placements, byName, actors } = fullWorld();
+    expect(deskNeighbourPairs(placements, byName)).toEqual(actors.deskNeighbours());
+  });
+
+  it('is pure over roster inputs: local busy-state cannot shrink it', () => {
+    const { placements, byName, actors } = fullWorld();
+    const before = deskNeighbourPairs(placements, byName);
+    const [a, b] = before[0]!;
+    actors.deskChat(a, b); // one browser has a chat in flight; the shared pool must not know
+    expect(deskNeighbourPairs(placements, byName)).toEqual(before);
+    expect(actors.deskNeighbours().some(([x, y]) => x === a || y === a)).toBe(false);
+  });
+
+  it('returns pairs in canonical order — same value on every viewer regardless of Map history', () => {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    const forward = world(nodes);
+    const reversed = world([...nodes].reverse());
+    const rebuilt = deskNeighbourPairs(
+      new Map([...reversed.placements].sort(() => -1)),
+      reversed.byName,
+    );
+    expect(rebuilt).toEqual(deskNeighbourPairs(forward.placements, forward.byName));
+  });
+});
+
+describe('ambient beats under an injected rng (E1 spec §2)', () => {
+  /** Two independent scene instances over the same roster — stand-ins for two browsers. */
+  function twoViewers() {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    const make = () => {
+      const { placements, byName } = world(nodes);
+      const actors = createActors();
+      actors.setHomes(placements, byName, true);
+      return actors;
+    };
+    return [make(), make()] as const;
+  }
+
+  it('two viewers play the same phone errand identically from the same slot rng', () => {
+    const [a, b] = twoViewers();
+    expect(a.errandPhone('N03', slotRng('revive', 7, 'phone'))).toBe(true);
+    expect(b.errandPhone('N03', slotRng('revive', 7, 'phone'))).toBe(true);
+    let guard = 0;
+    while ((a.active() || b.active()) && guard++ < 4000) {
+      a.step(0.05);
+      b.step(0.05);
+      expect(a.poses().get('N03')).toEqual(b.poses().get('N03'));
+    }
+    expect(guard).toBeLessThan(4000);
+  });
+
+  it('two viewers play the same desk chat for the same length', () => {
+    const [a, b] = twoViewers();
+    const [x, y] = a.deskNeighbours()[0]!;
+    expect(a.deskChat(x, y, slotRng('revive', 9, 'chat'))).toBe(true);
+    expect(b.deskChat(x, y, slotRng('revive', 9, 'chat'))).toBe(true);
+    let aTicks = 0;
+    let bTicks = 0;
+    for (let i = 0; i < 4000 && a.active(); i++, aTicks++) a.step(0.05);
+    for (let i = 0; i < 4000 && b.active(); i++, bTicks++) b.step(0.05);
+    expect(aTicks).toBe(bTicks);
+  });
+
+  it('two viewers send the same member to the same lounge seat', () => {
+    const [a, b] = twoViewers();
+    const seatA = a.errandFridge('N05', slotRng('revive', 4, 'fridge'));
+    const seatB = b.errandFridge('N05', slotRng('revive', 4, 'fridge'));
+    expect(seatA).not.toBeNull();
+    expect(seatA).toEqual(seatB);
+  });
+});
+
+describe('the laptop on the person (laptop/dock design §0)', () => {
+  /** An idle member: on the floor, not working — so their laptop is never in a dock. `active` is what
+   *  the composed posture calls idle-but-present (`memberPosture`), and it is what seating reads. */
+  function idle(name: string): OfficeNode {
+    return { ...node(name), activity: 'active', posture: 'active' };
+  }
+
+  it('a working member has empty hands — their laptop is docked at the desk they are sitting at', () => {
+    const { placements, byName } = world([node('Ada')]);
+    expect(homePoses(placements, byName).get('Ada')!.carry).toBeNull();
+  });
+
+  it('an idle member holds it — seated at a leisure spot, it is in their lap', () => {
+    const { placements, byName } = world([idle('Ada')]);
+    const pose = homePoses(placements, byName).get('Ada')!;
+    expect(placements.get('Ada')!.kind).toBe('leisure');
+    expect(pose.carry).toBe('laptop');
+  });
+
+  /** Walk `who` in from the door onto an empty floor, and return their pose one step in. */
+  function arriving(who: OfficeNode) {
+    const actors = createActors();
+    const empty = world([]);
+    actors.setHomes(empty.placements, empty.byName, true); // an empty floor, settled
+    const { placements, byName } = world([who]);
+    actors.setHomes(placements, byName, true); // …then they appear: a walk in from the door
+    actors.step(0.05);
+    return actors.poses().get(who.name)!;
+  }
+
+  it('the entrance walk carries it: an idle member arrives with it under their arm', () => {
+    const p = arriving(idle('Ada'));
+    expect(Math.hypot(p.lx - ENTRANCE.lx, p.ly - ENTRANCE.ly)).toBeLessThan(40); // still at the door
+    expect(p.carry).toBe('laptop');
+  });
+
+  it('so does a member who comes online ALREADY working — a walker is not at their desk', () => {
+    // The regression nick caught (2026-09-04): reading posture here meant someone who appeared as
+    // `working` walked in empty-handed, because the predicate said their laptop was already in a
+    // dock they had not reached yet. Crossing the floor is not being at your desk, whatever the
+    // roster says — so the walk carries it, and the dock stays empty until they sit (render side).
+    const p = arriving(node('Ada'));
+    expect(Math.hypot(p.lx - ENTRANCE.lx, p.ly - ENTRANCE.ly)).toBeLessThan(40);
+    expect(p.carry).toBe('laptop');
+  });
+
+  it('and they still have it mid-walk, not only at the door', () => {
+    const actors = createActors();
+    const empty = world([]);
+    actors.setHomes(empty.placements, empty.byName, true);
+    const { placements, byName } = world([node('Ada')]);
+    actors.setHomes(placements, byName, true);
+    let carried = 0;
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) {
+      actors.step(0.05);
+      if (actors.poses().get('Ada')!.carry === 'laptop') carried++;
+    }
+    expect(carried).toBeGreaterThan(5); // held for the crossing, not a single frame at the threshold
+    seated(actors, 'Ada');
+    expect(actors.poses().get('Ada')!.carry).toBeNull(); // …and docked once they are home and SEATED
+  });
+
+  it('holds it through the sit blend — the laptop is never nowhere (gptbot, reviewing #1304)', () => {
+    // The dock fills on `workingAtDesk(node, sit)`, which needs `sit > 0.9`; the carry was read off
+    // `carriesLaptop(node)`, which goes false the moment the roster says `working`. Between those two
+    // thresholds a working member was neither carrying the laptop nor docking it — it existed
+    // NOWHERE for the length of the blend. Reproduced on the sit-down at the end of a water errand:
+    // at home, not walking, sit 0.083, carry null, dock empty.
+    //
+    // One predicate means one predicate, read off the same frame's pose: the hand lets go exactly
+    // when the dock takes it.
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    for (let i = 0; i < 60; i++) actors.step(0.05); // settle at the desk
+    expect(actors.errandWater('Ada')).toBe(true);
+
+    let sawRamp = false;
+    let guard = 0;
+    while (actors.active() && guard++ < 4000) {
+      actors.step(0.05);
+      const p = actors.poses().get('Ada')!;
+      // At home, mid-sit, and holding no errand prop — the frames where the laptop is the only thing
+      // the hands could have, and the dock does not have it yet.
+      if (!p.moving && p.sit <= 0.9 && p.carry !== 'bottle') {
+        sawRamp = true;
+        expect({ sit: Number(p.sit.toFixed(3)), carry: p.carry }).toEqual({
+          sit: Number(p.sit.toFixed(3)),
+          carry: 'laptop',
+        });
+      }
+    }
+    expect(sawRamp).toBe(true); // the ramp was actually observed, not skipped in one step
+    seated(actors, 'Ada');
+    expect(actors.poses().get('Ada')!.carry).toBeNull(); // seated past 0.9 again: the dock has it
+  });
+
+  it('an errand outranks the laptop for its duration, and the laptop is back when it ends', () => {
+    const { placements, byName } = world([idle('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.poses().get('Ada')!.carry).toBe('laptop'); // idle at home: on the person
+
+    expect(actors.errandWater('Ada')).toBe(true);
+    actors.step(0.1); // inside the pick-it-up hold
+    expect(actors.poses().get('Ada')!.carry).toBe('bottle'); // you put the laptop down to fill a bottle
+
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) actors.step(0.05);
+    expect(actors.poses().get('Ada')!.carry).toBe('laptop'); // and it is back on the arm afterwards
+  });
+
+  it('posture is read live: a member who stops working picks their laptop up without a reseat', () => {
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.poses().get('Ada')!.carry).toBeNull();
+    // Same placements object — only the roster node changed. `homes` would not rebuild on its own,
+    // which is exactly why the carry is derived per frame rather than baked into the home pose.
+    actors.setHomes(placements, new Map([['Ada', idle('Ada')]]), true);
+    expect(actors.poses().get('Ada')!.carry).toBe('laptop');
   });
 });

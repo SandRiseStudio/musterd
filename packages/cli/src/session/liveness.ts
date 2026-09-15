@@ -5,6 +5,9 @@ import {
   enumerateClaudeSessions,
   enumerateCodexSessions,
   enumerateCursorSessions,
+  enumerateGrokSessions,
+  enumerateOpencodeSessions,
+  LOCAL_SESSION_LIVE_MS,
   type SessionFile,
 } from './enumerate.js';
 
@@ -25,9 +28,7 @@ import {
  * harness appends to it on every message/tool event, so a live session touches it constantly.
  */
 
-/** A transcript untouched for this long means no live local session (the guard threshold): long
- *  enough to protect a human who is thinking, well under the 30-minute batched-wake cooldown. */
-export const LOCAL_SESSION_LIVE_MS = 10 * 60_000;
+export { LOCAL_SESSION_LIVE_MS };
 
 /** Claude Code GCs sessions after 30 days (`cleanupPeriodDays` default) — a capture older than
  *  this cannot resume; skip straight to fresh (design doc §3, claude-code row). */
@@ -114,17 +115,23 @@ export function localSessionLiveness(
 ): LocalSessionLiveness {
   const slot = slotLiveness(workspace, now);
   // The host names a harness from the enrollment registry, which beats an old capture whose
-  // harness is stale. CLI readers that have no registry retain the binding's surface/capture as
-  // the selection evidence. Unknown harnesses preserve the historical Claude fallback rather than
-  // treating an unavailable scanner as proof that a workspace is idle.
-  const selectedHarness = harness ?? slot.session?.harness ?? findBinding(workspace, {})?.surface;
+  // harness is stale. CLI readers that have no registry retain the capture as the selection
+  // evidence — the binding's captured session, since identity declares no surface (ADR 281).
+  // Unknown harnesses preserve the historical Claude fallback rather than treating an
+  // unavailable scanner as proof that a workspace is idle.
+  const selectedHarness =
+    harness ?? slot.session?.harness ?? findBinding(workspace, {})?.session?.harness;
   const selected =
     enumerate ??
     (selectedHarness === 'codex'
       ? (dir: string) => enumerateCodexSessions(dir)
       : selectedHarness === 'cursor'
         ? (dir: string) => enumerateCursorSessions(dir)
-        : (dir: string) => enumerateClaudeSessions(dir));
+        : selectedHarness === 'opencode'
+          ? (dir: string) => enumerateOpencodeSessions(dir)
+          : selectedHarness === 'grok'
+            ? (dir: string) => enumerateGrokSessions(dir)
+            : (dir: string) => enumerateClaudeSessions(dir));
   const enumerated = enumeratedLiveness(workspace, now, selected);
   if (!enumerated) return { source: 'slot', ...slot };
   // ADR 199 / ADR 179: clean SessionEnd outranks a still-warm transcript on the deciding

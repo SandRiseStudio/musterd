@@ -7,7 +7,9 @@
   `service install|restart|refresh` and `reset`) shipped 2026-08-04; amended 2026-08-06
   (close-out, #725: measurable eval signal `roster.role_query`, roster-first `musterd role`,
   verb-list correction, first warn→deliberate-proceed measurement recorded below —
-  docs/superpowers/specs/2026-08-06-adr-227-closeout-design.md)
+  docs/superpowers/specs/2026-08-06-adr-227-closeout-design.md); second measurement recorded
+  2026-08-19 (zero `roster.role_query` rows ever — the increment-1 pass criterion fails by its own
+  words, and the role-addressed-send reopening trigger has vacuously never fired)
 - **Date:** 2026-08-04
 - **Owner:** izzo (design session with nick, 2026-08-04)
 - **Supersedes / relates to:** ADR 069/070 (the capability substrate this extends), ADR 112 (steward — the first worked role), ADR 145 (admins are human-only), ADR 150 (structural inducement — the gate pattern increment 2 reuses), ADR 191/219/131 (the liveness trio discovery composes with), ADR 026–030 (provisioning templates — the per-harness rendering half), landscape.md §9 (the AgentField survey that widened the scope)
@@ -207,6 +209,23 @@ redirecting. That is zero evidence for hardening: the ramp stays at warn until a
 redirecting real unsanctioned work (or failing to). n=3, and one of the three is self-referential
 (a warn emitted while testing the gate) — the next measurement should re-run this join before
 reading anything into rates.
+
+**Second measurement (run 2026-08-19 against the live team DB, by stanley — 13 of the 14-day
+increment-1 window elapsed; the window closes 2026-08-20).**
+
+- `roster.role_query`: **0 rows, ever** — out of 11,809 audit rows total. Not zero from real seats;
+  zero from anyone. The increment-1 pass criterion above says what zero means: the surface or the
+  primer failed — the design is wrong, not the team. Falsifier: any
+  `SELECT count(*) FROM audit WHERE action='roster.role_query'` returning > 0 on the team DB
+  invalidates this row.
+- `infra.touch.warned`: still **n=3** — the same three rows the first measurement classified; no
+  seat has bumped the guardrail in the 13 days since.
+- **The reopening trigger for role-addressed sends has therefore vacuously never fired**: the
+  discovery→send join above cannot produce a row when its left side is empty. This matters beyond
+  this ADR — [ADR 272](./272-team-roles-route-work-profiles-configure-workspaces.md) (proposed,
+  2026-08-14) reopens the deferred role-addressed send citing the broader re-evaluation session,
+  not this measured trigger. Whatever ADR 272's fate, that reopening now stands as a recorded
+  override of a pre-registered gate, not as the gate firing.
 
 **Experiment.** None pre-registered for increment 1 (a roster query needs no A/B). The hardening
 ramp is the standing experiment for increment 2: each step (warn → `--force` → refuse) is a

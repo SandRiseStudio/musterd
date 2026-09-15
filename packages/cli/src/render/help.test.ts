@@ -6,6 +6,7 @@ import {
   renderGroupHelp,
   renderHelp,
   renderHelpJson,
+  wantsCommandHelp,
 } from './help.js';
 
 // Color is pinned OFF via NO_COLOR in vitest.config, so assertions are on visible text.
@@ -81,5 +82,49 @@ describe('nearestCommand', () => {
 
   it('returns null when nothing is close', () => {
     expect(nearestCommand('xyzzy-nonsense')).toBeNull();
+  });
+});
+
+describe('wantsCommandHelp — `musterd <cmd> help` is a help request, not an argument', () => {
+  // The footgun this closes: `musterd agent help` parsed "help" as a SEAT NAME and provisioned a
+  // member called `help` (roster row + git worktree + branch + MCP wiring) before erroring out on an
+  // unrelated missing credential. `help` was only ever recognized in argv[0] or as a --help flag.
+  it('fires for a bare `help` after a real command', () => {
+    expect(wantsCommandHelp('agent', ['help'])).toBe(true);
+    expect(wantsCommandHelp('team', ['help'])).toBe(true);
+    expect(wantsCommandHelp('lane', ['help'])).toBe(true);
+  });
+
+  it('does NOT fire when `help` is one of several positionals — `team add help` still adds', () => {
+    expect(wantsCommandHelp('team', ['add', 'help'])).toBe(false);
+    expect(wantsCommandHelp('agent', ['help', 'extra'])).toBe(false);
+  });
+
+  it('does not fire for a different positional', () => {
+    expect(wantsCommandHelp('agent', ['june'])).toBe(false);
+    expect(wantsCommandHelp('agent', [])).toBe(false);
+  });
+
+  it('does not fire for an uncatalogued command — `musterd bogus help` stays an unknown command', () => {
+    expect(wantsCommandHelp('bogus', ['help'])).toBe(false);
+  });
+});
+
+describe('wantsCommandHelp does not eat a free-text argument (#858 follow-up)', () => {
+  it('a one-word body of exactly "help" still sends — send carries free text, not subcommands', () => {
+    // `musterd send --to nick --act request_help help` must SEND the word, not print usage.
+    // On a request_help act, "help" is the most plausible one-word body anyone would ever type,
+    // so the word the guard reserves is the word that verb exists to carry.
+    expect(wantsCommandHelp('send', ['help'])).toBe(false);
+  });
+
+  it('still fires for a verb whose positional is a subcommand', () => {
+    expect(wantsCommandHelp('agent', ['help'])).toBe(true);
+    expect(wantsCommandHelp('team', ['help'])).toBe(true);
+  });
+
+  it('still ignores a non-sole positional and an uncatalogued command', () => {
+    expect(wantsCommandHelp('team', ['add', 'help'])).toBe(false);
+    expect(wantsCommandHelp('bogus', ['help'])).toBe(false);
   });
 });

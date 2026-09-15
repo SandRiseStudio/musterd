@@ -2,7 +2,7 @@
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 
-The **universal harness adapter**. One MCP (stdio) server exposing **twenty-two tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the lane, goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/209). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
+The **universal harness adapter**. One MCP (stdio) server exposing **twenty-nine tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the Seed, Lane, Goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/209/318/319). `team_insight_search` is canonical (its `team_memory_search` alias and `lane_submit`'s `lane_ready` alias were removed 2026-09-03 after their one-epoch retention — ADR 327 amendment, ADR 192). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
 
 ## Stack
 
@@ -33,7 +33,8 @@ MUSTERD_SERVER   = http://localhost:4849
 MUSTERD_TEAM     = dawn
 MUSTERD_AGENT_KEY = mskey_...      # the team agent key (ADR 075/076): authenticates the harness; the seat is claimed at run time (no per-seat token — mskd_ removed in the P3 cutover, ADR 077)
 MUSTERD_GRANT    = msgr_...        # optional; a pre-issued grant that skips the pending/admin-approval lane on claim (ADR 077)
-MUSTERD_SURFACE  = claude-code     # or codex; defaults to 'other'
+MUSTERD_LAUNCH_SURFACE = claude-code  # REQUIRED for an external launch (ADR 286): the launcher's own Surface, written into its registration by the fragment reconciler. No marker ⇒ the adapter refuses Presence attachment (run `musterd harness configure`)
+MUSTERD_TEST_SURFACE   = codex        # test/headless-only override; outranks the launch marker; written by no adapter
 MUSTERD_CLAIM    = seat:Ada        # optional MANUAL OVERRIDE — NOT written by default provisioning (the seat resolves from binding.json, PR #58); folder claim policy (ADR 032): chat | seat:<name> | role:<role>. drives team_join {} + autojoin
 MUSTERD_AUTOJOIN = 1               # optional MANUAL OVERRIDE — NOT written by provisioning (ADR 165 inc 2: it lives in binding.json's `autojoin`); opt-in auto-join/claim on launch (off by default); an explicit 0 beats an opted-in binding
 MUSTERD_PROVENANCE = session       # optional; why this session attaches (ADR 014): session|asked|hook|scheduled|daemon. defaults to 'session'
@@ -42,13 +43,19 @@ MUSTERD_DRIVER     = nick          # optional MANUAL OVERRIDE — NOT written by
 MUSTERD_BINDING    = /abs/.musterd/binding.json  # optional; explicit binding-file path (ADR 018)
 ```
 
-**Identity resolution (ADR 018/075/080) — aligned with the CLI.** `MUSTERD_*` env wins; if it carries
-no field the adapter falls back to the **workspace binding file** `<workspace>/.musterd/binding.json`
-(`{server, team, surface, claim?, agent_key?, grant?}`, `BindingSchema` in `@musterd/protocol`) — the
-explicit `MUSTERD_BINDING` path if set, else walking up from cwd — and then, for the **non-secret**
-fields only, to the committed **`<workspace>/.musterd/workspace.json`** (`WorkspaceSpecSchema` =
-`{server, team, surface, claim}`, ADR 080). So the per-field resolution ladder is **env → binding.json →
-workspace.json**, with the two secrets (`agent_key`, `grant`) coming _only_ from env or the gitignored
+**Identity resolution (ADR 018/075/080/281) — aligned with the CLI.** `MUSTERD_*` env wins; if it
+carries no field the adapter falls back to the **workspace binding file**
+`<workspace>/.musterd/binding.json` (strict v2 `{version: 2, server, team, claim?, agent_key?,
+grant?, …}`, `BindingSchema` in `@musterd/protocol`) — the explicit `MUSTERD_BINDING` path if set,
+else walking up from cwd — and then, for the **non-secret** fields only, to the committed
+**`<workspace>/.musterd/workspace.json`** (`WorkspaceSpecSchema` = `{version: 2, server, team,
+claim}`, ADR 080/281). **Surface is the exception (ADR 286): it is resolved ONCE at startup from
+`MUSTERD_TEST_SURFACE` then `MUSTERD_LAUNCH_SURFACE` and from nothing else — no stored file,
+capture, or observation participates; absence, an invalid value, or any presence of the retired
+`MUSTERD_SURFACE` refuses Presence attachment with the `musterd harness configure` repair. A binding
+refresh may update model/capture/capability fields but never `config.surface`.** For the rest, the
+per-field resolution ladder is **env → binding.json → workspace.json**, with the two secrets
+(`agent_key`, `grant`) coming _only_ from env or the gitignored
 `binding.json`, never the committable spec. `musterd init`/`agent` write both files; the committed spec
 lets a fresh clone self-wire (see `musterd wire`, `04-cli.md`), while binding.json (0600, gitignored)
 carries the machine-local secrets — so the CLI and the adapter resolve to the **same** member in a given
@@ -64,12 +71,15 @@ setups.
 
 Claude Code keys local-scope MCP config by **repo root**, so every git worktree of a repo shares one
 `musterd` entry. A shared slot may hold only what is identical across everything sharing it, so the
-entry holds nothing: no server, team, surface, agent key or grant. The adapter resolves all of them
-from `.musterd/binding.json`, found by walking up from **cwd** — the one signal that is genuinely
-per-worktree — falling back to the committed `workspace.json` for the non-secret fields.
+entry holds exactly ONE thing since ADR 286: `MUSTERD_LAUNCH_SURFACE=<its own surface>` — identical
+for every worktree sharing the slot, so still no per-seat state. The adapter resolves everything
+else from `.musterd/binding.json`, found by walking up from **cwd** — the one signal that is
+genuinely per-worktree — falling back to the committed `workspace.json` for the non-secret fields.
 
-All of `MUSTERD_SERVER`, `MUSTERD_TEAM`, `MUSTERD_SURFACE`, `MUSTERD_AGENT_KEY`, `MUSTERD_GRANT`,
-`MUSTERD_CLAIM` and `MUSTERD_MODEL` remain supported **manual** overrides for headless/CI use.
+All of `MUSTERD_SERVER`, `MUSTERD_TEAM`, `MUSTERD_AGENT_KEY`, `MUSTERD_GRANT`,
+`MUSTERD_CLAIM` and `MUSTERD_MODEL` remain supported **manual** overrides for headless/CI use
+(`MUSTERD_SURFACE` is retired — a registration carrying it refuses attachment until a confirmed
+`musterd harness configure` repairs the marker).
 Provisioning simply never writes them. See ADR 143 and ADR 165. **Identity is optional** (claim-on-first-use, ADR 032): only the **team** is required to load —
 the `agent_key` may be absent, leaving the session a pending presence that claims a seat on first use
 (`team_join` / `musterd claim`, which writes the resolved seat back into binding.json).
@@ -120,7 +130,7 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 
 ## Standing context — the primer as MCP `instructions` (ADR 012 follow-up)
 
-`buildMcpServer` sets the server's **`instructions`** (returned on `initialize` under the legacy handshake; served from `server/discover` once a modern era is negotiated — same field, same contract) to the agent primer — `renderPrimer` from `@musterd/protocol`, the **same source** the CLI writes into `AGENTS.md`. This is the _file-free_ onboarding surface: any MCP-speaking harness injects `instructions` as standing context, so the agent learns it's on a team and how to coordinate **without touching `CLAUDE.md` or any per-harness file** (the boundary ADR 012 set; `AGENTS.md` remains the surface for the CLI / no-MCP path). `primerInstructions(config)` is the pure wiring: a **provisioned** session (`config.member` set) gets a named-seat primer; an **unclaimed** session gets the "claim a seat first" variant. The primer is channel-aware — it documents both the `team_*` tools and the `musterd` CLI.
+`buildMcpServer` sets the server's **`instructions`** (returned on `initialize` under the legacy handshake; served from `server/discover` once a modern era is negotiated — same field, same contract) to `renderRuntimePrimer` from `@musterd/protocol` (ADR 307). This process-local delivery may name the Member target resolved from `config.member` or a fixed seat claim; an unresolved policy gets the claim-first variant. Those bytes state intent until authenticated occupancy confirms the Member. The Team Role and charter arrive only through that server-owned occupancy path; toolkit data appears in neither primer. The identity-neutral loop body remains shared with `renderRepositoryPrimer`, but the committed `AGENTS.md` bytes deliberately do not match runtime instructions. Both variants are channel-aware and onboard any MCP-speaking harness without touching `CLAUDE.md` or another harness-owned file.
 
 > **Era note (ADR 175; serveStdio adopted 2026-08-12).** The 2026-07-28 spec removes the
 > `initialize` handshake; `instructions` moves to the mandatory `server/discover` response (same
@@ -139,7 +149,7 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 ## The core tools (JSON schemas — verbatim contract)
 
 This section contracts the **six core team tools** verbatim; the lane, goal, seat-memory, and report
-tools (22 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093/209). Two lifecycle
+tools (27 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093/209/318/319). Two lifecycle
 tools (`team_join` / `team_leave`) gate the working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
 
 Tool names are stable; descriptions are written for the _agent_ reading them — concise,
@@ -150,12 +160,23 @@ goals, memory, insight) and `lane_*` (the work-board sub-surface). The split is 
 drift (MCP spec #2808's namespacing direction favors several small namespaces over one flat
 prefix); the full statement lives in `toolNames.ts`.
 
+### Shared Seed tools (ADR 319)
+
+Three `team_seed_*` tools expose the same Shared Seed lifecycle as the CLI over HTTP:
+`team_seed_list`, `team_seed_get`, and `team_seed_update` (ADR 318). List defaults to the shared
+active-tray rule and accepts `history:true`; get returns the immutable Slack source plus public
+thread. Update selects `claim | ask | answer | submit | promote` with `action` and carries the
+action-specific structured object in `input`; the handler parses the full envelope through
+`SeedMcpUpdateSchema`. Every result carries both action-naming text and the protocol Seed in
+`structuredContent`; list carries the protocol Seed array. Capability scoping keeps list/get on
+read-only Surfaces and removes update.
+
 ### `team_join` (overloaded — claim-on-first-use, ADR 032)
 
 ```json
 {
   "name": "team_join",
-  "description": "Claim your seat on the team and go online — call once when you start working. {as:\"Ada\"} claims a named seat (auto-minted if new); {role:\"backend\"} claims the next open seat in that pool; {} uses this folder's claim policy. Blocks until an admin approves when approval is needed, so one call gets you seated. After joining, check your inbox.",
+  "description": "Claim a Team seat and go online. Use as, role, or this Workspace's policy. May wait for approval; check your Inbox after.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -169,7 +190,7 @@ prefix); the full statement lives in `toolNames.ts`.
 }
 ```
 
-Resolves the target (`as` → named seat; `role` → next `<role>-<n>` handle; neither → the folder `MUSTERD_CLAIM` policy; `chat` with no target → asks the session to name itself, with its claim-code). Then sends the v0.3 **`claim` frame** (ADR 075/077) authenticated by the team agent key: the server responds `occupied` (seat free or a pre-issued grant applied — the session's identity is set, **persisted into `.musterd/binding.json`**, the pending marker cleared, and the live stream opened), `refused` (a no-dead-end hint), or **`pending`** — a held/declared seat with no grant opens an admin-approval request (ADR 077) the session holds on until an admin decides. Idempotent once joined (`"Already joined …"`); your own reloaded seat → newest-wins (ADR 017). The success result returns the **assigned identity** (a fresh session learns who it is; its charter is in `AGENTS.md`) and reminds the agent to `team_inbox_check` now and at every task boundary.
+Resolves the target (`as` → named seat; `role` → next `<role>-<n>` handle; neither → the folder `MUSTERD_CLAIM` policy; `chat` with no target → asks the session to name itself, with its claim-code). Then sends the v0.3 **`claim` frame** (ADR 075/077) authenticated by the team agent key: the server responds `occupied` (seat free or a pre-issued grant applied — the session's identity is set, **persisted into `.musterd/binding.json`**, the pending marker cleared, and the live stream opened), `refused` (a no-dead-end hint), or **`pending`** — a held/declared seat with no grant opens an admin-approval request (ADR 077) the session holds on until an admin decides. Idempotent once joined (`"Already joined …"`); your own reloaded seat → newest-wins (ADR 017). The success result returns the **assigned identity** and the Team Role charter delivered by authenticated occupancy, then reminds the agent to `team_inbox_check` now and at every task boundary. The client clears that charter when it releases the seat; it never reads one from `AGENTS.md` or a toolkit.
 
 ### `team_leave`
 
@@ -188,7 +209,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
 ```json
 {
   "name": "team_send",
-  "description": "Send an act to a teammate, '@team', or '@broadcast'. Acts: status_update = report progress; request_help = you are blocked; handoff = pass work; accept/decline = answer the latest open ask (set reply_to to override); wait = paused; resolve = close a thread (set thread to its root id); steer = redirect a teammate (interrupts; newest steer wins; meta.goal_id scopes it to a Goal); challenge = demand justification (answered by an accept with evidence); defer = shelve a Goal (meta.goal_id). Goal-scoped steer/defer re-sequence the plan and flag lanes building against the old one.",
+  "description": "Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires meta.species and meta.tier; 2–4 to names mean any may answer.",
   "inputSchema": {
     "type": "object",
     "required": ["act", "body"],
@@ -354,15 +375,19 @@ src/
   claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() + adoptIdentity() (live claim, ADR 034)
   harness.ts      // bounded MCP clientInfo capture: adapter-local harness diagnostics, never model inference (ADR 120)
   pending.ts      // pending markers (.musterd/pending/<code>.json) + resolution sidecars (ADR 034)
-  binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI); clearGrantFromBinding on stale-grant refuse (ADR 193); ADR 143 env leak guard + ADR 213/218 foreign-binary warn (real checkouts only); saveBinding omit = preserve, capture writers pass { drop: { model_observed: true } } (ADR 270)
+  binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI); clearGrantFromBinding on stale-grant refuse (ADR 193); ADR 143 env leak guard + ADR 213/218 foreign-binary warn (real checkouts only); saveBinding preserves omitted capture fields and same-seat claimed seat_credential, capture writers pass { drop: { model_observed: true } } (ADR 270/340)
   brand.ts        // canonical chip SVG + MCP serverInfo.icons data URI (ADR 154)
-  workspace.ts    // the gracefully-degrading "where" label captured at join (ADR 014)
+  workspace.ts    // provenance / driver / model / wake-lease resolvers for the attach; the "where" label itself (`resolveWorkspace`, ADR 014) lives in @musterd/protocol/project since 2026-09-04 and is re-exported here one epoch
+  wakeLeaseFile.ts // reads the actuator-written wake lease (ADR 354) — consulted only when env is silent on BOTH provenance and lease, honoured only when spawner_pid is in our bounded ancestry and unexpired: an attestation with a source, never a default (ADR 236)
+  processAncestry.ts // this process's ancestors via `ps -o ppid=`, nearest first, bounded — the wake-lease file names the pid the actuator spawned, and the `codex` launcher is a Node wrapper one generation above the native binary that launches us (ADR 354 correction, 2026-09-02)
   otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)
   telemetry.ts    // boots the shared SDK as musterd-mcp + wraps every tool in a musterd.tool.call span (ADR 089)
+  modelProbe.ts   // which surfaces have an observeModel probe, so a declared attestation where an observation was reachable can warn (ADR 101/158) — hand-kept here rather than in @musterd/protocol because it is not contract-facing, and pinned against the CLI's HARNESSES registry from the far side of the dependency edge
   toolTelemetry.ts // first-party tool-call telemetry: times/classifies every tools/call (bounces included) + attests the rendered-surface weight, batched to the daemon (ADR 144 inc 1)
   repair.ts       // repair hints on invalid-input bounces at the same tools/call seam — deterministic, regenerated by re-validating against the tool's captured zod shape (ADR 144 inc 3 / ADR 175)
   version.ts      // ADAPTER_VERSION read from package.json so serverInfo can never drift from the published version (ADR 175)
   coerce.ts       // deterministic input coercion at the same seam, but BEFORE validation — measured alias/shape rules so near-miss input succeeds instead of bouncing (ADR 144 inc 4)
+  mergeVerify.ts  // ADR 300: classify a lane_submit merge attestation against origin/main with this worktree's git (fetch + merge-base --is-ancestor, injected exec) — awaiting_acceptance means landed; not_ancestor refuses, abstentions proceed tier-stamped
   scope.ts        // scope the rendered surface by capability — a muted seat never loads acting tools (ADR 144 inc 5); declarative WRITE_TOOLS data, applied by dropping registrations, FAIL-OPEN (the daemon, not the render, enforces)
   surfaceMeasure.ts // measure a seat's tools/list weight from an in-memory connect (SurfaceRender shape) — shared by the scope tests and the standing-context budget gate (pnpm context:check)
   tools/
@@ -370,11 +395,15 @@ src/
     leave.ts      // team_leave — go offline (release seat, ~45s grace)
     send.ts       // refuses until ready (pending → claim; dormant → join)
     inboxCheck.ts // refuses until ready (pending → claim; dormant → join); appends the ADR 135 build-skew warning
+    huddleRooms.ts // the room an arriving turn came from (ADR 378): folds the timeline with the protocol lens so a turn names its topic and the call that answers it — a FIELD on inbox_check, never a tool (ADR 144 selectability + standing-context cost)
     status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning
     members.ts    // works while dormant/pending
+    availability.ts // team_availability — set your OWN availability (ADR 044), the MCP twin of `musterd availability`; not a WRITE_TOOL, a muted seat may still say it is away (surface survey #1245 item 6)
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
     wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 209)
-    lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256)
+    lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256); counterpart resolve omits merged (ADR 305)
+    seeds.ts      // three team_seed_* tools: shared tray/read plus compact lifecycle update (ADR 318/319)
+    teamMemory.ts // team_insight_save + team_insight_search — findings for the whole team, pull-only retrieval (ADR 327)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)
     format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135)
@@ -402,7 +431,7 @@ evidence procedure is [`tests/codex-desktop.md`](../../tests/codex-desktop.md); 
 - With env pointing at a live test server + a `team add Ada` token: MCP boot is **dormant** — the server roster shows Ada `offline`. After `team_join`, the roster shows Ada online with the surface from env.
 - A second session for the same Member calling `team_join` **takes over** (newest-wins, ADR 017); the first is `superseded` and goes dormant without reconnecting. A same-workspace successor that proves durable reaps the first with `same_workspace:true`, and its adapter **exits** rather than lingering dormant (ADR 092); a cross-workspace takeover does not exit.
 - `team_send` / `team_inbox_check` **before** `team_join` return the not-ready guard (no message sent, cursor untouched): the _pending_ "claim a seat" hint when unclaimed, or the dormant "call team_join first" when claimed-but-not-joined.
-- `primerInstructions` returns the primer the server advertises as `instructions`: a named-seat block when `config.member` is set, the "claim your seat first" variant when it isn't — both channel-aware (no file written).
+- `primerInstructions` returns process-local runtime instructions: a named Member target from `config.member` or a fixed seat policy, otherwise the claim-first variant. It never writes a file or injects a Role, charter, or toolkit.
 - An **unclaimed** binding (claim policy only): boot is a **pending presence** — a `.musterd/pending/<code>.json` marker exists; `team_join {as:'Ada'}` claims Ada with the agent key (occupied if free/granted, else a pending admin-approval request), writes the binding, and goes online; `{role:'backend'}` claims the next open `backend-<n>`.
 - **Live external claim (ADR 034):** while a pending session is running, `musterd claim Ada --for <code>` drops a `<code>.resolved.json` sidecar; the session's resolution watcher adopts the seat and goes online **without a relaunch** (the sidecar is read-once + deleted; the binding is the durable fallback for a missed watcher).
 - After join: `team_send {act:'status_update', body:'...'}` persists a message visible to a CLI `inbox` on the same team.

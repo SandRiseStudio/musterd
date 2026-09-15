@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { log } from '../log.js';
+import { localNodeForTeam } from './messages.js';
 
 /**
  * The v0.3 governance audit log (ADR 071, P2 of ADR 069). Append-only: every governed decision writes one
@@ -50,6 +51,23 @@ export type AuditAction =
   // cross-workspace newest-wins path, which does not audit).
   | 'claim.duplicate_workspace'
   | 'claim.superseded'
+  // ADR 337: agent HTTP authority lifecycle. Detail carries opaque ids only, never secret values.
+  | 'agent_seat_credential.minted'
+  | 'agent_seat_credential.rotated'
+  // ADR 344: independently scoped bootstrap credential lifecycle.
+  | 'bootstrap_credential.minted'
+  | 'bootstrap_credential.rotated'
+  | 'bootstrap_credential.used'
+  | 'bootstrap_credential.refused'
+  | 'bootstrap_credential.expired'
+  | 'bootstrap_credential.revoked'
+  // ADR 350: per-Workspace successor exchange, safe retry cleanup, and per-Team legacy cutover.
+  | 'bootstrap_credential.migrated'
+  | 'bootstrap_credential.migration_replaced'
+  | 'bootstrap_credential.cutover'
+  | 'agent_session_lease.revoked'
+  | 'agent_session_lease.minted'
+  | 'agent_session_lease.renewed'
   | 'request.decide'
   | 'request.expired'
   // ADR 088: an interrupt-class act was surfaced to a busy agent at a tool boundary (delivery, not
@@ -57,15 +75,57 @@ export type AuditAction =
   // at whom. The raised→read pair (this row, then the recipient's inbox read of `detail.act`) is the
   // delivery-confirmation signal.
   | 'interrupt.raised'
-  // ADR 093: a seat wrote or cleared its private memory blob. `detail` carries sizes only
+  // ADR 391: a live seat's interrupt probe was REFUSED — valid seat credential, missing or dead
+  // session lease — i.e. the seat is deaf and does not know it. target = the seat the credential
+  // proved (never the `x-musterd-seat` header, which proves nothing); detail = `{ lease }`, the
+  // two-word state. Deduped to one row per seat per REFUSAL_WINDOW_MS, because the probe fires at
+  // every tool boundary and a deaf seat would otherwise write a row a second.
+  | 'interrupt.refused'
+  // Doorbell contract clause 7 (docs/design/daemon-doorbell-contract.md): an interrupt-class act
+  // with NO answering move — a `steer`, an urgent message — was RENDERED to its addressee by an
+  // inbox read. That is its discharge: the ADR 287 watermark may hold behind it forever (an
+  // elided backlog pins the cursor), and a steer perfectly delivered and ringing at every boundary
+  // after it was read and acted on teaches the model to ignore the bell (delta, stanley's steer
+  // 01M2GC25MN, ~20 boundaries across two sessions, 2026-09-14). One row per (recipient, act);
+  // `detail = { act, act_kind }`, never the body.
+  | 'inbox.rendered'
+  // ADR 093: a seat wrote or cleared its private memory blob. `detail` carried sizes only
   // (`size_bytes`, `headline_len`) — never the headline or body text (the no-secrets hard rule 5).
+  // SUPERSEDED by the `continuity.*` verbs below (ADR 366, 2026-09-03): no new rows are written
+  // under these names; the union keeps them so old rows still type.
   | 'memory.save'
   | 'memory.clear'
+  // ADR 366 (residence-2 census gap 2): a seat's continuity, stamped and replicated. These CARRY
+  // THE NOTE — `detail: { headline, body, saved_at }` — which overturns ADR 093's hard rule 5 by
+  // decision (nick, 2026-09-03), because a headline is not continuity and a second machine (ADR 358)
+  // needs the note itself. Daemon-side only, never git (the ADR 058 line is unmoved); bounded by the
+  // 8 KiB cap. A clear is `{ cleared_at, had_memory }` — a fact with a clock, so it can win against
+  // a stale save from a peer. A cursor advance is `{ last_read_message_id }` and NEVER a timestamp:
+  // `last_read_ts` is a receipt clock and differs per machine (store/cursors.ts).
+  | 'continuity.memory_saved'
+  | 'continuity.memory_cleared'
+  | 'continuity.cursor_advanced'
+  // ADR 371 (residence-2 census gap 3): the record kind — rows whose projection is an additive or
+  // append-only table and that decide nothing. `tool_calls` carries one adapter flush
+  // `{ seat, role, bucket_start, events }` and folds into `tool_call_stats` under the ORIGIN's hour;
+  // `seed_thread` carries `{ entry_id, relay_id, kind, body, by, created_at }` — relay id and member
+  // NAME, because `seeds.id` and `members.id` are daemon-private; `incident_report` carries the pool
+  // row `{ report_id, gate, seat, sig, ref, message_id, lane_id, created_at }` and is minted by the
+  // HUB only (the pool is the hub's, §2) — a later `lane_id` stamp is the same verb again.
+  | 'record.tool_calls'
+  | 'record.seed_thread'
+  | 'record.incident_report'
   // ADR 101: a harness attested (or re-attested) the model on an occupancy. `detail` carries
   // `{ occupancy, old, new, source: 'claim'|'heartbeat'|'ambient' }` — this append-only trail IS the
   // occupancy's model-switch history (the ADR keeps no history column). `ambient` is ADR 119: a
   // CLI/HTTP one-shot carrying `x-musterd-model` after the claim presence expired.
   | 'occupancy.model_attested'
+  // Presence replication (spec 2026-09-02): the three session transitions, stamped and replicated.
+  // `detail.presence` is the presence row's ULID — the key every reader joins on. Heartbeats never
+  // write here. A node emits these for rows it wrote (`presence.node IS NULL`) and for no other.
+  | 'presence.attached'
+  | 'presence.detached'
+  | 'presence.reattested'
   // ADR 109: a lane carrying a branch reached a terminal state — the seat attests the landed merge.
   // actor = the resolving seat, target = the branch, `detail` carries the attested (never verified)
   // `{ pr, sha, authorized_by }` — the join table between seats, main SHAs, and authorizing humans.
@@ -89,6 +149,14 @@ export type AuditAction =
   | 'lane.closed'
   | 'lane.review_sent_back'
   | 'lane.review_peer_confirmed'
+  // A hand re-route of a STANDING acceptance (lane 01M1QYHJFY): the lane was already
+  // awaiting_acceptance and the owner (or an admin) named a different acceptor. Its own verb, not a
+  // second `lane.ready_for_review` — that row is the submit, and the review-loop breaker and the
+  // ADR 348 `named` counter both read it as one. Carries no state (the lane stays awaiting); detail:
+  // { lane, owner, reviewer, route:'named', review_grade, from_reviewer, superseded_ask, ask_tier,
+  //   ask_timeout_ms }. `standingAcceptance` reads it as the newest routing, and the verdict edge
+  // refuses an accept/decline on the `superseded_ask`.
+  | 'lane.review_rerouted'
   // Letting go of a lane: an owned lane moved back to `open`, which the state machine's
   // open ⟺ unowned invariant turns into a release (detail: { lane, released_by, owner_before }).
   // Traceable for the same reason a claim is — "who stopped carrying this, and when".
@@ -98,10 +166,31 @@ export type AuditAction =
   // assumed this row existed — it did not, and its absence is why a 2026-08-01 double-claim left
   // nothing in the audit log but the release that undid it.
   | 'lane.claimed'
-  // ADR 248: a buffered raw seed became a lane. actor = the human the seed is attributed to,
-  // target = the opened lane; detail carries { seed_id, source, lane, captured_at }. Observability
-  // only — ingest state lives in `seeds_ingest_cursor`, never read back from this row (ADR 247).
+  // ADR 325 prereq: the transitions the four rows above do NOT cover, so a lane's whole history
+  // folds back out of the log. `lane.updated` is any field edit (detail: { lane, fields,
+  // changes: { field: { from, to } } } — values since the lane-replication slice, names alone
+  // left a folding peer nothing to apply) —
+  // branch/scope/title/… changes previously wrote nothing at all. `lane.state_changed` is a state
+  // move not already recorded as claimed/released/ready_for_review/closed (detail: { lane, from,
+  // to }) — e.g. active↔blocked, or acceptance sent back by its owner.
+  | 'lane.updated'
+  | 'lane.state_changed'
+  // Lane-replication slice, Finding 4: the log had no first event. `lane.opened` is written by
+  // `openLane` inside the insert transaction and carries the whole declaration (title, project,
+  // scope, depends_on, branch, goal_id, risk, stakes, …) so a folding peer knows what a lane IS,
+  // not only what happened to it. Precedes `lane.claimed at_open` on a claimed birth.
+  | 'lane.opened'
+  // ADR 291 / 311 / 312: shared-Seed ingest and lifecycle decisions. Details carry only Seed/Lane
+  // ids, state edges, result kind, and skipped-research metadata — never raw content, Slack identity,
+  // clarification text, briefs, or conclusions. Ingest state lives in `seeds_ingest_cursor`, never
+  // read back from this row (ADR 247).
   | 'seed.ingested'
+  | 'seed.claimed'
+  | 'seed.clarification_asked'
+  | 'seed.clarification_answered'
+  | 'seed.brief_submitted'
+  | 'seed.completed'
+  | 'seed.promoted'
   // ADR 231: a `handoff` act named no lane, so the daemon looked at the lanes the sender actually
   // holds. `handoff.lane_derived` = exactly one, attached (detail: { message, lane, branch }).
   // `handoff.lane_ambiguous` = two or more, so nothing was attached and the sender was warned
@@ -295,7 +384,33 @@ export type AuditAction =
   // `{ killed: pid[], refused: {pid, reason}[], rss_kb }`. Every kill was re-verified against the
   // live process table at kill time (allowlist match + still orphaned) — the row records what the
   // verification let through, so a disputed reap can be audited against what was actually running.
-  | 'footprint.reaped';
+  | 'footprint.reaped'
+  // ADR 328 (federation increment 3a): the machine-credential lifecycle. Admitting a machine is a
+  // governance decision in exactly the sense this ledger exists for — it grants a principal the
+  // ability to speak for the seats resident on it, and revoking it is how that is taken back.
+  //
+  // `node.invited` (actor = the admin, target = the label, detail `{ expires_at }`);
+  // `node.enrolled` (actor null — the invite code is the authority, not a seat; detail
+  // `{ node_id }`); `node.enrollment_refused` (`result: deny`, the CAS turning down a spent code
+  // or an unavailable id); `node.rotated` and `node.revoked` (actor = the admin, target = the node
+  // id). No detail ever carries a credential, an invite code, or either one's hash.
+  | 'node.invited'
+  | 'node.enrolled'
+  | 'node.enrollment_refused'
+  | 'node.rotated'
+  | 'node.revoked'
+  // ADR 328 §4, enforced (ADR 355 amendment, 2026-09-02): the seat→node residence binding's trace.
+  // `seat.bound` — first speak, the node now holds the seat (detail: { node }). `seat.bound_elsewhere`
+  // — a node asked to act as a seat another node holds; result `deny`, detail { node, bound_to }.
+  // `seat.unbound` — the explicit re-bind act, under admin authority (detail: { node, by }). A run
+  // of bound_elsewhere→unbound pairs is the signal ADR 328 §Experiment pre-registered.
+  | 'seat.bound'
+  | 'seat.bound_elsewhere'
+  | 'seat.unbound'
+  // ADR 358: a human seat's set of nodes widened by the explicit trust act from a node already in
+  // it (detail: { node, by_node, by_label }). A refused trust is `seat.bound_elsewhere` with
+  // detail.act = 'trust' — one row shape for every probe from a machine outside the set.
+  | 'seat.node_trusted';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */
@@ -319,14 +434,32 @@ export interface AuditRow {
   result: 'allow' | 'deny';
   detail: string | null;
   created_at: number;
+  /** The ADR 331 ordering pair (v58), stamped only on replicated rows (`lane.*`, `presence.*`). Every
+   *  other row keeps `''`/`0` and reads as "not replicated". Server-stamped, never wire-fed. */
+  origin_node: string;
+  origin_seq: number;
 }
 
 /**
- * Append an audit entry. **Best-effort observability, never a gate**: a failure here is logged and
- * swallowed so it can never break the request path it is recording.
+ * Append an audit row as a REPLICATED event — any replicated kind: `lane.*` (lane-replication spec
+ * §"The wire, decided") and `presence.*` (presence replication, 2026-09-02). The required append,
+ * plus `(origin_node, origin_seq)` drawn from the same `nodes.next_seq` allocator `insertMessage`
+ * uses — one allocator for every replicated kind (ADR 335 §8), so a node's sequence is dense across
+ * messages, lane transitions and presence transitions alike. Opens its own transaction (a
+ * SAVEPOINT inside the caller's), so the number and the row are one unit: a throw burns no seq.
+ *
+ * Every `lane.*` and `presence.*` writer goes through here. A row written through the plain append
+ * would be a transition the origin holds and no peer ever sees — exactly the hole this closes.
  */
-export function appendAudit(db: Database, teamId: string, entry: AuditEntry): void {
-  try {
+export function appendReplicatedEvent(db: Database, teamId: string, entry: AuditEntry): void {
+  db.transaction(() => {
+    const node = localNodeForTeam(db, teamId);
+    const seq = db
+      .prepare<
+        [string],
+        { seq: number }
+      >('UPDATE nodes SET next_seq = next_seq + 1 WHERE id = ? RETURNING next_seq - 1 AS seq')
+      .get(node.id)!.seq;
     const now = Date.now();
     const row: AuditRow = {
       id: ulid(),
@@ -338,13 +471,125 @@ export function appendAudit(db: Database, teamId: string, entry: AuditEntry): vo
       result: entry.result,
       detail: entry.detail ? JSON.stringify(entry.detail) : null,
       created_at: now,
+      origin_node: node.id,
+      origin_seq: seq,
     };
     db.prepare(
-      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
-       VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at)`,
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+       VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at, @origin_node, @origin_seq)`,
     ).run(row);
+  })();
+}
+
+/** `lane.*` writers keep their name; the allocator and the SAVEPOINT are the same. */
+export const appendLaneEventRequired = appendReplicatedEvent;
+
+/**
+ * The best-effort verbs that cross the wire as ADR 365 `ledger` events: the wake economy, whose
+ * rows ARE the wake-cost ledger `musterd report` reads (`deriveWakeMetrics`, insights.ts). A wake
+ * paid for on one machine was invisible to every other before this set existed.
+ *
+ * Consulted inside {@link appendAudit} rather than at the ~14 call sites that write these verbs,
+ * because the failure mode of a per-site opt-in is a new call site that silently does not
+ * replicate — the exact defect this closes, one verb later. Adding a verb here is the whole change.
+ *
+ * A verb belongs here only if NOTHING decides on it across machines. The six wake verbs are read by
+ * deciders locally (rate cap, ADR 262 breaker, wakeability), and those readers are pinned to rows
+ * this machine minted — ADR 365 §3. Widening this set means checking that pinning again.
+ *
+ * ADR 371 §4 widened it by the rest of `residency.*` and `mcp.surface_rendered`, after pinning the
+ * three deciding readers that were not: `hostAsleepMs` (the ADR 236 ceiling — a suspension is a
+ * fact about THIS host), `firstWakeLeaseTs` (the ceiling's clock starts on a lease this host
+ * issued) and `leaseCapturedSession` (the ADR 252 join, by a host-local lease id). Reporting
+ * readers stay unpinned: the insight is team-wide, the decision is machine-local.
+ */
+export const REPLICATED_LEDGER_VERBS = new Set([
+  'residency.woke',
+  'residency.wake_failed',
+  'residency.wake_deferred',
+  'residency.wake_exhausted',
+  'residency.wake_cost',
+  'residency.wake_report_rejected',
+  // ADR 371 §4 — the residence ledger's own birth rows, the lease, the capture, the suspension.
+  'residency.enrolled',
+  'residency.revoked',
+  'residency.wake_leased',
+  'residency.host_suspended',
+  'residency.session_captured',
+  'residency.session_ended',
+  'residency.context_read',
+  // ADR 371 §4 — a seat's attested surface weight (ADR 144), read by the report's surface block.
+  'mcp.surface_rendered',
+]);
+
+/** Insert an audit row and surface failure when the caller's transaction requires the evidence. */
+export function appendAuditRequired(db: Database, teamId: string, entry: AuditEntry): void {
+  const now = Date.now();
+  const row: AuditRow = {
+    id: ulid(),
+    team_id: teamId,
+    ts: now,
+    actor: entry.actor,
+    action: entry.action,
+    target: entry.target,
+    result: entry.result,
+    detail: entry.detail ? JSON.stringify(entry.detail) : null,
+    created_at: now,
+    origin_node: '',
+    origin_seq: 0,
+  };
+  db.prepare(
+    `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+     VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at)`,
+  ).run(row);
+}
+
+/**
+ * Append an audit entry. **Best-effort observability, never a gate**: a failure here is logged and
+ * swallowed so it can never break the request path it is recording.
+ */
+export function appendAudit(db: Database, teamId: string, entry: AuditEntry): void {
+  if (REPLICATED_LEDGER_VERBS.has(entry.action)) {
+    try {
+      appendReplicatedEvent(db, teamId, entry);
+      return;
+    } catch (err) {
+      // The stamp is a nice-to-have; the ROW is the observability contract. A daemon with no
+      // `local_node` row for the team (never enrolled, never messaged) cannot allocate a seq, and
+      // must still keep its own ledger — it falls through to the unstamped append, which reads
+      // exactly as every pre-ADR-364 row does: local, and not replicated.
+      log.warn({ msg: 'ledger_stamp_failed', action: entry.action, err: String(err) });
+    }
+  }
+  try {
+    appendAuditRequired(db, teamId, entry);
   } catch (err) {
     log.warn({ msg: 'audit_append_failed', action: entry.action, err: String(err) });
+  }
+}
+
+/**
+ * Which of `actIds` have an `inbox.rendered` row for `target` — the acts this seat has already been
+ * shown by an inbox read (clause 7(iv)). One query for the whole set; empty in, empty out.
+ */
+export function listRenderedActs(
+  db: Database,
+  teamId: string,
+  target: string,
+  actIds: string[],
+): Set<string> {
+  if (actIds.length === 0) return new Set();
+  try {
+    const rows = db
+      .prepare<unknown[], { act: string }>(
+        `SELECT DISTINCT json_extract(detail, '$.act') AS act FROM audit
+          WHERE team_id = ? AND action = 'inbox.rendered' AND target = ?
+            AND json_extract(detail, '$.act') IN (${actIds.map(() => '?').join(',')})`,
+      )
+      .all(teamId, target, ...actIds);
+    return new Set(rows.map((r) => r.act));
+  } catch {
+    return new Set();
   }
 }
 
@@ -369,6 +614,35 @@ export function hasInterruptRaised(
             AND json_extract(detail, '$.act') = ? LIMIT 1`,
       )
       .get(teamId, target, actId);
+    return row != null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ADR 391 dedupe window for `interrupt.refused`. The probe runs at every tool boundary; a deaf seat
+ * doing ordinary work would hit the route several times a minute, and the row's job is to say WHO
+ * went deaf and roughly when, not to count probes — the request log already counts. Ten minutes
+ * is long enough to collapse a working session's burst and short enough that a seat healed and
+ * re-deafened by the next bounce (they come every merge) reads as two events, which it was.
+ */
+export const REFUSAL_WINDOW_MS = 10 * 60_000;
+
+/** True when `seat` already has an `interrupt.refused` row inside the window ending at `now`. */
+export function hasRecentInterruptRefusal(
+  db: Database,
+  teamId: string,
+  seat: string,
+  now = Date.now(),
+): boolean {
+  try {
+    const row = db
+      .prepare<[string, string, number], { one: number }>(
+        `SELECT 1 AS one FROM audit
+          WHERE team_id = ? AND action = 'interrupt.refused' AND target = ? AND ts > ? LIMIT 1`,
+      )
+      .get(teamId, seat, now - REFUSAL_WINDOW_MS);
     return row != null;
   } catch {
     return false;
@@ -475,8 +749,12 @@ export function reviewRouting(
   };
   const row = db
     .prepare<[string, string], { detail: string | null }>(
+      // A hand re-route (`lane.review_rerouted`, lane 01M1QYHJFY) is the newer routing decision
+      // on the same acceptance: it carries `reviewer`, `human_required` and the promised wait for
+      // the seat that now holds the ask. Reading only the submit row here would grade a re-routed
+      // lane against the wrong seat — and call a re-route of a no-candidate submit a self-close.
       `SELECT detail FROM audit
-         WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+         WHERE team_id = ? AND action IN ('lane.ready_for_review','lane.review_rerouted') AND target = ?
        ORDER BY ts DESC, id DESC LIMIT 1`,
     )
     .get(teamId, laneId);
@@ -535,8 +813,11 @@ export function standingAcceptance(
 ): { reviewer?: string; route?: string; grade?: string; acceptance_exempt?: boolean } | null {
   const row = db
     .prepare<[string, string], { detail: string | null }>(
+      // A re-route (`lane.review_rerouted`) is a later routing decision on the same standing
+      // acceptance, so the newest of EITHER verb is what stands — a reader that saw only the submit
+      // row would name the seat whose ask was superseded.
       `SELECT detail FROM audit
-         WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+         WHERE team_id = ? AND action IN ('lane.ready_for_review','lane.review_rerouted') AND target = ?
        ORDER BY ts DESC, id DESC LIMIT 1`,
     )
     .get(teamId, laneId);

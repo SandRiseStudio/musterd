@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 14;
+export const GUIDANCE_CONTENT_VERSION = 23;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -30,7 +30,22 @@ export const SKILL_MCP_TOOLS = [
   'team_members',
   'team_memory_save',
   'team_memory_read',
+  // ADR 327: the team-visible counterpart to seat memory — save a finding for everyone; search
+  // before re-deriving what a teammate may already have recorded.
+  'team_insight_save',
+  'team_insight_search',
   'team_next',
+  // The tool form of `musterd availability` (ADR 296 parity work): the channel note promises
+  // tool-form / CLI-form for everything the skill teaches, and availability was the last exception.
+  'team_availability',
+  // Goals are named where lanes join them — a lane that links to a Goal should be able to open one.
+  'team_goal_declare',
+  'team_goal_outcome',
+  'team_goal_retract',
+  'team_goals',
+  // ADR 209, wired by the session-orientation spec 2026-08-25 §C: the wake templates name it, so
+  // a woken session must find it in the skill's tool reference.
+  'team_wake_context',
   'lane_open',
   'lane_claim',
   'lane_release',
@@ -58,7 +73,9 @@ export const SKILL_CLI_COMMANDS = [
   'lanes',
   'next',
   'done',
+  'goal',
   'memory',
+  'insight',
   'requests',
   'availability',
   'notify',
@@ -139,7 +156,7 @@ export function renderSkillBody(opts: { team: string }): string {
     'claim*, not a menu to read past — a seeded board that nobody claims produces three agents all building',
     'the same thing and throwing two-thirds of it away. So: `lane_board` / `musterd lanes` to see what is',
     'open and who owns what, then `lane_claim` / `musterd lane claim` **the one lane you will do** before you',
-    'start editing. Open a new one with `lane_open {title, surface_globs, claim:true}` / `musterd lane open',
+    'start editing. Open a new one with `lane_open {title, scope, claim:true}` / `musterd lane open',
     '"<title>" --surface <globs> --claim` if your work is not on the board yet.',
     '',
     '- **Never build in a lane a teammate already owns.** If the lane you need is claimed, coordinate —',
@@ -147,9 +164,14 @@ export function renderSkillBody(opts: { team: string }): string {
     '- **Park work you stop carrying.** If you claimed a lane and are not doing it, `lane_release` /',
     '  `musterd lane release <id>` hands it back to the board — a claimed lane sitting idle reserves work',
     '  nobody is doing. Releasing is not failing; it is the honest board state.',
-    '- Link a lane to a Goal with `--goal <id>` so status derives up the plan. `musterd next` gives your',
-    '  orientation brief (what you carry, what to pick up); `musterd done` closes your live lane and shows',
-    '  what is next. Overlap is warned, never blocked — the warning is a coordination prompt, act on it.',
+    '- Link a lane to a Goal with `--goal <id>` so status derives up the plan — `team_goal_declare` /',
+    '  `musterd goal declare` opens one, `team_goals` / `musterd goal list` shows the board, and',
+    '  `team_goal_outcome` / `team_goal_retract` record how it ended or withdraw it.',
+    '- `musterd next` gives your orientation brief (what you carry, what to pick up). **`musterd done`',
+    '  records two different things and says which** — with a merge attestation (`--pr`/`--sha`) it *is*',
+    '  a submit (→ `awaiting_acceptance`, acceptor routed); without one it is an **unconfirmed**',
+    '  self-close. After a merge, always give it the attestation; see the closing section below.',
+    '- Overlap is warned, never blocked — the warning is a coordination prompt, act on it.',
     '',
     '## Handing off cleanly',
     '',
@@ -165,12 +187,17 @@ export function renderSkillBody(opts: { team: string }): string {
     '**landed outcome** (intent / principles / usable / feel) — not the hunk list.',
     '',
     '1. After merge: `lane_submit` / `musterd lane submit` with the merge attestation (`pr`, `sha`,',
-    '   `authorized_by`). Moves the lane to `awaiting_acceptance` and asks an acceptor.',
+    '   `authorized_by`). Moves the lane to `awaiting_acceptance` and asks an acceptor; name one',
+    '   yourself when a particular seat should judge it, otherwise the daemon routes. `musterd done',
+    '   --pr <n> --sha <sha>` is the same path in one step — that is the routine close after a merge.',
+    '   A bare `done`/`resolve` with no attestation records an **unconfirmed** self-close instead.',
     '2. Acceptor: accept (→ done) or reject (→ active with a concrete note). Not style nits.',
-    '3. On silence / no candidate: `lane_resolve` / `musterd lane resolve` yourself — recorded',
-    '   **unconfirmed**, never a wedge. Prefer a live acceptor over self-close.',
-    '',
-    '(`lane_ready` / `musterd lane ready` remain as deprecated aliases for submit.)',
+    '3. Then **follow the submit response** — it names the contract (ADR 235). Acceptor asked and a',
+    '   backstop armed: you are done — do **not** self-close on silence (as of 2026-08 acceptors had',
+    '   come back 20 of 20 times, and the daemon sweeps unanswered lanes itself; if you ever see that',
+    '   stop being true, say so rather than resuming self-closing). Only when nobody was asked —',
+    '   no eligible acceptor, or acceptance-exempt (ADR 234) — is `lane_resolve` / `musterd lane',
+    '   resolve` yourself sanctioned (recorded **unconfirmed**, never a wedge).',
     '',
     '## Asking a human (the ask stream, ADR 147)',
     '',
@@ -212,15 +239,44 @@ export function renderSkillBody(opts: { team: string }): string {
     'Durable knowledge still belongs in docs and prior work in lanes/threads — the note is working',
     'state, not a second home for facts.',
     '',
+    '## Team memory — findings everyone can find (ADR 327)',
+    '',
+    'A trap hit, a measured number, how something actually works: save it where teammates can find it.',
+    '`team_insight_save {headline, body}` / `musterd insight save --headline "<subject>" [body]` writes an',
+    'insight the whole team sees — the opposite of seat memory, which stays private. **Search before you',
+    're-derive**: `team_insight_search` / `musterd insight search "<keywords>"` may surface a finding a',
+    'teammate already recorded. When an insight proves durable, promote it into docs/wiki/ — the insight is',
+    'the fast capture; the wiki page is the governed home. Never put secrets in either.',
+    '',
     '## Waiting without polling',
     '',
     'When you are idle and want to resume the moment a teammate addresses you, `musterd inbox --wait` blocks',
     'until the next directed act, then exits. Under a harness re-invoker pair it with `/loop`: `musterd inbox',
     '--wait && <do the work>` — the cheap, no-poll wake loop. Do not bolt inbox-polling onto a timer.',
     '',
-    'Set how reachable you are with `musterd availability <available|away|dnd>` — `away` holds',
-    'notifications, `dnd` still passes directed + urgent. `musterd notify` runs a background nudge that',
-    'raises an OS notification when a directed act lands while you are away (the human-side loop).',
+    '**`--wait` and `--waiting` are one letter apart and are not the same thing.** `--wait` *blocks* —',
+    'it is the wake loop above. `--waiting` *returns immediately*: a read-only banner naming the acts',
+    'that already wait, silent when none do, marking nothing read. Reach for `--waiting` to answer "is',
+    'anything waiting right now" and `--wait` to answer "wake me when something arrives". Neither',
+    'replaces `team_inbox_check` / `musterd inbox`, which is what actually reads your mail.',
+    '',
+    'Set how reachable you are with `team_availability` / `musterd availability <available|away|dnd>` —',
+    '`away` holds notifications, `dnd` still passes directed + urgent. `musterd notify` runs a background',
+    'nudge that raises an OS notification when a directed act lands while you are away (the human-side loop).',
+    '',
+    '## When you were woken (ADR 209)',
+    '',
+    'A session the wake actuator started did not choose its own task: something addressed to this seat',
+    'is why it is running. **Find out what before you do anything else.** `team_wake_context` returns a',
+    'bounded packet for the one act or lane you were woken for — ids, state, the delivery intent, and',
+    'the named reads worth making. It deliberately carries **no message or memory bodies**: it tells you',
+    'what you were woken *for* and which call fetches the substance, so read the packet, then make the',
+    'reads it names (`team_inbox_check`, `team_memory_read`, `lane_board` — or the branch it points at).',
+    '',
+    '- **Do the thing you were woken for.** A wake naming an act or a lane is work routed to this seat;',
+    '  it is not a prompt to survey the board or pick something more interesting.',
+    '- **Answer through the acts, as always** — a wake changes what started you, not how you report.',
+    '- **A wake with no context packet is worth saying out loud**, not guessing past.',
     '',
     '## Shared blockers — report, park, converge (incident convergence)',
     '',
@@ -447,6 +503,75 @@ export function renderNudgeRelayFrontmatter(): string {
       'returns a delivery_hint (recipient live on this machine). Use immediately after any ' +
       'team_send whose result carries a delivery_hint; sends the hinted one-liner verbatim over ' +
       'the harness session-messaging tools.',
+    '---',
+  ].join('\n');
+}
+
+/**
+ * The orient skill (spec 2026-08-25-session-orientation-design.md §B): what a seat session does
+ * when the injected orientation block or the per-turn orient nudge says "orient now". Tier 1
+ * (everything ADDRESSED to this seat — directed acts, incidents, acceptance/review requests) is
+ * HANDLED unprompted; tier 2 is work NOBODY addressed to this seat — carried lanes, up-next,
+ * claimable open lanes — and is surfaced, never acted on. The tiers are one rule, not two lists:
+ * anything routed to the seat is tier 1 by construction, so routed-but-unhandled work can never
+ * be added back to tier 2. The autonomy line is deliberate and the spec's §E owns it: it sits
+ * between addressed and unaddressed work, not between answering and doing (ADR 326 amendment
+ * 2026-08-27 UTC — seats were asking the human's permission to take reviews routed to them,
+ * because this skill taught it).
+ *
+ * Step 3's announce clause is load-bearing, not etiquette: `request_help` carries an eligible set
+ * (ADR 254) and `discharged` is written ONLY by an accept/decline whose `meta.in_reply_to` names
+ * the request, so telling every addressee to execute unprompted without it makes duplicate reviews
+ * the default. The announcement IS the discharge for every co-addressee at once.
+ *
+ * And it is scoped to the acts that carry a set (lane 01M2GQFJXG, 2026-09-14). A `lane_review`
+ * ask is minted to ONE seat (`deliverLaneAskAct`, one reviewer, never an eligible set) and its
+ * `accept` is the acceptance verdict itself (ADR 202): the lane closes on that send. The clause
+ * used to say "an acceptance or review request" and stanley followed it — ryder's lane went to
+ * done on the announcement, before the diff was read. There is nobody to stand down on a review
+ * ask, so there is nothing to announce with an accept; a seat that wants to say "on it" says it
+ * with a status_update, and sends accept/decline when it has judged.
+ */
+export function renderOrientSkill(): string {
+  return [
+    '# Orient this seat session',
+    '',
+    'Run at session start in a seat worktree when the orient nudge (or the injected orientation',
+    'block) says so. Orientation ends with a stamp; the nudge repeats every turn until then.',
+    '',
+    '1. `team_inbox_check` — your first team_* call; it claims the seat and shows what waits.',
+    '2. If the orientation block showed a memory headline, `team_memory_read` and pick up where',
+    '   the previous session left off.',
+    '3. **Handle now (tier 1) — everything addressed to this seat.** Directed asks /',
+    '   request_help / steers: answer them (`team_send` accept/decline/reply as the act',
+    '   demands). An acceptance or review request routed to you: DO the review — it is yours by',
+    '   address, never ask the human whether to take it. A `lane_review` ask (meta.lane_review)',
+    '   goes to ONE seat and its accept IS the verdict (ADR 202): the lane closes on that send, so',
+    '   send accept/decline only once you have judged the landed outcome; say "on it" with a',
+    '   status_update if you want to. **Announce before you start** — for a request_help or ask',
+    '   that carries an eligible set (2-4 names) —',
+    "   `team_send {act:'accept', reply_to:<the request act id>}`, because only that act",
+    '   discharges it for your co-addressees; skip it and two seats review the same thing. Open',
+    '   incident lanes: read the lane, post one status_update',
+    '   with what you found. Do not start other work into a shared red.',
+    '4. **Surface, do not handle (tier 2) — work nobody routed to you.** Carried lanes, up-next,',
+    '   claimable open lanes: one compact readout for the human. Do not claim unaddressed work.',
+    "5. `team_send {act:'status_update'}` — one line — then run `musterd session orient-stamp`.",
+    '6. When tier 1 is done, stop and wait for direction. Autonomous pickup of UNADDRESSED work',
+    '   is deliberately NOT this skill (session-orientation spec §E); work addressed to this',
+    '   seat was never optional.',
+    '',
+  ].join('\n');
+}
+
+/** Frontmatter for {@link renderOrientSkill} on a harness that gates skills on a description. */
+export function renderOrientFrontmatter(): string {
+  return [
+    '---',
+    'name: musterd-orient',
+    'description: Orient a seat session at start: inbox, seat memory, handle directed asks and ' +
+      'incidents unprompted, surface the rest, then stamp oriented. Use when the injected ' +
+      'orientation block or the orient nudge appears, before other work.',
     '---',
   ].join('\n');
 }

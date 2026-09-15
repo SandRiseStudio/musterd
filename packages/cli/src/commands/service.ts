@@ -7,7 +7,7 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir, platform as osPlatform } from 'node:os';
+import { cpus, homedir, loadavg, platform as osPlatform } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { makeEnvelope } from '@musterd/protocol';
 import { ulid } from 'ulid';
@@ -17,6 +17,7 @@ import { configPath, loadConfig, serverProvenance } from '../config.js';
 import { CliError } from '../errors.js';
 import { actOn } from '../guardian/act.js';
 import { resolveGuardianTiers, DEFAULT_TIERS } from '../guardian/classify.js';
+import { runSampleTool } from '../guardian/sample.js';
 import { collectSignals, type HealthPayload } from '../guardian/signals.js';
 import { loadHostRegistry } from '../host/registry.js';
 import { infraTouchWarning } from '../infra-gate.js';
@@ -50,6 +51,7 @@ import {
   kickstartArgs,
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
+  STREAMWATCH_LABEL,
   SWEEP_LABEL,
   GUARDIAN_LABEL,
   printArgs,
@@ -84,6 +86,13 @@ import {
   type Runner,
   type ServiceCtx,
 } from '../service/manage.js';
+import {
+  DEFAULT_STREAMWATCH_INTERVAL,
+  installStreamwatch,
+  statusStreamwatch,
+  uninstallStreamwatch,
+  type StreamwatchCtx,
+} from '../service/streamwatch.js';
 import {
   DEFAULT_SWEEP_INTERVAL,
   installSweep,
@@ -169,7 +178,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep | --guardian] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep | --guardian | --stream] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -361,6 +370,36 @@ function refreshHandoverPath(): string {
  * `packages/cli/dist`: running anywhere else would measure with an artifact production is not
  * using. `--interval` (bare seconds) is baked at install, like the other interval agents.
  */
+/**
+ * Resolve the ADR 293 stream supervisor from the running process: the plist runs `node bin.js
+ * stream ensure` on an interval. PATH carries the homebrew dirs — the reconcile shells `fly` and
+ * `tailscale`, and launchd's default PATH has neither.
+ */
+function resolveStreamwatchCtx(run: Runner, parsed: Parsed): StreamwatchCtx {
+  const binJs = resolvePath(process.argv[1] ?? '');
+  const home = dirname(configPath()); // ~/.musterd
+  const interval = flagStr(parsed.flags, 'interval');
+  return {
+    uid: typeof process.getuid === 'function' ? process.getuid() : '',
+    label: STREAMWATCH_LABEL,
+    plistPath: join(homedir(), 'Library', 'LaunchAgents', `${STREAMWATCH_LABEL}.plist`),
+    node: agentNode(),
+    binJs,
+    workingDir: dirname(binJs),
+    logPath: join(home, 'stream', 'ensure.log'),
+    errLogPath: join(home, 'stream', 'ensure.log'),
+    path: [
+      dirname(process.execPath),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+    ].join(':'),
+    intervalSeconds: interval ? Number(interval) : DEFAULT_STREAMWATCH_INTERVAL,
+    run,
+  };
+}
+
 function resolveSweepCtx(run: Runner, parsed: Parsed): SweepCtx {
   const binJs = resolvePath(process.argv[1] ?? '');
   const home = dirname(configPath()); // ~/.musterd
@@ -814,6 +853,7 @@ export async function serviceCommand(
     autoRefreshCtx?: AutoRefreshCtx;
     guardianCtx?: AutoRefreshCtx;
     sweepCtx?: SweepCtx;
+    streamwatchCtx?: StreamwatchCtx;
     health?: () => Promise<DaemonHealth>;
     /** Probe whether the daemon serves /live (injected so tests skip the network). */
     probeViewer?: (url: string) => Promise<boolean>;
@@ -976,6 +1016,13 @@ export async function serviceCommand(
   if (parsed.flags['sweep'] === true) {
     const sweepCtx = deps.sweepCtx ?? resolveSweepCtx(ctx.run, parsed);
     return sweepServiceCommand(sub, sweepCtx, parsed, ok, fail);
+  }
+
+  // `--stream` targets the ADR 293 stream supervisor. Same posture as `--sweep`: no server touched,
+  // no teammate session dropped, so no live-session guard and no ABI guard.
+  if (parsed.flags['stream'] === true) {
+    const swCtx = deps.streamwatchCtx ?? resolveStreamwatchCtx(ctx.run, parsed);
+    return streamwatchServiceCommand(sub, swCtx, ok, fail);
   }
 
   // The warn-only infra-touch gate (ADR 227 inc 2), on the daemon-targeted verbs only — the
@@ -1293,16 +1340,34 @@ export function serviceTokenPath(): string {
 }
 
 /**
- * Provision the auto-refresher's ledger seat token (ADR 232 §5) — best-effort, at install time,
- * with the OPERATOR's stored identity (they are running `service install`; the daemon's admin
- * gate decides). The token lands as a 0600 file whose path rides the plist environment; the tick
- * reads it back and never sees a binding — which is the point: the tick runs in a folder bound to
- * the operator, and inheriting that binding is the misattribution this seat exists to end.
+ * Provision a platform service's ledger seat + token (ADR 232 §5–§6) — best-effort, at install
+ * time, with the OPERATOR's stored identity (they are running `service install`; the daemon's admin
+ * gate decides). The token lands as a 0600 file under `~/.musterd/<home>/seat-token`; a tick that
+ * speaks reads it back from the plist environment and never sees a binding — which is the point:
+ * the tick runs in a folder bound to the operator, and inheriting that binding is the
+ * misattribution the seat exists to end.
  *
- * Every failure is a meta line, never a hard stop: an unprovisioned auto-refresher is exactly the
- * pre-232 behaviour, and `install` must keep working on teams that haven't declared the seat.
+ * ONE function for every platform service (lane 01M1Q9D90X). It was three copies — autorefresh,
+ * guardian, streamwatch — and the three services that shipped WITHOUT a copy (wake host, /live
+ * publisher, sweep) are exactly the three the census named as unattributed actors 23 days after
+ * ADR 232 said `service install` would seat them. A seat is owed at install whether or not the tick
+ * has anything to say yet: the roster is the census of what runs unattended here, and a silent
+ * service is still an actor.
+ *
+ * Every failure is a meta line, never a hard stop: an unprovisioned service is exactly the pre-232
+ * behaviour, and `install` must keep working on teams that haven't declared the seat.
  */
-async function provisionAutoRefreshToken(
+async function provisionServiceSeat(
+  svc: {
+    /** Roster seat name; also the LaunchAgent label suffix the census matches on. */
+    name: string;
+    /** Directory under `~/.musterd` that holds this service's token (and usually its stamp/logs). */
+    home: string;
+    /** The `musterd service install …` spelling that re-runs this. */
+    rerun: string;
+    /** What the operator loses while the seat is missing — one clause, in the failure line. */
+    consequence: string;
+  },
   ok: (s: string) => void,
   meta: (s: string) => void,
 ): Promise<void> {
@@ -1311,30 +1376,47 @@ async function provisionAutoRefreshToken(
   const identity = team ? config.identities[team] : undefined;
   if (!team || !identity) {
     meta(
-      '  seat:    no current team identity — skipped the autorefresh service seat token (ADR 232); ' +
-        'join your team, then rerun `musterd service install --auto`',
+      `  seat:    no current team identity — skipped the ${svc.name} service seat token (ADR 232); ` +
+        `join your team, then rerun \`${svc.rerun}\``,
     );
     return;
   }
   try {
     const http = new HttpClient({ server: config.server, key: identity.key, surface: 'cli' });
     const res = (await http.addMember(team, {
-      name: AUTOREFRESH_SEAT,
+      name: svc.name,
       kind: 'service',
       role: 'platform',
     })) as { token?: string };
     if (!res.token) throw new Error('daemon returned no token');
-    const p = serviceTokenPath();
+    const p = join(dirname(configPath()), svc.home, 'seat-token');
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, res.token + '\n', { encoding: 'utf8', mode: 0o600 });
-    ok(`minted the ${AUTOREFRESH_SEAT} service seat token → ${theme.accent(p)} (0600)`);
+    ok(`minted the ${svc.name} service seat token → ${theme.accent(p)} (0600)`);
   } catch (err) {
     meta(
-      `  seat:    could not provision the ${AUTOREFRESH_SEAT} service seat (${(err as Error).message}) — ` +
-        `the tick will run unattributed (pre-ADR 232 behaviour). For a file-backed roster, write ` +
-        `seats/${AUTOREFRESH_SEAT}.toml (kind = "service", roles = ["platform"]) and rerun install.`,
+      `  seat:    could not provision the ${svc.name} service seat (${(err as Error).message}) — ` +
+        `${svc.consequence}. For a file-backed roster, write seats/${svc.name}.toml ` +
+        `(kind = "service", roles = ["platform"]) and rerun install.`,
     );
   }
+}
+
+/** The auto-refresher's seat (ADR 232 increment 1) — the first attributed unattended actor. */
+function provisionAutoRefreshToken(
+  ok: (s: string) => void,
+  meta: (s: string) => void,
+): Promise<void> {
+  return provisionServiceSeat(
+    {
+      name: AUTOREFRESH_SEAT,
+      home: 'autorefresh',
+      rerun: 'musterd service install --auto',
+      consequence: 'the tick will run unattributed (pre-ADR 232 behaviour)',
+    },
+    ok,
+    meta,
+  );
 }
 
 /**
@@ -1831,44 +1913,18 @@ function resolveGuardianCtx(run: Runner, parsed: Parsed): AutoRefreshCtx {
   };
 }
 
-/**
- * Provision the guardian's ledger seat (ADR 232 §5) — the autorefresh token flow with the
- * guardian's name and token path. Best-effort: an unprovisioned guardian still probes and
- * OS-notifies; only the in-band half (asks, heartbeat) stays silent.
- */
-async function provisionGuardianToken(
-  ok: (s: string) => void,
-  meta: (s: string) => void,
-): Promise<void> {
-  const config = loadConfig();
-  const team = config.current;
-  const identity = team ? config.identities[team] : undefined;
-  if (!team || !identity) {
-    meta(
-      '  seat:    no current team identity — skipped the guardian service seat token (ADR 232); ' +
-        'join your team, then rerun `musterd service --guardian install`',
-    );
-    return;
-  }
-  try {
-    const http = new HttpClient({ server: config.server, key: identity.key, surface: 'cli' });
-    const res = (await http.addMember(team, {
+/** The guardian probe's seat (ADR 263) — token at `~/.musterd/guardian/seat-token`. */
+function provisionGuardianToken(ok: (s: string) => void, meta: (s: string) => void): Promise<void> {
+  return provisionServiceSeat(
+    {
       name: GUARDIAN_SEAT,
-      kind: 'service',
-      role: 'platform',
-    })) as { token?: string };
-    if (!res.token) throw new Error('daemon returned no token');
-    const p = join(guardianHome(), 'seat-token');
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, res.token + '\n', { encoding: 'utf8', mode: 0o600 });
-    ok(`minted the ${GUARDIAN_SEAT} service seat token → ${theme.accent(p)} (0600)`);
-  } catch (err) {
-    meta(
-      `  seat:    could not provision the ${GUARDIAN_SEAT} service seat (${(err as Error).message}) — ` +
-        `the probe will run unattributed. For a file-backed roster, write seats/${GUARDIAN_SEAT}.toml ` +
-        `(kind = "service", roles = ["platform"]) and rerun install.`,
-    );
-  }
+      home: 'guardian',
+      rerun: 'musterd service --guardian install',
+      consequence: 'the probe will run unattributed',
+    },
+    ok,
+    meta,
+  );
 }
 
 async function guardianServiceCommand(
@@ -1955,12 +2011,16 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
     }
   };
 
-  const rawHealth = async (): Promise<HealthPayload> => {
+  const probeHealth = async (timeoutMs: number): Promise<HealthPayload> => {
     const server = loadConfig().server;
-    const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`health ${res.status}`);
     return (await res.json()) as HealthPayload;
   };
+  /** The fast probe: three of these, 1 s apart, are ADR 274's confirmation. */
+  const rawHealth = (): Promise<HealthPayload> => probeHealth(2000);
+  /** The DIFFERENT observation — same request, on whatever bound the collector asks for. */
+  const confirmHealth = probeHealth;
 
   /** mtime-gated read: a file untouched since `epochMs` contributes nothing (recency hard rule);
    *  a touched file contributes its tail (cap 400 lines — bounded work on an 8 GB machine). */
@@ -2002,6 +2062,7 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
         collectSignals({
           now: () => Date.now(),
           fetchHealth: rawHealth,
+          confirmHealth,
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           launchctlPrint: async () => {
             const uid = typeof process.getuid === 'function' ? process.getuid() : '';
@@ -2009,6 +2070,15 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
           },
           readSince,
           statMtime,
+          /**
+           * `sample <pid> <seconds>` — read-only, bounded, no signal sent (ADR 389 §1). The spawn
+           * lives in sample.ts (`runSampleTool`) so the falsifier test runs the SAME command the
+           * tick does, rather than a copy of it. Spawned there rather than through `ctx.run` for the
+           * timeout alone — `Runner` takes no options.
+           */
+          sampleStack: async (pid, seconds) => runSampleTool(pid, seconds),
+          // Lane 01M2GTB0RA: the one signal that separates a starved daemon from a blocked one.
+          loadAverage: () => ({ one: loadavg()[0] ?? 0, cores: Math.max(1, cpus().length) }),
           expected: { dbPath: join(home, 'musterd.db'), schema: null },
           daemonErrLogPath: join(home, 'daemon.err.log'),
           publisherBuildLogPath: join(home, 'live', 'build.log'),
@@ -2035,6 +2105,8 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
         now: () => Date.now(),
         stamp: actStamp,
         tiers: controlProbe ? { ...DEFAULT_TIERS, publisher_failed: 'alert' } : tiers,
+        // The probe must fire on every install and leave damping state alone (see ActDeps).
+        dampRaises: !controlProbe,
         runService: async (args) => {
           if (controlProbe) {
             log(`control probe: would run service ${args.join(' ')}`);
@@ -2198,6 +2270,73 @@ async function autoRefreshServiceCommand(
  * `demoted` after increment 2's flip, so leaving it unscheduled left the guardrail unobserved.
  * Read-only and bounce-safe: nothing long-lived is stopped, no seat or lane is touched.
  */
+/** The `--stream` lifecycle (ADR 293): install/uninstall/status for the supervisor LaunchAgent,
+ * plus minting the `streamwatch` service seat whose token carries the stand-down ask. */
+async function streamwatchServiceCommand(
+  sub: string,
+  ctx: StreamwatchCtx,
+  ok: (s: string) => void,
+  fail: (step: string, r: RunResult) => never,
+): Promise<number> {
+  const meta = (s: string) => process.stdout.write(theme.meta(s) + '\n');
+  switch (sub) {
+    case 'install': {
+      const res = installStreamwatch(ctx);
+      if (res.status !== 0) fail('stream supervisor (bootstrap)', res);
+      ok(`installed + started the stream supervisor (${theme.accent(ctx.label)})`);
+      await provisionStreamwatchToken(ok, meta);
+      meta(`  runs:    musterd stream ensure every ${ctx.intervalSeconds}s`);
+      meta(`  policy:  crash → restart, 3/30min → stand down + ask; \`stream stop\` always wins`);
+      meta(`  logs:    ${ctx.logPath} (findings only — a healthy tick is silent)`);
+      return 0;
+    }
+    case 'uninstall': {
+      const res = uninstallStreamwatch(ctx);
+      ok(
+        res.removedPlist
+          ? 'stopped + removed the stream supervisor (the desired-state file is kept)'
+          : 'stream supervisor was not installed — nothing to remove',
+      );
+      return 0;
+    }
+    case 'status': {
+      const st = statusStreamwatch(ctx);
+      ok(
+        `stream supervisor: ${
+          st.loaded ? theme.ok(intervalAgentLabel(st) ?? 'loaded') : theme.warn('not installed')
+        }`,
+      );
+      const dead = agentFailureNote(st, agentProgramExists(ctx.plistPath));
+      if (dead) process.stdout.write(`  ${theme.err('✗')} ${dead}\n`);
+      meta(`  runs:  musterd stream ensure every ${ctx.intervalSeconds}s`);
+      meta(`  logs:  ${ctx.logPath}`);
+      return 0;
+    }
+    default:
+      throw new CliError(
+        'usage: musterd service <install|uninstall|status> --stream [--interval <s>]',
+        2,
+      );
+  }
+}
+
+/** The stream watchdog's seat — token at `~/.musterd/stream/seat-token`. */
+function provisionStreamwatchToken(
+  ok: (s: string) => void,
+  meta: (s: string) => void,
+): Promise<void> {
+  return provisionServiceSeat(
+    {
+      name: 'streamwatch',
+      home: 'stream',
+      rerun: 'musterd service install --stream',
+      consequence: 'a stand-down will be logged but not asked',
+    },
+    ok,
+    meta,
+  );
+}
+
 async function sweepServiceCommand(
   sub: string,
   ctx: SweepCtx,
@@ -2218,6 +2357,16 @@ async function sweepServiceCommand(
       const res = installSweep(ctx);
       if (res.status !== 0) fail('liveness sweep (bootstrap)', res);
       ok(`installed + started the ADR 166 liveness sweep (${theme.accent(ctx.label)})`);
+      await provisionServiceSeat(
+        {
+          name: 'sweep',
+          home: 'sweep',
+          rerun: 'musterd service install --sweep',
+          consequence: 'the sweep runs as an unattributed actor and the census will say so',
+        },
+        ok,
+        meta,
+      );
       meta(`  runs:    ${ctx.scriptPath} ${ctx.scriptArgs.join(' ')}`);
       meta(
         `  cadence: on load + every ${ctx.intervalSeconds}s ` +
@@ -2328,6 +2477,16 @@ async function liveServiceCommand(
         fail('git worktree add', res.worktree.result);
       if (res.build.status !== 0) fail('build-publisher (bootstrap)', res.build);
       ok(`installed + started the /live build-publisher (${theme.accent(ctx.buildLabel)})`);
+      await provisionServiceSeat(
+        {
+          name: 'live',
+          home: 'live',
+          rerun: 'musterd service install --live',
+          consequence: 'the publisher runs as an unattributed actor and the census will say so',
+        },
+        ok,
+        meta,
+      );
       meta(`  worktree:  ${ctx.worktree}${res.worktree.created ? ' (created)' : ''}`);
       meta(`  builds →   ${ctx.webRoot}  (the daemon serves this at /live)`);
       meta(`  publishes: on load + every ${ctx.intervalSeconds}s when origin/main moves`);
@@ -2414,6 +2573,16 @@ async function wakeServiceCommand(
       const res = installWakeHost(ctx);
       if (res.status !== 0) fail('install --wake (bootstrap)', res);
       ok(`installed + started the wake actuator (LaunchAgent ${theme.accent(ctx.label)})`);
+      await provisionServiceSeat(
+        {
+          name: 'host',
+          home: 'host',
+          rerun: 'musterd service install --wake',
+          consequence: 'the actuator runs as an unattributed actor and the census will say so',
+        },
+        ok,
+        meta,
+      );
       meta(`  plist:    ${ctx.plistPath}`);
       meta(`  runs:     ${ctx.binJs} host ${ctx.hostArgs.join(' ')}`.trimEnd());
       meta(`  registry: ${registrySummary()}`);

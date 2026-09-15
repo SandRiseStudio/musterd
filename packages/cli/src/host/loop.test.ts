@@ -1,6 +1,10 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { MemberSummary, WakeOrder, WakeReportBody } from '@musterd/protocol';
-import { describe, expect, it } from 'vitest';
-import type { ActuatorBackend, WakeSpec } from './backend.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { saveBinding } from '../config.js';
+import type { ActuatorBackend, BackendContext, WakeSpec } from './backend.js';
 import { pollHostOnce, type HostPollDeps, type WakeClient } from './loop.js';
 import type { HostRegistryEntry } from './registry.js';
 
@@ -171,26 +175,38 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(lines.join('\n')).not.toMatch(/clamped/);
   });
 
-  it('an order for a seat this machine does not hold is reported failed, never dropped', async () => {
+  /**
+   * Lane 01M1J2V4EJ (2026-09-02): a pre-actuation fault is a property of THIS MACHINE, not of the
+   * act — nothing spawned, nothing was paid, and the operator's fix is local. Reported as a failure
+   * it burned `attempt_cap` and `hourly_cap` (sloane: two "not in registry" rows in 46s spent 2 of
+   * 2/h and 2 of the act's 3 attempts, on a diagnosis that named the wrong thing). ADR 221's line
+   * applies: defer, budget-neutral, and stay loud in the host log.
+   */
+  it('an order for a seat this machine does not hold is DEFERRED (not failed) and stays loud', async () => {
     const { client, calls } = fakeClient([order({ seat: 'ghost', lease_id: 'L9' })]);
+    const lines: string[] = [];
     await pollHostOnce(
       deps({
         backends: new Map(),
         loadRegistry: () => ({ entries: [entryOf()] }),
         clientFor: () => client,
+        log: (l) => lines.push(l),
       }),
     );
     expect(calls.reports).toHaveLength(1);
     expect(calls.reports[0]).toMatchObject({
       lease_id: 'L9',
       occupied: false,
+      deferred: true,
       wakeability: 'not_enrolled',
     });
     expect(calls.reports[0]!.reason).toMatch(/host registry/);
+    expect(lines.join('\n')).toMatch(/wake deferred: ghost.*host registry/);
   });
 
-  it('a registered seat whose workspace is unreadable reports enrolled_dead_workspace (ADR 189)', async () => {
+  it('a registered seat whose workspace is unreadable DEFERS as enrolled_dead_workspace (ADR 189)', async () => {
     const { client, calls } = fakeClient([order({ seat: 'ghost', lease_id: 'L8' })]);
+    const lines: string[] = [];
     await pollHostOnce(
       deps({
         backends: new Map(),
@@ -200,14 +216,51 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         }),
         readAgentKey: (ws) => (ws === '/ws/ghost' ? undefined : 'mskey_x'),
         clientFor: () => client,
+        log: (l) => lines.push(l),
       }),
     );
     expect(calls.reports[0]).toMatchObject({
       lease_id: 'L8',
       occupied: false,
+      deferred: true,
       wakeability: 'enrolled_dead_workspace',
     });
     expect(calls.reports[0]!.reason).toMatch(/missing or has no binding/);
+    expect(lines.join('\n')).toMatch(/wake deferred: ghost.*missing or has no binding/);
+  });
+
+  /**
+   * Lane 01M1J2V4EJ (2026-09-02): the poll groups entries by the daemon URL STRING. sloane's
+   * binding said `http://localhost:4849` where every sibling said `http://127.0.0.1:4849` — the same
+   * socket — so sloane polled alone, the siblings' group claimed its lease first, found no entry
+   * for it in THEIR group, and reported "seat not in this machine's host registry" for a seat that
+   * was registered and whose operator had already followed the advice. Two entries that differ only
+   * in the spelling of the daemon must be one group: one poll, one claim, the right workspace.
+   */
+  it('entries whose server differs only in spelling (localhost vs 127.0.0.1) are ONE poll group', async () => {
+    const { client, calls } = fakeClient([order({ seat: 'sloane', lease_id: 'L7' })]);
+    const { backend, specs } = fakeBackend();
+    const servers: string[] = [];
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({
+          entries: [
+            entryOf({ server: 'http://127.0.0.1:4849' }),
+            entryOf({ server: 'http://localhost:4849/', seat: 'sloane', workspace: '/ws/sloane' }),
+          ],
+        }),
+        clientFor: (server) => {
+          servers.push(server);
+          return client;
+        },
+      }),
+    );
+    expect(calls.leases).toHaveLength(1); // one poll, not one per spelling
+    expect(servers).toEqual(['http://127.0.0.1:4849']); // the canonical spelling is what gets dialled
+    expect(specs).toHaveLength(1);
+    expect(specs[0]!.workspace).toBe('/ws/sloane');
+    expect(calls.reports).toEqual([{ lease_id: 'L7', occupied: true, session: 'fresh' }]);
   });
 
   it('an order for a harness with no backend is reported failed with the harness named', async () => {
@@ -304,7 +357,8 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(dead?.occupied).toBe(false);
     expect(dead?.reason).toMatch(/workspace/i);
     expect(dead?.reason).toContain('/ws/gone');
-    expect(lines.join('\n')).toMatch(/wake FAILED for izzo/);
+    expect(dead?.deferred).toBe(true); // lane 01M1J2V4EJ: a dead workspace is this machine's fault
+    expect(lines.join('\n')).toMatch(/wake deferred: izzo/);
   });
 
   it('roster verify: offline → live-with-wake-provenance resolves occupied with the provenance', async () => {
@@ -622,6 +676,32 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(lines.join('\n')).toContain('wake deferred: scout');
   });
 
+  it('the guard defers on a demoted conflict too — slot live, enumeration disagrees (ADR 166 inc 3)', async () => {
+    // Every resolvable demoted case in the 2026-08-21 sweep inspection was a live session
+    // enumeration could not see; the guard question resolves disagreement toward LIVE.
+    const { client, calls } = fakeClient([order()]);
+    const { backend, specs } = fakeBackend();
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        liveness: () => ({
+          state: 'resumable',
+          source: 'enumerated',
+          slotState: 'live',
+          disagreed: true,
+          demoted: true,
+          session: { harness: 'claude-code', id: 'cap-1', started_at: 1 },
+        }),
+      }),
+    );
+    expect(specs).toHaveLength(0);
+    expect(calls.reports).toEqual([
+      { lease_id: 'L1', occupied: false, deferred: true, reason: 'local-session-live' },
+    ]);
+  });
+
   it('passes a Codex registry harness to the local-session guard', async () => {
     const { client } = fakeClient([order()]);
     const { backend, specs } = fakeBackend('codex');
@@ -824,5 +904,155 @@ describe('pollHostOnce — wake-progress after spawn (ADR 262)', () => {
       }),
     );
     expect(calls.reports.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * ADR 379 — the actuator spares the child it can identify as its own. The evidence is on the row:
+ * `workspace` equal to the label the child attaches with from the spawn path, `attached_at` at or
+ * after the spawn, and no `wake_lease`. Every term is positive; a missing `attached_at` (older
+ * daemon) or a row created BEFORE the spawn (a human already in the worktree, ADR 068) stays foreign.
+ */
+describe('verifyOccupied — own child that could not attest its lease (ADR 379)', () => {
+  const offline: MemberSummary[] = [
+    {
+      id: 'm1',
+      name: 'scout',
+      kind: 'agent',
+      role: 'dev',
+      presence: 'offline',
+      presences: [],
+      created_at: 1,
+    } as unknown as MemberSummary,
+  ];
+  const row = (over: Record<string, unknown>) =>
+    [
+      {
+        ...offline[0]!,
+        presence: 'online',
+        presences: [
+          {
+            surface: 'codex',
+            status: 'online',
+            last_seen_at: Date.now() + 1_000,
+            provenance: 'session',
+            ...over,
+          },
+        ],
+      },
+    ] as unknown as MemberSummary[];
+  const probe = async (roster: MemberSummary[]) => {
+    const { client } = fakeClient([order()], [offline, roster]);
+    let verified: Awaited<ReturnType<BackendContext['verifyOccupied']>> | undefined;
+    const backend: ActuatorBackend = {
+      harness: 'codex',
+      wake: async (_spec, ctx) => {
+        verified = await ctx.verifyOccupied('scout', 300, Date.now());
+        return { outcome: { occupied: verified.occupied }, settled: Promise.resolve(undefined) };
+      },
+    };
+    await pollHostOnce(
+      deps({
+        backends: new Map([['codex', backend]]),
+        // `/ws/scout` is no git repo, so the label the child would attest is the bare folder name.
+        loadRegistry: () => ({ entries: [entryOf({ harness: 'codex' })] }),
+        clientFor: () => client,
+      }),
+    );
+    return verified!;
+  };
+
+  it("a lease-less row in the wake workspace, created after spawn, is the wake's own child", async () => {
+    const verified = await probe(row({ workspace: 'scout', attached_at: Date.now() + 500 }));
+    expect(verified).toEqual({
+      occupied: true,
+      provenance: 'session',
+      lease_matched: false,
+      own_unattested: true,
+    });
+  });
+
+  it('the same row created BEFORE the spawn is a prior occupant — foreign, defer as before', async () => {
+    const verified = await probe(row({ workspace: 'scout', attached_at: Date.now() - 60_000 }));
+    expect(verified).toEqual({ occupied: true, provenance: 'session', lease_matched: false });
+  });
+
+  it('a row created after spawn in ANOTHER workspace is foreign', async () => {
+    const verified = await probe(
+      row({ workspace: 'elsewhere@main', attached_at: Date.now() + 500 }),
+    );
+    expect(verified).toEqual({ occupied: true, provenance: 'session', lease_matched: false });
+  });
+
+  it('an older daemon that sends no attached_at cannot qualify — absence is not "created after"', async () => {
+    const verified = await probe(row({ workspace: 'scout' }));
+    expect(verified).toEqual({ occupied: true, provenance: 'session', lease_matched: false });
+  });
+
+  it('a lease-attesting row still wins over an own-unattested one — the token is the stronger evidence', async () => {
+    const both = [
+      {
+        ...offline[0]!,
+        presence: 'online',
+        presences: [
+          {
+            surface: 'codex',
+            status: 'online',
+            last_seen_at: Date.now() + 1_000,
+            provenance: 'session',
+            workspace: 'scout',
+            attached_at: Date.now() + 200,
+          },
+          {
+            surface: 'codex',
+            status: 'online',
+            last_seen_at: Date.now() + 1_000,
+            provenance: 'wake',
+            wake_lease: 'L1',
+          },
+        ],
+      },
+    ] as unknown as MemberSummary[];
+    const verified = await probe(both);
+    expect(verified).toEqual({ occupied: true, provenance: 'wake', lease_matched: true });
+  });
+});
+
+describe('pollHostOnce — actuator credential (ADR 395)', () => {
+  const prevConfig = process.env['MUSTERD_CONFIG'];
+  afterEach(() => {
+    if (prevConfig === undefined) delete process.env['MUSTERD_CONFIG'];
+    else process.env['MUSTERD_CONFIG'] = prevConfig;
+  });
+
+  it('polls with host_key even when agent_key is a claim-scoped credential', async () => {
+    // Production change that would make this fail: defaultReadAgentKey still reading agent_key.
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-hostkey-'));
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+    saveBinding(dir, {
+      version: 2,
+      server: 'http://s1',
+      team: 'dawn',
+      claim: { mode: 'seat', name: 'scout' },
+      agent_key: 'mskey_claim_seat',
+      host_key: 'mskey_host',
+    });
+    const { client, calls } = fakeClient([]);
+    let used: string | undefined;
+    await pollHostOnce({
+      backends: new Map(),
+      bounds: { timeout_ms: 60_000 },
+      log: () => undefined,
+      liveness: () => ({ state: 'none' }),
+      verifyWindowMs: 50,
+      verifyPollMs: 5,
+      loadRegistry: () => ({ entries: [entryOf({ workspace: dir })] }),
+      clientFor: (_server, key) => {
+        used = key;
+        return client;
+      },
+    });
+    expect(used).toBe('mskey_host');
+    expect(calls.leases).toEqual([{ team: 'dawn', host: 'mac.lan' }]);
   });
 });

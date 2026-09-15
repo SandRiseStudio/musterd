@@ -4,17 +4,28 @@ import {
   ErrorBodySchema,
   ActDeliverySchema,
   GoalListSchema,
+  NodeInviteMintSchema,
+  NodeListSchema,
+  type SeatNodeTrusted,
+  SeatNodeTrustedSchema,
+  type SyncWedge,
+  type NodeInviteMint,
+  type NodeList,
   GoalSchema,
   GrantMintSchema,
   LaneBoardSchema,
   LaneResultSchema,
+  SeedListSchema,
+  SeedResultSchema,
   NextBriefSchema,
+  NextSummarySchema,
   PROTOCOL_VERSION,
   ReportSchema,
   resolveAttestedModel,
   resolveAttestedProvenance,
   resolveAttestedWakeLease,
   TOKEN_PREFIXES,
+  type AgentKeyMint,
   type GuardianTiers,
   type Policy,
   type PolicyOverride,
@@ -54,11 +65,16 @@ import {
   type IssueGrant,
   type LaneBoard,
   type LaneResult,
+  type Seed,
+  type SubmitSeedBrief,
+  type PromoteSeed,
+  type CaptureRepoSeed,
   type Member,
   type MemberKind,
   type MemberSummary,
   type MemoryEnvelope,
   type NextBrief,
+  type NextSummary,
   type OpenLane,
   type RefusedCode,
   type Report,
@@ -93,8 +109,14 @@ export interface InterruptCheck {
 
 export interface HttpClientOpts {
   server: string;
-  /** The Bearer secret (v0.3, ADR 075): a team agent key (`mskey_`) or human credential (`mscr_`).
-   *  The server dispatches on the prefix → live-presence occupancy; replaces the v0.2 seat token. */
+  /** Team needed to re-claim an agent Presence for a standalone CLI HTTP request (ADR 339). */
+  team?: string;
+  /** Workspace label passed to the command-scoped re-claim (ADR 068/092). */
+  workspace?: string;
+  /** Stable workspace identity (work tree root) — what displacement compares (lane 01M1JQYYAC);
+   *  the label above is branch-qualified and is renamed by a switch or a detached HEAD. */
+  workspaceKey?: string;
+  /** The self-identifying Bearer secret: agent-seat (`msac_`) or human (`mscr_`) credential. */
   key?: string;
   /**
    * The seat this client acts as (v0.3, ADR 075 / SPEC A.7 §253). An agent key authenticates the
@@ -103,6 +125,10 @@ export interface HttpClientOpts {
    * envelope `from` instead. Unused on the mskd_ token path (the token already is the seat).
    */
   seat?: string;
+  /** Required alongside an `msac_` credential; proves its current Presence (ADR 337). */
+  sessionLease?: string;
+  /** Claim the agent seat afresh and hold its Presence for THIS request (ADR 339) — the per-request claim, not the admin `musterd reclaim` (drop someone else's stale session) and not `claimSessionLease` (one claim after a refusal). Renamed from `claimSeatPerRequest` 2026-09-03: three "reclaim"s named three different things. */
+  claimSeatPerRequest?: boolean;
   /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
   surface?: string;
   /**
@@ -122,6 +148,44 @@ export interface HttpClientOpts {
    * away/idle human look present and so silence the very notification they were owed.
    */
   noTouch?: boolean;
+  /** Test seam: inject a ClaimSocket factory for the reclaim WS (lane 01M1F7Y4N). */
+  createClaimSocket?: (url: string) => ClaimSocket;
+}
+
+export interface BootstrapCredentialSummary {
+  id: string;
+  use: 'claim_seat' | 'claim_role' | 'host' | 'legacy';
+  target: string | null;
+  label: string | null;
+  state: 'active' | 'rotated' | 'revoked';
+  expires_at: number | null;
+  created_by: string | null;
+  created_at: number;
+  rotated_at: number | null;
+  revoked_at: number | null;
+}
+
+export interface BootstrapCutoverReadiness {
+  already_cut_over: boolean;
+  unmet_seats: Array<{ member_id: string; name: string }>;
+  unmet_hosts: string[];
+}
+
+export interface BootstrapCutoverResponse {
+  ok: true;
+  already_cut_over: boolean;
+  forced: boolean;
+  readiness: BootstrapCutoverReadiness;
+}
+
+/**
+ * Is this refusal specifically "the session lease you presented is no longer good"? Matched on the
+ * server's own two messages (`store/members.ts`) rather than on `unauthorized` alone, because a bad
+ * credential or a wrong acting seat is also `unauthorized` and re-claiming would not fix either —
+ * it would just claim, fail again, and double the noise.
+ */
+export function isSessionLeaseRefusal(error: { code: string; message: string }): boolean {
+  return error.code === 'unauthorized' && /agent session lease/i.test(error.message);
 }
 
 export class HttpClient {
@@ -152,9 +216,109 @@ export class HttpClient {
     }
   }
 
+  private async claimAgentLease(): Promise<{ lease: string; close: () => void } | undefined> {
+    const { key, seat, surface, team } = this.opts;
+    if (
+      !this.opts.claimSeatPerRequest ||
+      !key?.startsWith(TOKEN_PREFIXES.agent_seat) ||
+      !team ||
+      !seat ||
+      !surface
+    ) {
+      return undefined;
+    }
+    try {
+      return await this.claimSessionLease();
+    } catch {
+      // Reclaim is best-effort for the HTTP read path (lane 01M1F7Y4N): a daemon bounce closes the WS
+      // with code 1001 (no 'error' fired) and would otherwise hang the promise forever. Degrade to the
+      // stored sessionLease — the server still validates fail-closed, so this is safe and visible.
+      return undefined;
+    }
+  }
+
+  /**
+   * Claim the seat over WS and hand back the session lease it minted, holding the Presence until
+   * `close`. This is ADR 337 §4 made explicit — "reconnection uses the seat credential to make a
+   * fresh claim and receive a fresh lease" — for a caller that has just had its stored lease
+   * REFUSED and wants exactly one claim in reply, rather than `claimSeatPerRequest`, which claims
+   * before every request whether or not the stored lease still works (the 2026-09-01 claim storm,
+   * #1138/#1143). The `workspace` label is what lets a live same-workspace adapter survive the claim
+   * (ADR 340, #1131); callers that have one must pass it.
+   */
+  async claimSessionLease(): Promise<{ lease: string; close: () => void }> {
+    const { key, seat, surface, team, workspace, workspaceKey } = this.opts;
+    if (!key?.startsWith(TOKEN_PREFIXES.agent_seat) || !team || !seat || !surface) {
+      throw new CliError(
+        'cannot claim a session lease without an agent-seat credential, team, seat and surface',
+        4,
+      );
+    }
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        session.close();
+        reject(new CliError('agent claim timed out — daemon may be restarting', 7));
+      }, CLAIM_LEASE_TIMEOUT_MS);
+      // The timer must not keep a one-shot CLI hanging after success.
+      (timer as unknown as { unref?: () => void }).unref?.();
+
+      const done = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      };
+
+      const session = watchClaim({
+        wsUrl: this.opts.server.replace(/^http/, 'ws') + '/ws',
+        team,
+        key,
+        target: { seat },
+        surface,
+        ...(workspace !== undefined ? { workspace } : {}),
+        ...(workspaceKey !== undefined ? { workspaceKey } : {}),
+        ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
+        ...(this.opts.createClaimSocket ? { createSocket: this.opts.createClaimSocket } : {}),
+        onDeliver: () => {},
+        onOccupied: (_seat, _presenceId, _grant, _memory, _credential, sessionLease) => {
+          if (!sessionLease) {
+            done(() => {
+              session.close();
+              reject(new CliError('agent claim did not return a session lease', 4));
+            });
+            return;
+          }
+          done(() => resolve({ lease: sessionLease, close: () => session.close() }));
+        },
+        onRefused: (_code, message) => {
+          done(() => {
+            session.close();
+            reject(new CliError(message, 4));
+          });
+        },
+        onError: (message) => {
+          done(() => {
+            session.close();
+            reject(new CliError(message, 4));
+          });
+        },
+      });
+    });
+  }
+
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async request(method: string, path: string, body?: unknown): Promise<any> {
+  private async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    /** Internal: set on the single retry that follows a refused session lease (see below). */
+    afterLeaseRefusal = false,
+  ): Promise<any> {
+    const claim = await this.claimAgentLease();
     let res: Response;
     try {
       // ADR 119: re-attest on every ambient HTTP touch when the env declares a model, so
@@ -170,7 +334,7 @@ export class HttpClient {
       // The ADR 121 credential gate is unchanged and outranks all of it: resolving a model more
       // thoroughly must not become a new way for a human shell to stamp an occupancy.
       const attestedModel =
-        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
+        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_seat) === true
           ? (this.opts.model ?? resolveAttestedModel(process.env))
           : undefined;
       // ADR 131 §6 (increment 5): provenance rides the same gate as model — a wake-spawned
@@ -178,7 +342,7 @@ export class HttpClient {
       // their ambient touches label the seat `wake` instead of the `session` default (the inc-4
       // mislabel: verify credited a wake against a session-labelled ambient row).
       const attestedProvenance =
-        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
+        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_seat) === true
           ? resolveAttestedProvenance(process.env)
           : undefined;
       // ADR 241: the wake correlation token rides the same agent-key gate as provenance, and for
@@ -187,7 +351,7 @@ export class HttpClient {
       // has nothing of this wake's to find. Never on a human credential: a lease token in a human
       // shell would let that shell claim to be a machine's wake.
       const attestedWakeLease =
-        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
+        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_seat) === true
           ? resolveAttestedWakeLease(process.env)
           : undefined;
       res = await this.fetchWithRetry(path, {
@@ -196,6 +360,9 @@ export class HttpClient {
           'content-type': 'application/json',
           ...(this.opts.key ? { authorization: `Bearer ${this.opts.key}` } : {}),
           ...(this.opts.seat ? { 'x-musterd-seat': this.opts.seat } : {}),
+          ...((claim?.lease ?? this.opts.sessionLease)
+            ? { 'x-musterd-session-lease': claim?.lease ?? this.opts.sessionLease }
+            : {}),
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
           ...(attestedModel !== undefined ? { 'x-musterd-model': attestedModel } : {}),
@@ -211,6 +378,7 @@ export class HttpClient {
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
     } catch (err) {
+      claim?.close();
       if (isConnRefused(err)) {
         throw new CliError(
           `can't reach team server at ${this.opts.server} — is the daemon running? (musterd serve)`,
@@ -219,11 +387,38 @@ export class HttpClient {
       }
       throw err;
     }
+    claim?.close();
     const text = await res.text();
     const json = text ? JSON.parse(text) : {};
     if (!res.ok) {
       const parsed = ErrorBodySchema.safeParse(json);
       if (parsed.success) {
+        // ADR 337 §4's stated case, which nothing was actually calling: "a caller that has just had
+        // its stored lease REFUSED and wants exactly one claim in reply". `claimAgentLease` above
+        // swallows a failed per-request claim and degrades to the stored lease, so a lease that died
+        // with its Presence (a daemon bounce, a reap) produces this refusal and the caller's act is
+        // thrown away with it. Measured 2026-09-04 in the first live huddle: `huddle say` refused,
+        // and the turn's text was simply gone from the thread.
+        //
+        // Deliberately narrow, because the opposite mistake is the 2026-09-01 claim storm
+        // (#1138/#1143): ONE retry, only on the lease refusal, and only for a caller that already
+        // opts into claiming. A hook read (`claimSeatPerRequest: false`) still fails closed and does
+        // NOT seize the seat — the behaviour `cli.e2e.test.ts` pins.
+        if (
+          !afterLeaseRefusal &&
+          this.opts.claimSeatPerRequest === true &&
+          isSessionLeaseRefusal(parsed.data.error)
+        ) {
+          const fresh = await this.claimSessionLease().catch(() => undefined);
+          if (fresh) {
+            this.opts.sessionLease = fresh.lease;
+            try {
+              return await this.request(method, path, body, true);
+            } finally {
+              fresh.close();
+            }
+          }
+        }
         throw new CliError(
           parsed.data.error.message,
           exitForCode(parsed.data.error.code),
@@ -256,6 +451,10 @@ export class HttpClient {
   addMember(slug: string, body: Record<string, unknown>) {
     return this.request('POST', `/teams/${slug}/members`, body);
   }
+  /** ADR 374: set a member's hue on a DB-only team (a file-backed team edits the seat file). */
+  setHue(slug: string, name: string, hue: number): Promise<{ member: MemberSummary }> {
+    return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(name)}/hue`, { hue });
+  }
   /**
    * Re-mint a human member's `mscr_` credential in place — the recovery path for a lost one. Sits at
    * the provisioning bar (localhost unauthenticated, admin off-host), so this deliberately does NOT
@@ -268,6 +467,55 @@ export class HttpClient {
       {},
     );
   }
+  /**
+   * Rotate the team **agent key** (ADR 075) — admin-only and audited daemon-side. Destructive by
+   * nature: every seat binding holding the old `mskey_` stops authenticating, so `musterd team
+   * agent-key` counts them and makes the operator confirm before calling this.
+   */
+  rotateAgentKey(slug: string): Promise<AgentKeyMint> {
+    return this.request('POST', `/teams/${encodeURIComponent(slug)}/agent-key/rotate`, {});
+  }
+  migrateBootstrapCredential(body: {
+    legacy_key: string;
+    seat_credential: string;
+  }): Promise<{ credential: BootstrapCredentialSummary; agent_key: string }> {
+    return this.request('POST', '/agent-bootstrap-migrations', body);
+  }
+  mintBootstrapCredential(
+    slug: string,
+    body: {
+      use: 'claim_seat' | 'claim_role' | 'host';
+      target: string;
+      label?: string;
+      expires_at?: number;
+    },
+  ): Promise<{
+    credential: BootstrapCredentialSummary;
+    agent_key: string;
+  }> {
+    return this.request(
+      'POST',
+      `/teams/${encodeURIComponent(slug)}/agent-bootstrap-credentials`,
+      body,
+    );
+  }
+  listBootstrapCredentials(slug: string): Promise<{ credentials: BootstrapCredentialSummary[] }> {
+    return this.request('GET', `/teams/${encodeURIComponent(slug)}/agent-bootstrap-credentials`);
+  }
+  revokeBootstrapCredential(slug: string, id: string): Promise<{ ok: true }> {
+    return this.request(
+      'DELETE',
+      `/teams/${encodeURIComponent(slug)}/agent-bootstrap-credentials/${encodeURIComponent(id)}`,
+    );
+  }
+  bootstrapCutoverReadiness(slug: string): Promise<BootstrapCutoverReadiness> {
+    return this.request('GET', `/teams/${encodeURIComponent(slug)}/agent-bootstrap-cutover`);
+  }
+  cutoverLegacyBootstrap(slug: string, force: boolean): Promise<BootstrapCutoverResponse> {
+    return this.request('POST', `/teams/${encodeURIComponent(slug)}/agent-bootstrap-cutover`, {
+      force,
+    });
+  }
   roster(slug: string): Promise<{
     members: MemberSummary[];
     /** The team's role library (ADR 227): absent from an older daemon — consumers degrade to
@@ -278,20 +526,31 @@ export class HttpClient {
       charter?: string | null;
       capabilities?: unknown;
     }>;
+    /** ADR 360 follow-on: this machine's standing push refusal. Absent from an older daemon. */
+    sync?: { wedged: SyncWedge | null };
   }> {
     return this.request('GET', `/teams/${slug}/members`);
   }
   /** On an `ask`, the daemon's ack additionally carries the derived tier contract with the reachability
    *  projection (`unblocker_reachable`, ADR 153); callers fall back to the pure local contract when an
    *  older daemon omits it. */
-  send(slug: string, envelope: Envelope): Promise<{ ask_contract?: AskContract }> {
+  send(
+    slug: string,
+    envelope: Envelope,
+  ): Promise<{
+    ask_contract?: AskContract;
+    /** ADR 202 on the ack (lane 01M2GQFJXG): the lane this accept/decline moved by answering a
+     *  `lane_review` ask. Absent when the act moved nothing, and from an older daemon. */
+    lane_verdict?: { lane: string; state: 'done' | 'active' };
+  }> {
     return this.request('POST', `/teams/${slug}/messages`, { envelope }) as Promise<{
       ask_contract?: AskContract;
+      lane_verdict?: { lane: string; state: 'done' | 'active' };
     }>;
   }
   inbox(
     slug: string,
-    opts: { unread?: boolean; limit?: number } = {},
+    opts: { unread?: boolean; limit?: number; since?: number } = {},
   ): Promise<{
     messages: Envelope[];
     cursor: { last_read_ts: number };
@@ -305,11 +564,25 @@ export class HttpClient {
     /** ADR 254: eligible-set acts in this inbox that someone else has already answered, and who.
      *  Server-computed and underivable here: the discharging reply is a DM to the asker, so a second
      *  eligible seat is not a party to it. Absent from an older daemon ⇒ the act shows as still owed. */
-    discharged?: { id: string; by: string }[];
+    /** Doorbell clause 7: why an act is no longer owed. Only `answered` carries `by` — the lane
+     *  closing and the seat having been shown the act have no answerer to name. `reason` is absent
+     *  on a pre-clause-7 daemon. */
+    discharged?: { id: string; by?: string; reason?: 'answered' | 'lane_closed' | 'read' }[];
+    /** More was waiting than this reply carried: a caller that named no `limit` gets a bounded
+     *  PREFIX, so page on with `since` = the last message's ts until this is absent. Absent from an
+     *  older daemon ⇒ the reply was complete, the prior behaviour. */
+    truncated?: boolean;
+    /** How many unread rows were cut past this page — the limit-NAMING caller's counterpart to
+     *  `truncated`, which the server emits only when no limit was named. Counts unread rows, while
+     *  a caller filtering to action-needed counts a subset, so this reads as "more was cut that I
+     *  did not classify": a floor marker, never a renderable total. Absent from an older daemon,
+     *  and absent when nothing was cut ⇒ the reply was complete. */
+    unread_remaining?: number;
   }> {
     const q = new URLSearchParams();
     if (opts.unread) q.set('unread', '1');
     if (opts.limit) q.set('limit', String(opts.limit));
+    if (opts.since !== undefined) q.set('since', String(opts.since));
     const qs = q.toString();
     return this.request('GET', `/teams/${slug}/inbox${qs ? `?${qs}` : ''}`);
   }
@@ -364,6 +637,26 @@ export class HttpClient {
   }
   clearMemory(slug: string): Promise<void> {
     return this.request('DELETE', `/teams/${slug}/memory`);
+  }
+  // ── Team memory (ADR 327): the read side of `insight` acts, via the daemon's derived FTS fold
+  // (a rebuildable cache — never a source of truth). Writes travel as ordinary acts.
+  searchTeamMemory(
+    slug: string,
+    q: string,
+    limit?: number,
+  ): Promise<{
+    results: Array<{
+      id: string;
+      from: string;
+      headline: string;
+      body: string;
+      tags: string[];
+      ts: number;
+    }>;
+  }> {
+    const params = new URLSearchParams({ q });
+    if (limit) params.set('limit', String(limit));
+    return this.request('GET', `/teams/${slug}/memory/search?${params.toString()}`);
   }
   /** ADR 242: the sampler's latest footprint tick, or null when the daemon has none (any non-200). */
   async footprint(slug: string): Promise<{
@@ -495,11 +788,87 @@ export class HttpClient {
     return parsed.data;
   }
 
+  // ── Shared Seeds (ADR 319). Every wire response is parsed at this boundary.
+  async seeds(slug: string): Promise<Seed[]> {
+    const parsed = SeedListSchema.safeParse(await this.request('GET', `/teams/${slug}/seeds`));
+    if (!parsed.success) throw new CliError('Seeds response did not match the protocol schema', 1);
+    return parsed.data.seeds;
+  }
+
+  async seed(slug: string, id: string): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('GET', `/teams/${slug}/seeds/${encodeURIComponent(id)}`),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async claimSeed(slug: string, id: string): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/claim`, {}),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async askSeed(slug: string, id: string, body: string): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/clarification`, {
+        body,
+      }),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async answerSeed(slug: string, id: string, body: string): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/answer`, { body }),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async submitSeed(slug: string, id: string, body: SubmitSeedBrief): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/brief`, body),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async promoteSeed(slug: string, id: string, body: PromoteSeed): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/promote`, body),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  /** ADR 373 inc 2: capture a document-recorded intention as a Seed (idempotent on `ref`). */
+  async captureRepoSeed(slug: string, body: CaptureRepoSeed): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/repo`, body),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
   /** The orientation brief (ADR 049/084) — `GET /teams/:slug/next`, one server-side projection. */
   async next(slug: string): Promise<NextBrief> {
     const json = await this.request('GET', `/teams/${slug}/next`);
     const parsed = NextBriefSchema.safeParse(json);
     if (!parsed.success) throw new CliError('next response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /** The brief's per-turn numbers (lane 01M2GTB0RA) — `GET /teams/:slug/next/summary`. Three bounded
+   *  queries, for the statusline and the orient nudge; the full brief stays `next()`. */
+  async nextSummary(slug: string): Promise<NextSummary> {
+    const json = await this.request('GET', `/teams/${slug}/next/summary`);
+    const parsed = NextSummarySchema.safeParse(json);
+    if (!parsed.success)
+      throw new CliError('next/summary response did not match the protocol schema', 1);
     return parsed.data;
   }
 
@@ -524,10 +893,84 @@ export class HttpClient {
     return parsed.data;
   }
 
+  /** Retract a Goal (goal-retract design). `null` = goal not yet declared (signal queued). */
+  async goalRetract(slug: string, body: { goal_id: string }): Promise<Goal | null> {
+    const json = await this.request('POST', `/teams/${slug}/goals/retract`, body);
+    const raw = (json as { goal: unknown }).goal;
+    if (raw === null) return null;
+    const parsed = GoalSchema.safeParse(raw);
+    if (!parsed.success) throw new CliError('goal response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
   async goals(slug: string): Promise<GoalList> {
     const json = await this.request('GET', `/teams/${slug}/goals`);
     const parsed = GoalListSchema.safeParse(json);
     if (!parsed.success) throw new CliError('goals response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  // ── Machine credentials (ADR 328), increment 3a of the ADR 325 federation build.
+
+  /** Mint a single-use enrollment code. Admin-only server-side; the plaintext comes back once. */
+  async nodeInvite(slug: string, label: string): Promise<NodeInviteMint> {
+    const json = await this.request('POST', `/teams/${slug}/nodes/invite`, { label });
+    const parsed = NodeInviteMintSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('invite response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /**
+   * Ask **this machine's own daemon** to enroll itself at a hub — not the hub directly. The daemon
+   * holds the `nodes` row whose id gets presented and is what will hold the credential, so it makes
+   * the call and writes `node.json`. The response carries no secret by design.
+   */
+  async nodeEnroll(body: { hub_url: string; code: string; team: string }): Promise<{
+    node_id: string;
+    team: string;
+  }> {
+    return (await this.request('POST', '/node/enroll', body)) as { node_id: string; team: string };
+  }
+
+  /** Mint a fresh credential against the SAME node row — the id, and every stamp naming it, stays. */
+  async nodeRotate(slug: string, nodeId: string): Promise<{ node_credential: string }> {
+    return (await this.request(
+      'POST',
+      `/teams/${slug}/nodes/${encodeURIComponent(nodeId)}/rotate`,
+    )) as { node_credential: string };
+  }
+
+  /** Revoke a node. `revoked: false` means it was already revoked or unknown. */
+  async nodeRevoke(slug: string, nodeId: string): Promise<{ revoked: boolean }> {
+    return (await this.request(
+      'POST',
+      `/teams/${slug}/nodes/${encodeURIComponent(nodeId)}/revoke`,
+    )) as { revoked: boolean };
+  }
+
+  /**
+   * ADR 358: trust `nodeId` for the caller's own seat. Decided by the daemon this CLI talks to
+   * (or forwarded to its hub) — the machine running the command is the one vouching.
+   */
+  async nodeTrust(slug: string, nodeId: string): Promise<SeatNodeTrusted> {
+    const json = await this.request('POST', `/teams/${slug}/nodes/trust`, { node_id: nodeId });
+    const parsed = SeatNodeTrustedSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('trust response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /** ADR 328 §4's explicit re-bind act: drop a seat's residence binding (admin). */
+  async nodeUnbind(slug: string, seat: string): Promise<{ seat: string; unbound: string | null }> {
+    return (await this.request(
+      'DELETE',
+      `/teams/${slug}/nodes/bindings/${encodeURIComponent(seat)}`,
+    )) as { seat: string; unbound: string | null };
+  }
+
+  async nodes(slug: string): Promise<NodeList> {
+    const json = await this.request('GET', `/teams/${slug}/nodes`);
+    const parsed = NodeListSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('nodes response did not match the protocol schema', 1);
     return parsed.data;
   }
 
@@ -770,29 +1213,66 @@ export class HttpClient {
    */
   async claim(
     slug: string,
-    input: { key: string; target: ClaimTarget; grant?: string; surface: Surface },
+    input: {
+      key: string;
+      target: ClaimTarget;
+      grant?: string;
+      surface: Surface;
+      workspace?: string;
+      /** The workspace's stable identity (work tree root), in the CLI's camelCase — `buildClaimFrame`
+       *  is the one place it becomes the wire's `workspace_key`. Named to match that builder on
+       *  purpose: this input used to be `workspace_key`, and the rename it needed on the way through
+       *  was made by hand inside a conditional spread, where TypeScript's excess-property check
+       *  cannot see it. The field was silently dropped and typecheck stayed green. One name until
+       *  the wire, so a typo is a type error. */
+      workspaceKey?: string;
+    },
   ): Promise<ClaimOutcome> {
     // Validate the frame shape against the protocol schema (ADR 078); send the HTTP body Cleo's
     // endpoint expects ({ key, target, grant?, surface } — no WS type/v).
-    // Model attestation (ADR 101): resolved from the env; absent reads as `unknown`.
-    const model = resolveAttestedModel(process.env);
+    // Model attestation (ADR 246): the full ladder `observed > env > binding` is already
+    // resolved by the caller into `this.opts.model` (see `helpers.ts:attestedModel`), so use it
+    // when present; fall back to the env declaration alone for callers that have no binding.
+    const model = this.opts.model ?? resolveAttestedModel(process.env);
+    // ADR 131 §6: provenance rides the claim on the same gate the ambient header uses — never from
+    // a human credential, because the wake actuators read this word to decide a seat is their own
+    // child, and a human shell must not be able to say `wake`. The server applies the authoritative
+    // gate on the target member's kind; this one keeps the client from ever putting it on the wire.
+    const claimProvenance = input.key.startsWith(TOKEN_PREFIXES.credential)
+      ? undefined
+      : resolveAttestedProvenance(process.env);
+    if (process.env['MUSTERD_DEBUG_ATTEST']) {
+      console.error(
+        `[musterd debug] HttpClient.claim model: opts=${this.opts.model ?? 'none'} env=${resolveAttestedModel(process.env) ?? 'none'} => ${model ?? 'none'}`,
+      );
+    }
     const frame = buildClaimFrame({
       team: slug,
       key: input.key,
       target: input.target,
       surface: input.surface,
+      ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
+      ...(input.workspaceKey !== undefined ? { workspaceKey: input.workspaceKey } : {}),
       ...(input.grant !== undefined ? { grant: input.grant } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
+      ...(claimProvenance !== undefined ? { provenance: claimProvenance } : {}),
     });
     const body = {
       key: frame.key,
       target: frame.target,
       ...(frame.grant !== undefined ? { grant: frame.grant } : {}),
       surface: frame.surface,
+      // ADR 014 / 368: the stateless mirror carries the workspace the same way the WS frame does.
+      // Omitted until 2026-09-04, which left every detached claim location-less on the roster and
+      // unprotected by ADR 092's same-workspace grace.
+      ...(frame.workspace !== undefined ? { workspace: frame.workspace } : {}),
+      ...(frame.workspace_key !== undefined ? { workspace_key: frame.workspace_key } : {}),
       ...(frame.model !== undefined ? { model: frame.model } : {}),
       ...(frame.build !== undefined ? { build: frame.build } : {}),
       ...(frame.epoch !== undefined ? { epoch: frame.epoch } : {}),
+      // ADR 131 §6: the last field that kept this route from being the mirror SPEC A.7 calls it.
+      ...(frame.provenance !== undefined ? { provenance: frame.provenance } : {}),
     };
     let res: Response;
     try {
@@ -901,10 +1381,13 @@ export function watch(opts: WatchOpts): { close: () => void } {
 
 /** Minimal socket surface `watchClaim` drives — the `ws` WebSocket shape it uses. Injectable for tests. */
 export interface ClaimSocket {
-  on(event: 'open' | 'message' | 'error', cb: (arg?: unknown) => void): void;
+  on(event: 'open' | 'message' | 'error' | 'close', cb: (arg?: unknown) => void): void;
   send(data: string): void;
   close(): void;
 }
+
+/** How long a short-lived reclaim may wait for the daemon before degrading (lane 01M1F7Y4N). */
+export const CLAIM_LEASE_TIMEOUT_MS = 3_000;
 
 export interface WatchClaimOpts {
   wsUrl: string;
@@ -919,6 +1402,8 @@ export interface WatchClaimOpts {
   /** Attach-time context (ADR 014), sticky for the session — same as `watch`. */
   provenance?: string;
   workspace?: string;
+  /** Stable workspace identity (work tree root) — compared for displacement (lane 01M1JQYYAC). */
+  workspaceKey?: string;
   /** Harness-attested model id (ADR 101). Defaults to the env resolution (`MUSTERD_MODEL` /
    *  `ANTHROPIC_MODEL`); absent reads as `unknown` server-side, never blocks. */
   model?: string;
@@ -935,6 +1420,8 @@ export interface WatchClaimOpts {
     presenceId: string,
     grant?: string,
     memory?: MemoryEnvelope | null,
+    seatCredential?: string,
+    sessionLease?: string,
   ) => void;
   /** No grant — the server opened a claim request (A.5); the socket stays open for the pushed terminal. */
   onPending?: (requestId: string, message: string) => void;
@@ -960,8 +1447,16 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
   // Model attestation (ADR 101): explicit opt wins, else the shared env resolution — resolved once
   // so a reconnecting frame attests the same value.
   const attestedModel = opts.model ?? resolveAttestedModel(process.env);
+  // ADR 131 §6: the live claim carries what animates this session, on the same gate the ambient
+  // header and the stateless mirror use — never from a human `mscr_` credential. Until now this
+  // path sent workspace, model and build but no provenance, so every CLI-claimed seat attached
+  // with none (measured 2026-09-05: 3582 cli `presence.attached` rows with a null provenance).
+  const attestedProvenance = opts.key.startsWith(TOKEN_PREFIXES.credential)
+    ? undefined
+    : resolveAttestedProvenance(process.env);
   let heartbeat: NodeJS.Timeout | undefined;
   let subscribed = false;
+  let terminal = false;
 
   const subscribe = () => {
     if (subscribed) return;
@@ -991,10 +1486,13 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
           surface: opts.surface as Surface,
           ...(opts.grant !== undefined ? { grant: opts.grant } : {}),
           ...(opts.workspace !== undefined ? { workspace: opts.workspace } : {}),
+          ...(opts.workspaceKey !== undefined ? { workspaceKey: opts.workspaceKey } : {}),
           // Model attestation (ADR 101): explicit opt wins, else the shared env resolution.
           ...(attestedModel !== undefined ? { model: attestedModel } : {}),
           // Build attestation (ADR 135): this CLI dist's own stamp.
           ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
+          // Provenance (ADR 131 §6) — the server applies the authoritative agent-only gate.
+          ...(attestedProvenance !== undefined ? { provenance: attestedProvenance } : {}),
         }),
       ),
     );
@@ -1005,15 +1503,25 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
     if (raw.type === 'occupied' || raw.type === 'refused' || raw.type === 'pending') {
       const o = parseClaimResponse(raw);
       if (o.state === 'occupied') {
+        terminal = true;
         // Subscribe FIRST, then hand control to the caller. The order is load-bearing: a caller that
         // reconciles durable state in `onOccupied` (as `inbox --wait` does, to close the drain/socket
         // startup gap — ADR 054) must run that reconciliation against a socket that is already
         // subscribed, or anything landing in between is missed by both paths.
         subscribe();
-        opts.onOccupied?.(o.seat, o.presenceId, o.grant, o.memory);
+        opts.onOccupied?.(
+          o.seat,
+          o.presenceId,
+          o.grant,
+          o.memory,
+          o.seatCredential,
+          o.sessionLease,
+        );
       } else if (o.state === 'refused') {
+        terminal = true;
         opts.onRefused?.(o.code, o.message, o.claimable, o.hint);
       } else {
+        // pending is NOT terminal — the same socket later delivers the pushed occupied/refused
         opts.onPending?.(o.requestId, o.message);
       }
       return;
@@ -1032,10 +1540,24 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
     }
   });
 
-  ws.on('error', (err) => opts.onError?.((err as Error)?.message ?? String(err)));
+  ws.on('error', (err) => {
+    terminal = true;
+    opts.onError?.((err as Error)?.message ?? String(err));
+  });
+
+  ws.on('close', (code) => {
+    if (terminal) return;
+    // A graceful daemon shutdown (code 1001) emits ONLY 'close', never 'error' — without this the
+    // claim promise never settles and the CLI hangs forever (lane 01M1F7Y4N). Surface it as an error
+    // so the reclaim can degrade to the stored lease instead of hanging.
+    terminal = true;
+    const detail = typeof code === 'number' ? `code ${code}` : String(code ?? 'unknown');
+    opts.onError?.(`claim socket closed before settlement (${detail})`);
+  });
 
   return {
     close: () => {
+      terminal = true;
       if (heartbeat) clearInterval(heartbeat);
       ws.close();
     },

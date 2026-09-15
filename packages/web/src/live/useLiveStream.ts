@@ -8,6 +8,7 @@ import {
   type ConnStatus,
   type LiveConfig,
 } from './client';
+import { ensureBuildSync } from './buildSync';
 import { firehoseSound } from './sound';
 import { capNewest } from './window';
 
@@ -82,6 +83,14 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
   const team = cfg?.team;
   const as = cfg?.as;
   const token = cfg?.token;
+
+  // Stale-page convergence (buildSync.ts): every live surface — /live and /broadcast alike — keeps
+  // itself on the build the daemon serves. Idempotent and inert in dev; independent of credentials,
+  // because a page stuck on a login error is still a page worth un-staling.
+  useEffect(() => {
+    ensureBuildSync();
+  }, []);
+
   useEffect(() => {
     if (!team || !as || !token) {
       setStatus('idle');

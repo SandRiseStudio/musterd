@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ProvenanceSchema, SurfaceSchema } from './acts.js';
 import { MemberSchema } from './member.js';
+import { WIRE_ATTESTATION_SOURCES } from './model.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 /**
@@ -67,6 +68,17 @@ export const ClaimFrame = z.object({
    * newest-wins (ADR 017). Optional for back-compat; the MCP/CLI clients already send it on the wire.
    */
   workspace: z.string().optional(),
+  /**
+   * The workspace's stable IDENTITY (`resolveWorkspaceKey` — the work tree root), as opposed to
+   * `workspace` above, which is a display label. Displacement compares this when both sides have it.
+   *
+   * They were one field until 2026-09-03 (lane 01M1JQYYAC), and that was the bug: the label is
+   * branch-qualified, so a branch switch or a detached HEAD renamed the workspace under the session
+   * holding it, its own next attach compared unequal, and ADR 092's same-workspace grace never
+   * engaged — the seat evicted itself. Optional for back-compat: absent on either side, the server
+   * falls back to comparing labels exactly as before, so an un-rebuilt dist is no worse off.
+   */
+  workspace_key: z.string().max(200).optional(),
   /** How this session was provisioned (ADR 014) + the human driving it (ADR 021) — presence metadata
    *  the live `hello` carried; surfaced on the roster. The client already sends both; recorded at OCCUPY. */
   provenance: ProvenanceSchema.optional(),
@@ -79,6 +91,19 @@ export const ClaimFrame = z.object({
    * switch is real); the audit log keeps the switch history (`occupancy.model_attested`).
    */
   model: z.string().max(120).optional(),
+  /**
+   * WHICH TIER produced `model` (ADR 301) — `observed` (a harness probe saw it),
+   * `environment` (this session's env declared it), or `binding` (a provisioning snapshot declared
+   * it). Rides with `model` and means nothing without it; omitted by older clients and by any
+   * session attesting nothing.
+   *
+   * It exists because the id alone cannot say whether it is a measurement or an assumption, and the
+   * two are not interchangeable evidence. A seat whose probe never fired falls through to a
+   * declaration and presents it with exactly the confidence of an observation — which is how a
+   * per-model aggregate ends up mixing measured rows with assumed ones and reporting a single
+   * number over both.
+   */
+  model_source: z.enum(WIRE_ATTESTATION_SOURCES).optional(),
   /**
    * The build ref (git SHA, `-dirty`-suffixed for an uncommitted build) of the *client dist* this
    * session runs from (ADR 135) — read from the dist's own `build.json` stamp, so it reports what the
@@ -120,7 +145,8 @@ export type MemoryEnvelope = z.infer<typeof MemoryEnvelopeSchema>;
 /** `occupied` (server → client) — the claim succeeded; this session holds the seat. `charter` is
  *  identity metadata the server serves but never enforces; `memory` is the seat-scoped continuity
  *  envelope (ADR 093) — headline + age, or null when the seat has saved nothing. The body is fetched
- *  on demand (GET /teams/:slug/memory); it never rides this frame. */
+ *  on demand (GET /teams/:slug/memory); it never rides this frame. An agent occupancy always receives
+ *  its Presence-bound lease; a newly minted or rotated agent credential is returned exactly once. */
 export const OccupiedFrame = z.object({
   type: z.literal('occupied'),
   seat: MemberSchema,
@@ -131,6 +157,11 @@ export const OccupiedFrame = z.object({
   // persists it into `binding.grant` and re-presents it on reconnect to occupy without an approval —
   // the server refreshes its TTL on each clean occupy. Only set on the first-issue (approve) path.
   grant: z.string().optional(),
+  // Per-agent credential shown exactly once, on first mint or explicit rotation (ADR 337).
+  seat_credential: z.string().optional(),
+  // A short-lived Presence-bound agent HTTP proof, freshly minted by every successful agent claim
+  // (ADR 337). Optional in the general frame because human and observer claims do not use it.
+  session_lease: z.string().optional(),
   memory: MemoryEnvelopeSchema.nullable(),
 });
 export type OccupiedFrame = z.infer<typeof OccupiedFrame>;

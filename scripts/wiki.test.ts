@@ -66,6 +66,46 @@ describe('checkWiki', () => {
     expect(checkWiki(dir).join('\n')).toMatch(/a\.md:5.*date/);
   });
 
+  /* The blind spot that motivated the widening: every one of these passed GREEN undated before
+   * 2026-08-24, and they are the family the team was finding most (config.modelDrift,
+   * neverExercised, ReconcileResult.errors, OccupiedFrame.charter). Kept as a corpus rather than
+   * one example, because the failure being guarded against is the phrase list going stale — a
+   * single case would be satisfied by a single synonym. */
+  it.each([
+    'ReconcileResult.errors is read by nothing, so a corrupt seat file vanishes.',
+    'OccupiedFrame.charter is populated by nothing.',
+    'The metric is populated by none of the five sites that build the frame.',
+    'The value is computed and never used.',
+    'The return value is discarded by every caller.',
+    'The paragraph is silently deleted by zod .strip().',
+    "The doctor's line is reaching no reader.",
+    'The charter is served to nobody.',
+    'This instrument has never been read.',
+    'Nothing counts the repeats.',
+    'The field is stored but never served.',
+  ])('fails an undated "reaches nobody" claim: %s', (claim) => {
+    const dir = withIndex({ 'a.md': `# A\n\nSummary.\n\n${claim}\n` });
+    expect(checkWiki(dir).join('\n')).toMatch(/a\.md:5.*date/);
+  });
+
+  /* Both halves of the transitive-verb discriminator. "never read X as Y" is ADVICE and must stay
+   * green; "simply never read." is an assertion and must go red. An earlier fix required a clause
+   * END after the verb and passed the first case while losing the second. */
+  it('does not lint imperative advice that opens its clause with the verb', () => {
+    const dir = withIndex({
+      'a.md':
+        '# A\n\nSummary.\n\nCLI send costs 650 ms — never read CLI latency as transport latency.\n',
+    });
+    expect(checkWiki(dir)).toEqual([]);
+  });
+
+  it('still lints the same verb used as an assertion, with a subject in front of it', () => {
+    const dir = withIndex({
+      'a.md': '# A\n\nSummary.\n\nThe tiebreak was persisted and simply never read.\n',
+    });
+    expect(checkWiki(dir).join('\n')).toMatch(/a\.md:5.*date/);
+  });
+
   it('ignores defect-shaped phrases inside fenced code blocks', () => {
     const dir = withIndex({ 'a.md': '# A\n\nSummary.\n\n```\nthis never runs\n```\n' });
     expect(checkWiki(dir)).toEqual([]);

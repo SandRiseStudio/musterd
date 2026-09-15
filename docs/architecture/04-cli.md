@@ -20,18 +20,29 @@ src/
   bin.ts              // shebang entry; parse argv; dispatch; map errors -> exit codes
   help.ts             // re-exports the plain `HELP` string (from help/plain.ts) so guidance:check can import it; ADR 085
   args.ts             // argv parser → { command, positionals, flags }
-  config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup; saveBinding merge-guards hook-written session + model_observed (omit = preserve); capture writers pass { drop: { model_observed: true } } to clear on session-id change (ADR 268)
+  config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup; saveBinding merge-guards hook-written session + model_observed and same-seat claimed seat_credential (omit = preserve), with atomic publication seam for migration recovery; capture writers pass { drop: { model_observed: true } } to clear on session-id change (ADR 268/340/350)
   machinePaths.ts     // machine-wide path resolvers; VITEST refuses unset overrides (ADR 190)
-  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
+  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; scoped bootstrap lifecycle, Workspace migration, and Team cutover (ADR 344/350); routine agent HTTP calls re-claim their bound seat in the same Workspace and hold its Presence through the request (ADR 339/340); forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
+  test-auth.ts        // CLI integration-fixture claim helper: bootstrap key → agent-seat credential + Presence-bound lease (ADR 337)
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
   codexBin.ts         // PATH-robust, shell-free `codex` binary resolution plus read-only `--version`/help capability probe; an unresolved or incompatible install stays non-wakeable (ADR 216)
+  opencodeBin.ts      // PATH-robust `opencode` binary resolution plus the read-only residency preflight (run --format json + --session advertised); an unresolved or incompatible install stays non-wakeable (ADR 321)
+  grokBin.ts          // PATH-robust `grok` binary resolution plus the read-only residency preflight (`-p` / `-r` advertised); an unresolved or incompatible install stays non-wakeable (ADR 352)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
+  roster-roles/
+    templates.ts      // built-in role templates `role create --from` instantiates into roles/<name>.toml — seeds with structural capabilities only, no promotion machinery (ADR 298)
   infra-gate.ts       // warn-only infra-touch check: asks the daemon whether the acting seat holds `platform`; every failure mode is silence, never a block (ADR 227 inc 2)
   workingTree.ts      // session-start marker + the advisory a stage-shaped `git add -A` earns for paths that PREDATE this session; local-only, warn-never-deny (ADR 239 verdict)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
+  process.ts          // injected synchronous process runner: missing binary → code 127, shared by read-only inspectors
   errors.ts           // CliError(code) -> message + exit code
+  exit.ts             // exitAfterFlush: exit only once stdout+stderr have drained — a piped render was cut at 64 KB by a bare process.exit()
+  integrations/       // optional external integration inspectors (ADR 385)
+    aperture.ts        // HuJSON config parsing + secret-safe Aperture retention/provider/grant/quota/identity posture checks
+    report.ts          // stable report composition + exact terminal rendering for independent optional postures
+    tailscale.ts       // typed Tailscale status/Serve parsing + bounded Host-gate upgrade probe; no mutation commands
   help/               // the structured command catalog behind `musterd help` (ADR 113)
     catalog.ts        // pure, import-free command catalog (groups + entries) — the single source guidance:check reads
     plain.ts          // renderPlainHelp(): the uncolored HELP string derived from the catalog (guidance-safe)
@@ -39,14 +50,18 @@ src/
     theme.ts          // mutable ANSI color instance + roles from brand.md; setColorEnabled wires --no-color (ADR 113)
     ui.ts             // shared layout toolkit: glyph set, termWidth, defList, success/heading/hint, visible-length padding (ADR 113)
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
+    huddles.ts        // the roster's huddle join (ADR 378): huddleMarks turns deriveHuddles' huddle-major answer into the seat-major one a roll-call row asks — open rooms only, spoken not merely named; owns TIMELINE_WINDOW so `status` and `huddle list` read the same window
     title.ts          // terminal-tab seat title (ADR 160): pure terminalTitleFor decision + best-effort /dev/tty OSC-0 writer, called from the bin.ts postamble
     help.ts           // the pretty grouped/per-command/JSON help renderers + did-you-mean (ADR 113)
     credentials.ts    // v0.3 mint/env renderers: credentialEnv (SPEC A.9) + shown-once agent key / human credential / grant / team-create blocks (ADR 075/076; live post-P3 cutover)
   broadcast/          // the hosted half of `musterd broadcast` — run the capture on a rented machine
-    hosted.ts         // `musterd stream doctor`'s precondition ladder + the tailscale/fly JSON parsers, all injected: checks are EMPIRICAL (the allow-list one attempts a real WS upgrade against the RUNNING daemon with the tailnet Host, rather than reading the plist) because every precondition here fails as the same "page never reported ready"
+    hosted.ts         // `musterd stream doctor`'s hosted-stream precondition ladder + Fly parsers, all injected; its Tailscale primitives live in integrations/tailscale.ts
+    streamState.ts    // ADR 293 desired-state file (start/stop provenance: who, when, why) + the pure ensure decision — a machine gone while this says live is a crash by definition; 3 restarts/30min then stand down
   guardian/           // the platform guardian's pure logic (ADR 263) — every effect injected, zero model tokens
     classify.ts       // recency-keyed signals → incident classes; shipped DEFAULT_TIERS + resolveGuardianTiers (policy over defaults, read-time)
     signals.ts        // collectSignals: /health (booted_at-anchored), launchctl parse, boot-gated log reads — the collector owns staleness so classify never sees a stale line
+    sample.ts         // ADR 389 §1: parse `sample <pid>` into a wedged/not verdict — ≥90% of the MAIN thread in ONE frame that is not the event loop's own poll (uv__io_poll/kevent/epoll_wait…) is held; a sleep or lock wait under a native call IS a wedge (the live SQLite wedge bottoms out in nanosleep → __semwait_signal, 2026-09-05); reports the leaf and where the chain left the runtime; runSampleTool is the tick's spawn (-file /dev/stdout, 15 s grace); any unreadable sample is `taken: false` with a reason, never a confident wrong answer
+    sample.fixtures.ts // CAPTURED `sample(1)` reports (wedge, spin, idle) from the falsifier's live run — not shaped ones; what sample.test.ts and falsifier.test.ts pin
     damp.ts           // one remediation attempt per class per hour then forced escalation; stamp file (never the DB — the DB may be what's down) + daily-heartbeat bookkeeping
     act.ts            // actOn: auto classes shell the guarded service verbs (refresh --live / refresh --pin <last-good> --force), alert classes notify + role-addressed ask; audit failure never breaks a tick
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
@@ -55,21 +70,24 @@ src/
   host/               // the `musterd host` wake actuator — harness residency's per-machine hand (ADR 131 inc 3)
     registry.ts       // machine-local seat → workspace/harness registry (~/.musterd/host-registry.json); written by `residency on`, never by the daemon
     backend.ts        // ActuatorBackend seam: spawn-or-invoke + roster-derived verify + WakeOutcome; native row must stay expressible (ADR 131 §7)
-    loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation; wake-progress after spawn (not on deferred)
-    pinnedBin.ts      // a wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
+    loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); host_key auth (ADR 395, fallback agent_key) read through workspace bindings; one wake span per actuation; wake-progress after spawn (not on deferred)
+    pinnedBin.ts      // every spawned-harness wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
+    wakeLeaseFile.ts  // the wake lease on DISK (ADR 354): written beside binding.json at spawn naming the harness child's pid, cleared at settle — for harnesses that sanitize the MCP env (codex: 12 vars, no MUSTERD_*), where the env channel ADR 241 relies on stops at the child
     engine.ts         // the AgentLoopEngine seam (ADR 251 §3): prompt + tools + bounds → turns/usage/end-reason, provider-neutral; the named insertion point for a second provider (ADR 101/110), with per-turn observation for capture/telemetry
     engines/
       anthropic.ts    // the one shipping engine: `client.beta.messages.toolRunner` drives the loop; ALL Claude-specific knowledge (pricing table, error classification) bounded to this file; cost computed by the harness from per-turn usage, unknown models price to honest absence (ADR 251 §6)
     backends/
       claudeCode.ts   // backend #1: explicit portable/fresh orders bypass resume; legacy orders retain the resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to fresh `claude -p` in the same lease; reports actual delivery + local byte/age metadata only (ADR 131 §5 / ADR 209) Under ADR 210 an order marked resume_eligible takes the exact-match rung INSTEAD of the slot/enumerated ladder: registry hit + byte/age hygiene or fresh; a non-eligible order never reads the registry at all. ADR 221: an unresolvable harness binary DEFERS (budget-neutral) rather than failing, so a machine-local fault cannot retire the act.
-      codex.ts        // backend #2: exact JSONL thread identity; explicit portable/fresh orders bypass `exec resume` (ADR 209 — same gate as claudeCode); legacy orders keep capture→resume then one fresh `exec -C` fallback; each path requires wake-provenance Presence; reports delivery_outcome + local byte/age when the order carries intended_delivery; sanitized environment and no bypass flags (ADR 216). ADR 210's exact-match rung is still Claude-only. ADR 221: an unresolvable harness binary DEFERS (budget-neutral) rather than failing, so a machine-local fault cannot retire the act.
+      codex.ts        // backend #2: exact JSONL thread identity; explicit portable/fresh orders bypass `exec resume` (ADR 209 — same gate as claudeCode); legacy orders keep capture→resume then one fresh `exec -C` fallback; each path requires wake-provenance Presence; reports delivery_outcome + local byte/age when the order carries intended_delivery; sanitized environment, actuator-pinned `musterd` PATH, and no bypass flags (ADR 216). ADR 210's exact-match rung is still Claude-only. ADR 221: an unresolvable harness binary DEFERS (budget-neutral) rather than failing, so a machine-local fault cannot retire the act.
+      opencode.ts     // backend #4 (ADR 321 §7): `run --format json` fresh / `run --session <captured id>` resume; identity from the streamed event records' top-level sessionID only; codex's deferral taxonomy and sanitized/pinned environment unchanged
+      grok.ts         // backend #5 (ADR 352 §7): `grok -p` fresh / `grok -r <id> -p` resume; no --yolo; PATH-pinned musterd; deferral taxonomy matches siblings
       native.ts       // backend #3, the native row (ADR 251): no child process — an in-process AgentLoopEngine run with the seat's bridged MCP surface as its tools; occupancy earned via ADR 108 autojoin + ADR 241 lease-bound roster verify; watchdog aborts the loop; outcome at verify, settled at runner finish with harness-computed cost; per-turn wake-turn rows (best-effort); fresh-only phase 1, opt-in per enrollment
       nativeBridge.ts // the in-memory MCP bridge (ADR 251 §4): buildMcpServer + InMemoryTransport + MCP client inside the host process — seat-scoped render, wake provenance + lease attested on the connection; bridges rendered tools 1:1 into EngineTools; nativeMcpConfig constructs the adapter config directly (never cwd-anchored — the ADR 143 lesson)
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     continuity.ts     // ADR 210: the local continuity registry (.musterd/continuity.json, 0600, gitignored) — readRegistry/writeRegistry/bindThread/pruneOnDisk map a thread to the harness session holding its dialogue; a foreign, corrupt, or unknown-shaped registry is DISCARDED not adopted (ADR 143 posture), and a workspace with no capture binds nothing so its wakes stay fresh; prunes on every bind and on session end (missing transcript / past RESUME_GC_HORIZON_MS — resolved-thread pruning needs daemon knowledge, so a caller supplies it)
     digest.ts         // sessionDigest(agentKey, sessionId): the correlation handle the resumable attestation carries (ADR 131 Consequences, follow-up note 2026-08-05) — a keyed truncated HMAC, equal across one session's start and end, different across two, irreversible without the workspace key; keyed rather than a bare hash so the guarantee rests on construction, not on every harness picking high-entropy ids. The id itself still never crosses the wire
     liveness.ts       // localSessionLiveness(workspace): harness-selected binding/session scan + transcript stat → none|live|resumable|gc-expired; shared by the host guard and `session show`, with registry harness outranking stale capture provenance (ADR 166/204/265)
-    enumerate.ts      // harness-owned read-only session scan: Claude transcripts and Codex rollouts are attributed only by their RECORDED cwd; Cursor sessions by `.workspace-trusted.workspacePath` (never filename/path guesses; ADR 265); undefined = "cannot tell" (never laundered into "none")
+    enumerate.ts      // harness-owned read-only session scan: Claude transcripts and Codex rollouts are attributed only by their RECORDED cwd; Cursor sessions by `.workspace-trusted.workspacePath` (never filename/path guesses; ADR 265); OpenCode by its CLI's `session list --format json` rows (id/updated/directory — the CLI is the evidence boundary, ADR 321 §6); Grok by `$GROK_HOME/sessions/*/summary.json` (`info.cwd`/`info.id`/`last_active_at`, ADR 352 §6); undefined = "cannot tell" (never laundered into "none")
     sweep-series.ts   // ADR 166 follow-through: the one path + row shape for the slot-sweep's append-only JSONL, plus the repeat gate (a workspace demoted by two consecutive runs) read by `report` and by the sweep itself
     transcript-model.ts // readModelFromTranscript(path): the ONLY module that knows a harness transcript's on-disk shape — newest assistant turn's model, bounded tail, never throws (ADR 158)
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
@@ -80,6 +98,7 @@ src/
     host.ts           // `service --wake`: the wake actuator (`musterd host`) as a KeepAlive LaunchAgent — residency survives reboots (ADR 131 inc 5)
     autorefresh.ts    // `service --auto`: the daemon auto-refresher as a StartInterval LaunchAgent — runs `refresh --auto` on a poll (ADR 152)
     sweep.ts          // `service --sweep`: the ADR 166 liveness sweep as a StartInterval LaunchAgent — read-only, every 5 min (≤ the 10-min window a demotion persists for, so it cannot miss one)
+    streamwatch.ts    // `service --stream`: the ADR 293 stream supervisor as a StartInterval LaunchAgent — one `stream ensure` reconcile pass every 60s, so a crash costs ≤ a minute of dead air plus the boot
     guardian.ts       // `service --guardian`: the pure-code on-call tick (collect → classify → act → stamp, never throws) + the instrument-silence status line (ADR 263)
     handover.ts       // ADR 274's bounded refresh-handover record: the writer owns lifecycle; the guardian only reads a valid, current record
     logTrim.ts        // pure-ish: size-capped retention for the service logs (ADR 224) — copy-truncate to `<name>.1`, run by the auto-refresh tick; an explicit log list, never a `*.log` glob (the musterd home is a shared temp dir under test isolation)
@@ -88,59 +107,78 @@ src/
     doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060); baked entry secrets flagged on PRESENCE, report.repair routes --fix to `wire` (entry drift, headless, repairs the repo-root-shared family) vs full init (ADR 165); an entry read from a harness's machine-global config (DetectResult.registeredElsewhere) is reported with that path and its machine-wide reach, and never with a repair prescription — musterd does not write those files (ADR 031); ADR 232 increment 2 census notes ride the report (warn-only, never exit-1)
     workspace.ts      // provisionWorkspace(name): git worktree / sibling folder for an isolated agent seat (ADR 065)
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
+    declined.ts       // recorded refusals, the ADR 332 tombstone: read/write `.musterd/declined.json` (`<harness>:<slot>` names, version 1). The third provisioning state — absence that was CHOSEN — so a drift check can stop prescribing a repair the user already declined. Fails OPEN (a malformed file yields no refusals, never an invented one); sibling of binding.json because a re-claim rewrites that and a preference must not depend on identity churn
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
     mcpEntry.ts       // resolve how to launch @musterd/mcp; buildMcpEnv returns {} — the repo-root-shared entry carries NO per-seat state, everything resolves from binding.json/workspace.json (ADR 158/165)
     entryGuard.ts     // foreignAdapterNote + siblingWorkspaces + isInside — inspection-path checks for an adapter launched from another seat's checkout (assertEntryIdentity removed by ADR 165: no secrets in the entry, nothing to compare)
-    manifest.ts       // provision manifest read/write (ADR 030) — records what init wrote, for uninstall
-    guidance.ts       // writeGuidance/removeGuidance: skill + slash-command files per harness, content-stamped (ADR 085)
+    manifest.ts       // provision manifest read/write (ADR 030); loadProvisioning/saveProvisioning classify + publish the strict v2 desired-set manifest (ADR 281)
+    reconcile/context.ts // HarnessContext — explicit worktree/machine roots + injected fs/process/clock seams (ADR 282); memoryFs is the scenario-suite double
+    reconcile/store.ts   // canonical validated stores (ADR 282/286): LocalLoad classification, canonical JSON, atomic 0600+fsync+rename publish; ledger/journal/lock paths hash the containerKey
+    reconcile/lock.ts    // createHarnessLocks — 30s cross-process recoverable lease per containerKey; reclaim needs expiry + provably-dead PID/process-start identity, unknown liveness stays busy (ADR 282/286)
+    reconcile/fragments.ts // the fragment adapter contract (ADR 281/282): HarnessAdapter/FragmentIntent types, canonical SHA-256 fingerprints, scope-discriminated resource keys, registry order
+    reconcile/engine.ts  // inspectHarnesses (read-only) + reconcileHarnesses: the frozen action matrix, write-ahead journal sequence, fingerprint-compared recovery, one allowlisted musterd.provisioning.operation span per fragment (ADR 282/286)
+    harnesses/musterd.ts // the native musterd adapter (always available, Surface musterd, zero external fragments) + the internal musterd-core guidance fragment producer
+    guidance.ts       // writeGuidance/removeGuidance: skill + slash-command files per harness, content-stamped (ADR 085); always writes canonical `.musterd/skill/orient.md` (ADR 333)
     pending.ts        // client-side pending-presence markers (ADR 033)
     permissions.ts    // ADR 261: STANDARD_FLOOR + installSeatPermissions — the harness permission layer becomes a provisioned artifact
-    primer.ts         // renderPrimer + idempotent upsertPrimer → AGENTS.md agent primer (ADR 012)
-    role.ts           // Role = harness-agnostic provisioning template; resolve/apply (ADR 026/029/038)
-    roles/builtins.ts // the shipped built-in role template seed library
-    harnesses/
+    primer.ts         // renderRepositoryPrimer + idempotent upsertPrimer → Team-only AGENTS.md primer (ADR 307)
+    toolkit.ts        // Toolkit = harness-agnostic provisioning template ("profile" pre-ADR-296, "role template" pre-ADR-272); resolve/apply (ADR 026/029/038); tools.codex_plugins declared for the Codex adapter (ADR 323)
+    toolkits/builtins.ts // the shipped built-in toolkit seed library
+    harnesses/        // per-harness feature differences (labeling, hooks, skills discovery) are observed environment facts — documented in docs/wiki/driver-support-matrix.md, not modelled (ADR 296)
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
-      cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks for model_id observe (ADR 198); CLI also wires afterShellExecution + afterMCPExecution (ADR 265)
-      codex.ts        // detect/configure via project-local .codex/config.toml + marker-owned observational hooks (ADR 031/249)
-      codexHooks.ts   // reversible .codex/hooks.json renderer: marker-owned SessionStart/SessionEnd/PostToolUse only (ADR 249)
-      codexToml.ts    // TOML read/merge helper for the codex adapter
+      cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks: preToolUse gate (ADR 150/369), postToolUse interrupt (ADR 088/369), sessionStart orient (ADR 333), model_id observe (ADR 198), afterShellExecution + afterMCPExecution (ADR 265)
+      codex.ts        // detect/configure via project-local .codex/config.toml + marker-owned observational hooks (ADR 031/249); toolkit-declared plugin fragments write [plugins."id"] enable tables in the same file (ADR 323)
+      opencode.ts     // detect/configure via project-local .opencode/opencode.json (`mcp.musterd`, McpLocalConfig shape); plain JSON only — an opencode.jsonc sibling is refused, never raced (ADR 321 §3/§4); no hooks, guidance rides the AGENTS.md primer opencode reads natively; orient skill is canonical `.musterd/skill/orient.md` (ADR 333)
+      opencodePlugin.ts // OpenCode doorbell (ADR 392): renders the marker-owned, dependency-free `.opencode/plugins/musterd.js` — `tool.execute.after` appends a raised `inbox --interrupt-check` line to tool output, `session.idle` delivers it as a capped `prompt_async`; generation-stamped for the doctor (ADR 168), `init --refresh-hooks` is the only writer
+      grok.ts         // detect/configure via project-local .grok/config.toml + hooks in .grok/hooks/musterd.json (inbox --waiting, PreToolUse interrupt additionalContext + Stop continuation (ADR 370), gate, capture, end); inspectGrokHookDrift compares command text + FEATURE_EPOCH two-way (ADR 168); statusline, permission floor; Cursor hook compat off (ADR 352)
+      codexHooks.ts   // reversible .codex/hooks.json renderer: marker-owned SessionStart/SessionEnd/PostToolUse + UserPromptSubmit orient-nudge (ADR 249 / ADR 333)
+      codexToml.ts    // TOML read/merge helper for the Codex adapter — [mcp_servers.*] and [plugins.*] tables only (ADR 031/323)
   archaeology/        // cookoff wasted-work reference collector — git-only, no daemon (ADR 122/123)
     engine.ts         // pure predicate-set-v1 classifier: W3 dup → W1 abandoned → W2 clobbered → W4 churn
     git.ts            // RepoFacts extractor over git plumbing; actor identity = ADR 109 attribution
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report; --check --fix → `wire` for entry drift, full init otherwise (ADR 165)
-    wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
-    codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence (ADR 249)
-    agent.ts          // musterd agent <name> [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness, via the ADR 038 registry) + standing grant + committed workspace.json (ADR 065/080/116)
+    wire.ts           // musterd wire: headless fragment reconcile, plus --migrate-bootstrap atomic replacement of a Workspace's legacy Team key while Presence stays occupied (ADR 080/282/350)
+    harness.ts        // musterd harness configure|status: the ONE desired-set editor/legacy converter + the read-only fragment inspection (ADR 281/282/286)
+    codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence (ADR 249); start also emits the ADR 326 orientation block on stdout (ADR 333)
+    agent.ts          // musterd agent <name> [--role <label>] [--profile <profile>] [--harness claude-code|cursor|codex|opencode|grok]: add an agent + isolated worktree + binding + MCP register (any harness) + standing grant + committed workspace.json (ADR 065/080/116); --role = team fact, --profile = local setup (ADR 272)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
-    residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant + host-registry entry; status cross-checks all three stores (ADR 131)
-    session.ts        // musterd session start|end|observe --stdin (hook-driven capture / Cursor model observe, ADR 198/265/268) | resolve-labels --stdin (sidebar sweep decision engine) | label-nudge (evidence-based due, single CCD scan, ADR 186) | show (ADR 131 §5 / ADR 160 / ADR 186). Interloper gate: an empty newcomer cannot take a live-looking slot; a named-but-missing occupant transcript is live by construction via started_at for LOCAL_SESSION_LIVE_MS (file appears at first turn, not at start). ADR 268: a new Cursor conversation_id without a model drops leftover model_observed; observe with no session_id still reconciles from enumeration; refresh heals an unended Cursor slot whose live .txt disagrees
+    residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant, host-scoped wake credential in binding.host_key (ADR 395), host-registry entry; status cross-checks the stores (ADR 131)
+    session.ts        // musterd session start|end|observe --stdin (hook-driven capture / Cursor model observe, ADR 198/265/268) | observe --orient (ADR 333: Cursor sessionStart JSON additional_context) | resolve-labels --stdin (sidebar sweep decision engine) | label-nudge (evidence-based due, single CCD scan, ADR 186) | orient-nudge / orient-stamp (per-session orientation ritual, ADR 326: stamp keyed to the captured session id quiets the per-turn nudge) | show (ADR 131 §5 / ADR 160 / ADR 186). `session start` also emits the ADR 326 orientation block after capture (read-only, wake-suppressed, composable-only). Interloper gate: an empty newcomer cannot take a live-looking slot; a named-but-missing occupant transcript is live by construction via started_at for LOCAL_SESSION_LIVE_MS (file appears at first turn, not at start). ADR 268: a new Cursor conversation_id without a model drops leftover model_observed; observe with no session_id still reconciles from enumeration; refresh heals an unended Cursor slot whose live .txt disagrees
+    sessionOrientation.ts // ADR 326 orientation-block composer — pure, composable-only (enums/slugs/ULIDs/counts + the seat's own fenced memory headline), 15-line cap; emission/silence policy lives in session.ts
+    sessionStatusline.ts // ADR 326 amendment: seat-chip composer for the statusLine — the USER-facing half (SessionStart has no user seam at exit 0; systemMessage is discarded there). Counts + validated slugs only, no free text at all; renders on a quiet seat where the block stays null
     gate.ts           // musterd gate check --stdin — the PreToolUse enforcement gate (hook-driven): match the tool call vs the team's class table client-side, adjudicate matches via POST /gate; fail-open (ADR 150)
     host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
     human.ts          // musterd human <name>: the mirror of `agent` — stands a person in the team home (~/musterd/<team>) with their 0600 binding, mints/reuses/re-issues the credential, self-claims, sets current (ADR 176)
     serve.ts          // musterd serve [--port]
     broadcast.ts      // musterd broadcast --team … (--out|--twitch|--rtmp): headless-Chrome capture of /broadcast → CFR frame pump → ffmpeg (VideoToolbox/libx264) → file or RTMPS; stream key from env/Keychain only (ADR 157 inc 2)
     stream.ts         // musterd stream doctor|build|start|stop|status: the one-verb hosted broadcast, absorbing scripts/broadcast/live.sh — `doctor` prints the exact repair per failed precondition; `build` records the pushed DIGEST and `start` runs that (a rebuilt tag can resolve to the previous image) and discovers the tailnet address itself; secrets stay operator-set, presence-checked only
+    integration.ts    // musterd integration doctor: explicitly selected, independent, read-only Tailscale transport and Aperture configuration inspections (ADR 385)
     broadcast-perf.ts // capture-pipeline instrumentation, dark unless MUSTERD_BROADCAST_PERF names a JSONL path: screencast fps/bytes, canvas draw rate, ffmpeg queue depth (its *slope* is the margin metric — `speed=` is pinned ≈1× for a live source), per-tree CPU + load; summarized by scripts/perf/broadcast-baseline.mjs
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
-    team.ts           // team create / add / remove / archive / export (ADR 058 db→file migration)
-    fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files (ADR 058 guard 2)
-    join.ts           // join
+    team.ts           // Team/member management, scoped bootstrap lifecycle + readiness-gated legacy cutover (ADR 344/350), policy, and roster export
+    fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files: team + seats + roles (ADR 058 guard 2)
+    join.ts           // hidden alias since 2026-09-03 (ADR 377): pure argv translation onto `claim <name> --team <slug> --detach`, prints the new spelling; removed one epoch on
     send.ts           // send
+    huddle.ts         // huddle open/say/close — a huddle is a thread: meta.huddle on the root, turns in the thread, resolve names the anchor; lays the whiteboard room out best-effort, never spawns it (ADR 378)
     inbox.ts          // inbox [--watch] [--wait] [--limit <n>] — bounded recent window + day-grouped smart dates, always-show-unread (ADR 054/117)
-    nudge.ts          // print directed acts waiting for this seat — the approval-prompt hook target (ADR 053)
+    nudge.ts          // `inbox --waiting`: the waiting-acts banner + the acts behind it, read-only — the approval-prompt hook target (ADR 053); `musterd nudge` is the hidden pre-2026-09-03 alias
     reap.ts           // musterd reap [--yes] (ADR 242): list orphaned MCP sidecars from the daemon's footprint tick; --yes asks the daemon to kill them (re-verified server-side, audited)
     whoami.ts         // print the seat this folder resolves to: member/team/surface/source (ADR 067)
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
+    insight.ts        // insight save/search — team-visible findings via the insight act + FTS search (ADR 327)
+    surface.ts        // musterd surface list|decline|accept (ADR 332): the vocabulary for refusing a provisioned surface. `decline` removes it AND records the tombstone (one command, one outcome); `list` names what is refusable here plus any refusal this build no longer recognises; `accept` clears one. `init --refresh-hooks` overrides every tombstone in the folder and says which it resurrected
     wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 209)
-    claim.ts          // claim a seat by name or open role (ADR 032/034/036)
-    lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256)
+    claim.ts          // claim a seat by name or open role (ADR 032/034/036); the ONE occupancy verb since ADR 377 — `--team/--key/--grant` cover the fresh-folder bootstrap `join` used to, `--detach` is join's one-shot HTTP claim (Presence outlives the process); MCP twin `team_join`
+    lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256); counterpart resolve ignores --pr/--sha (ADR 305)
+    seed.ts           // shared Seed tray/read/claim/clarification/brief/conclude/promote Surface (ADR 319)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
-    done.ts           // close your work — mark the lane done (auto-targets your live lane), then show next (ADR 049/084)
+    node.ts           // machine credentials (ADR 328, federation 3a): invite/join/rotate/revoke/list. `join <hub-url> <code>` does NOT call the hub — it asks THIS machine's daemon to enroll, so the process holding the nodes row also holds the credential and writes node.json. join/list use resolveRead (a fresh laptop has no bound identity; the code plus being on-machine is the authority); the admin verbs use resolve. join prints no credential — it went to disk
+    done.ts           // close your work — mark the lane done (auto-targets your live lane), then show next (ADR 049/084); with --pr/--sha it is a submit and prints the shared routing report, without it says "unconfirmed"; refuses a lane already awaiting acceptance
     goal.ts           // declare/list team Goals — the declared-outcome layer above lanes (ADR 048/084)
     report.ts         // the insight report at ic/team/exec altitudes: flow, coordination, steering (ADR 050/084/125), waiting-on, Goal board
     board.ts          // musterd board: open /board signed in as yourself — stages a one-shot 60s nonce with the daemon and opens it in the fragment, so no human ever handles a credential (ADR 170)
@@ -150,7 +188,8 @@ src/
     reload.ts         // SIGHUP the service daemon to re-resolve roster roots + reconcile (ADR 058)
     reclaim.ts        // operator force-drop of a member's stuck live session (ADR 017 follow-up)
     notify.ts         // human-reachability nudge loop (ADR 024/035)
-    role.ts           // role list / show / create (ADR 029/038)
+    role.ts           // the team's role library — list / show / create / assign (ADR 227, narrowed by 296)
+    toolkit.ts        // workspace equipment — list / show / create; carries no authority (ADR 296)
     reset.ts          // local clean-slate db + config wipe (ADR 022)
     uninstall.ts      // per-folder uninstall — unwinds what init wrote (ADR 027)
     helpers.ts        // shared command helpers (active-identity resolution, ADR 036)
@@ -192,7 +231,8 @@ _workspace_, the same way the MCP adapter resolves it, so an agent that shells o
 in its folder acts as _that_ member — not whoever last wrote the global single-slot-per-team
 (the 2026-06-16/17 dogfood collision). `musterd init` writes the binding file (0600, gitignored),
 which under v0.3 (ADR 075) carries the **team agent key** (`agent_key`, `mskey_`) + a `claim` policy
-(+ optional `grant`), not a per-seat token.
+(+ optional `grant`), not a per-seat token. `host_key` (ADR 395) is the wake actuator's host-scoped
+bootstrap credential, minted at `residency on` and merge-guarded so a claim cannot overwrite it.
 
 **Committed launch spec `.musterd/workspace.json` (ADR 080).** Alongside the gitignored `binding.json`,
 `init`/`agent` also write a **secret-free** `.musterd/workspace.json` (`WorkspaceSpecSchema` =
@@ -226,6 +266,17 @@ unauthenticated; `inbox` + writes already require a member token.
 
 All commands accept global `--team <slug>`, `--server <url>`, `--json` (machine output, no color), `--no-color`, `--quiet` (suppress the reachability nudge below). `musterd --version` / `-v` / `version` prints the `@musterd/cli` `package.json` version and exits (ADR 067) — intercepted in `main()` before the help path so it isn't swallowed.
 
+### `musterd seed <list|show|claim|ask|answer|brief|conclude|promote>`
+
+The human Shared Seed Surface (ADR 319). `list` shows the active tray — `open`, `exploring`,
+`needs_clarification`, `clarified`, plus `completed` for three days — while `--history` shows every
+Seed and `--json` emits the protocol object. `show <id>` renders the immutable Slack source and public
+thread. An agent Member uses `claim`, then `ask`; only the submitting human Member uses `answer`.
+`brief <id> --file <path>` parses an exhaustive `SeedBrief` JSON file through the protocol schema and
+promotes it to a Lane. `conclude <id> --file <path> "<conclusion>"` records the same brief without a
+Lane. `promote` is the explicit research-skipped override. Mutation success and empty-state copy are
+specified by `figma-brief-terminal.md`.
+
 **Agent-side reachability nudge (ADR 046).** After any **acting** command returns, `bin.ts` re-resolves the identity (`resolveRead`) and — only when it is **explicit** (env/binding/`--as`, never an ambient global-config read, ADR 036) — appends a one-line banner to **stderr** naming the directed acts waiting for that member: `⚑ N acts waiting for <me> — musterd inbox (since <t>)`. It is the agent-side mirror of `status`'s comeback summary, surfaced everywhere an agent already is so a heads-down agent can't sit on a `request_help` it never looked for. Built from the same `pendingActionSummary`/`openActionNeeded` predicate, so it self-clears once the inbox cursor advances or the thread is resolved. **Skipped** for commands that show the acts themselves or carry no identity (`inbox`, `nudge`, `status`, `serve`, `service`, `init`, `reset`, `role`, `uninstall`) and suppressed by `--json`/`--quiet`/`MUSTERD_NO_NUDGE=1`. Best-effort: any read failure is swallowed — the nudge never fails or delays a command beyond one inbox read, and never touches stdout (keeps `--json`/pipes clean). No wire change (rides the existing inbox cursor, like `notify`).
 
 ### `musterd init`
@@ -243,7 +294,7 @@ Interactive first-run onboarding (requires a TTY; non-TTY prints guidance and ex
 6. **Name + mint** — name the agent (no spaces), optional role. Before minting, the **cross-folder name-reuse guard** (ADR 020) runs `nameBoundElsewhere(name, cwd, config.bindings)`: if the name is already bound in _another_ folder it warns (naming that folder + team) with a default-yes confirm — on the same team the mint would be refused anyway (names are unique per team), so this pre-empts the failure. Then `team add` mints it. (The registry it consults is the global config's tokenless `bindings` map, which `saveBinding` writes on every init — see Config file below.)
 7. **Activation** — offer autojoin per-binding (_"Auto-join the team when `<name>` starts?"_), written to `binding.autojoin` (ADR 165 inc 2 — never the repo-root-shared MCP entry). If off, the agent joins when it calls `team_join` in-session. The agent is **dormant until it joins** (see `05-mcp.md`).
 8. **Configure** — with confirmation, write the target's MCP config (`claude mcp add -s local` / `.cursor/mcp.json`). `ConfigureResult.scope` prints a per-folder caveat: _"wired into this folder only (`<path>`) — another project needs its own `musterd init`, and a second agent needs its own folder."_ If the config lands **inside the working tree** with the token in plaintext (`ConfigureResult.secretPath` — e.g. Cursor's `.cursor/mcp.json`; Claude Code's `-s local` config lives in `~/.claude.json` _outside_ the repo, so no warning), init warns that the file holds the member's token and offers to add it to `.gitignore` so it isn't committed.
-9. **Agent primer** — with confirmation (default yes), write a musterd primer into the folder's `AGENTS.md` (`onboard/primer.ts`; ADR 012 / `docs/design/agent-primer.md`). This is the fix for the onboarding gap: a fresh agent that only _has_ the `team_*` tools doesn't know it's on a team or the working-loop, so init seeds the cross-tool agent-context file both Claude Code and Cursor read every session with the member's identity and the loop (join at session start → `team_inbox_check` at task boundaries → `status_update`/`request_help`/`handoff`/`accept`). The block is **marker-delimited** (`<!-- musterd:start -->`…`<!-- musterd:end -->`), so `upsertPrimer` is idempotent and never clobbers the user's own `AGENTS.md` content (create / append-below-prose / update-in-place). The **confirm prompt is honest at the decision point** (`classifyPrimerTarget`, ADR 023): against an existing unmarked `AGENTS.md` it reads _"Append a musterd primer … (your content is kept)"_, against an already-managed one _"Update the musterd primer …"_, and only says _"Write an AGENTS.md primer …"_ when none exists — so a user next to their own `AGENTS.md` is never asked to "write" one in a way that reads like an overwrite (2026-06-18 dogfood). The manual-setup printout (`printManual`) includes the block too.
+9. **Repository primer** — with confirmation (default yes), write `renderRepositoryPrimer({ team })` into the folder's `AGENTS.md` (`onboard/primer.ts`; ADR 012/307). The committed block carries the Team's coordination intent and working loop, never a Workspace-local Member, Role, charter, toolkit, or claim target. It directs a session to MCP instructions/authenticated occupancy when tools are present and to read-only `musterd whoami` otherwise. The block is **marker-delimited** (`<!-- musterd:start -->`…`<!-- musterd:end -->`), so `upsertPrimer` is idempotent, never clobbers user prose, and migrates an older Member-specific block on the next init (create / append-below-prose / update-in-place). The **confirm prompt is honest at the decision point** (`classifyPrimerTarget`, ADR 023): against an existing unmarked `AGENTS.md` it reads _"Append a musterd primer … (your content is kept)"_, against an already-managed one _"Update the musterd primer …"_, and only says _"Write an AGENTS.md primer …"_ when none exists. The manual-setup printout (`printManual`) includes the same repository-safe block.
 10. **Wait-to-join** — poll the roster, live spinner that resolves when the agent's Presence appears (or a no-rush note if it doesn't within the window).
 
 ### `musterd serve [--port 4849] [--host 127.0.0.1] [--tls-cert <pem> --tls-key <pem> | --insecure-trust-proxy]`
@@ -256,13 +307,30 @@ Runs the daemon as a background **service** so it survives a closed terminal/ses
 
 **`--live` (ADR 132):** the same verbs, retargeted at the **`/live` viewer** instead of the daemon. The daemon serves `/live` from its **own origin** (ADR 062 static-serve — its `serveArgs` carry a default `--web-root <home>/live/web`), so the viewer is not a separate host but a **build-publisher** that keeps that web-root fresh. It's a **single agent** in the same user domain — `studio.sandrise.musterd-live`, a `StartInterval` build job (no more `:5173` dev server, no second tracker agent). `install --live` **generates** one shell script (`~/.musterd/live/build.sh`, from a versioned builder in `launchd.ts` — reproducible + testable) and its plist, ensures a **dedicated detached-on-`origin/main` worktree** (`…/agents-live`, added from the daemon's checkout — they share the git object store; never the `main` branch → no worktree contention), boots out any retired ADR 124 dev-server bundle, then bootstraps the agent. `build.sh` advances the worktree to the tip of main → `pnpm --filter @musterd/web build` → **atomically publishes** `dist/client` into the daemon's web-root (staged copy on the same filesystem + `rename` swap, so a request never sees a half-written or emptied bundle), skipping the build when already current + published and keeping the last-good bundle on a build failure. The daemon serves the fresh files on the next request — **so `/live` tracks main with zero manual step and no daemon restart** (`serveStatic` reads per-request). `refresh --live` forces a rebuild now; `status --live` reports the agent + probes the **daemon's** `/live` (the real serving surface); `logs --live` tails `build.log`; `uninstall --live` boots it out + removes the artifacts + clears the published bundle (leaves the worktree unless `--purge`). Unlike the daemon verbs, `--live` ops **skip the shared-daemon guard** — nothing long-lived is bounced. Like the daemon, it's macOS-only via the same seam. `renderPlist` in `launchd.ts` is the one XML template the daemon and the viewer agent share.
 
+### `musterd integration doctor [--tailscale] [--aperture <https-url>] [--json]`
+
+Each integration is selected independently. With neither flag, both report healthy `off`. The
+Tailscale path runs the three read-only CLI commands named in ADR 385 and empirically checks the
+loopback daemon, Serve forward, exact Host gate, `/health`, and `/ws`. Aperture makes one bounded GET
+to `/api/config`, parses the vendor HuJSON through protocol-owned schemas, and reports configuration
+readiness with redacted evidence. Each ready workload grant has exactly one lowercase opaque
+`tag:musterd-member-<id>` source and only the standard `user` role; shared agent tags, multiple
+sources, missing roles, and other roles fail readiness (ADR 394). It never changes Tailscale,
+Aperture, musterd configuration, or Team state. Ready Aperture configuration remains enforcement
+`off`; the command makes no device-management, sandbox, or unrelated-harness claim. A selected failed
+check exits 1, invalid usage exits 2, and JSON stdout parses as `IntegrationDoctorReportSchema`.
+
 ### `musterd team create <slug> [--display <name>] [--as <yourname>] [--role <role>]`
 
 `POST /teams`. Creates the team and you as its first **human** member. Saves identity+token to config, sets `current`, and **auto-binds the current folder** to you (ADR 036) so you can act there with no `--as`. Output: `cmd/team-create` frame — green `✓ team "dawn" created`, your member line, the dim _bound this folder_ note, dim add hint. Errors: slug taken → `conflict` (exit 9).
 
 ### `musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]`
 
-`POST /teams/:slug/members`. Prints `✓ added <name> (<kind>, <role>)` and the **join token + ready-to-paste connect hint** (the token is shown once). For agents the hint is the MCP/`join` invocation; copy it into the agent's surface. Output: `cmd/team-add`.
+`POST /teams/:slug/members`, then for an agent `POST /teams/:slug/agent-bootstrap-credentials`. Prints `✓ added <name> (<kind>, <role>)` and a ready-to-paste connect hint. An agent receives a shown-once `mskey_` constrained to that seat (ADR 344), never the legacy Team-wide key; a human receives their shown-once `mscr_` credential. Output: `cmd/team-add`.
+
+### `musterd team bootstrap <mint|list|revoke>` (ADR 344)
+
+Admin lifecycle for least-privilege harness bootstrap credentials. `mint` requires exactly one of `--seat <name>`, `--role <name>`, or `--host <label>` and optionally accepts `--label` plus `--expires-in <45s|15m|2h>`; it prints the new `mskey_` once. `list` returns redacted inventory metadata only. `revoke <credential-id>` immediately invalidates one scoped credential without disturbing any successor credential, enabling overlap-first rotation: mint, distribute and verify, then revoke.
 
 ### `musterd team remove <name>`
 
@@ -292,7 +360,7 @@ declared surface sits under the rule — mixed web+server lanes stay `normal`.
 
 ### `musterd fmt [--check]`
 
-Canonicalize this folder's `.musterd/team.toml` + `seats/*.toml` — the ADR 058 **guard-2 (tidiness)** tool, so roster diffs stay minimal and blame clean. `--check` asserts the committed files are already canonical (exit 1 + the offending files on drift), the CI-style sibling of `format:check`. Purely cosmetic — correctness rides on the semantic round-trip (guard 1), never byte-equality of hand edits.
+Canonicalize this folder's `.musterd/team.toml` + `seats/*.toml` + `roles/*.toml` — the ADR 058 **guard-2 (tidiness)** tool, so roster diffs stay minimal and blame clean. All three durable classes the daemon reconciles; `roles/` joined 2026-08-21, having had a writer (ADR 298's `role create`) but no formatter, so hand-written role files could drift with nothing to catch them. `--check` asserts the committed files are already canonical (exit 1 + the offending files on drift), the CI-style sibling of `format:check`. Purely cosmetic — correctness rides on the semantic round-trip (guard 1), never byte-equality of hand edits.
 
 ### `musterd unbind`
 
@@ -306,7 +374,7 @@ Tell the running **service-managed** daemon to re-resolve its roster roots and r
 
 Local clean-slate (ADR 022) — wipes the daemon's SQLite db (every team, member, presence, message) by deleting the db file + its `-wal`/`-shm` siblings, and clears the local CLI `identities`/`bindings`/`current` in `config.json` (the `server` URL is kept). A fresh `musterd serve` re-creates an empty db at the current schema. Pure filesystem + config: it never imports `@musterd/server` (ADR 002) or opens the db, and talks to a running daemon only through the read-only `/health` probe. **Safety, three layers:** (1) **refuses while a daemon is live on the target db** — `/health` reports the served db path (ADR 016); deleting an open SQLite file orphans the daemon onto a ghost inode, so it tells you to stop the daemon first (exit 11). A daemon on a _different_ db doesn't block. (2) **Backs up first** by default — db files + `config.json` → `~/.musterd/backups/*.<ts>.bak`; `--no-backup` opts out. (3) **Confirms** — interactive `y/N` on a TTY, and on a non-TTY refuses unless `--force`/`--yes`. Per-folder `.musterd/binding.json` files are not touched (run `musterd init` to repoint them). Output: `✓ reset — wiped <db>; cleared N local identities`.
 
-### `musterd join <slug> --as <name> [--token <tok>] [--surface cli]`
+### `musterd join <slug> --as <name> …` — hidden alias (ADR 377, 2026-09-03) of `musterd claim <name> --team <slug> [--key …] [--grant …]`
 
 Attaches a Presence for an existing member, stores identity locally, and **auto-binds the current folder** to it (ADR 036) so you can act here without `--as`. If `--token` omitted, uses config (and refuses to relabel a different member's token — see Identity resolution above). Opens a short WS `hello` to confirm + register presence, then exits 0 (presence is held by `inbox --watch` or one-shot pings; plain `join` just registers and confirms). Output: `cmd/join` (`✓ <name> joined <slug>` + presence line).
 
@@ -378,9 +446,15 @@ The admin surface for the **claim/teammate request lane** (ADR 077) — the othe
 
 The **localhost notification down-payment** (ADR 035) — an opt-in, headless, client-side notifier the human leaves running so a directed act that lands while they're **not** watching still reaches them (the not-watching case `inbox --watch`'s bell can't cover). Polls the durable inbox cursor (`GET /inbox?unread=1`) with the same `openActionNeeded` predicate as the comeback summary; on a not-yet-seen action-needed act (`request_help`/`handoff`/`accept`/`decline`/@mention) it fires an **OS notification** by shelling out to `osascript` (macOS) / `notify-send` (Linux) — no runtime dep, dynamic strings passed as injection-safe AppleScript `argv`. **Suppressed when the human is actively watching** (roster `presence !== 'offline'` — the watch bell already reached them), so it owns only the not-watching case. De-dupe is two-layered: the durable cursor (reading the inbox clears it) + an in-memory seen set (no re-nag within a run). **Tiering by the recipient's own availability** (ADR 044): when you are `away` the Loud set is held and only an `urgent` ping fires; `dnd` passes directed pings + `urgent`; `available` (the default) fires the Loud set as before — `urgent` pierces every tier. Availability is read off the same roster as reachability (no new wire field). `--once` polls once and exits (cron-friendly + testable); default is the resident loop (`--interval` seconds, default 10). Needs an **active identity** like any act (ADR 036). Client-side tiering only — **no wire change / no SPEC bump**; the v0.3 governed superset (`SPEC.md` A.6a — `can_flag_urgent`, audit, `wasnt_urgent`) is the named seam. Other platforms no-op (the comeback summary still serves them).
 
-### `musterd role <list|show|create> [<name>] [--from <builtin>] [--force]`
+### `musterd toolkit <list|show|create> [<name>] [--from <builtin>] [--force]`
 
-Manage role **provisioning templates** (ADR 026/029/038; `docs/design/provisioning-recipe.md` §3) — a pure local-file + built-in-library command that **never touches the daemon or the server roster** (Universe-2 only; identity unchanged). `role list` shows the shipped built-ins plus any user templates in `.musterd/roles/*.json`; `role show <name>` prints a fully-resolved template (built-in or user, with `inspect with: musterd role show <name>`); `role create <name> [--from <builtin>]` scaffolds an editable user template under `.musterd/roles/` (refuses to overwrite without `--force`). A Role projects into two places at use-time — the identity half (role label) and the harness-provisioning half (MCP servers + permissions `init` writes) — so editing a template changes what the next `init` provisions.
+Manage **workspace toolkits** — the ADR 026/029/038 provisioning templates, named *role template* then *profile* then, by ADR 296, **toolkit** — a pure local-file + built-in-library command that **never touches the daemon or the server roster** (Universe-2 only; identity unchanged). `toolkit list` shows the shipped built-ins plus any user files; `toolkit show <name>` prints a fully-resolved toolkit (built-in or user); `toolkit create <name> [--from <builtin>]` scaffolds an editable user file (refuses to overwrite without `--force`). A toolkit renders local setup only — MCP servers, the permission lists `init`/`musterd agent --profile` write (that flag still carries the old word — a CLI token, not a file key, and not renamed here), and `tools.codex_plugins` (Codex adapter writes project-local `[plugins."id"]` enable tables on `harness configure`; never `~/.codex/config.toml` — ADR 323 / ADR 031). It mints no team fact: the roster role label is independent of the toolkit pick, and the primer's charter comes from the team role library, never from a toolkit (ADR 272 increment 2 removed ADR 038's label-from-template derivation). A toolkit carries no authority (ADR 272).
+
+**On disk**, canonical files are `toolkit`-keyed JSON under `.musterd/toolkits/`, which is the only shape ever written. Two older shapes are still **read, never written** (ADR 296 tier 2 — legacy accepted on read, no flag day): `profile`-keyed files in `.musterd/profiles/` (ADR 272) and `role`-keyed files in `.musterd/roles/` (pre-272). The homes are searched newest-first, so a file in `.musterd/toolkits/` wins over an older copy of the same name, and a file carrying more than one name key resolves on the newest it has.
+
+### `musterd role <list|show|assign>`
+
+**Roster-only** since ADR 296: `role` answers what the *team* recognizes, and never renders workspace equipment. A name that is only a toolkit is not silently printed here under the word "role" — the error names `musterd toolkit show <name>` instead. `role create` outside a roster home is refused rather than downgraded to a local file (a local file may never assert a team responsibility). `role create --profile` survives as a quiet alias delegating to `musterd toolkit create`.
 
 ### `musterd uninstall [--force|--yes]`
 

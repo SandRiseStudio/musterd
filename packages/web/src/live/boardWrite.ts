@@ -2,7 +2,7 @@
 // member may do to a lane* lives here, testable without DOM. The route/component layer renders these
 // verdicts; the daemon remains the authority (these mirror, never replace, its checks).
 import type { Lane, LaneBoard, LaneResult, LaneState, UpdateLane } from '@musterd/protocol';
-import { isAwaitingAcceptance } from '@musterd/protocol';
+import { isAwaitingAcceptance } from '@musterd/protocol/wire';
 
 /** A verb the board may offer on a card. `patch` is the exact `PATCH /lanes/:id` body. */
 export interface LaneAction {

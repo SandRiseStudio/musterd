@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
-import { askTierHolds } from '@musterd/protocol';
+import { askTierHolds } from '@musterd/protocol/wire';
 import {
   answerableCount,
+  applyTierClock,
   askAudience,
   askIsLoud,
   byAudienceThenUrgency,
+  clockFraction,
   deriveAsks,
   deriveReviewQueue,
   SPECIES_VERB,
@@ -14,7 +16,8 @@ import {
   type AudienceContext,
 } from './asks';
 import { sendAct, type LiveConfig } from './client';
-import { initial, memberAvatar, kindOf } from './format';
+import { asksOpenMode, stillMode } from './stillMode';
+import { initial, memberAvatar, memberColor, kindOf, hueOf } from './format';
 import { scrollToMessage } from './Stream';
 
 /**
@@ -64,13 +67,21 @@ export function AsksStrip({
   const [localAnswers, setLocalAnswers] = useState<Envelope[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  // Closed by default; `?asks-open` starts it open so the contrast gate can measure the cards inside
+  // it, which are `visibility: hidden` and therefore invisible to the sweep otherwise. Initial state
+  // only — the reader closes it like any other time.
+  const [open, setOpen] = useState(asksOpenMode);
   const rootRef = useRef<HTMLElement | null>(null);
 
-  const asks = useMemo(
+  // One clock for the whole strip: it decides both what the countdowns read and, past a deadline,
+  // which side of the tier contract an unanswered ask fell on (`applyTierClock`). Those must be the
+  // same instant or a card can say "0:00 left" while still offering Approve.
+  const [now, setNow] = useState(() => Date.now());
+  const derived = useMemo(
     () => deriveAsks([...envelopes, ...localAnswers]),
     [envelopes, localAnswers],
   );
+  const asks = useMemo(() => applyTierClock(derived, now), [derived, now]);
   // Answerable iff the connected seat is a real member (observers are hidden from the roster).
   const canAnswer = roster.some((m) => m.name === cfg.as);
   /**
@@ -86,10 +97,18 @@ export function AsksStrip({
     }),
     [canAnswer, cfg.as, localIdentity, roster],
   );
-  const loud = asks.filter((a) => askIsLoud(a.state)).sort(byAudienceThenUrgency(ctx));
+  const loud = asks.filter((a) => askIsLoud(a.state)).sort(byAudienceThenUrgency(ctx, now));
   const deferred = asks.filter((a) => a.state === 'deferred');
-  const closed = asks.length - loud.length - deferred.length;
-  const cards = [...loud, ...deferred];
+  /**
+   * Elapsed below the top tier: the contract already let them proceed (`applyTierClock`). Kept out
+   * of `loud` — the rail, the quick-answer buttons and the tab title are all claims that something
+   * waits on the reader, and none of them is true here. Kept out of `closed` too: "settled" is for
+   * asks somebody actually answered, and rolling these in would hide the fact that fourteen asks
+   * ran out of clock with nobody home. They list in the sheet, last, with no buttons.
+   */
+  const lapsed = asks.filter((a) => a.state === 'lapsed');
+  const closed = asks.length - loud.length - deferred.length - lapsed.length;
+  const cards = [...loud, ...deferred, ...lapsed];
   // The one the rail answers inline, and the one the sheet puts first: yours first, then urgency.
   const lead = loud[0] ?? deferred[0];
   const leadAudience = lead ? askAudience(lead, ctx) : null;
@@ -105,12 +124,18 @@ export function AsksStrip({
 
   // A 1s tick while any clock is running, so the countdowns are honest. Stops when nothing is loud —
   // idle cost is paid by every viewer, forever (packages/web/AGENTS.md).
-  const [, setTick] = useState(0);
+  //
+  // Held under `?still` (ADR 285). A countdown is the purest case the flag exists for: the text
+  // "4m 12s" is a row the contrast sweep measures, and re-rendering it every second re-widens the
+  // row and moves whatever sits after it — so the page never settles, and the number the gate
+  // reports is a frame. The card keeps whatever value it had at mount, which is exactly what a
+  // reader sees at any instant; it simply stops counting down while being photographed.
+  const still = stillMode();
   useEffect(() => {
-    if (loud.length === 0) return;
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    if (loud.length === 0 || still) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [loud.length]);
+  }, [loud.length, still]);
 
   // Waiting-on-YOU count in the tab title — loud even when the tab isn't front. Counts only asks
   // this browser's identity could answer (yours + team-pool): titling the tab "(10 asks)" for ten
@@ -193,11 +218,25 @@ export function AsksStrip({
 
   const idx = new Map(roster.map((m) => [m.name, m]));
   const rest = cards.length - (lead ? 1 : 0);
+  /* The rail wears the lead asker's colour — rim and bell — the way a bubble's ring wears its
+     speaker's: "who is asking" is the same colour as their body on the floor. `memberColor` is the
+     FILL (a ring, a stroke; never text — the fill/ink split in format.ts). The clock is the arc
+     round their avatar: how much of the tier is left, read off the same `now` the text clock reads,
+     so the two can never disagree. Both are inline variables, so the cost is CSS. */
+  const frac = lead ? clockFraction(lead, now) : null;
+  const leadStyle = lead
+    ? ({
+        '--lc-asks-hue': memberColor(lead.env.from, kindOf(lead.env.from, idx), hueOf(lead.env.from, idx)),
+      } as CSSProperties)
+    : undefined;
 
   return (
     <section
       ref={rootRef}
-      className={`lc-asks${loud.length > 0 ? ' lc-asks--loud' : ''}${open ? ' is-open' : ''}`}
+      className={`lc-asks${loud.length > 0 ? ' lc-asks--loud' : ''}${open ? ' is-open' : ''}${
+        lead ? ' has-lead' : ''
+      }`}
+      style={leadStyle}
       aria-label="asks and approvals"
     >
       <div className="lc-asks__rail">
@@ -206,8 +245,15 @@ export function AsksStrip({
         {lead ? (
           <>
             <span
-              className="lc-chip__avatar lc-asks__who"
-              style={{ background: memberAvatar(lead.env.from, kindOf(lead.env.from, idx)) }}
+              className={`lc-chip__avatar lc-asks__who${
+                frac === null ? '' : frac > 0 ? ' is-timed' : ' is-over'
+              }`}
+              style={
+                {
+                  background: memberAvatar(lead.env.from, kindOf(lead.env.from, idx), hueOf(lead.env.from, idx)),
+                  '--lc-ask-frac': frac ?? 0,
+                } as CSSProperties
+              }
               aria-hidden="true"
             >
               {initial(lead.env.from)}
@@ -232,7 +278,7 @@ export function AsksStrip({
             <span className={`lc-ask__tier lc-asks__tier lc-ask__tier--${lead.tier}`}>
               {lead.tier}
             </span>
-            <AskClock ask={lead} />
+            <AskClock ask={lead} now={now} />
             {askIsLoud(lead.state) && canAnswer && leadIsOurs && (
               <span className="lc-asks__quick">
                 <button
@@ -293,6 +339,11 @@ export function AsksStrip({
 
         {reviews.length > 0 && <span className="lc-asks__meta">{reviews.length} in review</span>}
         {deferred.length > 0 && <span className="lc-asks__meta">{deferred.length} deciding</span>}
+        {/* Counted apart from "settled" on purpose: an ask nobody answered in time is not the same
+            event as one somebody answered, and folding the two would make the gap unfindable. */}
+        {lapsed.length > 0 && (
+          <span className="lc-asks__meta">{lapsed.length} elapsed</span>
+        )}
         {closed > 0 && <span className="lc-asks__meta">{closed} settled</span>}
 
         {(cards.length > 0 || reviews.length > 0) && (
@@ -349,6 +400,7 @@ export function AsksStrip({
                   canAnswer={canAnswer && (aud === 'you' || aud === 'team')}
                   audience={aud}
                   busy={busy === ask.env.id}
+                  now={now}
                   onAnswer={(kind) => void answer(ask, kind)}
                   style={{ '--i': i } as React.CSSProperties}
                 />
@@ -384,6 +436,7 @@ export function AsksStrip({
                       background: memberAvatar(
                         r.lane.owner_seat ?? '?',
                         kindOf(r.lane.owner_seat ?? '?', idx),
+                        hueOf(r.lane.owner_seat ?? '?', idx),
                       ),
                     }}
                     aria-hidden="true"
@@ -418,6 +471,7 @@ function AskCard({
   canAnswer,
   audience,
   busy,
+  now,
   onAnswer,
   style,
 }: {
@@ -427,6 +481,8 @@ function AskCard({
   canAnswer: boolean;
   audience: 'you' | 'human' | 'agent' | 'team';
   busy: boolean;
+  /** The strip's single clock — the same instant that decided this card's state. */
+  now: number;
   onAnswer: (kind: 'accept' | 'decline' | 'deciding') => void;
   style?: React.CSSProperties;
 }) {
@@ -440,7 +496,10 @@ function AskCard({
           down a list of twenty, every clock and every button lands on the same vertical line. */}
       <div className="lc-ask__main">
         <div className="lc-ask__head">
-          <span className="lc-chip__avatar" style={{ background: memberAvatar(from, kind) }}>
+          <span
+            className="lc-chip__avatar"
+            style={{ background: memberAvatar(from, kind, hueOf(from, idx)) }}
+          >
             {initial(from)}
           </span>
           <span className="lc-ask__verb">
@@ -460,7 +519,7 @@ function AskCard({
           </button>
         )}
       </div>
-      <AskClock ask={ask} />
+      <AskClock ask={ask} now={now} />
       {open && canAnswer && (
         <div className="lc-ask__actions">
           <button
@@ -497,15 +556,33 @@ function AskCard({
           {ask.answeredBy} is deciding{ask.until ? ` — check back in ${ask.until}` : ''}
         </div>
       )}
+      {/* The honest sentence about a lapsed ask, and the reason the card is still here rather than
+          hidden: the reader should be able to see that a question went unanswered long enough for
+          the contract to answer it. It names the tier and what the tier permits — never a verdict,
+          because the surface has no envelope saying what was chosen. */}
+      {ask.state === 'lapsed' && (
+        <div className="lc-ask__note lc-ask__note--lapsed">
+          no answer within the {ask.tier} window — {from} was free to proceed and record the risk.
+          Nothing is waiting on you.
+        </div>
+      )}
     </article>
   );
 }
 
 /** The tier clock: time left until the agent invokes its no-answer policy, or what elapsing meant. */
-function AskClock({ ask }: { ask: AskView }) {
+function AskClock({ ask, now }: { ask: AskView; now: number }) {
   if (ask.state === 'held') return <Elapsed holding />;
+  /**
+   * Elapsed below the top tier. "timed out" was the wrong word for this and for its opposite alike:
+   * on a holding tier it understates (the agent is stopped), and here it overstates — it reads as a
+   * failure when the tier behaved exactly as designed. So this says what the clock knows, `elapsed`,
+   * and the card's note says what the contract means. Neither says approved: nothing here knows
+   * what the agent decided, only that it was free to decide.
+   */
+  if (ask.state === 'lapsed') return <span className="lc-ask__clock lc-ask__clock--lapsed">elapsed</span>;
   if (ask.state !== 'open') return null;
-  const left = ask.deadline - Date.now();
+  const left = ask.deadline - now;
   if (left <= 0) return <Elapsed holding={askTierHolds(ask.tier)} />;
   const m = Math.floor(left / 60_000);
   const s = Math.floor((left % 60_000) / 1000);

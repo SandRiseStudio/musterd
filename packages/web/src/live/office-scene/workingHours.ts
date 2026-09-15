@@ -63,3 +63,35 @@ export function formatWorkingHours(hours: WorkingHoursInput | null | undefined):
     hours: `${formatTime(hours.start)}–${formatTime(hours.end)}`,
   };
 }
+
+/** `"11:00"` → 11, `"09:30"` → 9.5 — schedule clock times as fractional hours. */
+function clockToHours(value: string): number {
+  const [hh, mm] = value.split(':').map(Number);
+  return (hh ?? 0) + (mm ?? 0) / 60;
+}
+
+/**
+ * Is `at` inside the schedule — right day AND right hours, both resolved in the schedule's own
+ * timezone (never the viewer's or UTC)? Start is inclusive, end exclusive. `hourOverride` swaps
+ * only the clock while keeping the real weekday — the `?light=HH` dev preview rides it, so
+ * previewing 11pm on a workday shows the after-hours office.
+ */
+export function isWithinWorkingHours(
+  hours: WorkingHoursInput,
+  at: Date = new Date(),
+  hourOverride?: number,
+): boolean {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: hours.timezone,
+    weekday: 'short',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23',
+  }).formatToParts(at);
+  const read = (type: string) => parts.find((p) => p.type === type)?.value;
+  const day = read('weekday')?.toLowerCase() as WorkingDay | undefined;
+  if (!day || !hours.days.includes(day)) return false;
+  const clock =
+    hourOverride ?? (Number(read('hour') ?? '12') % 24) + Number(read('minute') ?? '0') / 60;
+  return clock >= clockToHours(hours.start) && clock < clockToHours(hours.end);
+}

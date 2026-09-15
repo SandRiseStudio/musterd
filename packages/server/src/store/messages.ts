@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import {
   DeferUntilSchema,
   eligibleOf,
@@ -6,6 +7,7 @@ import {
   type Envelope,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { ulid } from 'ulid';
 import type { MessageRow } from './rows.js';
 
 /**
@@ -25,35 +27,92 @@ function senderProvenance(db: Database, memberId: string): string | null {
   return row?.provenance ?? null;
 }
 
-/** Insert an envelope into the append-only log. `toMemberId` set iff to.kind==='member'. */
+/**
+ * This team's local node row (ADR 331 §Decision 1) — per (daemon, team), minted by migration v47
+ * and lazily here for teams created after it.
+ *
+ * The `local_node` marker is the authority (v48, increment 3a), not `ORDER BY id LIMIT 1` as this
+ * read once was. That ordering was correct only while enrollment did not exist and `nodes` held one
+ * row per team; enrollment is exactly what adds remote rows, and one whose ULID sorted lower would
+ * have taken over our stamp — holing our own sequence while writing numbers into a remote node's
+ * that name events it never sent. Two sequences corrupted at once, which is the ambiguity between
+ * loss and silence that ADR 331 exists to prevent.
+ */
+export function localNodeForTeam(db: Database, teamId: string): { id: string } {
+  const marked = db
+    .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+    .get(teamId);
+  if (marked) return { id: marked.node_id };
+
+  const id = ulid();
+  db.prepare('INSERT INTO nodes (id, team_id, label, next_seq) VALUES (?, ?, ?, 1)').run(
+    id,
+    teamId,
+    hostname(),
+  );
+  // Both writes or neither: `insertMessage` already holds the transaction, so a row minted without
+  // its marker cannot survive to be re-minted on the next send.
+  db.prepare('INSERT INTO local_node (team_id, node_id) VALUES (?, ?)').run(teamId, id);
+  return { id };
+}
+
+/**
+ * Insert an envelope into the append-only log. `toMemberId` set iff to.kind==='member'.
+ *
+ * Stamps `(origin_node, origin_seq)` (ADR 331): SERVER-derived like `from_provenance` — there is no
+ * wire field, so a caller cannot supply an origin. Opens its own transaction (a SAVEPOINT when the
+ * caller already holds one): the seq allocation and the insert are one atomic unit, so a throw
+ * between them — a replayed envelope id's UNIQUE violation is the realistic one — burns no number
+ * and leaves no hole.
+ */
 export function insertMessage(
   db: Database,
   teamId: string,
   fromMemberId: string,
   toMemberId: string | null,
   env: Envelope,
+  /**
+   * `now` is the receipt clock the row is stamped with (`created_at`) — the position every read
+   * cursor walks. Injected for the same reason `slowestInboxLagMs(db, now)` is: a fixture that
+   * needs two rows in one millisecond, or one that arrives an hour after it was stamped, cannot
+   * get either from a wall clock. Production callers leave it unset.
+   */
+  opts: { now?: number } = {},
 ): MessageRow {
-  const row: MessageRow = {
-    id: env.id,
-    team_id: teamId,
-    from_member: fromMemberId,
-    to_kind: env.to.kind,
-    to_member: toMemberId,
-    act: env.act,
-    body: env.body,
-    thread_id: env.thread ?? null,
-    meta: env.meta ? JSON.stringify(env.meta) : null,
-    from_provenance: senderProvenance(db, fromMemberId),
-    ts: env.ts,
-    created_at: Date.now(),
-  };
-  db.prepare(
-    `INSERT INTO messages
-       (id, team_id, from_member, to_kind, to_member, act, body, thread_id, meta, from_provenance, ts, created_at)
-     VALUES
-       (@id, @team_id, @from_member, @to_kind, @to_member, @act, @body, @thread_id, @meta, @from_provenance, @ts, @created_at)`,
-  ).run(row);
-  return row;
+  return db.transaction((): MessageRow => {
+    const node = localNodeForTeam(db, teamId);
+    // Read-then-bump under SQLite's single-writer lock: `next_seq` names the next value to assign,
+    // so the returned pre-increment value is this message's seq — monotone and gapless by construction.
+    const seq = db
+      .prepare<
+        [string],
+        { seq: number }
+      >('UPDATE nodes SET next_seq = next_seq + 1 WHERE id = ? RETURNING next_seq - 1 AS seq')
+      .get(node.id)!.seq;
+    const row: MessageRow = {
+      id: env.id,
+      team_id: teamId,
+      from_member: fromMemberId,
+      to_kind: env.to.kind,
+      to_member: toMemberId,
+      act: env.act,
+      body: env.body,
+      thread_id: env.thread ?? null,
+      meta: env.meta ? JSON.stringify(env.meta) : null,
+      from_provenance: senderProvenance(db, fromMemberId),
+      origin_node: node.id,
+      origin_seq: seq,
+      ts: env.ts,
+      created_at: opts.now ?? Date.now(),
+    };
+    db.prepare(
+      `INSERT INTO messages
+         (id, team_id, from_member, to_kind, to_member, act, body, thread_id, meta, from_provenance, origin_node, origin_seq, ts, created_at)
+       VALUES
+         (@id, @team_id, @from_member, @to_kind, @to_member, @act, @body, @thread_id, @meta, @from_provenance, @origin_node, @origin_seq, @ts, @created_at)`,
+    ).run(row);
+    return row;
+  })();
 }
 
 /** The `ts` of one message by id (loop-latency lookups, ADR 082 slice 3). Null when unknown. */
@@ -120,16 +179,43 @@ export function countOpenLoopsByTeam(db: Database): { team: string; count: numbe
     .all();
 }
 
+/**
+ * Every position in here is in RECEIPT order — `messages.created_at`, this daemon's clock at insert
+ * or fold — never the envelope's `ts`, which is the origin's clock and travels (ADR 335). A cursor
+ * keyed on `ts` never showed an event that arrived after the seat last read but was stamped before
+ * it (the ts-cursor defect, lane 01M1FAYTHQA881M35PDPXRTGM1). `cursorTs` and `since` are both
+ * `created_at` values; the CLI pages with the envelope's `received_at`, which is this column.
+ */
 export interface InboxOpts {
   since?: number;
   unreadOnly?: boolean;
   cursorTs?: number;
+  /**
+   * The cursor row's id — the TIEBREAK this query already orders by, finally expressed in the
+   * position that walks it. A read cursor is a `(created_at, id)` point, not a ts: two messages can share a
+   * millisecond (musterd fan-out sends land sub-millisecond apart), and `created_at > cursorTs` drops the
+   * one that ties. Not "shown late" — never shown, because the cursor only moves forward.
+   * Omitted ⇒ the ts-only floor, which is correct whenever nothing ties.
+   */
+  cursorId?: string | null;
+  /** The newest `limit` — the recent tail, for a caller that asked to see the latest few. */
   limit?: number;
+  /**
+   * The OLDEST `headLimit` — a PREFIX of the unbounded read, for bounding a response the caller did
+   * not ask to have bounded.
+   *
+   * The distinction is load-bearing, which is why this is a separate option and not a flag on
+   * `limit`. Truncating to the newest n and then letting the reader advance its cursor to the newest
+   * row it received steps over everything that was cut — ADR 287's loss, arrived at from the other
+   * direction. A prefix cannot do that: advancing to the last row seen leaves the remainder unread,
+   * and catching up takes several reads and reaches every message in order.
+   */
+  headLimit?: number;
 }
 
 /**
  * A member's inbox: messages in their team addressed to them or to team/broadcast,
- * excluding their own sends. unreadOnly filters by the caller-supplied cursor ts.
+ * excluding their own sends. unreadOnly filters by the caller-supplied cursor position (receipt order).
  */
 export function listInbox(
   db: Database,
@@ -141,26 +227,92 @@ export function listInbox(
        AND (to_member = ? OR to_kind IN ('team','broadcast'))
        AND from_member != ?`;
   if (opts.unreadOnly) {
-    where += ' AND ts > ?';
-    params.push(opts.cursorTs ?? 0);
+    // Both floors apply when both are given: `cursorTs` is what the seat has already read, `since` is
+    // how far a paging caller has walked. They are applied SEPARATELY rather than as `max(...)`,
+    // because only one of them carries a tiebreak: the cursor is a `(created_at, id)` point and compares
+    // as one, while `since` is a plain created_at and stays strict. Collapsing them to a single number is what
+    // made the tied row unreachable — `max()` cannot express half a comparison. With no ties the two
+    // forms select exactly the same rows.
+    const cursorTs = opts.cursorTs ?? 0;
+    if (opts.cursorId) {
+      where += ' AND (created_at > ? OR (created_at = ? AND id > ?))';
+      params.push(cursorTs, cursorTs, opts.cursorId);
+    } else {
+      where += ' AND created_at > ?';
+      params.push(cursorTs);
+    }
+    if (typeof opts.since === 'number') {
+      where += ' AND created_at > ?';
+      params.push(opts.since);
+    }
   } else if (typeof opts.since === 'number') {
-    where += ' AND ts > ?';
+    where += ' AND created_at > ?';
     params.push(opts.since);
   }
   // With a limit, take the NEWEST `limit` (DESC + LIMIT) then re-sort ascending for display — an
   // inbox is read most-recent-first, so a bounded view must keep the recent tail, not the oldest N
   // (the `ts ASC LIMIT` bug that returned the wrong end; mirrors listTeamMessages' backfill).
   if (opts.limit) {
-    params.push(opts.limit);
-    return db
+    const newest = db
       .prepare<
         unknown[],
         MessageRow
-      >(`SELECT * FROM (SELECT * FROM messages ${where} ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC`)
+      >(`SELECT * FROM (SELECT * FROM messages ${where} ORDER BY created_at DESC, id DESC LIMIT ?) ORDER BY created_at ASC, id ASC`)
+      .all(...params, opts.limit);
+    // MCP always sends `limit`, so the newest tail is team broadcasts and an old waiting handoff
+    // never appears. The CLI banner reads with no limit and counts it. Pin action-needed unread
+    // (request_help / ask / directed non-message) into the page. Directed `message` stays newest-N
+    // so a mailbox of DMs does not explode the bound.
+    if (!opts.unreadOnly) return newest;
+    const pinned = db
+      .prepare<unknown[], MessageRow>(
+        `SELECT * FROM messages ${where} AND (
+           act IN ('request_help', 'ask')
+           OR (to_kind = 'member' AND act NOT IN ('message', 'resolve'))
+         ) ORDER BY created_at ASC, id ASC`,
+      )
       .all(...params);
+    if (pinned.length === 0) return newest;
+    const byId = new Map<string, MessageRow>();
+    for (const row of newest) byId.set(row.id, row);
+    for (const row of pinned) byId.set(row.id, row);
+    return [...byId.values()].sort(
+      (a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+  }
+  // The prefix read: same order as the unbounded query, simply stopped early — except that it never
+  // stops in the MIDDLE OF A TIE. A page cut between two rows sharing a millisecond cannot be walked
+  // by a plain cursor: the next request asks for `created_at > last` and excludes every tied row, so
+  // the remainder is stranded and the empty page reads as "caught up" (izzo's repro: 220 messages,
+  // page one 200, page two 0, silently reaching 200). Completing the group instead of splitting it
+  // makes `> last` exact again for EVERY caller — including one on an older client that has no way to
+  // send a tiebreak — rather than adding a cursor field the lossy spelling still sits next to.
+  //
+  // The overshoot is the size of one tie group, so the bound is "about `headLimit`" rather than
+  // exactly it. That is the deliberate trade: a response slightly over budget, or a silent
+  // permanent hole in someone's history.
+  if (opts.headLimit) {
+    const head = db
+      .prepare<
+        unknown[],
+        MessageRow
+      >(`SELECT * FROM messages ${where} ORDER BY created_at ASC, id ASC LIMIT ?`)
+      .all(...params, opts.headLimit);
+    if (head.length < opts.headLimit) return head;
+    const last = head[head.length - 1]!;
+    const tied = db
+      .prepare<
+        unknown[],
+        MessageRow
+      >(`SELECT * FROM messages ${where} AND created_at = ? AND id > ? ORDER BY id ASC`)
+      .all(...params, last.created_at, last.id);
+    return tied.length > 0 ? [...head, ...tied] : head;
   }
   return db
-    .prepare<unknown[], MessageRow>(`SELECT * FROM messages ${where} ORDER BY ts ASC, id ASC`)
+    .prepare<
+      unknown[],
+      MessageRow
+    >(`SELECT * FROM messages ${where} ORDER BY created_at ASC, id ASC`)
     .all(...params);
 }
 
@@ -169,6 +321,40 @@ export function listInbox(
  * the denominator behind the CLI's "showing N of TOTAL" footer, so a bounded default can honestly say
  * how much history it elided. Cheap COUNT; unread is derived client-side from the cursor.
  */
+/** Unread count by the caller-supplied cursor — what a bounded read needs in order to say how much
+ *  it could not carry. Counting is not marshalling: this stays cheap on a deep backlog. */
+export function countUnread(
+  db: Database,
+  member: { id: string; team_id: string },
+  cursorTs: number,
+  /** The cursor row's id — same `(created_at, id)` comparison {@link listInbox} makes, so the count and the
+   *  listing can never disagree about a tied row. Without it this returns 0 while one still waits. */
+  cursorId?: string | null,
+): number {
+  if (cursorId) {
+    const row = db
+      .prepare<[string, string, string, number, number, string], { n: number }>(
+        `SELECT COUNT(*) AS n FROM messages
+          WHERE team_id = ?
+            AND (to_member = ? OR to_kind IN ('team','broadcast'))
+            AND from_member != ?
+            AND (created_at > ? OR (created_at = ? AND id > ?))`,
+      )
+      .get(member.team_id, member.id, member.id, cursorTs, cursorTs, cursorId);
+    return row?.n ?? 0;
+  }
+  const row = db
+    .prepare<[string, string, string, number], { n: number }>(
+      `SELECT COUNT(*) AS n FROM messages
+        WHERE team_id = ?
+          AND (to_member = ? OR to_kind IN ('team','broadcast'))
+          AND from_member != ?
+          AND created_at > ?`,
+    )
+    .get(member.team_id, member.id, member.id, cursorTs);
+  return row?.n ?? 0;
+}
+
 export function countInbox(db: Database, member: { id: string; team_id: string }): number {
   const row = db
     .prepare<[string, string, string], { n: number }>(
@@ -228,7 +414,7 @@ export function pendingInterrupts(
    *  gated on `loops.review` + `flow:auto` (ADR 191); admitting acceptance there would route a paid
    *  wake around its own policy gate. That the same predicate cannot serve both rails is precisely
    *  ADR 225's thesis — live and offline want different instruments — appearing in the code. */
-  opts: { obligations?: boolean } = {},
+  opts: { obligations?: boolean; huddles?: boolean; huddleOpens?: boolean } = {},
 ): Envelope[] {
   const resolved = new Set<string>();
   // ADR 254: an eligible-set act is discharged by the FIRST accept/decline naming it — for every
@@ -236,12 +422,16 @@ export function pendingInterrupts(
   // is pure over envelopes (no `Database`), so it cannot call the ledger's `actAnswered`. It does not
   // need one — the discharging act is an envelope in the very list being scanned.
   const discharged = new Set<string>();
+  // Clause 7(iv) of the doorbell contract: a steer has no accept/decline — the addressee's reply
+  // IS the answer, whatever act it rides on. Only `me`'s own replies count here; an obligation is
+  // still discharged only by an accept/decline (any sender), as before.
+  const answeredByMe = new Set<string>();
   for (const m of messages) {
     if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
-    if (m.act === 'accept' || m.act === 'decline') {
-      const ref = (m.meta as { in_reply_to?: unknown } | null | undefined)?.['in_reply_to'];
-      if (typeof ref === 'string') discharged.add(ref);
-    }
+    const ref = (m.meta as { in_reply_to?: unknown } | null | undefined)?.['in_reply_to'];
+    if (typeof ref !== 'string') continue;
+    if (m.act === 'accept' || m.act === 'decline') discharged.add(ref);
+    if (m.from === me) answeredByMe.add(ref);
   }
   const isUrgent = (m: Envelope) =>
     (m.meta as { urgent?: unknown } | null | undefined)?.['urgent'] === true;
@@ -251,12 +441,86 @@ export function pendingInterrupts(
     opts.obligations === true &&
     m.act === 'ask' &&
     (m.meta as { lane_review?: unknown } | null | undefined)?.['lane_review'] != null;
+  // ADR 378: a turn in a huddle I am IN rings the bell, so a live participant hears it at its next
+  // tool boundary instead of at its next inbox check. Without this a huddle is asynchronous by
+  // omission — delivery was already real-time (the ADR 061 firehose), only the bell was missing.
+  //
+  // Live rail only, like `obligations` and for ADR 225's reason: this predicate also picks PAID
+  // wakes (`claimWakeLeases`), and raising every turn there would summon every offline participant
+  // on every turn — precisely the token storm ADR 378 set out to avoid. Two flags now say
+  // "live-only"; a third should collapse them into one.
+  //
+  // Who counts as in it: a NAMED participant (an eligible set, or a directed root) is in from the
+  // root act. A `@team` huddle is an open invitation rather than a summons, so a seat joins by
+  // taking a turn — otherwise one team-addressed huddle interrupts every seat on the roster, every
+  // turn. Closed huddles go quiet for free: the root's id is in `resolved` once its `resolve` lands.
+  // Maps each open huddle I am in to the moment I last spoke in it — `-Infinity` when I have not
+  // spoken yet, so a named participant hears everything since the root. Only turns NEWER than that
+  // ring: what was said before I joined is backlog I read on the way in, and the interrupt line is
+  // for what needs me now, not for a transcript.
+  const myOpenHuddles = new Map<string, { ts: number; id: string }>();
+  if (opts.huddles === true) {
+    for (const root of messages) {
+      if ((root.meta as { huddle?: unknown } | null | undefined)?.['huddle'] == null) continue;
+      if (resolved.has(root.id)) continue;
+      const named = eligibleOf(root.meta as Record<string, unknown> | null | undefined);
+      const inFromTheRoot = named
+        ? named.includes(me)
+        : root.to.kind === 'member' && root.to.name === me;
+      // Ties on `ts` break on id, the same convention the steer scan below uses: ULIDs sort
+      // deterministically, so two turns in one millisecond still have one order everybody agrees on.
+      let spoke = { ts: Number.NEGATIVE_INFINITY, id: '' };
+      for (const t of messages) {
+        if (t.thread !== root.id || t.from !== me) continue;
+        if (t.ts > spoke.ts || (t.ts === spoke.ts && t.id > spoke.id))
+          spoke = { ts: t.ts, id: t.id };
+      }
+      const joined = spoke.ts > Number.NEGATIVE_INFINITY;
+      if (inFromTheRoot || joined || root.from === me) myOpenHuddles.set(root.id, spoke);
+    }
+  }
+  const isHuddleTurn = (m: Envelope) => {
+    if (m.thread == null) return false;
+    const since = myOpenHuddles.get(m.thread);
+    if (since === undefined) return false;
+    return m.ts > since.ts || (m.ts === since.ts && m.id > since.id);
+  };
+  /**
+   * ADR 378 increment 4 — the OPEN act, on the wake rail: a huddle convenes the seats it names.
+   *
+   * The mirror image of `huddles` above, and deliberately the narrower half. That flag admits every
+   * TURN and is live-rail only, because paying a wake per turn is the token storm ADR 378 exists to
+   * avoid. This one admits exactly the ROOT and is what the paid rail opts into: one act, once, per
+   * named seat per huddle. A turn is never a wake reason, so a busy room costs no more than a quiet
+   * one — the seat woken by the open reads the whole room when it arrives.
+   *
+   * NAMED means named: an eligible set that includes me, or a directed root addressed to me. A
+   * `@team` huddle is an open invitation and must never summon the roster — the same line the live
+   * rail draws, for a much more expensive reason. My own open is not a summons to myself, and a
+   * huddle whose `resolve` has landed summons nobody.
+   */
+  const isHuddleOpen = (m: Envelope) => {
+    if (opts.huddleOpens !== true) return false;
+    if ((m.meta as { huddle?: unknown } | null | undefined)?.['huddle'] == null) return false;
+    if (m.from === me) return false;
+    if (resolved.has(m.id)) return false;
+    const named = eligibleOf(m.meta as Record<string, unknown> | null | undefined);
+    return named ? named.includes(me) : m.to.kind === 'member' && m.to.name === me;
+  };
   // ADR 254: an eligible set REPLACES the default obligation rule rather than adding to it — which is
   // what narrows `request_help` from "every seat on the team" (its behaviour without a set, below) to
   // the named few. Discharge is checked here rather than at the filter so a stood-down act stops
   // being action-needed *everywhere* at once, including in the `steer` winner scan.
   const actionNeeded = (m: Envelope) => {
     if (m.act === 'resolve') return false;
+    // A huddle turn is addressed to the room, not to me — the default rule below would reject it
+    // before its class was ever considered. Being in the huddle IS the address (ADR 378).
+    if (isHuddleTurn(m)) return true;
+    // An eligible-set huddle open would otherwise fall to the `names.includes(me)` rule below and be
+    // discharged by the first accept naming it — right for "any one of you answers", wrong for a
+    // room: a huddle names everyone it wants IN it, and one seat turning up does not stand the rest
+    // down. Answered above the discharge check for exactly that reason.
+    if (isHuddleOpen(m)) return true;
     const names = eligibleOf(m.meta as Record<string, unknown> | null | undefined);
     if (names) return names.includes(me) && !discharged.has(m.id);
     return m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me);
@@ -281,11 +545,22 @@ export function pendingInterrupts(
       (m) =>
         m.from !== me &&
         actionNeeded(m) &&
-        (isUrgent(m) || m.act === 'steer' || isObligation(m)) &&
+        (isUrgent(m) ||
+          m.act === 'steer' ||
+          isObligation(m) ||
+          isHuddleTurn(m) ||
+          isHuddleOpen(m)) &&
         !resolved.has(m.thread ?? m.id) &&
+        // Directed obligations (no eligible set) were missing this: `discharged` only ran inside
+        // the eligible-set branch of `actionNeeded`, so a self-answered `lane_review` ask kept
+        // ringing. A huddle OPEN is the opposite — one named seat accepting must not stand the
+        // rest down (ADR 378 inc 4).
+        !(isObligation(m) && discharged.has(m.id)) &&
         // Newest steer wins: any steer that isn't the single winner is superseded — it neither
         // interrupts nor counts (a ts tie is broken by id, so no two steers survive together).
-        (m.act !== 'steer' || m.id === winningSteerId),
+        // A winner this seat already replied to is discharged (clause 7(iv)) — and because the
+        // winner is chosen over the whole set first, the superseded steers under it do not rise.
+        (m.act !== 'steer' || (m.id === winningSteerId && !answeredByMe.has(m.id))),
     )
     .sort((a, b) => b.ts - a.ts);
 }
@@ -501,5 +776,6 @@ export function rowToEnvelope(
     thread: row.thread_id,
     meta: row.meta ? (JSON.parse(row.meta) as Record<string, unknown>) : null,
     ts: row.ts,
+    received_at: row.created_at,
   };
 }

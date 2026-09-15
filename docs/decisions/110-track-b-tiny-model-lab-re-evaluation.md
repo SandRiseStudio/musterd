@@ -109,6 +109,11 @@ repos carry only decisions and findings: this ADR, the §Track B pointer in
   pins, the stage split made explicit.
 - Risk accepted: a 3–4B model may simply fail to coordinate at all. That is a _finding_, not a
   failure — the guardrail floor being below 4B is worth one research note either way.
+- _Dated note, 2026-08-19._ Readers were still treating "Stage 2 / train from scratch" as one job
+  that includes the judge. §2 already split them: the learning GPT (ungated, `musterd-lab`, not
+  research-spine) is not the coordination-judge (gated on `coordination-dataset`).
+  `docs/design/model-experimentation.md` §Track B now names four outcomes — Stage 1 (done), learning
+  GPT, dataset v1, judge — so the design doc and this Decision agree without rewriting the Decision.
 
 ## Observability & Evaluation
 

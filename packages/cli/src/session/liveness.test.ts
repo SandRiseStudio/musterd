@@ -18,9 +18,9 @@ describe('localSessionLiveness', () => {
 
   const write = (session?: SessionCapture): void => {
     const binding: Binding = {
+      version: 2,
       server: 'http://127.0.0.1:1',
       team: 'dawn',
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'scout' },
       agent_key: 'mskey_test',
       ...(session ? { session } : {}),
@@ -117,9 +117,9 @@ describe('the flip (ADR 166 increment 2)', () => {
   /** The agents-stanley shape: a foreign, already-ended capture whose transcript was never written. */
   const phantomSlot = (): void => {
     const binding: Binding = {
+      version: 2,
       server: 'http://127.0.0.1:1',
       team: 'dawn',
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'scout' },
       agent_key: 'mskey_test',
       session: {
@@ -198,9 +198,9 @@ describe('the flip (ADR 166 increment 2)', () => {
     const t = (NOW - 1_000) / 1000;
     utimesSync(p, t, t);
     const binding: Binding = {
+      version: 2,
       server: 'http://127.0.0.1:1',
       team: 'dawn',
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'scout' },
       agent_key: 'mskey_test',
       session: { harness: 'claude-code', id: 's1', transcript_path: p, started_at: NOW - 60_000 },
@@ -215,9 +215,9 @@ describe('the flip (ADR 166 increment 2)', () => {
 
   it('ADR 199: clean ended_at outranks warm mtime when enumeration names the same session', () => {
     const binding: Binding = {
+      version: 2,
       server: 'http://127.0.0.1:1',
       team: 'dawn',
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'scout' },
       agent_key: 'mskey_test',
       session: {
@@ -246,9 +246,9 @@ describe('the flip (ADR 166 increment 2)', () => {
     const stale = (NOW - LOCAL_SESSION_LIVE_MS - 60_000) / 1000;
     utimesSync(p, stale, stale);
     const binding: Binding = {
+      version: 2,
       server: 'http://127.0.0.1:1',
       team: 'dawn',
-      surface: 'cursor',
       claim: { mode: 'seat', name: 'scout' },
       agent_key: 'mskey_test',
       session: {

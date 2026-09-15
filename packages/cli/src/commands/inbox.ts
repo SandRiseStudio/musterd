@@ -1,14 +1,21 @@
-import { resolveWorkspace } from '@musterd/mcp';
-import { makeEnvelope, type DeferUntil, type Envelope, type MemberKind } from '@musterd/protocol';
+import {
+  envelopePosition,
+  makeEnvelope,
+  type DeferUntil,
+  type Envelope,
+  type MemberKind,
+} from '@musterd/protocol';
+import { resolveWorkspace } from '@musterd/protocol/project';
 import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
-import { watchClaim } from '../client.js';
+import { isSessionLeaseRefusal, watchClaim } from '../client.js';
 import { wsBase, type Identity } from '../config.js';
 import { CliError } from '../errors.js';
 import { isActionNeeded, renderInbox, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { kindLookup, resolve, resolveRead } from './helpers.js';
-import { refreshModelObservation } from './session.js';
+import { waitingCommand } from './nudge.js';
+import { attestSlotIfUnattested, refreshModelObservation } from './session.js';
 
 /** Block-until-message exit code on timeout — mirrors coreutils `timeout(1)` so shell loops can tell
  *  "no message yet" from a real failure. Zero is reserved for "a directed act woke me". */
@@ -26,6 +33,10 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   // tool boundary, so it must be resolved *before* the acting `resolve()` below (which throws on an
   // ambient/unbound folder) and must be silent-or-one-line, best-effort, and never fail a tool call.
   if (parsed.flags['interrupt-check']) return interruptCheck(parsed);
+  // --waiting (ADR 053): the read-only banner + the directed acts behind it, the approval-prompt
+  // Notification hook target. Read-only, never moves the cursor, silent when nothing waits, exit 0
+  // always — so it too must run before the acting `resolve()` below.
+  if (parsed.flags['waiting']) return waitingCommand(parsed);
 
   // `musterd inbox defer <act_id> --until-lane <id> | --until-reply` (ADR 211 §6): the recipient's
   // "not now, raise it when ⟨cond⟩". The CLI takes the surface investment because ADR 145 §4 spends
@@ -116,13 +127,40 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   // mark it read. Guarantee: if the oldest row in a bounded window is itself unread, there may be more
   // unread older than the window — refetch every unread and show those instead, so nothing is elided
   // and then consumed.
+  // The daemon bounds a read that named no `limit` (it was the last unbounded one on the request
+  // path), so "all unread are always shown" is only still true if we walk the pages. The bound is a
+  // PREFIX, so paging forward on the last row's ts reaches every message in order and never steps
+  // over one — the property the cursor rule above depends on.
+  // Paging must REPEAT THE FIRST REQUEST, narrowed by `since` — never a fixed shape of its own. A
+  // drain that always paged `{unread: true}` silently truncated every read that wasn't unread-only:
+  // a full-history read (`--limit 0`, and any `--from`/`--act` lens) got the oldest-200 prefix plus
+  // the unread tail, and everything between was dropped with nothing to say so. The prefix is what
+  // makes walking safe; asking for a different slice on page two is what makes it lossy.
+  const drain = async (
+    opts: { unread?: boolean; limit?: number },
+    first: Awaited<ReturnType<typeof http.inbox>>,
+  ) => {
+    const out = [...first.messages];
+    let page = first;
+    while (page.truncated && page.messages.length > 0) {
+      page = await http.inbox(team, {
+        ...opts,
+        // Page in the order the daemon serves: receipt position, not the sender's ts.
+        since: envelopePosition(page.messages[page.messages.length - 1]!),
+      });
+      out.push(...page.messages);
+    }
+    return out;
+  };
+
   const bounded = window > 0 && !unread && !filtering;
-  const res = await http.inbox(team, unread ? { unread: true } : bounded ? { limit: window } : {});
+  const query = unread ? { unread: true } : bounded ? { limit: window } : {};
+  const res = await http.inbox(team, query);
   const cursorTs = res.cursor.last_read_ts;
   const total = res.total ?? res.messages.length;
-  let rows = res.messages;
-  if (bounded && rows.length > 0 && rows[0]!.ts > cursorTs) {
-    rows = (await http.inbox(team, { unread: true })).messages;
+  let rows = await drain(query, res);
+  if (bounded && rows.length > 0 && envelopePosition(rows[0]!) > cursorTs) {
+    rows = await drain({ unread: true }, await http.inbox(team, { unread: true }));
   }
   const messages = rows.filter((m) => matchesFilter(m, filter));
 
@@ -143,13 +181,18 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   }
   // ADR 254: the stand-down trace, so an eligible-set act someone else already answered says so
   // instead of sitting there looking owed. Absent on an older daemon ⇒ an empty map ⇒ prior render.
-  const discharged = new Map((res.discharged ?? []).map((d) => [d.id, d.by]));
+  const discharged = new Map(
+    (res.discharged ?? []).map((d) => [
+      d.id,
+      { ...(d.by ? { by: d.by } : {}), ...(d.reason ? { reason: d.reason } : {}) },
+    ]),
+  );
   process.stdout.write('\n' + renderInbox(messages, kindOf, { cursorTs, discharged }) + '\n');
 
   // Advance the read cursor to the NEWEST UNREAD we actually displayed — never past an unshown unread
   // (the bounded-inbox invariant), and never at all when peeking or filtering (a lens must not consume).
   if (!parsed.flags['peek'] && !filtering) {
-    const newestUnread = [...messages].reverse().find((m) => m.ts > cursorTs);
+    const newestUnread = [...messages].reverse().find((m) => envelopePosition(m) > cursorTs);
     if (newestUnread) await http.markRead(team, newestUnread.id).catch(() => undefined);
   }
   // ADR 211 §5: ADR 117 requires the default view to include every unread, and a deferred act is
@@ -229,26 +272,155 @@ async function deferAct(parsed: Parsed): Promise<number> {
  * (an ambient folder has no inbox to interrupt), and it honours `MUSTERD_NO_NUDGE=1`. The daemon owns
  * the predicate, the capability gate, the composed line, and the audit/telemetry — the CLI just prints.
  */
+/**
+ * ADR 088 amendment (2026-09-05): the line must ride the harness's JSON seam, not bare stdout.
+ *
+ * Claude Code's hook contract: for PostToolUse, plain-text stdout at exit 0 goes to the DEBUG LOG and
+ * is never shown to the model — only `UserPromptSubmit`, `SessionStart` and two others promote bare
+ * stdout to context. What reaches the model from a PostToolUse hook is the JSON field
+ * `hookSpecificOutput.additionalContext` (or `systemMessage`, or stderr on exit 2). ADR 088 shipped
+ * the line as bare stdout, so it never reached a Claude Code model. Measured 2026-09-05 in one seat's
+ * own transcript: 67 PostToolUse hook runs produced a musterd line (`hook_success.stdout`, e.g.
+ * "ryder took a turn" at 00:48:26Z) and not one appeared in the model's context; the daemon audited
+ * every one as `interrupt.raised`. The bell check's Claude Code seats all reporting "no bell" was the
+ * same fact from the other side.
+ *
+ * Mirrors `formatCursorInterrupt` (session.ts, ADR 369), which already knew Cursor's seam. Null in →
+ * null out: the common path stays silent and free, exactly as §1 requires. Exported for the unit that
+ * pins the shape, because the shape IS the delivery.
+ */
+export function formatClaudeCodeInterrupt(line: string | null): string | null {
+  return line
+    ? JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: line },
+      })
+    : null;
+}
+
+/** The harness JSON seams `--interrupt-check --hook <harness>` can emit into. Bare stdout otherwise. */
+const HOOK_SEAMS: Record<string, (line: string) => string | null> = {
+  'claude-code': formatClaudeCodeInterrupt,
+};
+
+/**
+ * Harnesses whose musterd tools arrive DEFERRED — names in the prompt, schemas fetched on demand —
+ * so a tool is granted without being callable (doorbell contract clause 8).
+ *
+ * This decides one thing only: whether the deaf line must name the schema round trip. The repair is
+ * the same everywhere (`team_join`, the only thing that holds a Presence); on these harnesses it is
+ * not *reachable* until the model has re-fetched the schema, so naming it alone prescribes a call
+ * the model cannot make — the same failure this line already refuses for `musterd claim`.
+ *
+ * Measured 2026-09-14 (lane 01M2GP25R3): stanley, laptop, 20:50Z — the MCP server dropped
+ * mid-session while the daemon stayed healthy, and on reconnect all 29 musterd tools came back
+ * deferred; the seat stayed deaf until the model ran `ToolSearch` and then `team_join` by hand.
+ * ryder reproduced the deferral half in an ordinary session the same day, and izzo independently on
+ * every daemon bounce. Cursor's equivalent (`GetDynamicTools`) is a deferral path too but its
+ * transport does not recover in-session at all (`docs/wiki/cursor-agent-live-doorbell-eval.md`
+ * Check 5), so it is deliberately NOT listed here: naming a round trip that cannot help would be
+ * the same mistake in the other direction. Add a harness here only with a measurement behind it.
+ */
+const DEFERRED_TOOL_HARNESSES: Record<string, string> = {
+  'claude-code': 'ToolSearch',
+};
+
 async function interruptCheck(parsed: Parsed): Promise<number> {
+  // Which harness's hook is running us, if any: decides whether a raised line (or the deaf line) is
+  // printed bare or wrapped in that harness's injection JSON. Unknown value → bare, never a throw.
+  const hookFlag = flagStr(parsed.flags, 'hook') ?? '';
+  const hookSeam = HOOK_SEAMS[hookFlag];
+  // The discovery verb this harness makes the model call before a named tool is callable, if any.
+  const discoveryVerb = DEFERRED_TOOL_HARNESSES[hookFlag];
+  const emit = (line: string): void => {
+    const out = hookSeam ? hookSeam(line) : line;
+    if (out !== null) process.stdout.write(out + '\n');
+  };
   // The tool boundary is also the first moment the running model is *knowable* — the transcript now
   // carries an assistant turn, which it did not when SessionStart observed (ADR 158 follow-up). Runs
   // before the env/identity gates below: the observation is local and is owed even to a seat whose
   // daemon is unreachable or whose nudges are muted. Self-guarded, silent, never throws.
   refreshModelObservation();
+  // …and the first moment a slot SessionStart never announced can still be announced (lane
+  // 01M159BHJK). Sits beside the observation for the same reason and under the same contract: both
+  // are local truths the seat OWES the daemon, both are silent and self-guarded, and both are due
+  // even to a seat whose nudges are muted — so this runs before the MUSTERD_NO_NUDGE gate below.
+  // One push per session, not per tool call: the slot's `attested_at` stamp is what bounds it.
+  await attestSlotIfUnattested();
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
+  let seat: string | undefined;
   try {
+    // The interrupt probe is hook-installed and rides every tool call — it takes the default (no
+    // reclaim) for the same reason `gate check` does.
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
     if (!explicit || !identity) return 0;
+    seat = identity.name;
     const res = await http.interruptCheck(team);
-    if (res.raised && res.line) process.stdout.write(res.line + '\n');
-  } catch {
-    // Best-effort: the interrupt probe must never fail the tool call it rides on.
+    if (res.raised && res.line) emit(res.line);
+  } catch (err) {
+    // Best-effort: the interrupt probe must never fail the tool call it rides on — with ONE thing it
+    // owes the seat before it goes quiet. `GET /inbox/interrupt-check` authenticates as a member, and
+    // this probe alone is excluded from both lease heals (`claimSeatPerRequest: false`, so the
+    // transport's one-shot reclaim in `client.ts` deliberately skips it, and no reclaim happens
+    // here). A lease that died with its Presence therefore refuses this route FOREVER, and the bare
+    // `catch {}` this replaced swallowed that 401 — leaving a seat permanently and SILENTLY deaf on
+    // the interrupt line while every other command self-healed and looked fine. Measured
+    // cross-machine 2026-09-04: 12 probes, silence every time, `inbox --peek` working throughout.
+    //
+    // The repair is not to reclaim — that reinstates the 2026-09-01 claim storm (#1138/#1143) and is
+    // exactly what `cli.e2e.test.ts` pins against. It is to make the silence AUDIBLE on the one
+    // channel the probe already owns, so the human or the agent can run the claim themselves. Every
+    // other failure (no daemon, a refused credential, a wrong seat) stays silent: a claim fixes none
+    // of them, and a line on every tool call is worse than no line at all.
+    if (isStaleSessionLease(err)) {
+      // Composed HERE, never echoed from the server's body: this line rides into a model's context
+      // at a tool boundary uninspected, and the daemon's own text is not ours to inject.
+      //
+      // It names the STATE and refuses to prescribe `musterd claim`, which does not repair it —
+      // measured by stanley on delta 2026-09-04: after a successful "✓ delta — occupied on revive"
+      // the identical request still 401'd. Both claim paths explain why. `detachedClaim` is
+      // documented "no socket held, no lease" and rewrites the binding WITHOUT `session_lease`, so
+      // `--detach` erases a lease rather than renewing one; and the attached path writes the lease
+      // the WS minted but then returns, so the Presence — and the lease bound to it (ADR 337) —
+      // dies with the command. A lease outlives its command only where something holds the
+      // Presence, which is the harness adapter. Naming a repair that does not work is worse than
+      // naming none: it spends a turn and returns the seat to the same silence.
+      // Through the same seam as a raised line: on Claude Code a bare deaf line went to the debug log
+      // too, so the one sentence #1317 bought was never read by the model it was written for.
+      //
+      // Clause 8 (lane 01M2GP25R3): on a harness whose tools arrive deferred, `team_join` is itself
+      // not callable until its schema is fetched — so the line names the round trip IN ORDER. Left
+      // implicit, this sentence prescribes a repair the reader cannot perform, which is the exact
+      // failure it already refuses for `musterd claim`; the model then burns the turn discovering
+      // the round trip for itself, which is what stanley measured on 2026-09-14.
+      const reJoin =
+        discoveryVerb !== undefined
+          ? `re-fetch the schema first (${discoveryVerb} select:mcp__musterd__team_join), then ` +
+            `call team_join`
+          : `re-join from your harness adapter (team_join)`;
+      emit(
+        `musterd: the interrupt line is deaf — this seat's session lease is dead, so every ` +
+          `interrupt check is being refused. ` +
+          `it needs a live Presence: ${reJoin}. ` +
+          `\`musterd claim${seat !== undefined ? ' ' + seat : ''}\` mints a lease that dies with ` +
+          `the command, and \`--detach\` writes none.`,
+      );
+    }
   }
   return 0;
 }
 
+/** The transport's lease refusal, narrowed to what a {@link CliError} carries — as opposed to a
+ *  refused credential, a wrong acting seat, or an unreachable daemon, none of which a claim fixes. */
+function isStaleSessionLease(err: unknown): boolean {
+  return (
+    err instanceof CliError &&
+    err.code !== undefined &&
+    isSessionLeaseRefusal({ code: err.code, message: err.message })
+  );
+}
+
 function countUnread(messages: Envelope[], cursorTs: number, _self: string): number {
-  return messages.filter((m) => m.ts > cursorTs).length;
+  return messages.filter((m) => envelopePosition(m) > cursorTs).length;
 }
 
 /** `inbox --from <name>` / `--act <act>` narrowing (ADR 067): keep only matching senders/act types. */
@@ -385,7 +557,8 @@ async function waitInbox(
     const pending = await http.inbox(team, { unread: true }).catch(() => undefined);
     if (!pending) return undefined;
     return pending.messages.find(
-      (m) => m.ts > pending.cursor.last_read_ts && wakesWait(m, identity.name, filter),
+      (m) =>
+        envelopePosition(m) > pending.cursor.last_read_ts && wakesWait(m, identity.name, filter),
     );
   };
 

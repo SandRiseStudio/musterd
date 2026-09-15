@@ -2,6 +2,9 @@
 
 - Status: accepted — settings applied 2026-07-07; CI + protection land with this ADR
 - Date: 2026-07-07
+- Snapshot-debt: none — the one frequency word in §Decision ("Bugbot occasionally reports
+  `skipping` on binary-only diffs", §4) describes a third-party tool's behaviour that protection
+  already treats as non-blocking; nothing in this ADR's own claims is a rate it would re-measure.
 
 ## Context
 
@@ -114,8 +117,9 @@ a docs/asset PR is never wedged.
 - **`main` stays green and linear.** A red/flaky test or an unresolved Bugbot finding **cannot** merge.
   The class of failure that opened this session (a flaky test on `main`) is structurally prevented going
   forward.
-- **Cost:** ~1–3 min of CI per PR, and the small chance a behind-but-conflict-free PR merges on a
-  slightly stale base (accepted, per §2). If semantic-collision rate rises, a GitHub **merge queue** is
+- **Cost:** ~1–3 min of CI per PR _(true when written; by 2026-09-03 the serial job had grown to
+  8m10s — see the amendment below, which fans it out and re-baselines)_, and the small chance a
+  behind-but-conflict-free PR merges on a slightly stale base (accepted, per §2). If semantic-collision rate rises, a GitHub **merge queue** is
   the pre-agreed next step.
 - **Admin bypass remains** for the human owner (break-glass); agents have no bypass.
 - The playbook is mirrored into `AGENTS.md` (the primer every agent reads) so it is guidance, not just an
@@ -139,3 +143,57 @@ lands; catch-up handled by the single documented `rebase --force-with-lease` ste
 (one red `main`, one number collision, several manual cleanups); *after* = the same team on the enforced
 loop. If red-`main` recurs or the stale-base merge bites, the escalation is a merge queue (§2) — itself a
 one-setting experiment we can A/B.
+
+## Amendment 2026-09-03 — the gates run in parallel; `gates` is the fan-in (lane `01M1M95Y6D69VWAB9K8ESHE9A3`)
+
+The Decision above stands — one workflow, CI the sole authority, `gates` the one required string. What
+changed is the **shape of the job**, because the cost line in Consequences had stopped being true.
+
+**What was measured.** §3 lists the chain as install → build → typecheck → test → format:check. By
+2026-09-03 it had grown to twelve serial steps, and three runs that day (`33789198570`, a docs-only PR;
+`33789487399`; `33717861041` on `main`) each took **8m10s**: the Chrome contrast sweep 227s (46%),
+tests + coverage 157s (32%), and typecheck / build / lint / the format chain ~22–26s each. The two
+big steps do not depend on each other, nor on anything but the built dist. A three-file markdown PR
+paid the full eight minutes. The repo is public, so Actions minutes are free; the cost was the
+wall clock on every merge — roughly fifteen a day that week.
+
+**What changed.** `ci.yml` now runs five leaves in parallel — `static` (typecheck, lint, perf and
+context budgets), `coverage`, `a11y-prerender`, `a11y-connected`, `docs` (the `format:check` chain
+and the diff-based ADR gate) — and a sixth job named **`gates`** that `needs:` all five and asserts
+each one's result is `success`. Each leaf checks out full history and builds on its own runner
+(`.github/actions/setup`); a rebuild is ~22s in parallel and avoids an artifact round-trip, and full
+history is ~3s — the first fanned-out run found `scripts/wiki-probe.test.ts` reading old SHAs from a
+depth-1 checkout, a third reader of history beside `roadmap-truth:check` and `change-adr:check`. The
+contrast gate grew a `--connected-only` flag to pair with its existing `--static-only`, so its two
+phases can run as two leaves. **No gate was removed or narrowed: every check that ran serially runs
+on every PR still.**
+
+**What was rejected, and why.** _Path-conditional skipping_ (no Chrome sweep when the diff touches
+nothing under `packages/web/`) would have saved the most on docs PRs, but it encodes "what can
+change contrast" as a path list — the premise-outlives-its-mechanism shape
+`docs/wiki/constraint-outlives-its-premise.md` records against this exact gate twice. If wanted
+later, gate on the built client's bytes being unchanged, not on paths. _A faster sweep_ (one Chrome
+per phase instead of one per route, ~90s of launch overhead) is the largest absolute win but
+touches a 1,620-line instrument carrying six flake guards; it is worth doing once the sweep is no
+longer on the critical path, when the saving is runner-minutes rather than latency.
+
+**Rules for the fan-in, so it is not quietly weakened.** `gates` runs under `if: always()` so a red
+leaf still yields a verdict (a skipped required check blocks merge with no reason shown); it must
+then assert every leaf's `result == success` by name — `cancelled` and `skipped` are red. A bare
+`always()` with no result check is the classic mistake that turns a red leaf into a green gate.
+Adding a gate means adding it to a leaf **and** to the `needs:` list; a leaf missing from `needs:`
+is a gate nobody requires.
+
+**Eval, amended.** _Baseline:_ 8m10s median over the three runs above. _First run on the new shape_
+(`33793376033`, this PR): **4m31s** created→completed; leaves `a11y-prerender` 261s,
+`a11y-connected` 150s, `coverage` 127s, `static` 95s, `docs` 50s, `gates` 3s. The critical path is
+the prerendered sweep, not `coverage` as predicted — on its own cold runner the 15-sweep phase took
+~215s after setup, against ~125s on a warm laptop, so the per-launch Chrome floor is the next lever
+(the "faster sweep" rejected above becomes the right next lane once this lands). The run before it
+(`33792845354`) had two red leaves for reasons unrelated to any gate and `gates` went red in 3s —
+the fan-in falsifier, exercised for real. _Target:_ under 4m30s median on the first three
+post-merge runs. _Falsifier:_ branch protection still lists exactly one required check named
+`gates`. If a leaf proves flaky on a cold runner (the sweep's 30s Chrome start timeout exists
+because cold start flaked once), that is a regression this amendment introduced, and the fix is the
+leaf, not the fan-in.
+

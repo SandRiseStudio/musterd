@@ -9,7 +9,9 @@ import {
   rosterOrder,
   rosterPrimaryChip,
 } from './format';
+import { dwellTrace, type DwellLog } from './dwell';
 import { CollapseButton, PanelRail } from './PanelChrome';
+import { wokenBadge, wokenSeat } from './wokenSeat';
 
 /**
  * The roster rail — presence posture (ADR 138) plus governance exceptions/capabilities (ADR 073/070).
@@ -24,6 +26,8 @@ export function RosterPanel({
   daemonEpoch,
   unreadable = 0,
   stale = false,
+  dwell,
+  dwellNow,
 }: {
   roster: MemberSummary[];
   collapsed?: boolean;
@@ -37,6 +41,12 @@ export function RosterPanel({
   unreadable?: number;
   /** The roster refetch is failing persistently, so these rows are frozen at their last good read. */
   stale?: boolean;
+  /** Visits this page has watched (lane 01M1JQENBK). Optional: with no log, no row says anything
+   *  about dwell, which is what every other caller and every render test gets. */
+  dwell?: DwellLog;
+  /** The clock the trace ages against, passed rather than read so the rail has one `now` per render
+   *  and a test can state the moment it means. */
+  dwellNow?: number;
 }) {
   const members = [...roster].sort(rosterOrder);
   const admins = members.filter((m) => m.capabilities?.is_admin).length;
@@ -66,7 +76,13 @@ export function RosterPanel({
           <p className="lc-roster__empty">No seats on this team yet.</p>
         )}
         {members.map((m) => (
-          <SeatRow key={m.id} m={m} daemonBuild={daemonBuild} daemonEpoch={daemonEpoch} />
+          <SeatRow
+            key={m.id}
+            m={m}
+            daemonBuild={daemonBuild}
+            daemonEpoch={daemonEpoch}
+            trace={dwell && dwellNow !== undefined ? dwellTrace(dwell, m, dwellNow) : null}
+          />
         ))}
       </div>
       {/* The two ways this list can quietly lie, each said out loud in one line. Deliberately NOT an
@@ -112,10 +128,14 @@ function SeatRow({
   m,
   daemonBuild,
   daemonEpoch,
+  trace = null,
 }: {
   m: MemberSummary;
   daemonBuild?: string | undefined;
   daemonEpoch?: number | undefined;
+  /** What this page remembers of a visit that has ENDED, or null. Never rendered for a live seat —
+   *  `dwellTrace` refuses that case at the source, so this row cannot reintroduce it. */
+  trace?: { label: string; title: string } | null;
 }) {
   const kind = m.kind === 'human' ? 'human' : 'agent';
   const online = m.presence !== 'offline';
@@ -126,6 +146,19 @@ function SeatRow({
   // The build ref stays only as operator detail in the tooltip; it is never itself the trigger.
   const memberBuild = m.presences?.[0]?.build ?? undefined;
   const memberEpoch = m.presences?.[0]?.epoch ?? undefined;
+  // The machine this seat lives on (presence replication, ADR 356) — `presences` comes back ordered
+  // `last_seen_at DESC` (presence.ts:461), so index 0 is where the seat was seen MOST RECENTLY, and
+  // the CLI reads the same index for the same reason (render/rows.ts:352). A local row carries
+  // `node: null` and says nothing: the machine you are already looking at is not news, and a suffix
+  // on every row would cost the rare remote one all its salience.
+  // Falls back to silence rather than the raw id when the label has not synced — `node_label` is a
+  // LEFT JOIN onto `nodes`, so a node this daemon has not replicated yet joins to null, and a ULID
+  // in the roster would be worse than not naming the machine at all.
+  const nodeLabel = m.presences?.[0]?.node_label?.trim() || undefined;
+  // Why this seat is in the room at all (ADR 131) — a wake, or a person opening a session. Rides
+  // ALONGSIDE the posture chip rather than replacing it: posture is what the seat is doing,
+  // provenance is why it is here, and a woken seat is `working` or `active` like any other.
+  const woken = wokenSeat(m);
   const epochBehind = isFeatureBehind(m, daemonEpoch);
   const skewTitle = epochBehind
     ? `Behind on features — this seat is on epoch ${memberEpoch}, the team is on ${daemonEpoch}. ` +
@@ -138,7 +171,13 @@ function SeatRow({
   // Residency (ADR 131): an enrolled offline seat is not unreachable — a directed act wakes it;
   // `resumable` only while the capture sits inside the harness's ~30d GC horizon (inc 5), which is
   // exactly why the wire carries a timestamp and not a boolean.
-  const wakeable = !online && !reconnecting && m.wakeable === true;
+  const enrolled = !online && !reconnecting && m.wakeable === true;
+  // ADR 357: the five-state read, when the daemon sends it. An older daemon omits `wakeability`
+  // and the chip reads exactly as before (enrolled ⇒ "wakeable"). A newer one lets the chip say
+  // WHY an enrolled seat cannot be reached — a dead actuator or a vanished workspace used to read
+  // "wakeable" until a wake failed in host.log where nobody was looking.
+  const wakeability = enrolled ? (m.wakeability ?? 'wakeable') : null;
+  const wakeable = wakeability === 'wakeable';
   const resumable =
     wakeable && m.resumable_at != null && Date.now() - m.resumable_at < 30 * 24 * 60 * 60 * 1000;
   const chip = rosterPrimaryChip(m);
@@ -163,7 +202,7 @@ function SeatRow({
           disc. `aria-hidden` stays: the name is on the next line. */}
       <span
         className="lc-seat__avatar"
-        style={{ background: memberAvatar(m.name, kind) }}
+        style={{ background: memberAvatar(m.name, kind, m.hue) }}
         aria-hidden="true"
       >
         {initial(m.name)}
@@ -184,10 +223,20 @@ function SeatRow({
         <div className="lc-seat__gov">
           <span
             className={`lc-stat lc-stat--${chip.quiet ? 'quiet' : chip.tone}`}
-            title={m.offline_reason ? `Offline reason: ${m.offline_reason}` : `Posture: ${chip.label}`}
+            title={
+              (m.offline_reason
+                ? `Offline reason: ${m.offline_reason}`
+                : `Posture: ${chip.label}`) + (nodeLabel ? ` · on ${nodeLabel}` : '')
+            }
           >
             {chip.label}
+            {nodeLabel && <span className="lc-stat__node"> @ {nodeLabel}</span>}
           </span>
+          {woken && (
+            <span className="lc-stat lc-stat--woken" title={wokenBadge().title}>
+              {wokenBadge().label}
+            </span>
+          )}
           {accountEx && (
             <span
               className={`lc-stat lc-stat--${accountEx.tone}`}
@@ -209,12 +258,43 @@ function SeatRow({
               wakeable
             </span>
           )}
+          {wakeability === 'enrolled_host_stale' && (
+            <span
+              className="lc-stat lc-stat--quiet"
+              title="Enrolled, but the host actuator that would spawn this seat has stopped polling — a directed act will wait until it is back (ADR 357)"
+            >
+              enrolled · host quiet
+            </span>
+          )}
+          {wakeability === 'enrolled_dead_workspace' && (
+            <span
+              className="lc-stat lc-stat--quiet"
+              title="Enrolled, but the last wake reported the workspace gone — re-provision before a directed act can reach it (ADR 357)"
+            >
+              enrolled · workspace gone
+            </span>
+          )}
+          {wakeability === 'enrolled_seat_busy' && (
+            <span
+              className="lc-stat lc-stat--quiet"
+              title="Enrolled and acting on the ledger just now with a lapsed heartbeat — waking it would spawn a duplicate (ADR 219)"
+            >
+              enrolled · busy
+            </span>
+          )}
           {resumable && (
             <span
               className="lc-stat lc-stat--quiet"
               title="A captured harness session is resumable — a wake continues the seat's own transcript"
             >
               resumable
+            </span>
+          )}
+          {/* Last, and deliberately not a `lc-stat` chip: the visit is over, and a trace that looked
+              like the live chips beside it would be competing with facts about now. */}
+          {trace && (
+            <span className="lc-roster__dwell" title={trace.title}>
+              {trace.label}
             </span>
           )}
         </div>

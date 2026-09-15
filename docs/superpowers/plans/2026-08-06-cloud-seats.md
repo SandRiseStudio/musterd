@@ -268,3 +268,31 @@ This is the dogfood: provision the first real cloud seat. Every command that cre
 - Deliberate deviation, stated: the spec's "product code limited to what the dogfood proves broken" — the systemd unit is built *before* the dry-run because the spec names it a known must-build; everything else waits for measured friction (Task 4 step 5 is the gate).
 - Type consistency: Task 2 consumes exactly Task 1's exports; Task 3's bootstrap calls only shipped CLI verbs (`claim`, `service install --wake`).
 - Honesty check: Task 2's test sketches defer constructor names to `host.test.ts`'s real harness rather than inventing them — the file dictates, the plan states the behavioral contract.
+
+---
+
+## Amendment 2026-09-03 — the VM is a joiner daemon, not a thin client (stanley, lane 01KZAAS15M)
+
+The federation arc (ADRs 325–376, landed 2026-08-25 → 2026-09-03) changed what "a second
+machine" is: a machine daemon that replicates, with the laptop as hub. The spec's spine 1 ("the
+daemon stays on the admin's machine; the VM is a client") was the ADR 039 answer and is superseded
+by ADR 325 — the VM runs its own daemon and enrolls (ADR 328), the laptop is the hub because the
+team was created there (ADR 376). Spine 2–4 stand. What this changes in the tasks:
+
+- **Tasks 1–2 (systemd wake actuator, `serviceSupported` widening) are dropped.** A Fly machine
+  is a container whose entrypoint is the supervisor; there is no systemd to write a unit for, and
+  `musterd host` runs on linux unchanged (it is a poll loop that spawns `claude -p`). No product
+  code is built ahead of the dry-run — the spec's own rule, now without the exception.
+- **Task 3 is rewritten as landed**: `deploy/cloud-seat/{Dockerfile,fly.toml,entrypoint.sh,README.md}`.
+  The entrypoint brings up tailscaled (kernel networking, as the broadcast image proved), a
+  loopback daemon with SQLite on the volume, the team, `musterd node join` against the hub
+  (resolved through tailscaled; the laptop's `tailscale serve` forwards 4849), the seat's
+  workspace, `residency on`, then `exec musterd host`. Every step is idempotent.
+- **Task 4 (the dry-run) gains the three pre-registered two-machine experiments** — ADR 365
+  §O&E, ADR 366 §Experiment, ADR 371 §O&E — as exit criteria beside the lane-end-to-end run.
+  Their first live measurement is the point of this machine.
+- **Task 5's ADR** records the joiner-not-client decision, the v1 lifecycle economics, and
+  inherits ADR 376 §4's open question (hub relocation) with the measurement that decides it.
+
+The "P4 remote-join fixes" in the lane title were built by the arc (ADRs 328, 331, 358, 360); the
+dry-run measures what is left. Known unknowns are listed in the runbook's last section.

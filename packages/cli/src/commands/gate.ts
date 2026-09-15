@@ -72,27 +72,65 @@ export function parseToolCall(raw: string): GateToolCall | null {
     const json: unknown = JSON.parse(raw);
     if (typeof json !== 'object' || json === null) return null;
     const o = json as Record<string, unknown>;
-    const tool = typeof o['tool_name'] === 'string' ? o['tool_name'] : undefined;
-    if (!tool) return null;
-    const input =
+    const rawTool =
+      typeof o['tool_name'] === 'string'
+        ? o['tool_name']
+        : typeof o['toolName'] === 'string'
+          ? o['toolName']
+          : undefined;
+    if (!rawTool) return null;
+    const inputRaw =
       typeof o['tool_input'] === 'object' && o['tool_input'] !== null
         ? (o['tool_input'] as Record<string, unknown>)
-        : {};
+        : typeof o['toolInput'] === 'object' && o['toolInput'] !== null
+          ? (o['toolInput'] as Record<string, unknown>)
+          : {};
+    // Tool aliases: map other harnesses onto the class-table vocabulary Claude already uses.
+    // - Grok CLI (ADR 352)
+    // - Cursor Agent (ADR 369)
+    const toolAlias: Record<string, string> = {
+      run_terminal_command: 'Bash',
+      search_replace: 'Edit',
+      Shell: 'Bash',
+      StrReplace: 'Edit',
+      Delete: 'Write',
+      Task: 'Agent',
+    };
+    const tool = toolAlias[rawTool] ?? rawTool;
+    const input = inputRaw;
     const path =
       typeof input['file_path'] === 'string'
         ? input['file_path']
         : typeof input['notebook_path'] === 'string'
           ? input['notebook_path']
-          : undefined;
+          : typeof input['target_file'] === 'string'
+            ? input['target_file']
+            : typeof input['path'] === 'string'
+              ? input['path']
+              : undefined;
     const command = typeof input['command'] === 'string' ? input['command'] : undefined;
     // ADR 163 — the payload ENVELOPE, not the tool input. `agent_id`/`agent_type` are present only on a
     // subagent's own tool calls and absent on the parent seat's; measured on Claude Code 2.1.220. On a
-    // spawn call (`tool_name: Agent`) the requested type + `model:` override live in tool_input instead,
-    // and carry no agent_id — the two halves share no key, which is why nothing joins them here.
-    const actorId = typeof o['agent_id'] === 'string' ? o['agent_id'] : undefined;
-    const actorType = typeof o['agent_type'] === 'string' ? o['agent_type'] : undefined;
+    // spawn call (`tool_name: Agent` / `Task`) the requested type + `model:` override live in tool_input
+    // instead, and carry no agent_id — the two halves share no key, which is why nothing joins them here.
+    const actorId =
+      typeof o['agent_id'] === 'string'
+        ? o['agent_id']
+        : typeof o['subagent_id'] === 'string'
+          ? o['subagent_id']
+          : undefined;
+    const actorType =
+      typeof o['agent_type'] === 'string'
+        ? o['agent_type']
+        : typeof o['subagent_type'] === 'string'
+          ? o['subagent_type']
+          : undefined;
     const spawnType =
-      typeof input['subagent_type'] === 'string' ? input['subagent_type'] : undefined;
+      typeof input['subagent_type'] === 'string'
+        ? input['subagent_type']
+        : typeof input['subagentType'] === 'string'
+          ? input['subagentType']
+          : undefined;
     const spawnModel = typeof input['model'] === 'string' ? input['model'] : undefined;
     // ADR 167 — the harness session-messaging send. The raw body and raw target session id are reduced
     // to sha256-16 HERE, inside this frame, and never assigned onto the returned object: what the rest
@@ -133,7 +171,8 @@ export function parseEnvelopeSessionId(raw: string): string | undefined {
   try {
     const json: unknown = JSON.parse(raw);
     if (typeof json !== 'object' || json === null) return undefined;
-    const id = (json as Record<string, unknown>)['session_id'];
+    const o = json as Record<string, unknown>;
+    const id = typeof o['session_id'] === 'string' ? o['session_id'] : o['sessionId'];
     return typeof id === 'string' && id ? id : undefined;
   } catch {
     return undefined;
@@ -167,11 +206,14 @@ export function workingTreeWarning(
   return stale.length > 0 ? stalePathWarning(stale, command) : undefined;
 }
 
-/** Emit the PreToolUse deny control JSON Claude Code reads — the tool is blocked and `reason` is the
- *  repair string surfaced to the model (in its action loop, not its background context). */
+/** Emit the PreToolUse deny control JSON. Claude Code reads `hookSpecificOutput`; Cursor Agent reads
+ *  `permission: deny` and surfaces `user_message` / `agent_message` (ADR 369). */
 function emitDeny(reason: string): void {
   process.stdout.write(
     JSON.stringify({
+      permission: 'deny',
+      user_message: reason,
+      agent_message: reason,
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
@@ -181,12 +223,14 @@ function emitDeny(reason: string): void {
   );
 }
 
-/** Surface a warn-posture advisory without blocking or auto-granting. `additionalContext` proceeds
- *  normally and best-effort adds the note to the model's context; a Claude Code build that ignores it
- *  simply proceeds silently (warn's guaranteed half is the server-side audit row, not this surface). */
+/** Surface a warn-posture advisory without blocking or auto-granting. `additionalContext` (Claude Code)
+ *  and `additional_context` (Cursor Agent) proceed normally and best-effort add the note to the model's
+ *  context; a harness build that ignores it simply proceeds silently (warn's guaranteed half is the
+ *  server-side audit row, not this surface). */
 function emitWarn(reason: string): void {
   process.stdout.write(
     JSON.stringify({
+      additional_context: reason,
       hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: reason },
     }) + '\n',
   );
@@ -283,7 +327,11 @@ async function gateCheck(parsed: Parsed): Promise<number> {
         justMarked,
       );
     }
-    const { http, team, identity, explicit } = resolveRead(parsed.flags);
+    // Hook one-shot: never reclaim the seat — a gate rides EVERY tool call, and a reclaim here
+    // evicts the live adapter's presence and kills its lease (see ResolveReadOptions).
+    const { http, team, identity, explicit } = resolveRead(parsed.flags, {
+      claimSeatPerRequest: false,
+    });
     if (!explicit || !identity) return; // ambient/unbound folder — no seat to gate → allow
     // ADR 163 — actor attestation, BEFORE the class table and independent of it. Deliberately not
     // awaited: nothing downstream reads the result, and an observer on the critical path would be the

@@ -11,7 +11,15 @@
  * guidance check imports it on Node's native TypeScript with no build step and no color dependency.
  */
 
-export type GroupId = 'setup' | 'team' | 'messaging' | 'work' | 'insight' | 'inbox' | 'admin';
+export type GroupId =
+  | 'waiting'
+  | 'messaging'
+  | 'work'
+  | 'remembering'
+  | 'team'
+  | 'insight'
+  | 'setup'
+  | 'ops';
 
 export interface CommandGroup {
   id: GroupId;
@@ -35,32 +43,60 @@ export interface CommandEntry {
   detail?: string;
   /** Copy-paste examples for `musterd help <name>`. */
   examples?: string[];
+  /**
+   * This command's first positional is FREE TEXT, not a subcommand — so `musterd <name> help` is an
+   * argument the user meant, never a help request. Set it and `wantsCommandHelp` stands down.
+   *
+   * `send` is the case that forced this: its positional is the message body, and on a
+   * `request_help` act a one-word body of exactly "help" is the most plausible message anyone
+   * would ever type. Reserving the word globally would have swallowed the very word that verb
+   * exists to carry.
+   */
+  freeTextPositional?: boolean;
 }
 
-/** The rooms of the floor, in display order. */
+/**
+ * The rooms of the floor, in display order — one room per QUESTION a reader brings, not per
+ * implementation. Regrouped 2026-09-03 (surface survey, docs/wiki/command-and-tool-surface-map.md):
+ * "what is waiting for me" used to be answered from three rooms, and `whoami`/`memory`/`insight` sat
+ * under "Inbox" though none of them reads an inbox.
+ */
 export const GROUPS: readonly CommandGroup[] = [
-  { id: 'setup', title: 'Setup & daemon', blurb: 'get wired up and run the coordination daemon' },
   {
-    id: 'team',
-    title: 'Team & seats',
-    blurb: 'create teams, add members, give agents a workspace',
+    id: 'waiting',
+    title: 'Waiting & orientation',
+    blurb: 'what is waiting for you, what to pick up next, who you are here',
   },
-  { id: 'messaging', title: 'Messaging', blurb: 'send acts, nudge a teammate, get notified' },
+  {
+    id: 'messaging',
+    title: 'Talking',
+    blurb: 'send a typed act to a teammate, a few, or everyone',
+  },
   {
     id: 'work',
     title: 'Work & lanes',
-    blurb: 'own a unit of work, orient, hand off, close it out',
-  },
-  { id: 'insight', title: 'Insight', blurb: 'the roster, flow metrics, and the governance trail' },
-  {
-    id: 'inbox',
-    title: 'Inbox & presence',
-    blurb: 'read what is waiting; set who you are and when',
+    blurb: 'explore shared Seeds; own, hand off, and close Lanes; the board',
   },
   {
-    id: 'admin',
-    title: 'Seats & admin',
-    blurb: 'claim a seat, approve requests, release and recover',
+    id: 'remembering',
+    title: 'Remembering',
+    blurb: "this seat's private continuity note; findings for the whole team",
+  },
+  {
+    id: 'team',
+    title: 'Team & seats',
+    blurb: 'who is on the team; create, claim, join, release, and recover seats',
+  },
+  {
+    id: 'insight',
+    title: 'Insight & audit',
+    blurb: 'flow metrics, the wasted-work collector, and the governance trail',
+  },
+  { id: 'setup', title: 'Setup & daemon', blurb: 'get wired up and run the coordination daemon' },
+  {
+    id: 'ops',
+    title: 'Residency & sessions',
+    blurb: 'wake enrolled seats while offline; the captured harness session',
   },
 ];
 
@@ -128,13 +164,56 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'wire',
-    signature: '[--autojoin] [--key mskey_…]',
+    signature: '[--autojoin] [--key mskey_…] [--migrate-bootstrap]',
     summary: 'headless self-wire from a committed .musterd/workspace.json',
     group: 'setup',
     detail:
-      'Headless setup for a fresh clone: register the MCP server from this folder’s committed ' +
-      '.musterd/workspace.json with no prompts and no seat claim (pass `--autojoin` to also claim).',
-    examples: ['musterd wire', 'musterd wire --autojoin'],
+      'Headless setup for a fresh clone: reconcile this workspace’s SAVED harness selection from the ' +
+      'committed .musterd/workspace.json + provisioned.json with no prompts and no seat claim (pass ' +
+      '`--autojoin` to also claim). Never edits the selection and never converts pre-ADR-281 state — ' +
+      'a folder without a valid selection exits 6 and names `musterd harness configure` as the fix. ' +
+      '`--migrate-bootstrap` replaces this Workspace’s legacy Team key with a seat-scoped credential; ' +
+      'it requires the existing seat credential, preserves active Presence, and is safe to retry after ' +
+      'a local write failure.',
+    examples: ['musterd wire', 'musterd wire --autojoin', 'musterd wire --migrate-bootstrap'],
+  },
+  {
+    name: 'harness',
+    signature: 'configure [--select <ids> [--yes]] | status [--json]',
+    summary: 'choose which harnesses launch this workspace — and inspect the wiring',
+    group: 'setup',
+    detail:
+      'The multi-harness front door (ADR 281/282/286). `configure` is the ONE editor of this ' +
+      'workspace’s desired harness set (Claude Code, Cursor, Codex, the native musterd host — any ' +
+      'subset, chosen once per workspace and machine) and the ONE converter of pre-ADR-281 local ' +
+      'state; after you confirm the complete set it saves strict v2 identity/manifest state and ' +
+      'reconciles the managed fragments crash-safely. `status` is read-only: per harness it reports ' +
+      'desired, availability, each managed fragment’s observed state and ownership, pending ' +
+      'journal/lock state, and the repair to run; exit 0 only when every desired fragment is usable ' +
+      'and every deselected contribution is released (a selected-but-uninstalled harness is ' +
+      '`pending`, which is healthy). `configure --select <ids> --yes` is the headless form: naming the ' +
+      'complete set on the command line is the confirmation, so scripts and service agents can ' +
+      'convert a pre-ADR-281 workspace non-interactively.',
+    examples: [
+      'musterd harness configure',
+      'musterd harness configure --select claude-code,musterd --yes',
+      'musterd harness status',
+      'musterd harness status --json',
+    ],
+  },
+  {
+    name: 'surface',
+    signature: 'list | decline <name> | accept <name>',
+    summary:
+      'record a refusal — remove a provisioned surface and remember that you meant to (ADR 332)',
+    group: 'setup',
+    detail:
+      'Provisioning used to know only installed and absent, and absence carries no intent. `list` shows what can be refused here and what has been; `decline <name>` removes the surface (a hook, a statusline chip) and records the refusal so `init --check` reports drift about it as a choice, not a gap; `accept <name>` clears the refusal (re-install with `init --refresh-hooks`).',
+    examples: [
+      'musterd surface list',
+      'musterd surface decline statusline',
+      'musterd surface accept statusline',
+    ],
   },
   {
     name: 'serve',
@@ -192,6 +271,27 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: ['musterd stream doctor', 'musterd stream build', 'musterd stream start'],
   },
   {
+    name: 'integration',
+    signature: 'doctor [--tailscale] [--aperture <https-url>] [--json]',
+    summary: 'read-only verification for optional Tailscale transport and Aperture configuration',
+    group: 'setup',
+    primary: false,
+    detail:
+      'Independently inspect either optional integration without changing it. `--tailscale` verifies ' +
+      'the daemon host’s actual loopback → Tailscale Serve → Host gate → HTTP/WebSocket path. ' +
+      '`--aperture` reads one HTTPS /api/config endpoint and checks zero retention, providers, exact ' +
+      'Member workload grants, rejecting quotas, and one exact Member tag with the standard user role. ' +
+      'A ready Aperture result ' +
+      'is configuration evidence only: this increment does not enforce model routing and does not manage ' +
+      'devices, sandbox Members, or cover unrelated harnesses. With neither flag, both sections are healthy off.',
+    examples: [
+      'musterd integration doctor',
+      'musterd integration doctor --tailscale',
+      'musterd integration doctor --aperture https://aperture.tailnet.ts.net',
+      'musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net',
+    ],
+  },
+  {
     name: 'service',
     signature:
       '<install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake] [--port <n>] [--host <h>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--follow] [--force]',
@@ -205,7 +305,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'build aborts before the bounce). `restart`/`stop`/`refresh` refuse while teammates hold live ' +
       'sessions unless `--force`. Add `--live` to target the /live viewer instead of the daemon ' +
       '(ADR 132): `install --live` stands up a self-updating build-publisher (a dedicated ' +
-      'detached-on-main worktree + an interval agent that rebuilds the web app and publishes it into ' +
+      'detached-on-main workspace + an interval agent that rebuilds the web app and publishes it into ' +
       'the daemon’s web-root whenever main moves), so the daemon serves /live from its own origin — ' +
       'always the latest main, no dev server, no daemon restart; `refresh --live` forces a rebuild now. ' +
       'Add `--wake` to target the wake actuator (ADR 131 inc 5): `install --wake` runs `musterd host` ' +
@@ -259,9 +359,9 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Team & seats ───────────────────────────────────────────────────────────────────────────
   {
     name: 'team',
-    signature: '<create|add|credential|remove|archive|export> …',
+    signature: '<create|add|credential|agent-key|bootstrap|remove|archive|export> …',
     summary:
-      'create a team, add/remove members, re-issue a lost credential, archive a team, export the roster to git',
+      'create a team, add/remove members, manage scoped bootstrap credentials, archive a team, export the roster to git',
     group: 'team',
     primary: true,
     detail:
@@ -271,6 +371,18 @@ export const CATALOG: readonly CommandEntry[] = [
       '                               folder on this machine at the new team (skip it for a probe)\n' +
       '  add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]\n' +
       '  credential <name>            re-issue a human’s lost mscr_ credential, shown once (localhost, or admin off-host)\n' +
+      '  agent-key [--key <mskey_…>] [--rotate --yes] [--show]\n' +
+      '                               the team agent key `musterd agent` provisions with. With no flags it\n' +
+      '                               RECOVERS it — reads it back off the seat bindings already on this\n' +
+      '                               machine and re-records it, changing nothing on the team. --rotate mints\n' +
+      '                               a new one and invalidates every seat’s (it counts them and needs --yes)\n' +
+      '  bootstrap mint (--seat <name>|--role <name>|--host <label>) [--label <text>] [--expires-in <duration>]\n' +
+      '                               mint one independently revocable bootstrap credential, shown once\n' +
+      '  bootstrap list              show the redacted credential inventory (admin)\n' +
+      '  bootstrap revoke <id>       revoke one scoped bootstrap credential (admin)\n' +
+      '  bootstrap cutover [--force] [--yes]\n' +
+      '                               disable the legacy Team key after every held seat and enrolled host\n' +
+      '                               proves scoped use; --force bypasses readiness, --yes confirmation\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +
       '  archive <slug> [--as <admin>]  soft-archive a whole team — off status/rosters, history kept (admin)\n' +
       '  export <slug> [--to <dir>]   move the roster onto git-tracked .musterd/ files (ADR 058);\n' +
@@ -278,18 +390,22 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: [
       'musterd team create acme --as nick',
       'musterd team add lin --kind human --role reviewer',
+      'musterd team bootstrap mint --seat ada --expires-in 24h',
+      'musterd team bootstrap cutover',
+      'musterd team agent-key            # `musterd agent` says no team agent key? start here',
     ],
   },
   {
     name: 'agent',
     signature:
-      '<name> [--role <role>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]',
-    summary: 'add an agent AND give it its own isolated workspace (worktree)',
+      // The live flag is still `--profile` (rename is ADR 296 tier 3) — the signature must match it. <!-- vocab:ok -->
+      '<name> [--role <label>] [--profile <profile>] [--harness <claude-code|cursor|codex|opencode|grok>] [--here | --path <dir>]', // <!-- vocab:ok -->
+    summary: 'add an agent AND give it its own isolated workspace',
     group: 'team',
     primary: true,
     detail:
-      'Add an agent and give it its own isolated git-worktree workspace, wired to run (ADR 065). One ' +
-      'command instead of team add + worktree + wire + claim. `--harness` picks which harness to wire ' +
+      'Add an agent and give it its own isolated workspace on its own branch, wired to run (ADR 065). ' +
+      'One command instead of team add + workspace + wire + claim. `--harness` picks which harness to wire ' +
       '(default claude-code; also cursor, codex) — the same adapters `musterd init` uses. Do not run ' +
       '`--here` inside a live seat’s folder.',
     examples: ['musterd agent scout --role researcher', 'musterd agent ryder --harness cursor'],
@@ -301,7 +417,7 @@ export const CATALOG: readonly CommandEntry[] = [
     group: 'team',
     primary: true,
     detail:
-      'The mirror of `musterd agent`: agents stand in worktrees, the human stands in the **team ' +
+      'The mirror of `musterd agent`: agents stand in workspaces, the human stands in the **team ' +
       'home** — `~/musterd/<team>` by default, holding their 0600 binding, so `musterd board`, ' +
       '`musterd inbox --watch` and `musterd send` are simply them with no `--as` and nothing pasted. ' +
       'Mints the credential for a new person, reuses one this machine already holds, and offers a ' +
@@ -309,30 +425,40 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: ['musterd human nick --team acme', 'musterd human lin --home ~/work/acme'],
   },
   {
-    name: 'join',
-    signature: '<slug> --as <name> [--token <tok>] [--surface cli]',
-    summary: 'join a team as a named member from this surface',
-    group: 'team',
-    primary: true,
-    examples: ['musterd join acme --as nick'],
-  },
-  {
     name: 'role',
     signature:
-      'list | show <name> | assign <seat> <role> [--remove] [--force] | create <name> [--from <builtin>] [--force]',
-    summary: "the team's role library (ADR 227) + local provisioning templates",
+      // `--from <template>` is the command's own usage string (role.ts) — the signature must match it. <!-- vocab:ok -->
+      'list | show <name> | assign <seat> <role> [--remove] [--force] | create <name> [--from <template>] [--force]', // <!-- vocab:ok -->
+    summary: "the team's role library — responsibility the team grants (ADR 227)",
     group: 'team',
     detail:
-      'Two worlds under one name: the durable team library (roles/<name>.toml — list/show read it ' +
-      'from the daemon roster; assign edits seats/<seat>.toml in the roster home) and the local ' +
-      'ADR 026 provisioning templates (create scaffolds one; list/show fall back to them when no ' +
-      'team is reachable).',
+      'A role is a responsibility the team grants: charter plus ceiling, team-side and reviewed. ' +
+      'list/show read the durable library (roles/<name>.toml) off the daemon roster; create ' +
+      'authors one in the roster home; assign edits seats/<seat>.toml there. What a workspace is ' +
+      'equipped with is a toolkit and lives in `musterd toolkit` — a role may name a default ' +
+      'toolkit, but a toolkit can never assert a role (ADR 296).',
     examples: ['musterd role list', 'musterd role assign wanderer platform'],
+  },
+  {
+    name: 'toolkit',
+    signature: 'list | show <name> | create <name> [--from <built-in>] [--force]',
+    summary: 'what a workspace is equipped with — MCP servers, tools, allow-entries (ADR 296)',
+    group: 'team',
+    detail:
+      'A toolkit carries no authority: it is the "installed" layer of the three (installed by a ' +
+      'toolkit, allowed by harness permissions, authorized by the team as a capability — they ' +
+      // `.musterd/profiles/` is the literal legacy path on disk, not the concept. <!-- vocab:ok -->
+      'compose as AND). create scaffolds one into .musterd/toolkits/; the older .musterd/profiles/ ' + // <!-- vocab:ok -->
+      'and .musterd/roles/ homes are still read, never written; ' +
+      '`musterd init` provisions it, and a user file overrides a built-in of the same name. ' +
+      'Nothing here reads the roster.',
+    examples: ['musterd toolkit list', 'musterd toolkit create writer --from docs'],
   },
 
   // ── Messaging ──────────────────────────────────────────────────────────────────────────────
   {
     name: 'send',
+    freeTextPositional: true,
     signature:
       '--to <name|a,b|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] [--blocked-by <gate> [--ref <what>] [--sig <detail>]] <body…>',
     summary: 'send a typed act to a teammate, a few teammates, the team, or everyone',
@@ -358,15 +484,6 @@ export const CATALOG: readonly CommandEntry[] = [
     ],
   },
   {
-    name: 'nudge',
-    signature: '',
-    summary: 'print directed acts waiting for this seat (read-only)',
-    group: 'messaging',
-    primary: true,
-    detail:
-      'Print the directed acts waiting for this seat. Read-only — the approval-prompt hook target.',
-  },
-  {
     name: 'reap',
     signature: '[--yes]',
     summary: 'reclaim orphaned MCP sidecar processes (list first; --yes applies)',
@@ -382,10 +499,55 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'notify',
     signature: '[--interval <seconds>] [--once]',
     summary: 'background OS notification when a directed act lands while away',
-    group: 'messaging',
+    group: 'waiting',
   },
 
   // ── Work & lanes ───────────────────────────────────────────────────────────────────────────
+  {
+    name: 'seed',
+    signature:
+      'list [--history] [--json]  |  show <id>  |  claim <id>  |  ask|answer <id> "<text>"  |  brief|conclude <id> --file <path>  |  promote <id>  |  capture --ref <path#anchor> "<text>"',
+    summary: 'explore a shared idea before it becomes a Lane',
+    group: 'work',
+    primary: true,
+    detail:
+      'A Seed is a Team idea captured before it becomes a Lane (ADR 291/319).\n' +
+      '  list [--history]              show the active tray or its full history\n' +
+      '  show <id>                     read the source and public exploration thread\n' +
+      '  claim <id>                    become its explorer\n' +
+      '  ask|answer <id> "<text>"      run one attributed clarification edge\n' +
+      '  brief <id> --file <path>      submit an exhaustive brief and open its Lane\n' +
+      '  conclude <id> --file <path> "<conclusion>"   finish without a Lane\n' +
+      '  promote <id>                  deliberately skip research and open a Lane\n' +
+      '  capture --ref <path#anchor> [--lane <id>] "<text>"   a document-recorded intention (ADR 373); --batch <file|-> for `pnpm intents:ingest`',
+    examples: ['musterd seed list', 'musterd seed claim 01SEED…'],
+  },
+  {
+    name: 'huddle',
+    signature:
+      'list [--all]  |  show <id>  |  open --topic <goal|lane|design>:<id> --anchor <path|pr|lane> [--to a,b|@team] [--turns N] [--until <ms|ISO>] "<why>"  |  say <id> [--act <act>] "<turn>"  |  close <id> --anchor-ref <ref|none> "<what landed>"',
+    summary:
+      'a bounded burst of collaboration on one topic, leaving one artifact — a thread with a room',
+    group: 'messaging',
+    detail:
+      'A huddle is a thread (ADR 378), so the room is a VIEW over the log rather than a second ' +
+      'message system: `list` shows the open huddles you are in, `show` reads one as a transcript — ' +
+      'who is in it, who has yet to speak, turns taken against the budget declared, and where the ' +
+      'output will land. `open` sends the root act with meta.huddle — the topic it is bound to, ' +
+      'the whiteboard room (laid out as anchor + turns when the service is up; never spawned), where the ' +
+      'output will land, and a declared budget readers display by counting the thread. `say` is a turn: an ' +
+      'ordinary act in the thread (message, challenge, steer, insight, wait). `close` is the resolve, naming ' +
+      'in --anchor-ref where the artifact landed, or "none" with the reason. A question to a human inside a ' +
+      'huddle is `musterd send --act ask --thread <id>` with a tier, not a turn. The daemon stores no clock ' +
+      'and enforces no budget; the participants own both.',
+    examples: [
+      'musterd huddle list',
+      'musterd huddle show 01M1…',
+      'musterd huddle open --topic lane:01M1N7Q2K5 --anchor docs/design/asks-rail.md --to miley,sloane --turns 12 "the asks rail arc — ring or bar?"',
+      'musterd huddle say 01M1… --act challenge "why a ring at all when the strip already has the tier?"',
+      'musterd huddle close 01M1… --anchor-ref docs/design/asks-rail.md@9ab435f0 "ring, drawn from the stored hue"',
+    ],
+  },
   {
     name: 'lane',
     signature:
@@ -416,10 +578,23 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: ['musterd lanes', 'musterd lanes --mine --open'],
   },
   {
+    name: 'node',
+    signature: '<invite|join|rotate|revoke|list>',
+    summary: 'machine credentials — admit a second machine to this team',
+    group: 'team',
+    detail:
+      'The machine credential (ADR 328). An admin runs `node invite` on the hub to mint a single-use, ' +
+      '15-minute `msinv_` code; the joining machine runs `node join <hub-url> <code>`, which asks ITS ' +
+      'OWN daemon to enroll — the daemon presents the node id it already holds and writes the durable ' +
+      '`msnode_` to ~/.musterd/node.json at 0600. `rotate` re-keys a machine without changing its ' +
+      'identity, so every event it has already stamped still names it. `revoke` cuts it off ' +
+      'immediately and leaves its history alone.',
+  },
+  {
     name: 'next',
     signature: '[--json]',
     summary: 'the orientation brief — what you carry, what to pick up next',
-    group: 'work',
+    group: 'waiting',
     primary: true,
     detail:
       'The orientation brief (ADR 049/084): what you’re carrying, what just shipped, open lanes you ' +
@@ -427,18 +602,22 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'done',
-    signature: '[<lane-id>] [--json]',
-    summary: 'close your work — mark the lane done, then show what’s next',
+    signature: '[<lane-id>] [--pr <n>] [--sha <sha>] [--authorized-by <human>] [--json]',
+    summary:
+      'close your work — mark the lane done (or submit it, with a merge attestation), then show what’s next',
     group: 'work',
     primary: true,
     detail:
       'Mark the lane done (the terminal that drives derived Goal status) and chain into orientation. ' +
-      'Auto-targets your single live lane when no id is given.',
+      'Auto-targets your single live lane when no id is given. It says what it records: with `--pr`/`--sha` ' +
+      'it IS `lane submit` (awaiting_acceptance, acceptor routed, ADR 192); without, it is an unconfirmed ' +
+      'self-close (ADR 169) and prints that — unless the lane is acceptance-exempt (ADR 234). A lane already ' +
+      'awaiting acceptance is refused rather than overridden.',
   },
   {
     name: 'goal',
     signature:
-      'declare "<title>" --goal-id <id> [--story "<line>"] [--wave later] [--depends <id>,…]  |  list [--json]',
+      'declare "<title>" --goal-id <id> [--story "<line>"] [--wave later] [--depends <id>,…]  |  outcome <id> "<text>"  |  retract <id>  |  list [--json]',
     summary: 'declare a team Goal; lanes join it and status is derived',
     group: 'work',
     primary: true,
@@ -467,7 +646,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'board',
     signature: '[--team <slug>] [--print] [--no-open]',
     summary: 'open the work board in your browser, signed in as yourself',
-    group: 'insight',
+    group: 'work',
     primary: true,
     detail:
       'Opens /board signed in as the seat this folder resolves to, without you handling a secret ' +
@@ -481,7 +660,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'live',
     signature: '[--team <slug>] [--print] [--no-open]',
     summary: 'open the office in your browser, signed in as yourself',
-    group: 'insight',
+    group: 'team',
     primary: false,
     detail:
       'Opens /live signed in as the seat this folder resolves to, so the asks waiting on you are ' +
@@ -508,8 +687,8 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'status',
     signature: '',
-    summary: 'the roster — who’s on the team, present, and working',
-    group: 'insight',
+    summary: 'the roster — who’s on the team, present, and working; leads with what waits for you',
+    group: 'team',
     primary: true,
     detail:
       'The team roster: members, presence, and what each is working on — plus, up top, anything waiting ' +
@@ -526,9 +705,9 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'inbox',
     signature:
-      '[--watch] [--all] [--unread] [--peek] [--deferred] [--limit <n>] [--from <name>] [--act <act>]  |  defer <act_id> --until-lane <id> | --until-reply  |  --wait [--timeout <s>]  |  --interrupt-check',
+      '[--watch] [--all] [--unread] [--peek] [--deferred] [--limit <n>] [--from <name>] [--act <act>]  |  --waiting  |  defer <act_id> --until-lane <id> | --until-reply  |  --wait [--timeout <s>]  |  --interrupt-check',
     summary: 'read what’s waiting for you; watch or block for the next act',
-    group: 'inbox',
+    group: 'waiting',
     primary: true,
     detail:
       'Your durable mailbox. By default it shows a bounded RECENT window (newest last), grouped under ' +
@@ -536,6 +715,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'advances the cursor only past what it showed. `--limit <n>` resizes the window; `--limit 0` ' +
       'shows the full history; `--peek` reads without marking anything read; `--unread` shows only new. ' +
       '`--watch` streams live; `--wait` blocks until the next directed act then exits (pairs with /loop); ' +
+      '`--waiting` prints the waiting-acts banner and the directed acts behind it, read-only and silent when nothing waits (the ADR 053 approval-prompt Notification hook target; `musterd nudge` until 2026-09-03). ' +
       '`--interrupt-check` is silent unless an urgent act waits (the ADR 088 PostToolUse interrupt hook). ' +
       '`defer <act_id>` postpones one act until a condition fires — `--until-lane <id>` (that lane moves) ' +
       'or `--until-reply` (someone answers on its thread); it comes back on its own then, even if the ' +
@@ -544,6 +724,7 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: [
       'musterd inbox',
       'musterd inbox --unread',
+      'musterd inbox --waiting',
       'musterd inbox --limit 40',
       'musterd inbox --wait --timeout 300',
       'musterd inbox defer 01KZ4PAE1E --until-reply',
@@ -554,7 +735,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'whoami',
     signature: '',
     summary: 'the seat this folder resolves to (member, team, surface, source)',
-    group: 'inbox',
+    group: 'waiting',
     primary: true,
     detail:
       'Show the seat this folder resolves to right now and where it came from (env > binding > --as > ' +
@@ -564,17 +745,29 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'memory',
     signature: '[show] | save --headline "<subject>" [body…] | clear',
     summary: 'this seat’s private continuity note (save before you hand off)',
-    group: 'inbox',
+    group: 'remembering',
     primary: true,
     detail:
       'This seat’s private continuity note (ADR 093): save before handing off or wrapping up; claim/status ' +
       'show the one-line pointer. No cross-seat read.',
   },
   {
+    name: 'insight',
+    signature:
+      'save --headline "<subject>" [body…] [--tags a,b] [--repo slug] | search "<keywords>"',
+    summary: 'save a finding for the whole team; search what teammates already saved',
+    group: 'remembering',
+    primary: false,
+    detail:
+      'Team memory (ADR 327): `save` writes an insight act — team-visible, attributed, dated — for traps, ' +
+      'measured numbers, and how-things-actually-work; `search` retrieves them pull-only via a derived index. ' +
+      'The fast tier under docs/wiki/: promote a durable finding there once it proves out.',
+  },
+  {
     name: 'wake-context',
     signature: '--act <id> | --lane <id>',
     summary: 'read a bounded, body-free wake orientation index',
-    group: 'inbox',
+    group: 'waiting',
     primary: false,
     detail:
       'Read ADR 209 portable wake context for a directed Act or owned Lane. It names only canonical IDs, state, delivery intent, and explicit follow-up reads; it never loads an Act or memory body.',
@@ -582,31 +775,42 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'availability',
     signature: '<available|away|dnd> [--until <iso>]',
-    summary: 'set your availability (away holds notifications; dnd passes urgent)',
-    group: 'inbox',
+    summary:
+      'set your availability (away holds notifications; dnd passes urgent) — MCP: team_availability',
+    group: 'waiting',
     primary: true,
   },
 
   // ── Seats & admin ──────────────────────────────────────────────────────────────────────────
   {
     name: 'claim',
-    signature: '[<name>] [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]',
-    summary: 'get onto the team from this folder — occupy or adopt a seat',
-    group: 'admin',
+    signature:
+      '[<name>] [--team <slug>] [--key <mskey_|mscr_>] [--grant <msgr_>] [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--detach] [--force]',
+    summary: 'get onto the team from this folder — occupy or adopt a seat (MCP: team_join)',
+    group: 'team',
     primary: true,
     detail:
       'Get onto the team from this folder: bare `claim` occupies your bound seat (or confirms it if ' +
       'already live here); a name/role claims that seat; `--token` adopts a teammate’s seat; `--force` ' +
       'repoints a folder bound to a live member. A held seat opens a request and blocks until an admin ' +
-      'approves, then occupies (ADR 087).',
-    examples: ['musterd claim', 'musterd claim scout', 'musterd claim --role reviewer'],
+      'approves, then occupies (ADR 087). In a fresh folder name the team and present the key: ' +
+      '`claim <name> --team <slug> --key <mskey_|mscr_>` (the former `musterd join`, folded in by ADR 377; ' +
+      'a key this machine has held before is found in the vault). `--detach` claims one-shot over HTTP and ' +
+      'exits with the seat still present (no session held; what `join` always did) — for fixtures and ' +
+      'scripts that want the room to stay occupied. The MCP spelling is `team_join`.',
+    examples: [
+      'musterd claim',
+      'musterd claim scout',
+      'musterd claim --role reviewer',
+      'musterd claim nick --team acme --key mscr_…',
+    ],
   },
   {
     name: 'requests',
     signature:
       '[--pending] [--json]  |  decide <id> --approve [--once | --standing | --ttl-hours <n>] | --deny',
     summary: 'list and decide claim/teammate requests (admin-only)',
-    group: 'admin',
+    group: 'team',
     primary: true,
     detail:
       'List claim/teammate requests and decide them (admin-only, ADR 077). Approve grant lifetimes: ' +
@@ -618,7 +822,7 @@ export const CATALOG: readonly CommandEntry[] = [
     signature:
       'on [--harness <class>] [--host <name>] [knobs] | off | status | policy [knobs]  [--seat <name>] [--json]',
     summary: 'enroll this seat for wake-on-message while offline (ADR 131)',
-    group: 'admin',
+    group: 'ops',
     detail:
       'Harness residency (ADR 131): an enrolled seat that goes offline stays reachable — the daemon ' +
       'derives wake-due directed acts and `musterd host` resurrects the harness session. ' +
@@ -647,7 +851,7 @@ export const CATALOG: readonly CommandEntry[] = [
     signature:
       'show [--json]  |  start --stdin | end --stdin  |  bind --thread <id>  |  resolve-labels --stdin  |  label-nudge',
     summary: 'this workspace’s captured harness session — what a wake would resume (ADR 131)',
-    group: 'admin',
+    group: 'ops',
     detail:
       'Session capture (ADR 131 inc 4): the SessionStart/SessionEnd hooks (`musterd init` wires ' +
       'them) pipe the harness hook JSON into `start`/`end`, which record the session in the ' +
@@ -659,6 +863,8 @@ export const CATALOG: readonly CommandEntry[] = [
       '`{apply, skipped}` out — the label-sessions skill pipes through it and applies the renames; ' +
       'it also stamps the machine-wide last-sweep file. `label-nudge` is the hook-driven other ' +
       'half: one imperative line while that stamp is missing/stale (>4h), silence otherwise. ' +
+      '`observe --orient` (ADR 333) is the Cursor sessionStart injector: after observe, stdout is ' +
+      'JSON `{ additional_context }` wrapping the orientation block. ' +
       '`bind --thread <id>` is ADR 210 repair: a threaded send binds this session to that thread ' +
       'automatically, and this re-binds when that never happened (capture arrived late, inherited ' +
       'session, dialogue moved). It binds the CURRENT capture only — a hand-named session is the ' +
@@ -674,7 +880,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'host',
     signature: '[--once] [--interval <s>] [--timeout <s>] [--host <label>]',
     summary: 'the wake actuator — resurrect enrolled offline seats on this machine (ADR 131)',
-    group: 'admin',
+    group: 'ops',
     detail:
       'The per-machine wake actuator (ADR 131 inc 3): polls the daemon for wake leases ' +
       '(agent-key, presence-neutral), spawns the harness fresh in the seat’s registered workspace ' +
@@ -689,12 +895,12 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'unbind',
     signature: '',
     summary: 'release this folder’s seat — keeps it on the team, free to re-claim',
-    group: 'admin',
+    group: 'team',
   },
   {
     name: 'reclaim',
     signature: '<member>',
     summary: 'drop a member’s stuck/stale live session so it can rejoin',
-    group: 'admin',
+    group: 'team',
   },
 ];

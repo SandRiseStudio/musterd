@@ -1,0 +1,134 @@
+# Huddles — a bounded burst of collaboration is a thread with a room
+
+A huddle (ADR 378, accepted shape 2026-09-03) is several seats and a human converging on one topic in a bounded burst and leaving one artifact. On the wire it is nothing new: a root act carrying `meta.huddle`, turns as ordinary acts in its thread, and a `resolve` naming where the artifact landed. The daemon learns nothing; the live surface is a whiteboard room (ADR 330).
+
+## How to run one (2026-09-03, increment 1 — `musterd huddle`)
+
+```
+musterd huddle open --topic lane:01M1N7Q2K5 --anchor docs/design/asks-rail.md --to miley,sloane --turns 12 "the asks rail arc — ring or bar?"
+musterd huddle say <id> --act challenge "why a ring at all when the strip already has the tier?"
+musterd send --act ask --thread <id> --to nick --meta species=consult --meta tier=standard "ring or bar?"
+musterd huddle close <id> --anchor-ref docs/design/asks-rail.md@9ab435f0 "ring, drawn from the stored hue"
+```
+
+- **`open`** sends a `message` (or `request_help`) with `meta.huddle = { topic: {kind, id}, room, anchor, budget? }`. The envelope's own id is the huddle id. `--to a,b` is the ADR 254 eligible set; the default is `@team`. The room URL is derived: `http://127.0.0.1:<WHITEBOARD_PORT|4851>/b/huddle-<id lowercased>`; `--room` overrides it.
+- **`say`** is a turn: `message`, `challenge`, `steer`, `insight` or `wait` with `thread` = the huddle id. `accept`/`decline`/`ask` are refused as turns on purpose: an answer names what it answers (`musterd send --reply-to`), and a question to a human is an `ask` with a tier (ADR 147) so it lands on the asks rail with an outcome record.
+- **`close`** is the `resolve` (ADR 025) with `meta.anchor_ref` — a path@sha, a PR, a lane, or `none` with the reason in the body.
+
+## Reading a huddle: the room is a view, not a venue
+
+```
+musterd huddle list            # the open huddles you are in (--all for everyone's, closed included)
+musterd huddle show <id>       # the transcript: who is in it, who has yet to speak, turns vs budget
+```
+
+`show` renders the room — topic, state, turns taken against the budget declared, the anchor, the room URL, who has spoken and who was named but has not — then the turns in order, then how to answer. A closed huddle says where the artifact landed instead.
+
+In the inbox a turn now reads `in huddle <topic>` rather than as a loose message to the team: a turn carries no huddle meta of its own, so without the root a reader could not tell which conversation it belonged to.
+
+### And on the MCP surface (2026-09-04, increment 3)
+
+The participants are agents, so the surface that had none of this was the one that mattered. `team_inbox_check` now answers the same three questions the CLI's room does, in the call that delivers the turn:
+
+- the turn's own line says `↳ in huddle <topic>` (and `huddle_topic` in `structuredContent`);
+- a room block follows the messages — what the huddle is for, who is in it, who was named and has not spoken, the anchor, and the last 6 turns including ones this seat has already read;
+- the last line of an open room is the exact call that answers in it: `team_send {thread: "<id>", …}`.
+
+The timeline read that supplies the root is paid for **only when the slice actually holds a threaded act**, and a failed read degrades to the bare messages the surface always showed. Falsify: an agent that has never seen the CLI can, from the tool surface alone, name a turn's topic and answer in it — `packages/mcp/src/tools/huddleRooms.test.ts`, whose five behavioural cases were verified red with the fold disabled (three controls stay green either way).
+
+The fold itself moved to `packages/protocol/src/huddleView.ts` when this landed. It shipped CLI-local as "a rendering concern", which was half right: what a surface *draws* is its own, but *what a huddle is* — which rows belong to it, who is in it, whether it is closed — is a reading of the wire, and two copies of that fold would make the same room two different rooms.
+
+### Why the log stays the transport (2026-09-04)
+
+The alternative considered was a dedicated room a participant enters and cannot leave until the huddle ends — a meeting. It was rejected on two grounds, and the reasoning is worth keeping because the metaphor is attractive.
+
+**It is not enforceable.** musterd runs no agent loops: the daemon runs no clocks on anyone's behalf and never injects into a session, so an agent's turn belongs to its harness. A "room" could only be a convention a seat honours, and on Claude Code or cursor nothing could hold it there.
+
+**It is a lock with no release.** A seat that enters a huddle whose other participants never arrive is wedged — the failure measured in [claim-approval-latency](claim-approval-latency.md), where only 5 of 33 blocked claims were answered inside their window. It would also switch off the interrupt line exactly where a seat is most committed, so an urgent steer could not reach someone in a meeting.
+
+So the log stays the transport — one cursor, recipient-scoped, replicated, already audited — and the room is a lens over it. A second delivery channel for huddle traffic would be a parallel message system needing its own replication, ordering and read state, which is the seventh-replicated-kind mistake in another costume.
+
+## What the room is, and is not
+
+`open` lays the board out over the whiteboard service's localhost HTTP port when the service is already up: an **Anchor** cluster holding the anchor ref, a **Turns** cluster the opening line lands in; `say` mirrors each turn there. It probes `/healthz` for 500 ms and **never spawns the service** — a huddle opens fine with the room dark (the JSON says `room_laid_out: false`), and the first `whiteboard_open` on that name creates the board. Nothing in the room reaches the ledger; anything that changes the anchor is a thread act with a `from` and a model (ADR 101/158). Falsify: `WHITEBOARD_PORT=1 musterd huddle open …` must still send the root act and print the room URL.
+
+## What is deliberately not here
+
+- **No budget enforcement.** `budget` is a declaration; readers count the thread's rows against it. The daemon stores no clock (ADR 131 §7, 147, 179) and no sweeper closes a quiet huddle — it stays open, like a lapsed ask stays lapsed (#1158).
+- **No lock.** A participant is never held in a huddle; the mode is declared and honoured, not enforced. See the rejection above.
+- **No cross-host wake.** A joiner seat is reached the way every act reaches it: the root replicates on the sync push (60 s tick, `sync/push.ts`) and its own machine's hook loop wakes it. Wake leases never travel (ADR 241, 356). The convene wake below is derived per-daemon for the seats *that daemon* holds enrollments for — so a huddle does convene across machines, just each side by its own rail and no sooner than the push that carries the root.
+- **No wake per turn.** Turns are free, forever. See below: the OPEN convenes, the turns do not.
+- **No `team_huddle_*` tools.** `team_send` with `meta.huddle` / `thread` / `meta.anchor_ref` is the MCP shape; the validator is the same `actMetaRules` both surfaces import. Re-argued and re-affirmed when the read surface landed (2026-09-04): a tool earns its place by being *selectable*, and reading a huddle is never a selection — a huddle reaches an agent exactly one way, as a turn in its inbox, so the read belongs at the arrival. The cost points the same way: a tool costs its name, description and schema in every seat's tool list on every turn forever, against 383 B of muted headroom measured that day; the field cost **0 B standing** (`pnpm context:check` identical before and after).
+- **No way to browse a room you have no unread in** (2026-09-04). `musterd huddle list` does that for a human and has no MCP counterpart, deliberately. Falsifier: if a seat is seen wanting the room it is *not* being spoken to in, that is the evidence for a tool.
+
+## Convening: the open wakes the seats it names (2026-09-04, ADR 386)
+
+Opening a huddle wakes its **named** participants — one paid wake per named seat per huddle, on the ADR 131 residency rail. Before this a huddle could only gather whoever was already at their desk: measured 2026-09-04, 5 seats were enrolled and three of the six harness representatives whose doorbell work was in flight were not among them, so the seats a cross-harness huddle most needed were the ones it could not reach.
+
+What is bounded, and why it stays affordable:
+
+- **the ROOT act only.** A turn is never a wake reason, so a busy room costs exactly what a quiet one costs. The convened seat reads the whole room on arrival (`musterd huddle show`, or the room block on `team_inbox_check`).
+- **named only.** An eligible set containing the seat, or a directed root. A `@team` huddle summons nobody — it is an invitation, and waking on it would bill every enrolled seat on the roster.
+- **never the opener**, and **nothing once the `resolve` has landed**.
+- **not discharged by another named seat accepting.** Under ADR 254 the first `accept` stands the other eligible seats down; a room is the opposite — it names everyone it wants in it.
+- every existing gate still applies above it: enrollment, wakeability, hourly cap, cooldown, attempt cap.
+
+The switch is `residency.convene_huddles`, settable as a team default and overridable per seat. **It ships OFF** (2026-09-04) and flips when the cross-machine run reports (lane 01M1Q8GQGW).
+
+The argument for shipping it on is sound and was not refuted: a huddle open is a person naming *you*, the same class as a directed urgent act, which has woken enrolled seats since ADR 131 without a rollout gate — and enrollment is already the opt-in. What it does not cover is the **second machine**. The convene is derived per-daemon and rides the **paid** wake rail, so on a two-daemon team default-on means a remote daemon spends real money on a wake derived from a root whose cross-machine arrival nobody has ever observed — the bell's root-before-turn hazard with a bill attached. Nothing today refuses a turn against a root the local daemon has never seen (`huddle say` mints `thread: <id>` straight from argv and no route resolves it), so that door is open. Default-off costs one line and a later flip; default-on costs an unmeasured paid action across an unwatched boundary.
+
+Falsify: `pnpm --filter @musterd/server exec vitest run src/store/interrupts.test.ts src/store/residency.test.ts` — the wake-rail cases were verified red with the rail wiring disabled.
+
+## Bell check, 2026-09-05 — the daemon rings, the seats are deaf for three separate reasons
+
+Run before schmidt's cross-harness huddle, with every seat hand-started on one laptop (no wakes, convene off). Two probe huddles: one naming schmidt (cursor), wanderer (grok), ghost (opencode), gptbot (codex); a control naming dolly, miley, ryder, stanley (claude-code). Each was asked how it learned of turn 1: (a) injected at a tool boundary, (b) its own inbox check, (c) a human nudge. Every seat that answered said **(c)**. The audit and the daemon log say why, and it is not one reason.
+
+| seat · harness | daemon raised a huddle turn to its probe? | why it was silent |
+| --- | --- | --- |
+| ryder · claude-code | **yes**, turn 1 at +19 s (`interrupt.raised`, tier huddle) | ~~unreconciled~~ RESOLVED 2026-09-05 (lane 01M1T4339Y): fork (1) — the hook line never reached the model. Claude Code sends a PostToolUse hook's bare stdout to the debug log; only `hookSpecificOutput.additionalContext` reaches context. izzo's own transcript: 67 raised lines, 0 in context. Fixed by `--hook claude-code` (ADR 088 amendment) |
+| stanley · claude-code | yes, three later turns | ~~at turn 1 his line was headlined by an acceptance ask with 6 pending — a huddle turn behind an obligation is a count, not a sentence (2026-09-05)~~ FIXED 2026-09-06 (lane 01M1T42SBS): the headline is chosen by class, steer > urgent > huddle > acceptance, and the tail names the rest by class — ADR 225 amendment |
+| dolly · claude-code | no, until `/mcp reload` | probe ran and was **401** — `musterd inbox --interrupt-check` printed #1317's "interrupt line is deaf — session lease is dead" line; after the adapter re-joined, the same command went silent and the next turn raised (17:56:55) |
+| wanderer · grok | yes, but only after his own inbox check (17:52:13, 17:52:49) | `.grok/hooks/musterd.json` runs the probe on PreToolUse; dead lease until the MCP call healed it |
+| schmidt · cursor | never | `.cursor/hooks.json` runs `session observe --stdin` with **no `--interrupt`** — ADR 369's probe exists in the CLI and is not wired in the worktree |
+| gptbot · codex | never | `codex-hook post-tool-use` does not call the probe at all; also idle at the prompt (no boundaries) |
+| ghost · opencode | never | no musterd plugin under `.opencode/` — nothing runs a probe |
+
+Daemon log, 17:45–17:57: **102 probes, 76 × 200, 26 × 401.** The log does not name the seat on a 401 (the refusal happens before the member resolves), so a deaf seat is identifiable only from its own side — which is exactly what #1317's audible line is for (falsify: `grep interrupt-check ~/.musterd/daemon.log | grep 401` and find a member name; there is none).
+
+**What this means for running a huddle today.** The transport is fine — every turn landed in every named inbox instantly. The bell is a per-seat property with three independent failure modes, and each has a check a human can run in the seat before the huddle opens:
+
+1. **Lease dead** (any harness): `musterd inbox --interrupt-check` in the worktree prints the deaf line → make one `team_*` MCP call (or `/mcp reload`); a CLI `musterd claim` does not heal it. Every autorefresh bounce re-creates this. Since ADR 391 (2026-09-05) the daemon names the deaf seat itself: `grep interrupt_probe_refused ~/.musterd/daemon.log`, or the `interrupt.refused` audit row (one per seat per ten minutes) — so the operator no longer has to ask every session to run the probe by hand (falsify: revoke one seat's lease, let its hook fire, and the grep is empty). ~~Corrected the same evening (2026-09-05, lane 01M1T41YRA): a bounce does NOT leave adapter-held seats deaf — every adapter-held binding on the machine carried a valid lease when checked at 19:40, because the adapter persists both the claim-time and each renewed lease.~~ INVALIDATED 2026-09-06 (lane 01M1VGJWME): a bounce DID leave every adapter-held seat deaf for one renewal window. The 14:01:30Z autorefresh bounce reconnected six adapters within a second and the daemon minted each a fresh lease, but the adapter wrote only the *renewal* frame's lease to binding.json, never the reconnect's — so until the first renewal at 14:04:30 every CLI probe presented the pre-boot lease and the daemon logged `interrupt_probe_refused lease=dead` for izzo, schmidt and stanley. The 19:40 check on 09-05 was simply later than a renewal. Two corollaries: the deaf line's own prescription ("re-join from your harness adapter (team_join)") did nothing in that window, because the adapter *was* joined and `team_join` no-ops on a joined adapter — `team_leave` then `team_join` healed it; and the window is the renew-ahead interval, not the bounce. Fixed by persisting the lease on every `occupied` frame (falsify: `pnpm --filter @musterd/mcp exec vitest run src/client.lease.test.ts` — the reconnect case was verified red first). The deaf seats were DORMANT adapters: one evicted by `claim.superseded`, one released by the ADR 164 liveness ladder and never re-armed because the model made no `team_*` call. ADR 164 amendment 2 makes a released adapter re-join on its own when the transcript moves again (falsify: demote a live seat's adapter, touch its transcript, and `binding.json` still holds the dead lease 30 s later).
+2. **Probe not wired** (cursor: hook without `--interrupt`; codex: hook without a probe; opencode: no plugin): the seat cannot hear anything at a boundary until that harness's adapter writes it. Nudge by hand between turns; the MCP room read then delivers the whole room.
+3. **Idle at the prompt** (any harness): no tool boundaries, no probe. Nudge, or the seat runs a blocking `musterd inbox --wait`.
+
+And one for the daemon: the line names one act. When an acceptance ask is pending, a huddle turn is only a count. Whether the huddle deserves the headline over an obligation is an ADR 225 question, not a bug.
+
+## Where the rules live
+
+| Rule | Where |
+| --- | --- |
+| `meta.huddle` shape; root-only; `message`/`request_help` only | `packages/protocol/src/huddle.ts`, `envelope.ts` (`actMetaRules`), `huddle.test.ts` |
+| `meta.anchor_ref` on `resolve` only, non-empty | same |
+| the fold both surfaces read a room with | `packages/protocol/src/huddleView.ts` |
+| the CLI and its room payload | `packages/cli/src/commands/huddle.ts`, `huddle.test.ts` |
+| the room an arriving turn came from, on MCP | `packages/mcp/src/tools/huddleRooms.ts`, `huddleRooms.test.ts` |
+| the bell (live) and the convene wake (offline, named) | `packages/server/src/store/messages.ts` (`pendingInterrupts` — `huddles` vs `huddleOpens`), `interrupts.test.ts` |
+| the convene switch and its rail | `packages/protocol/src/residency.ts` (`convene_huddles`), `packages/server/src/store/residency.ts`, `residency.test.ts` |
+| the whiteboard accepts that payload | `packages/whiteboard/src/service.test.ts` ("accepts a huddle layout") |
+
+### And on `/live` and `/broadcast` (2026-09-04, increment 2)
+
+A huddle shows on both web surfaces at once, from the timeline the page already holds — the backfill plus the `team-all` firehose (ADR 061). No endpoint, no room state, no socket to the whiteboard.
+
+- **A rail under the asks rail**, one row per open huddle: the topic, the line it opened on, the turns taken against the turns declared, who is gathered, who was named and has not spoken, the anchor, and a link out to the room. It renders nothing until a huddle is open, and the link is dropped on `/broadcast` where nobody can click it.
+- **The floor gathers** (2026-09-04). Everyone taking turns in an open huddle is seated at the meeting table, ahead of both the lounge and their own desk — four chairs and no more, and the fifth participant stays where they were rather than have the room draw a chair that does not exist. Named-but-silent seats are NOT seated: being named is an invitation, and a thread has no presence, so an away or offline participant who spoke an hour ago is not in the room now. Falsify: `packages/web/src/live/office-scene/seating.test.ts` ("the huddle gathers at the meeting table") — five cases, verified red against the unmodified `assignSeats`.
+- **The budget is displayed and never enforced.** Going over changes the words (`9 of 6 turns — over`) and nothing else: nothing on the page closes a huddle, hides one, or greys it out. A surface that quietly dropped an over-budget huddle would be enforcing the rule the daemon deliberately refuses (§4 above).
+
+The rail is mounted inside `OfficeScene`, not in either route's slot — one mount is what makes the two surfaces agree without either route wiring anything, the same argument `officeRoom` settles for the rest of the room's facts.
+
+**Trap, measured the day this landed.** The huddle fold is a VALUE import, and `@musterd/protocol` builds its schemas at module scope: importing `deriveHuddles` from the barrel pulled zod back into the browser and blew both JS budgets at once (+20 KB gzipped, undoing #1307's repayment). The browser takes it from `@musterd/protocol/wire`, which now re-exports `huddleView.js`; `packages/web/src/live/huddles.test.ts` holds that as a source guard, because the budget gate only catches it after a build and only while the budget has headroom to lose. Measured cost of the whole increment: total JS gzip 228.6 → 230.7 KB, initial 132.0 → 133.3 KB, both inside budget — no raise.
+
+Falsify: `scripts/a11y/fixture-team.sh up` now opens a huddle, so the connected `/live` sweep measures the rail. It found two nodes below AA the first time it could see them (white initials on `memberColor`, 1.45:1 — the floor's fill is not the avatar's), which is the evidence for seeding the fixture rather than eyeballing the rail.
+
+
+Follows-up: deferred — opened against ADR 378 when increment 1 has had one real huddle (2026-09-03)

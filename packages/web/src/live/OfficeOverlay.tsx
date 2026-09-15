@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ConnStatus } from './client';
+import { CaptionPill } from './CaptionPill';
+import type { Caption } from './captions';
+import { stillMode } from './stillMode';
 import type { RoomEntry } from './workingOn';
 
 /**
@@ -46,12 +49,19 @@ export function OfficeOverlay({
   present,
   entries,
   status,
+  caption,
+  captionColor,
   interactive = false,
 }: {
   teamName: string;
   present: number;
   entries: RoomEntry[];
   status: ConnStatus;
+  /** The room's narration line (first-five-seconds §2) — the broadcast card carries it now that
+   *  the floating lower-third rail is gone (nick, 2026-08-31). */
+  caption?: Caption | null;
+  /** The narrating member's colour, resolved by the caller. */
+  captionColor?: string | undefined;
   /** `/live` only. False keeps the passive, non-interactive, aria-hidden chyron `/broadcast` needs. */
   interactive?: boolean;
 }) {
@@ -83,8 +93,15 @@ export function OfficeOverlay({
 
   // Auto-advance. Off while the viewer is steering or hovering, and off on a hidden tab — a
   // background dashboard costs a viewer nothing, per the packages/web perf contract.
+  //
+  // Also off under `?still` (ADR 285). This reel was the single largest reason /office-preview never
+  // settled for the contrast gate: past the 30s mark of a 150s probe, 144 of the 214 remaining DOM
+  // events were this component advancing on a flat 6s period, forever. Holding it hides nothing —
+  // the card that is up stays up and is measured exactly as a reader sees it; what stops is the reel
+  // moving ON to the next member mid-shutter. Read at mount, like the flag's other consumers.
+  const still = stillMode();
   useEffect(() => {
-    if (count < 2 || paused) return;
+    if (count < 2 || paused || still) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const arm = () => {
       timer = setTimeout(() => {
@@ -106,7 +123,7 @@ export function OfficeOverlay({
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [count, paused, signature]);
+  }, [count, paused, signature, still]);
 
   // Hand the reel back after the viewer has been still. Hovering holds it indefinitely — the clock
   // only starts once the pointer leaves, which is what "I am reading this" actually looks like.
@@ -231,6 +248,17 @@ export function OfficeOverlay({
         ) : (
           <p className="lc-ov__now is-quiet">
             <span className="lc-ov__title">nobody in the room yet</span>
+          </p>
+        )}
+
+        {/* This conditional is safe ONLY because this mount is never interactive: `interactive`
+            false means the whole card is `aria-hidden`, so the pill's aria-live region has nothing
+            to announce to. If this card ever goes interactive with a caption, hoist the conditional
+            INSIDE the pill the way WorkStack does — a live region that does not exist until the
+            first caption arrives announces that caption to nobody. (dolly, review of #1126.) */}
+        {caption && (
+          <p className="lc-ov__caption">
+            <CaptionPill caption={caption} color={captionColor} />
           </p>
         )}
 

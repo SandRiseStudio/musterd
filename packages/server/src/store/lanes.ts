@@ -16,13 +16,14 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import type { AuditRow } from './audit.js';
+import { appendLaneEventRequired, type AuditAction, type AuditRow } from './audit.js';
 import { listGoals } from './goals.js';
 import { getPolicy } from './teams.js';
 
 /**
  * Coordination lanes, Phase 1 (ADR 083) — store CRUD + the two warn-only contention checks.
- * Declarations only: `surface_globs` ∩ and `depends_on` state are the whole engine. Checks are
+ * Declarations only: `scope` ∩ and `depends_on` state are the whole engine (wire token `scope`, ADR 296;
+ * the DB column keeps its historical `surface_globs` name — internal, tier 3). Checks are
  * computed live (the board always reflects current state); the *delivery* dedup — warn once until the
  * condition clears or changes — falls out of diffing warnings before/after a mutation (route layer).
  */
@@ -69,7 +70,9 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
     kind: (row.kind as Lane['kind']) ?? null,
     owner_seat: row.owner_seat,
     role: row.role,
-    surface_globs: JSON.parse(row.surface_globs) as string[],
+    // The DB column keeps its historical `surface_globs` name (internal, ADR 296 tier 3); the
+    // epoch-14 wire mirror of that key dropped at epoch 16.
+    scope: JSON.parse(row.surface_globs) as string[],
     depends_on: JSON.parse(row.depends_on) as string[],
     branch: row.branch,
     goal_id: row.goal_id,
@@ -92,6 +95,99 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
 /** States that participate in contention (ADR 169: shared constant — includes ready_for_review). */
 const CONTENDING: ReadonlySet<string> = LANE_CONTENDING_STATES;
 
+/**
+ * Who is making a lane transition, for the `lane.*` row the store writes beside it. Lane-replication
+ * spec §Hole 3: a `lane.*` row is not observability, it IS the transition — so it is written inside
+ * the same transaction as the lane row, with the required append, and if the record cannot be
+ * written the transition does not happen. `messages` has had this property since v1 (the log is
+ * the write); it is what makes the audit spine a substrate a peer can fold rather than a
+ * best-effort shadow. Callers that own their own verb (`recordLaneClose`, `lane.ready_for_review`)
+ * pass nothing and write theirs as before.
+ */
+export interface LaneAudit {
+  actor: string | null;
+  /**
+   * Federation 3c: the node the acting seat resides on, when the transition was arbitrated by the
+   * hub on a joiner's behalf (the claim since ADR 355; every ownership/state edge since ADR 361).
+   * Recorded on every `lane.*` row the write produces — the residence TRACE in the replicated
+   * log (the binding itself is `seat_nodes`, ADR 355 §5). Absent for a local transition.
+   */
+  node?: string;
+}
+
+function laneAuditRow(
+  db: Database,
+  teamId: string,
+  audit: LaneAudit,
+  action: AuditAction,
+  laneId: string,
+  detail: Record<string, unknown>,
+): void {
+  appendLaneEventRequired(db, teamId, {
+    actor: audit.actor,
+    action,
+    target: laneId,
+    result: 'allow',
+    detail: { ...(audit.node !== undefined ? { node: audit.node } : {}), ...detail },
+  });
+}
+
+/**
+ * The four edges the store records, with the same exclusivity the PATCH handler used to apply —
+ * moved here, not duplicated, so the predicates cannot drift (ryder, #1071 acceptance). Terminal
+ * edges belong to `recordLaneClose`; entering awaiting_acceptance belongs to `lane.ready_for_review`.
+ */
+function recordLaneEdges(
+  db: Database,
+  teamId: string,
+  before: Lane,
+  after: Lane,
+  ownerPatched: boolean,
+  audit: LaneAudit,
+): void {
+  const claimed =
+    ownerPatched && after.owner_seat !== null && after.owner_seat !== before.owner_seat;
+  if (claimed) {
+    laneAuditRow(db, teamId, audit, 'lane.claimed', after.id, {
+      lane: after.id,
+      owner: after.owner_seat,
+      previous_owner: before.owner_seat,
+      // A handoff and a self-claim are the same patch; only the record can tell them apart later.
+      kind: after.owner_seat === audit.actor ? 'claim' : 'handoff',
+      ...(before.owner_seat ? { takeover_of_offline_owner: true } : {}),
+    });
+  }
+  const changed = laneFieldChanges(before, after);
+  if (changed.length > 0) {
+    laneAuditRow(db, teamId, audit, 'lane.updated', after.id, {
+      lane: after.id,
+      fields: changed,
+      changes: laneFieldDiff(before, after),
+    });
+  }
+  const released = before.owner_seat !== null && after.state === 'open' && before.state !== 'open';
+  if (released) {
+    laneAuditRow(db, teamId, audit, 'lane.released', after.id, {
+      lane: after.id,
+      released_by: audit.actor,
+      owner_before: before.owner_seat,
+    });
+  }
+  if (
+    after.state !== before.state &&
+    !LANE_TERMINAL_STATES.has(after.state) &&
+    !released &&
+    !(isAwaitingAcceptance(after.state) && !isAwaitingAcceptance(before.state)) &&
+    !claimed
+  ) {
+    laneAuditRow(db, teamId, audit, 'lane.state_changed', after.id, {
+      lane: after.id,
+      from: before.state,
+      to: after.state,
+    });
+  }
+}
+
 export function openLane(
   db: Database,
   teamId: string,
@@ -101,13 +197,17 @@ export function openLane(
   now: number = Date.now(),
 ): Lane {
   const claim = input.claim === true;
+  // The birth's actor IS the creator — every caller passed the same name twice, and two of three
+  // (incidents, seeds) passed nothing and were born with no first event (dolly, #1179 decline). So
+  // openLane takes no audit argument at all: the store writes the birth, and no caller can omit it.
+  const audit: LaneAudit = { actor: createdBy };
   // ADR 244: an admin's default-stakes rule fires HERE, at open, and never again. Resolving it late
   // — at submit, or at close — would make a policy able to rewrite what a lane already was, which is
   // the exact trap ADR 234 increment 2 named for the close edge: only a RECORDED fact earns a label.
   // An explicit declaration always wins, in EITHER direction: a seat that thinks its web change
   // deserves eyes must be able to say so without an admin, and a seat that says `low` on a lane
   // policy would have left `normal` has still declared it themselves.
-  const surfaces = input.surface_globs ?? [];
+  const surfaces = input.scope ?? [];
   const rule =
     input.stakes === undefined
       ? resolveStakesDefault(getPolicy(db, teamId).stakes_defaults, surfaces)
@@ -122,7 +222,7 @@ export function openLane(
     kind: input.kind ?? null,
     owner_seat: claim ? createdBy : null,
     role: input.role ?? null,
-    surface_globs: JSON.stringify(input.surface_globs ?? []),
+    surface_globs: JSON.stringify(input.scope ?? []),
     depends_on: JSON.stringify(input.depends_on ?? []),
     branch: input.branch ?? null,
     goal_id: input.goal_id ?? null,
@@ -143,13 +243,72 @@ export function openLane(
     resolved_at: null,
     updated_at: now,
   };
-  db.prepare(
+  const insert = db.prepare(
     `INSERT INTO lanes (id, team_id, project, title, detail, kind, owner_seat, role, surface_globs,
                         depends_on, branch, goal_id, risk, stakes, stakes_provenance, merged_json, state, created_by, created_at, claimed_at, resolved_at, updated_at)
      VALUES (@id, @team_id, @project, @title, @detail, @kind, @owner_seat, @role, @surface_globs,
              @depends_on, @branch, @goal_id, @risk, @stakes, @stakes_provenance, @merged_json, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
-  ).run(row);
+  );
+  db.transaction(() => {
+    insert.run(row);
+    // Finding 4 (lane-replication spec): the birth is the first event, and it carries the whole
+    // declaration — the fields `lane.updated` will later diff against. Without it the log describes
+    // what happened to a lane and never what the lane is.
+    laneAuditRow(db, teamId, audit, 'lane.opened', row.id, {
+      lane: row.id,
+      title: row.title,
+      project: row.project,
+      detail: row.detail,
+      kind: row.kind,
+      role: row.role,
+      scope: input.scope ?? [],
+      depends_on: input.depends_on ?? [],
+      branch: row.branch,
+      goal_id: row.goal_id,
+      risk: input.risk ?? [],
+      stakes,
+      stakes_provenance: row.stakes_provenance ?? 'declared',
+      created_by: createdBy,
+      created_at: now,
+    });
+    // A lane born owned is the most common acquisition of all (ADR 203). No collision is possible —
+    // the lane did not exist — so no guard: just the row, `at_open` so a reader can tell a birth
+    // from a takeover.
+    if (row.owner_seat) {
+      laneAuditRow(db, teamId, audit, 'lane.claimed', row.id, {
+        lane: row.id,
+        owner: row.owner_seat,
+        previous_owner: null,
+        kind: 'claim',
+        at_open: true,
+      });
+    }
+  })();
   return rowToLane(row, teamSlug);
+}
+
+/**
+ * The lanes, other than `exceptId`, whose standing attestation names `sha` (lane 01M2GR0434). A
+ * squash SHA belongs to one branch, so a second lane carrying it is either the same seat closing
+ * twin lanes with one PR — nine of ten cases on the live db, 2026-09-14 — or a seat stamping its
+ * lane with someone else's merge, the tenth. `decideLanePatch` tells them apart by owner.
+ * `json_extract` on `merged_json`, which the store alone writes as JSON, so ADR 173's malformed-detail
+ * hazard does not apply.
+ */
+export function lanesAttestedBy(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  sha: string,
+  exceptId: string,
+): Lane[] {
+  return db
+    .prepare<[string, string, string], LaneRow>(
+      `SELECT * FROM lanes WHERE team_id = ? AND id != ? AND merged_json IS NOT NULL
+         AND json_extract(merged_json, '$.sha') = ? ORDER BY created_at`,
+    )
+    .all(teamId, exceptId, sha)
+    .map((r) => rowToLane(r, teamSlug));
 }
 
 export function getLane(db: Database, teamId: string, id: string, teamSlug: string): Lane | null {
@@ -160,8 +319,41 @@ export function getLane(db: Database, teamId: string, id: string, teamSlug: stri
 }
 
 /**
+ * The caller's expectation about a lane at write time (ADR 325 prereq). A claim decision is made
+ * against a read; the write refuses if the lane no longer matches, instead of blindly overwriting
+ * whatever landed in between. `undefined` fields are unchecked; `owner_seat: null` means
+ * "expected unowned".
+ */
+export interface LaneExpectation {
+  owner_seat?: string | null;
+  state?: string;
+}
+
+/** A guarded lane write found the lane changed since the caller's read (ADR 325 prereq). */
+export class LaneConflictError extends Error {
+  constructor(
+    readonly laneId: string,
+    readonly expected: LaneExpectation,
+    readonly actual: { owner_seat: string | null; state: string },
+  ) {
+    super(
+      `lane "${laneId}" changed since it was read — expected ` +
+        `owner=${expected.owner_seat === undefined ? '(any)' : String(expected.owner_seat)}/` +
+        `state=${expected.state ?? '(any)'}, found ` +
+        `owner=${String(actual.owner_seat)}/state=${actual.state}`,
+    );
+    this.name = 'LaneConflictError';
+  }
+}
+
+/**
  * Apply a partial update (lane_update / claim / handoff / resolve are all this seam). Stamps
  * claimed_at on first ownership and resolved_at on done/abandoned. Returns null when unknown.
+ *
+ * The read, the decision, and the write run inside one transaction, the UPDATE assigns only the
+ * columns that actually change, and an `expect` makes the write a guarded CAS — three ADR 325
+ * prerequisites, each also correct under today's single daemon (a future `await` between a
+ * caller's read and this write must not silently reintroduce the blind overwrite).
  */
 export function updateLane(
   db: Database,
@@ -170,9 +362,37 @@ export function updateLane(
   teamSlug: string,
   patch: UpdateLane,
   now: number = Date.now(),
+  expect?: LaneExpectation,
+  audit?: LaneAudit,
+): Lane | null {
+  return db.transaction(() =>
+    updateLaneInTx(db, teamId, id, teamSlug, patch, now, expect, audit),
+  )();
+}
+
+function updateLaneInTx(
+  db: Database,
+  teamId: string,
+  id: string,
+  teamSlug: string,
+  patch: UpdateLane,
+  now: number,
+  expect?: LaneExpectation,
+  audit?: LaneAudit,
 ): Lane | null {
   const existing = getLane(db, teamId, id, teamSlug);
   if (!existing) return null;
+  if (expect) {
+    const ownerMismatch =
+      expect.owner_seat !== undefined && existing.owner_seat !== expect.owner_seat;
+    const stateMismatch = expect.state !== undefined && existing.state !== expect.state;
+    if (ownerMismatch || stateMismatch) {
+      throw new LaneConflictError(id, expect, {
+        owner_seat: existing.owner_seat,
+        state: existing.state,
+      });
+    }
+  }
   const owned = patch.owner_seat !== undefined ? patch.owner_seat : existing.owner_seat;
   // Taking ownership of an `open` lane implies `claimed` unless the patch names a state itself.
   let state: LaneState =
@@ -187,9 +407,10 @@ export function updateLane(
   // let a caller assign an arbitrary owner, which lane_claim is for).
   const ownerSeat = state === 'open' ? null : owned;
   // ADR 192: a merge attestation on a patch that *enters or sits in* awaiting_acceptance is the
-  // worker's stage-one claim — persist it so a counterpart's later accept carries it. (A terminal
-  // patch's `merged` keeps its ADR 109 meaning and flows to the audit at the route layer; persisting
-  // it here too is harmless and keeps the lane's last attestation readable.)
+  // worker's stage-one claim — persist it so a counterpart's later accept carries it. A worker's
+  // own terminal patch may still rewrite it (ADR 109). A counterpart terminal patch must not:
+  // the HTTP layer strips `merged` before this write (ADR 305), because MCP/CLI resolve send a
+  // partial object and wholesale replace dropped `authorized_by` and the ADR 300 verification tier.
   const merged = patch.merged !== undefined ? patch.merged : existing.merged;
   const risk = patch.risk ?? existing.risk;
   const stakes = patch.stakes ?? existing.stakes;
@@ -206,7 +427,7 @@ export function updateLane(
     title: patch.title !== undefined ? patch.title : existing.title,
     detail: patch.detail !== undefined ? patch.detail : existing.detail,
     owner_seat: ownerSeat,
-    surface_globs: JSON.stringify(patch.surface_globs ?? existing.surface_globs),
+    surface_globs: JSON.stringify(patch.scope ?? existing.scope),
     depends_on: JSON.stringify(patch.depends_on ?? existing.depends_on),
     branch: patch.branch !== undefined ? patch.branch : existing.branch,
     goal_id: patch.goal_id !== undefined ? patch.goal_id : existing.goal_id,
@@ -235,13 +456,79 @@ export function updateLane(
       : null,
     updated_at: now,
   };
+  // Per-field write (ADR 325 prereq): assign only the columns that actually change, so a patch's
+  // blast radius is its own fields — never a blind LWW of the whole row. Diffed against the raw
+  // row, not the parsed Lane, so JSON-serialization round-trips cannot fake a change.
+  const rawRow = db
+    .prepare<[string, string], LaneRow>('SELECT * FROM lanes WHERE team_id = ? AND id = ?')
+    .get(teamId, id)!;
+  const columns = [
+    'project',
+    'title',
+    'detail',
+    'owner_seat',
+    'surface_globs',
+    'depends_on',
+    'branch',
+    'goal_id',
+    'risk',
+    'stakes',
+    'stakes_provenance',
+    'merged_json',
+    'state',
+    'claimed_at',
+    'resolved_at',
+  ] as const;
+  const changed = columns.filter((c) => next[c] !== rawRow[c]);
+  const bind: Record<string, unknown> = { team_id: teamId, id, updated_at: now };
+  for (const c of changed) bind[c] = next[c];
   db.prepare(
-    `UPDATE lanes SET project=@project, title=@title, detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
-       depends_on=@depends_on, branch=@branch, goal_id=@goal_id, risk=@risk, stakes=@stakes, stakes_provenance=@stakes_provenance, merged_json=@merged_json,
-       state=@state, claimed_at=@claimed_at, resolved_at=@resolved_at, updated_at=@updated_at
+    `UPDATE lanes SET ${[...changed.map((c) => `${c}=@${c}`), 'updated_at=@updated_at'].join(', ')}
      WHERE team_id=@team_id AND id=@id`,
-  ).run(next);
-  return getLane(db, teamId, id, teamSlug);
+  ).run(bind);
+  const after = getLane(db, teamId, id, teamSlug)!;
+  if (audit) recordLaneEdges(db, teamId, existing, after, patch.owner_seat !== undefined, audit);
+  return after;
+}
+
+/** Fields a `lane.updated` audit row reports (ADR 325 prereq). Ownership and state are excluded —
+ *  those edges have their own audit verbs — as are derived stamps (claimed_at &c.). */
+const AUDITED_LANE_FIELDS = [
+  'project',
+  'title',
+  'detail',
+  'branch',
+  'goal_id',
+  'scope',
+  'depends_on',
+  'risk',
+  'stakes',
+  'merged',
+] as const;
+
+/** Which auditable fields differ between two reads of a lane (arrays/objects by value). */
+export function laneFieldChanges(before: Lane, after: Lane): string[] {
+  return AUDITED_LANE_FIELDS.filter(
+    (f) => JSON.stringify(before[f] ?? null) !== JSON.stringify(after[f] ?? null),
+  );
+}
+
+/**
+ * The values behind `laneFieldChanges`: `{ field: { from, to } }` for every audited field that
+ * moved. `lane.updated` carried names only, so history could prove a scope changed and never say
+ * to what — a replicating peer folding the row had nothing to apply (lane-replication spec
+ * §Finding 3, hole 2). Absent reads as `null` on both sides, matching the equality above.
+ */
+export function laneFieldDiff(
+  before: Lane,
+  after: Lane,
+): Record<string, { from: unknown; to: unknown }> {
+  const out: Record<string, { from: unknown; to: unknown }> = {};
+  for (const f of laneFieldChanges(before, after)) {
+    const key = f as (typeof AUDITED_LANE_FIELDS)[number];
+    out[f] = { from: before[key] ?? null, to: after[key] ?? null };
+  }
+  return out;
 }
 
 export interface LaneFilter {
@@ -430,7 +717,7 @@ export function globsOverlap(a: string, b: string): boolean {
 }
 
 /**
- * The first **contending** lane (claimed/active/blocked) whose declared `surface_globs` cover the given
+ * The first **contending** lane (claimed/active/blocked) whose declared `scope` covers the given
  * concrete path — path-vs-glob (a real match of one file against the lane's globs, `globToRegExp` in
  * `path` flavor), NOT the cheap glob-vs-glob prefix `globsOverlap` uses. This is the read behind ADR 150
  * Gate A: "does <seat> own a claimed lane covering this edit?" (pass `owner`), and its blocked cousin
@@ -448,7 +735,7 @@ export function laneCoveringPath(
     ...(opts.owner ? { owner: opts.owner } : {}),
   }).filter((l) => CONTENDING.has(l.state));
   for (const lane of lanes) {
-    for (const glob of lane.surface_globs) {
+    for (const glob of lane.scope) {
       if (globToRegExp(glob, 'path').test(path)) return lane;
     }
   }
@@ -575,12 +862,12 @@ export function laneWarnings(
       detail: `building on "${dep.title}" (owner ${dep.owner_seat ?? 'unowned'}), still ${dep.state}`,
     });
   }
-  if (lane.surface_globs.length > 0 && CONTENDING.has(lane.state)) {
+  if (lane.scope.length > 0 && CONTENDING.has(lane.state)) {
     for (const other of listLanes(db, teamId, teamSlug)) {
       if (other.id === lane.id || !CONTENDING.has(other.state)) continue;
       if (!projectsContend(lane.project, other.project)) continue;
-      const shared = lane.surface_globs.flatMap((g) =>
-        other.surface_globs.filter((og) => globsOverlap(g, og)).map((og) => `${g} ∩ ${og}`),
+      const shared = lane.scope.flatMap((g) =>
+        other.scope.filter((og) => globsOverlap(g, og)).map((og) => `${g} ∩ ${og}`),
       );
       if (shared.length > 0) {
         warnings.push({
@@ -635,6 +922,41 @@ export function boardWarnings(
 const RELEASE_ON_DEPART = "('claimed','active','blocked')" as const;
 
 /**
+ * The system as a releaser, named the way `SYSTEM_CLOSER` names the sweep. A departure release has
+ * no seat behind it, and `null` would read as "actor unknown" — which is the defect this fixes.
+ */
+const SYSTEM_RELEASER = 'musterd';
+
+/**
+ * Release one lane back to `open` AND leave the `lane.released` row the PATCH path leaves
+ * (`transport/http.ts`, same `detail` shape plus a `reason`). Increment 1 of ADR 325 made every
+ * lane transition leave a durable row so a replicating daemon can fold history back out; these two
+ * departure paths were the exceptions — the only places a lane changed hands with no record of who
+ * or why (lane-replication spec §Finding 3). `appendAuditRequired`, not `appendAudit`: the release
+ * and its record are one transaction, so a peer can never see the first without the second.
+ */
+function releaseLaneWithRecord(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  ownerBefore: string,
+  reason: 'seat_left' | 'seat_departed_sweep',
+  now: number,
+): void {
+  db.prepare(
+    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
+     WHERE team_id = ? AND id = ?`,
+  ).run(now, teamId, laneId);
+  appendLaneEventRequired(db, teamId, {
+    actor: SYSTEM_RELEASER,
+    action: 'lane.released',
+    target: laneId,
+    result: 'allow',
+    detail: { lane: laneId, released_by: SYSTEM_RELEASER, owner_before: ownerBefore, reason },
+  });
+}
+
+/**
  * Release a seat's in-flight lanes back to `open` (ADR 196 / open ⟺ unowned). Used when the seat
  * soft-leaves the roster so the board cannot assert ownership for a name every list filter drops.
  * Returns the released lane ids + prior state for logging/audit.
@@ -652,12 +974,8 @@ export function releaseInFlightClaimsForSeat(
     )
     .all(teamId, seatName);
   if (rows.length === 0) return [];
-  const upd = db.prepare(
-    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
-     WHERE team_id = ? AND id = ?`,
-  );
   db.transaction(() => {
-    for (const r of rows) upd.run(now, teamId, r.id);
+    for (const r of rows) releaseLaneWithRecord(db, teamId, r.id, seatName, 'seat_left', now);
   })();
   return rows.map((r) => ({ id: r.id, state_before: r.state }));
 }
@@ -680,12 +998,9 @@ export function releaseDepartedSeatClaims(
     )
     .all();
   if (rows.length === 0) return [];
-  const upd = db.prepare(
-    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
-     WHERE team_id = ? AND id = ?`,
-  );
   db.transaction(() => {
-    for (const r of rows) upd.run(now, r.team_id, r.lane);
+    for (const r of rows)
+      releaseLaneWithRecord(db, r.team_id, r.lane, r.seat, 'seat_departed_sweep', now);
   })();
   return rows;
 }

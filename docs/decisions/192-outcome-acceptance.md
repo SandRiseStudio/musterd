@@ -106,6 +106,12 @@ human asks get the same framing plus peer findings.
   forward. Living docs (architecture, AGENTS, skill) update in the same change set.
 - Protocol state addition is ADR-gated (this ADR).
 
+- **2026-08-21 — a counterpart close must not rewrite `merged` (ADR 305).** `updateLane` replaced
+  the worker's stage-one attestation wholesale whenever the closing PATCH carried `merged`. MCP/CLI
+  `lane_resolve` send `{pr, sha, authorized_by}` without `verification`, so a counterpart who used
+  the documented flags dropped `authorized_by` and the ADR 300 tier. The HTTP layer now strips
+  `merged` on a non-owner terminal PATCH; the worker's own close may still rewrite it.
+
 ## Observability & Evaluation
 
 - **Traces.** Same audit actions as ADR 169/188; ask body change is visible in message text.
@@ -125,3 +131,7 @@ human asks get the same framing plus peer findings.
   co-author overlap above is surfaced rather than excluded.
 - **Experiment.** First week after deploy: fraction of closes that used `lane_submit` /
   `awaiting_acceptance` vs direct `lane_resolve`; spot-check ask bodies contain the checklist.
+
+---
+
+_Amendment (dated 2026-09-03, surface survey #1245 item 2, lane 01M1MMRHY6): the deprecated aliases `lane_ready` / `musterd lane ready` kept for compatibility by this ADR are removed — their one-epoch retention elapsed long ago (FEATURE_EPOCH has moved several times since July). `lane_submit` / `musterd lane submit` is the only spelling. The Decision above is unchanged._

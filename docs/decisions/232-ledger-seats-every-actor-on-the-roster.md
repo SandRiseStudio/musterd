@@ -2,7 +2,12 @@
 
 - Status: accepted — increments 1–2 built (`kind: service`, the mskd\_ service-token auth path, the
   kind-keyed exclusions, `service install --auto` token delivery, the tick's in-band bounce
-  announcement, and the warn-only census in `init --check`); increments 3–5 open
+  announcement, and the warn-only census in `init --check`). Increments 3–5 disposed 2026-09-04
+  (#1311, lane `01M1MMK3339B06Q328HYWXARJF`): **3 is open** on lane
+  `01M1Q9D90XEP9FPCYPQNBFH73Q` — a live defect, five unattributed LaunchAgents and a job-gone check
+  that cannot see guardian or streamwatch; **4 deferred** until a team wants a seat for automation
+  that is not musterd's own; **5 retracted** — superseded by ADR 241's `wake_lease`, and across 818
+  wakes no service has ever caused one. See the dated disposition below.
 - Date: 2026-08-05
 - Owner: izzo (design session with nick, 2026-08-04/05 — the lane-01KZ7KRG60 session)
 - Relates to: ADR 227 (roles — the system this completes and partly re-aims), ADR 230 (the re-eval
@@ -185,9 +190,13 @@ known-open dogfood topology, not designed around.
 2. **Census check** in doctor / `init --check`.
 3. **Remaining platform services** + `service install` auto-provisioning (wake actuator, /live
    publisher, sweep, otel-sink — the sweep with an `until`).
+   Follows-up: 01M1Q9D90XEP9FPCYPQNBFH73Q
 4. **Project services** — the registration UX (`musterd service register <name>`-shaped; designed
    from the fitness-team posture, Slack-bot prior art).
+   Follows-up: deferred — the first project service anyone actually wants a seat for; concretely, a
+   second `kind: service` seat on any team whose job is not musterd's own machinery (2026-09-04)
 5. **Wake provenance** — `woken-by-<service>` on presence rows.
+   Follows-up: none — superseded by ADR 241's `wake_lease`, and its premise never occurred (2026-09-04)
 
 ## Consequences
 
@@ -211,6 +220,55 @@ ledger seat. "Job gone" only applies to the four platform labels increment 3 wil
 Hand-authored plists are identified by their `Label`, not their filename. Unreachable roster or
 a non-darwin host stays silent. The increment-2 eval's fake-plist line is the unit test; zero
 unattributed jobs on the live machine waits on increment 3's remaining seats.
+
+**2026-09-04 — increments 3–5 disposed (lane 01M1MMK3339B06Q328HYWXARJF).** Twenty-three days after
+increment 2, none of 3–5 had a lane, and `census.ts` carried a comment promising an increment 3 with
+no owner. Re-measured rather than assumed, they turned out to be three different things.
+
+*Increment 3 is a live defect and now has its own lane.*
+Follows-up: 01M1Q9D90XEP9FPCYPQNBFH73Q
+On this
+machine at build 064db424, `musterd init --check` names **five** unattributed actors —
+`adr260-rerun`, `host`, `live`, `otel-sink`, `sweep` — so increment 2's own exit line ("zero
+unattributed jobs on the live machine waits on increment 3's remaining seats") is still unmet. The
+sharper finding is the other direction: the job-gone list above was frozen at four labels, and
+`guardian` and `streamwatch` shipped afterwards as `kind: service, role: platform` seats with live
+LaunchAgents. They are outside `PLATFORM_SERVICE_LABELS`, so if either lost its job the census would
+say nothing — and guardian is the daemon watchdog. The list could not grow with the roster, which
+reintroduced the "a wedged cron goes visibly quiet" hole this ADR was written to close.
+
+*Increment 4 is deferred with a trigger.* `deploybot` exists as a sentence here, a comment, a test
+fixture and a roadmap string; there is no `service register` command and no team has asked for one.
+The deferral reopens on the first project service someone actually wants a seat for — a `kind:
+service` seat whose job is not musterd's own machinery. Recorded rather than left implicit so nobody
+re-discovers it as a gap.
+
+*Increment 5 is retracted, not deferred — superseded by ADR 241.* `woken-by-<service>` was meant to
+close the wake ledger's who-caused-this gap. `wake_lease` (ADR 241) closed it better and later:
+`claim-handshake.ts` says why in the source — provenance describes a KIND of session, so "two wake
+sessions on one seat look identical under it", while a lease correlates a session to the exact wake.
+Measured over 818 leases on this machine: 586 name the causing act (and the act names its sender),
+210 more carry `edge = dispatch_continuation` naming a lane, 22 residual. And the premise itself
+never occurred — the resolvable causers are **581 agent, 5 human, 0 service**. No service has ever
+woken a session here, so there is nothing for `woken-by-<service>` to attribute. If that changes —
+a service becomes a wake causer — the lease's `act_id` already names it, and this stays retracted.
+
+
+**2026-09-04 — increment 3 landed (lane 01M1Q9D90XEP9FPCYPQNBFH73Q).** The census now DERIVES its
+job-gone set from the roster — every `kind: service` seat holding the `platform` role — and the
+frozen four-label literal is gone. The falsifier the lane asked for is the unit test: a platform seat
+`census.ts` has never heard of, with no job, is named without anyone editing `census.ts`. `guardian`
+and `streamwatch` are covered by construction; so is the next one. `service install --wake | --live |
+--sweep` now provision their seats (`host`, `live`, `sweep`) through ONE `provisionServiceSeat`,
+which also replaced the three copy-pasted provisioners — the three services that shipped without a
+copy were exactly the three the census named. A dated one-shot (`StartCalendarInterval` with a Month
+and Day, no `StartInterval` — `adr260-rerun`) has no standing presence to attribute and is named as a
+task rather than an unattributed actor, and named again once it has fired and is still installed, so
+the census does not warn forever about a job that was never a service. `otel-sink` is a hand-authored
+plist with no install verb — hand-authored plists walk past `install`, which is why the check exists
+— so its seat is hand-provisioned, once, the same way. Increment 2's exit line ("zero unattributed
+jobs on the live machine") is met on this machine once the three installs are re-run and the one
+seat is added; the census is still warn-only and stays so.
 
 ## Observability & Evaluation
 

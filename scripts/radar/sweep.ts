@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { DEFAULT_PRINT_LIMIT, DEFAULT_SINCE_DAYS, radarDir, repoRoot, seenPath } from './config.ts';
 import { loadSeen, mergeCandidates, partitionBySeen } from './dedup.ts';
-import { sweepArxiv, sweepHf, type FetchFn } from './fetch.ts';
+import { sweepArxiv, sweepExn, sweepHf, type FetchFn } from './fetch.ts';
 import { requireAnthropicKey } from './llm.ts';
 import { runTriage, type CompleteFn } from './triage.ts';
 import type { RadarCandidate, SweepReport, TriageReport } from './types.ts';
@@ -21,6 +21,8 @@ export interface SweepArgs {
   sinceDays: number;
   limit: number;
   triage: boolean;
+  /** M4: write the weekly digest + append triaged ids to seen.json. Requires triage. */
+  emit: boolean;
   /** Injected for tests. */
   fetchFn?: FetchFn | undefined;
   seenFile?: string;
@@ -34,10 +36,12 @@ export function parseArgs(argv: string[]): SweepArgs {
   let sinceDays = DEFAULT_SINCE_DAYS;
   let limit = DEFAULT_PRINT_LIMIT;
   let triage = false;
+  let emit = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
     if (a === '--json') json = true;
     else if (a === '--triage') triage = true;
+    else if (a === '--emit') emit = true;
     else if (a === '--since') {
       const v = Number(argv[++i]);
       if (!Number.isFinite(v) || v < 1)
@@ -56,7 +60,10 @@ export function parseArgs(argv: string[]): SweepArgs {
       throw new Error(`unknown flag: ${a} (try --help)`);
     }
   }
-  return { json, sinceDays, limit, triage };
+  if (emit && !triage) {
+    throw new Error('--emit requires --triage — a digest is a triage artifact');
+  }
+  return { json, sinceDays, limit, triage, emit };
 }
 
 function printHelp(): void {
@@ -69,21 +76,24 @@ function printHelp(): void {
   --since <n>    lookback days (default ${DEFAULT_SINCE_DAYS})
   --limit <n>    max new candidates to print / feed into triage (default ${DEFAULT_PRINT_LIMIT})
   --triage       run tier-1 + tier-2 LLM triage (needs ANTHROPIC_API_KEY)
-  --dry-run      no-op (print-only is the only write mode until M4)
+  --emit         write docs/research/radar/<YYYY-WW>.md + mark triaged ids seen (requires --triage)
+  --dry-run      no-op (print-only without --emit)
 `);
 }
 
 export async function runSweep(args: SweepArgs): Promise<SweepReport> {
   const warnings: string[] = [];
   const fetchFn = args.fetchFn;
-  const [arxiv, hf] = await Promise.all([
+  const [arxiv, hf, exn] = await Promise.all([
     sweepArxiv({ sinceDays: args.sinceDays, fetchFn }),
     sweepHf({ sinceDays: args.sinceDays, fetchFn }),
+    sweepExn({ sinceDays: args.sinceDays, fetchFn }),
   ]);
   if (arxiv.warning) warnings.push(arxiv.warning);
   if (hf.warning) warnings.push(hf.warning);
+  if (exn.warning) warnings.push(exn.warning);
 
-  const merged = mergeCandidates([arxiv.candidates, hf.candidates]);
+  const merged = mergeCandidates([arxiv.candidates, hf.candidates, exn.candidates]);
   const seen = loadSeen(args.seenFile ?? seenPath);
   const { fresh, alreadySeen } = partitionBySeen(merged, seen);
   const truncated = fresh.length > args.limit;
@@ -194,6 +204,13 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
     process.stdout.write(`${formatHuman(report)}\n`);
+  }
+  if (args.emit) {
+    const { emitDigest } = await import('./digest.ts');
+    const out = emitDigest(report, radarDir);
+    process.stdout.write(
+      `digest ready: ${out.digestPath} (seen +${out.appended.arxiv} arxiv, +${out.appended.hf} hf, +${out.appended.exn} exn)\n`,
+    );
   }
   if (report.candidates_fetched === 0 && report.warnings.length) {
     process.exitCode = 2;

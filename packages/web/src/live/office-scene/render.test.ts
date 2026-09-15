@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { homePoses } from './actors';
 import { memberColor } from '../format';
-import { fitFloor, project } from './iso';
-import { DESK_SLOTS, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
+import { depth, fitFloor, project } from './iso';
+import { CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import {
@@ -12,13 +12,21 @@ import {
   BOOK_COLORS,
   CLOCK_NUMERALS,
   coffeeAnchor,
+  contactPool,
+  deskNearDepth,
+  deskPropSort,
+  DOCK_HALF_ACROSS,
+  dockAcross,
+  drawCue,
   drawDog,
   glassColor,
   MACHINE_H,
+  MONITOR_ALONG,
   packShelf,
   pawCycle,
   renderScene,
   shelfRnd,
+  WIDEST_PANEL_HALF,
 } from './render';
 import { assignSeats } from './seating';
 import type { OfficeNode, Pose } from './types';
@@ -35,7 +43,7 @@ function laneFix(id: string, state: LaneState): Lane {
     detail: null,
     owner_seat: null,
     role: null,
-    surface_globs: [],
+    scope: [],
     depends_on: [],
     branch: null,
     goal_id: null,
@@ -56,9 +64,11 @@ function node(name: string, activity: OfficeNode['activity']): OfficeNode {
   return {
     name,
     kind: 'agent',
+    service: false,
+    woken: false,
     presence: 'online',
     activity,
-    posture: activity === 'working' ? 'working' : 'idle',
+    posture: activity === 'working' ? 'working' : 'active',
     state: null,
     color: memberColor(name, 'agent'),
     role: '',
@@ -68,6 +78,9 @@ function node(name: string, activity: OfficeNode['activity']): OfficeNode {
     workSource: null,
     laneState: null,
     moreLanes: 0,
+    dnd: false,
+    offline_reason: null,
+    last_seen_at: null,
   };
 }
 
@@ -107,6 +120,28 @@ function parseableColor(c: string): boolean {
   if (/^hsla?\(\s*[-\d.]+\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*(,\s*[\d.]+\s*)?\)$/.test(c)) return true;
   return /^[a-z]+$/i.test(c); // a named colour (transparent, white, …)
 }
+
+/** The acceptance confetti cue: deterministic per `t` (no per-frame randomness — a given moment
+ * always draws the same burst), and every particle colour parseable across its whole lifetime. */
+describe('drawCue confetti', () => {
+  it('paints only parseable colours across the burst lifetime', () => {
+    for (const t of [0, 0.25, 0.5, 0.75, 0.99]) {
+      const paints: string[] = [];
+      drawCue(mockCtx(paints), { at: { x: 300, y: 200 }, color: '#5cd49a', glyph: '', t, urgent: false, kind: 'confetti' }, 1);
+      expect(paints.length).toBeGreaterThan(0);
+      for (const c of paints) expect(parseableColor(c), c).toBe(true);
+    }
+  });
+
+  it('is a pure function of t — the same moment draws the same colours in the same order', () => {
+    const a: string[] = [];
+    const b: string[] = [];
+    const cue = { at: { x: 300, y: 200 }, color: '#5cd49a', glyph: '' as const, t: 0.4, urgent: false, kind: 'confetti' as const };
+    drawCue(mockCtx(a), cue, 1);
+    drawCue(mockCtx(b), cue, 1);
+    expect(a).toEqual(b);
+  });
+});
 
 /** The fan/coffee overlay anchors (Tier-A animated props). The key behaviour: a fan only spins and a mug
  * only steams at an *occupied* desk — an unattended running fan or a steaming fresh mug reads as wrong. */
@@ -169,7 +204,7 @@ describe('working monitor desktop', () => {
   });
 
   it('keeps Stanley’s idle monitor dim', () => {
-    expect(paintsFor('idle')).not.toContain('#2f9a8a');
+    expect(paintsFor('active')).not.toContain('#2f9a8a');
   });
 });
 
@@ -548,8 +583,8 @@ describe('renderScene draws the whole office without throwing', () => {
     const paints: string[] = [];
     const nodes: OfficeNode[] = [
       node('desker', 'working'),
-      node('lounger', 'idle'),
-      node('reader', 'idle'),
+      node('lounger', 'active'),
+      node('reader', 'active'),
     ];
     const byName = new Map(nodes.map((n) => [n.name, n]));
     const placements = assignSeats(nodes);
@@ -734,5 +769,188 @@ describe('where an actor sorts against the furniture', () => {
     const p = pose({ ...cushion, sit: 1 });
     const a = actorSortAnchor(p, undefined, { depthAt: couch });
     expect(a.lx).toBe(couch.lx);
+  });
+});
+
+/**
+ * The contact pool's compounding guard.
+ *
+ * A desk is not one solid — it is a top, four legs, a monitor, a keyboard and a mug, and every one of
+ * them reaches `box()`. The first cut of the pool drew for all of them, and a dozen overlapping pools
+ * per pod turned the desks into a dark brown mass. The `MIN_SPAN` floor is what stops that, so it is
+ * pinned here: without it the guard is one careless edit away from returning, and the symptom (a room
+ * that has quietly lost its light) is not something any other assertion in this file would catch.
+ */
+describe('contact pool', () => {
+  const fit = fitFloor(1200, 900);
+  /** Count the radial gradients a call creates — one per pool actually drawn. */
+  function poolCtx(): { ctx: CanvasRenderingContext2D; pools: () => number } {
+    let n = 0;
+    const grad = { addColorStop() {} };
+    const ctx = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createRadialGradient')
+            return () => {
+              n++;
+              return grad;
+            };
+          if (prop === 'createLinearGradient') return () => grad;
+          if (prop === 'measureText') return () => ({ width: 0 });
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    return { ctx, pools: () => n };
+  }
+
+  it('draws nothing for a footprint below the minimum span', () => {
+    const { ctx, pools } = poolCtx();
+    // A keyboard-sized solid: real, but far too small to own a shadow anyone would notice.
+    contactPool(ctx, fit, 100, 100, 6, 4, 0);
+    expect(pools()).toBe(0);
+  });
+
+  it('draws a pool for a desk-sized footprint', () => {
+    const { ctx, pools } = poolCtx();
+    contactPool(ctx, fit, 100, 100, 100, 68, 0);
+    expect(pools()).toBe(1);
+  });
+
+  it('draws the pool at the surface the solid stands on, not always the floor', () => {
+    // The monitor on a desk pools on the DESK TOP. Same footprint, different baseUp, must not collapse
+    // to the same y — otherwise everything in the room casts onto the floor and desks read as glass.
+    const ys: number[] = [];
+    const grad = { addColorStop() {} };
+    const spy = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createRadialGradient' || prop === 'createLinearGradient') return () => grad;
+          if (prop === 'translate') return (_x: number, y: number) => void ys.push(y);
+          if (prop === 'measureText') return () => ({ width: 0 });
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    contactPool(spy, fit, 100, 100, 40, 40, 0);
+    contactPool(spy, fit, 100, 100, 40, 40, 30);
+    expect(ys).toHaveLength(2);
+    expect(ys[1]!).toBeLessThan(ys[0]!); // higher base → higher on screen
+  });
+});
+
+/**
+ * "The docked laptop must never block the view of the front of any monitor screen" (nick,
+ * 2026-09-04) — held here as geometry rather than as a look at two desks.
+ *
+ * It takes both halves. OUTBOARD alone is not enough, because a prop nearer the viewer can still
+ * paint over a panel it overlaps diagonally in the projection; BEHIND alone is not enough either,
+ * because a dock hidden behind the screen is not a dock anyone can see. The trap the second half
+ * exists for is real: `at()`'s across term is +1 on an N desk and −1 on a W one, so a single written
+ * across sorts behind the monitor on one camera-facing row and in FRONT of it on the other — a
+ * defect that looks fine on whichever row you happened to open.
+ */
+describe('the dock never covers a screen (laptop/dock design)', () => {
+  const FACINGS = ['N', 'S', 'E', 'W'] as const;
+
+  it('sorts behind the monitor at every facing, not just the row you looked at', () => {
+    for (const dir of FACINGS) {
+      const dock = deskPropSort(dir, 26, dockAcross(dir));
+      const mon = deskPropSort(dir, MONITOR_ALONG, 0);
+      expect(dock, `dock must paint before the monitor on a ${dir} desk`).toBeLessThan(mon);
+    }
+  });
+
+  it('sits mostly clear of the widest panel, so it reads as beside it and not tucked behind it', () => {
+    // The soft half of the requirement, and deliberately not "no overlap at all": a 20-wide dock
+    // cannot fit outboard of a dual's 35 on a 100-wide slab, and the desk edge is the harder limit.
+    // Behind (above) is what makes the screen safe; this only keeps the dock worth drawing.
+    for (const dir of FACINGS) {
+      const outer = Math.abs(dockAcross(dir)) + DOCK_HALF_ACROSS;
+      const clear = (outer - WIDEST_PANEL_HALF) / (DOCK_HALF_ACROSS * 2);
+      expect(clear, `dock is mostly hidden behind a panel on a ${dir} desk`).toBeGreaterThan(0.6);
+    }
+  });
+
+  it('stays on the desk — outboard is bounded by the slab, not just by the panel', () => {
+    for (const dir of FACINGS) {
+      expect(Math.abs(dockAcross(dir)) + DOCK_HALF_ACROSS).toBeLessThanOrEqual(DESK_W / 2);
+    }
+  });
+
+  it('a fixed across would have failed the first of these — the sign flip is the whole point', () => {
+    // The shape of the bug this replaced: one written constant, used at every facing.
+    const naive = -26;
+    const behind = FACINGS.filter((dir) => deskPropSort(dir, 18, naive) < deskPropSort(dir, MONITOR_ALONG, 0));
+    expect(behind.length).toBeLessThan(FACINGS.length); // it cannot be behind on all four
+  });
+});
+
+/**
+ * The desk's near half, and the ordering #1394 shipped without a test.
+ *
+ * #1394 moved the whole desk's key to its near corner and buried the sitter at every N/W desk; #1400
+ * reverted it. The lesson is that the passer-by and the sitter ask opposite questions of one scalar,
+ * so the desk keeps its centre key and gains a SECOND item on its camera-near half — keyed at the
+ * near corner, except never past this desk's own sitter.
+ *
+ * These pin every claim at all four facings. The first cut of the implementation defined the extra
+ * half by `FWD` rather than by depth and these caught it immediately on N: on an N or W desk the
+ * facing points AWAY from the viewer, so the room side is the far side.
+ */
+describe('the desk near half (the correct version of the reverted #1394)', () => {
+  const FACINGS = ['N', 'S', 'E', 'W'] as const;
+  const slotAt = (dir: (typeof FACINGS)[number]) => ({ lx: 400, ly: 400, dir });
+  /** Where a sitter at this desk sorts: the chair, opposite the facing (see `actorSortAnchor`). */
+  const seatOf = (dir: (typeof FACINGS)[number]) => {
+    const f = FWD[dir];
+    return { lx: 400 - f[0] * CHAIR_OFF, ly: 400 - f[1] * CHAIR_OFF };
+  };
+
+  it('an EMPTY desk keys its near half past the slab at every facing — that is what catches a passer-by', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      expect(deskNearDepth(slot, null), `near half must key after the slab on a ${dir} desk`).toBeGreaterThan(
+        depth(slot.lx, slot.ly),
+      );
+    }
+  });
+
+  it('a member standing clear in front of an empty desk still paints after it', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      const sn = dir === 'S' || dir === 'N';
+      const wx = sn ? DESK_W : DESK_D;
+      const dy = sn ? DESK_D : DESK_W;
+      // A body a stride beyond the desk's near corner — plainly in the room, not at the desk.
+      const outside = depth(slot.lx + wx / 2 + 20, slot.ly + dy / 2 + 20);
+      expect(outside, `a member in front of a ${dir} desk must paint after its near half`).toBeGreaterThan(
+        deskNearDepth(slot, null),
+      );
+    }
+  });
+
+  it('NEVER keys past its own sitter, at any facing — the regression #1400 reverted', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      const seat = seatOf(dir);
+      expect(
+        deskNearDepth(slot, seat),
+        `near half must paint before the sitter on a ${dir} desk`,
+      ).toBeLessThan(depth(seat.lx, seat.ly));
+    }
+  });
+
+  it('an occupied desk is never keyed FURTHER forward than the same desk empty', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      expect(deskNearDepth(slot, seatOf(dir))).toBeLessThanOrEqual(deskNearDepth(slot, null));
+    }
   });
 });

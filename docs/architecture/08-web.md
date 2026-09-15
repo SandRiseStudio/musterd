@@ -25,16 +25,15 @@ Two design commitments follow from "read-only projection":
 
 ## Routes
 
-| Route               | What it is                                                                                                                                                                                                                                                      |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/` (`index.tsx`)   | Marketing / hero + the roadmap map (rendered from `content/roadmap.data.ts`, the same source `ROADMAP.md` is generated from).                                                                                                                                   |
-| `/live`             | The team console: the isometric **office** + the **stream** + the governance **roster**. The flagship surface.                                                                                                                                                  |
-| `/board`            | Read-only kanban over `GET /lanes` — one column per lane state (ADR 104 increment 1).                                                                                                                                                                           |
-| `/approvals`        | The approval queue / card web views (ADR 072/073).                                                                                                                                                                                                              |
-| `/audit`            | The audit-log view (ADR 071 projection).                                                                                                                                                                                                                        |
-| `/office-preview`   | A design/verification harness: a scripted act sequence + a control bar that fires each `OfficeEvent` on demand. Not a live surface — the place to eyeball choreography without a daemon.                                                                        |
-| `/character-sheet`  | The character turnaround (ADR 142): the office character at ~4×, every facing, every pose, across two dozen names. The office draws people ~40px tall, where a wardrobe bug is invisible until it ships — iterate on the character **here**, not in the office. |
-| `/approval-preview` | The same idea for the approval card.                                                                                                                                                                                                                            |
+| Route              | What it is                                                                                                                                                                                                                                                      |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/` (`index.tsx`)  | Marketing / hero + the roadmap map (rendered from `content/roadmap.data.ts`, the same source `ROADMAP.md` is generated from).                                                                                                                                   |
+| `/live`            | The team console: the isometric **office** + the **stream** + the governance **roster**. The flagship surface.                                                                                                                                                  |
+| `/board`           | Read-only kanban over `GET /lanes` — one column per lane state (ADR 104 increment 1).                                                                                                                                                                           |
+| `/approvals`       | The approval queue / card web views (ADR 072/073).                                                                                                                                                                                                              |
+| `/audit`           | The audit-log view (ADR 071 projection).                                                                                                                                                                                                                        |
+| `/office-preview`  | A design/verification harness: a scripted act sequence + a control bar that fires each `OfficeEvent` on demand. Not a live surface — the place to eyeball choreography without a daemon.                                                                        |
+| `/character-sheet` | The character turnaround (ADR 142): the office character at ~4×, every facing, every pose, across two dozen names. The office draws people ~40px tall, where a wardrobe bug is invisible until it ships — iterate on the character **here**, not in the office. |
 
 ## The `/live` connection model
 
@@ -49,6 +48,8 @@ Two design commitments follow from "read-only projection":
 
 A shared read-only **watch link** (`/live?team=<slug>&as=<observer>#w=<credential>`, ADR 063) lets a team
 hand someone a spectator view without provisioning them a real seat.
+The watch link mints a public-grade observer (ADR 136): it sees Team-broadcast Acts, not directed
+traffic. It is a scoped observer, not anonymous access; roster handles and Presence remain visible.
 
 > **Known limitation (2026-07-07):** the HTTP backfill is capped (200) and returns the oldest of an
 > over-cap history, so on a busy team the newest acts arrive only via the live socket, not the backfill.
@@ -69,6 +70,10 @@ hand someone a spectator view without provisioning them a real seat.
   server-projected `posture` (`working`·`idle`·`away`·`offline`), with offline chips preferring
   `offline_reason` (`reconnecting`/`disconnected`/`signed off`/`off hours`) when known; account-status
   only for exceptions (`disabled`/`banned`/`archived`); capability deviations; presence dot.
+- **Shared Seeds tray** (`live/SeedsTray.tsx`) — a read-only drawer from the `/live` top bar (ADR 319).
+  Active uses the protocol's shared tray rule; history reveals completed/promoted work and links a
+  promoted Seed to the ordinary focused Lane view. It refetches on firehose activity so promotion
+  leaves the active tray without adding a browser mutation path.
 
 ## Act rendering vocabulary (the load-bearing contract)
 
@@ -113,10 +118,12 @@ routes/                         // one file per route (live, board, approvals, a
 content/roadmap.data.ts         // the roadmap SOURCE — ROADMAP.md is generated from it (scripts/gen-roadmap.ts)
 live/
   client.ts                     // observer claim + backfill + WS subscribe (browser port of the CLI watch)
+  seedClient.ts                 // lazy Seed HTTP projection; keeps Seed schemas out of eager `/live`
   useLiveStream.ts              // the React hook: envelopes, roster, liveIds, conn status; drives the chime
   format.ts                     // act tone/label, laneEvent recovery, roster/colour/status projections
   Stream.tsx                    // the act feed + ACT_GLYPH + typewriter
   RosterPanel.tsx               // posture/offline_reason chip + exception account_status
+  SeedsTray.tsx                 // read-only active/history Seed drawer; promoted history → focused Lane
   OfficeScene.tsx               // React wrapper: mounts the scene, feeds it envelopes → emit
   Board.tsx / ApprovalQueue.tsx / ApprovalCard.tsx / AuditLog.tsx   // the other live views
   sound.ts                      // opt-in WebAudio firehose cues
@@ -132,7 +139,7 @@ live/
     character.ts                // paints a skeleton in an appearance (facing + limb self-occlusion)
     speech.ts                   // the over-head speech-bubble text model
 components/                     // marketing surface (Hero, Roadmap, Footer, LiquidGlass, Wedge)
-brand/                          // unified marks — Chip + MusterdWord topbar lockup (ADR 154)
+brand/                          // unified marks — Chip + MusterdWord topbar lockup (ADR 154); social-card.png + siteMeta.ts (og:image on musterd.io)
 ```
 
 ## Testing & verification

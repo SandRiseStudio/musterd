@@ -88,9 +88,15 @@ export const RESUME_TRANSCRIPT_MAX_BYTES = 256 * 1024;
 /** Per-run argv options (increment 5) — delivered on the wake order by the daemon's effective
  *  policy, applied identically to the fresh and resume paths (one permission posture per run). */
 export interface WakeArgOpts {
-  /** `reply-only` (default) scopes the run to the musterd tools via `--allowedTools`; `seat-policy`
-   *  omits the flag so the workspace's own settings govern. NEITHER ever passes a skip-permissions
-   *  flag — the explicit ADR 131 §6 invariant, enforced by the argv tests for both policies. */
+  /** `reply-only` (default) and `seat-policy` BOTH hand the run the musterd MCP tools via
+   *  `--allowedTools mcp__musterd`; under seat-policy the workspace's own settings govern everything
+   *  else. Until 2026-09-06 seat-policy omitted the flag, on the reading that "the workspace's
+   *  settings govern" — and the ADR 261 floor those settings came from allowed the CLI, not the MCP
+   *  server, so a work_order (always seat-policy) had the wake's own control plane refused and could
+   *  not occupy, submit or report: the broader policy was strictly narrower for the one server every
+   *  wake needs (finding 18, docs/perf/cloud-seat.md; ADR 131 §6 amendment). The musterd tools are
+   *  how the wake is *delivered*, not part of the task's permissions. NEITHER policy ever passes a
+   *  skip-permissions flag — the explicit ADR 131 §6 invariant, enforced by the argv tests for both. */
   toolPolicy?: 'reply-only' | 'seat-policy';
   /** `--max-turns` where set (the claude CLI supports it; other backends may not). */
   maxTurns?: number;
@@ -98,7 +104,8 @@ export interface WakeArgOpts {
 
 function argTail(opts: WakeArgOpts): string[] {
   return [
-    ...(opts.toolPolicy === 'seat-policy' ? [] : ['--allowedTools', 'mcp__musterd']),
+    '--allowedTools',
+    'mcp__musterd',
     ...(opts.maxTurns !== undefined ? ['--max-turns', String(opts.maxTurns)] : []),
     '--output-format',
     'json',
@@ -229,28 +236,58 @@ function killTree(child: ChildProcess, graceMs: number): void {
   hardKill.unref();
 }
 
-/** Best-effort cost/duration out of `--output-format json` stdout — telemetry, never verification. */
+/** Best-effort cost/duration out of `--output-format json` stdout — telemetry, never verification.
+ *  `error_text` is the harness's own last word when the result is an error (`is_error`): it is the
+ *  only place a run that never reached the roster says why — four delta wakes on 2026-09-06 died in
+ *  ~10 s at $0.0000 on `Credit balance is too low`, and host.log said "exited without occupying". */
 export function parseRunSummary(
   stdout: string,
-): { cost_usd?: number; duration_ms?: number; is_error?: boolean } | null {
+): { cost_usd?: number; duration_ms?: number; is_error?: boolean; error_text?: string } | null {
   try {
     const parsed = JSON.parse(stdout.trim()) as Record<string, unknown>;
+    const isError = typeof parsed['is_error'] === 'boolean' ? parsed['is_error'] : undefined;
+    const result = typeof parsed['result'] === 'string' ? parsed['result'].trim() : '';
     return {
       ...(typeof parsed['total_cost_usd'] === 'number'
         ? { cost_usd: parsed['total_cost_usd'] }
         : {}),
       ...(typeof parsed['duration_ms'] === 'number' ? { duration_ms: parsed['duration_ms'] } : {}),
-      ...(typeof parsed['is_error'] === 'boolean' ? { is_error: parsed['is_error'] } : {}),
+      ...(isError !== undefined ? { is_error: isError } : {}),
+      ...(isError === true && result.length > 0 ? { error_text: result } : {}),
     };
   } catch {
     return null;
   }
 }
 
+/** The wire bound on a failure reason (`WakeReportSchema.reason`, protocol). */
+const REASON_MAX = 200;
+
+/** The one line an operator reads when a wake never occupied: the host's verdict, then — when the
+ *  harness said anything — the harness's own words, so "exited (code 1)" names its cause. Prefers
+ *  the JSON result's error text; falls back to the last non-empty stderr line. Bounded to the wire. */
+export function composeFailureReason(
+  verdict: string,
+  summary: { error_text?: string } | null,
+  stderr: string,
+): string {
+  const lastStderr = stderr
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .at(-1);
+  const said = summary?.error_text ?? lastStderr;
+  if (!said) return verdict.slice(0, REASON_MAX);
+  return `${verdict} — harness: ${said}`.slice(0, REASON_MAX);
+}
+
 /** One spawn attempt (fresh or resume): spawn, watchdog, roster-verify, kill-on-fail. */
 interface AttemptResult {
   occupied: boolean;
   provenance?: string | null;
+  /** ADR 241: the seat is occupied by a session this wake did not create — a deferral, never a
+   *  failure (no attempt budget) and never a success (no delivery claimed). */
+  deferred?: boolean;
   /** Host-composed failure summary; null when occupied. */
   reason: string | null;
   /** Resolves when the spawned run finishes (exit or watchdog kill), carrying the run's parsed
@@ -306,6 +343,13 @@ function runAttempt(
     stdout += d.toString();
     if (stdout.length > 262_144) stdout = stdout.slice(-262_144);
   });
+  // stderr is kept only for the failure reason (a harness that dies before printing its JSON
+  // result — a missing binary, an MCP server that will not start — says so here and nowhere else).
+  let stderr = '';
+  child.stderr?.on('data', (d: Buffer) => {
+    stderr += d.toString();
+    if (stderr.length > 8_192) stderr = stderr.slice(-8_192);
+  });
   let spawnError: Error | null = null;
   const exited = new Promise<number | null>((res) => {
     child.once('exit', (code) => res(code));
@@ -333,10 +377,15 @@ function runAttempt(
     );
     // The completion record (increment 5): harness-reported cost + measured wall clock. Cost only
     // exists at exit — the loop posts it as a supplementary report against the settled lease.
-    if (!summary) return undefined;
+    //
+    // A run with NO parseable summary still settles WITH a completion (lane 01M1G310Y7). Until
+    // 2026-09-02 this returned undefined here, so a watchdog kill, an `exit=error`, or a clean exit
+    // that printed no JSON produced no `residency.wake_cost` row at all — 55 of 171 claude-code
+    // settles on the live host log, and the watchdog case is the MOST expensive shape a wake can
+    // take. The child's cost needs the child's cooperation; the host's wall clock does not.
     return {
-      ...(summary.cost_usd !== undefined ? { cost_usd: summary.cost_usd } : {}),
-      duration_ms: summary.duration_ms ?? Date.now() - spawnedAt,
+      ...(summary?.cost_usd !== undefined ? { cost_usd: summary.cost_usd } : {}),
+      duration_ms: summary?.duration_ms ?? Date.now() - spawnedAt,
     };
   });
 
@@ -351,6 +400,30 @@ function runAttempt(
         .then(() => new Promise((r) => setTimeout(r, 2_000)))
         .then(() => ctx.verifyOccupied(seat, opts.verifyWindowMs, spawnedAt)),
     ]);
+
+    // ADR 241 increment 3 (2026-09-02, lane 01M1HQC9JJ): the success bar is `lease_matched` — a
+    // fresh row attesting THIS lease's token — not `occupied`. This was the last of five backends
+    // to gate on occupancy alone, so a presence row belonging to ANOTHER session (a human in the
+    // worktree; a prior wake still inside its 30m timeout) was credited as this wake's own: the act
+    // reported delivered to a session that never received it, and the child spawned here kept
+    // running beside the real occupant. `occupied && !lease_matched` is the contract's deferral
+    // (backend.ts): nothing about the act or the host is wrong, so it must not be charged — kill
+    // what we spawned and let the act wait for the session that holds the seat.
+    // ADR 379: unless the unattested occupant is demonstrably the child spawned here (same
+    // workspace, created after spawn) — then it is ours, it just could not attest the lease, and
+    // killing it is the self-kill ADR 354 §Consequences named.
+    if (verified.occupied && !verified.lease_matched && !verified.own_unattested) {
+      killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
+      return {
+        occupied: false,
+        deferred: true,
+        reason: `the seat is held by another session (not lease ${spec.order.lease_id})`.slice(
+          0,
+          200,
+        ),
+        settled,
+      };
+    }
 
     if (verified.occupied) {
       // Confirmation beat (first live fallback rehearsal, 2026-07-13): a stale-id `--resume` died
@@ -372,7 +445,13 @@ function runAttempt(
         `⚡ woke ${seat}: spawn→roster ${(wakeLatencyMs / 1000).toFixed(1)}s, ` +
           `session=${opts.label} provenance=${verified.provenance ?? 'unknown'}`,
       );
-      if (verified.provenance !== 'wake') {
+      if (verified.own_unattested) {
+        ctx.log(
+          `note: ${seat}'s occupancy attests no lease (${spec.order.lease_id}) — credited as this ` +
+            `wake's own on its evidence: created in ${spec.workspace} after spawn (ADR 379). ` +
+            `The workspace's musterd MCP dist may predate the lease token (rebuild it).`,
+        );
+      } else if (verified.provenance !== 'wake') {
         ctx.log(
           `note: occupancy attests provenance "${verified.provenance ?? 'none'}", not "wake" — ` +
             `the workspace's musterd MCP dist may predate ADR 131 inc 3 (rebuild it)`,
@@ -388,7 +467,7 @@ function runAttempt(
 
     // Not on the roster: a session that never joined must not keep burning — kill what's left.
     killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
-    const reason = spawnError
+    const verdict = spawnError
       ? `spawn failed: ${(spawnError as Error).message}`
       : timedOut
         ? `watchdog timeout (${opts.timeoutMs}ms) before roster occupancy`
@@ -399,9 +478,17 @@ function runAttempt(
     // on the primary report so no supplement is needed. A watchdogged/live child stays deferred to
     // `settled` (awaiting the kill grace here would delay the report for no gain).
     const completion = child.exitCode !== null || spawnError ? await settled : undefined;
+    // A run that exited says why (finding 18 fix 3): the harness's error text or its last stderr
+    // line rides the reason, so the actuator's line and the `residency.wake_failed` row name the
+    // cause instead of the costume ("exited without occupying" wore billing, a refused MCP server,
+    // and a missing binary on one machine in one day). Timeouts and live children carry no words.
+    const reason =
+      child.exitCode !== null && !spawnError
+        ? composeFailureReason(verdict, parseRunSummary(stdout), stderr)
+        : verdict.slice(0, REASON_MAX);
     return {
       occupied: false,
-      reason: reason.slice(0, 200),
+      reason,
       settled,
       ...(completion ? { completion } : {}),
     };
@@ -629,6 +716,25 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
               settled: settleAll(),
             };
           }
+          if (resumed.deferred) {
+            // The seat is someone else's. A fresh fallback here would be a second process aimed
+            // into a worktree another session is sitting in — the exact duplicate this increment
+            // exists to stop. Defer the whole wake; the act waits for the occupant.
+            ctx.log(
+              `resume deferred for ${seat} (${resumed.reason ?? 'unknown'}) — no fresh fallback`,
+            );
+            return {
+              outcome: {
+                occupied: false,
+                deferred: true,
+                session: 'resumed',
+                ...(deliveryTracked ? { delivery_outcome: 'resumed' as const } : {}),
+                ...deliveryMetadata(),
+                ...(resumed.reason ? { reason: resumed.reason } : {}),
+              },
+              settled: settleAll(),
+            };
+          }
           ctx.log(
             `resume failed for ${seat} (${resumed.reason ?? 'unknown'}) — ` +
               `fresh fallback in the same lease`,
@@ -715,6 +821,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         return {
           outcome: {
             occupied: healedOutcome.occupied,
+            ...(healedOutcome.deferred ? { deferred: true } : {}),
             session: 'fresh',
             ...(deliveryTracked
               ? {
@@ -734,6 +841,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       return {
         outcome: {
           occupied: outcome.occupied,
+          ...(outcome.deferred ? { deferred: true } : {}),
           session: 'fresh',
           ...(deliveryTracked
             ? {

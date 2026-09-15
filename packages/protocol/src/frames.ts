@@ -4,6 +4,7 @@ import { ClaimFrame, OccupiedFrame, PendingFrame, RefusedFrame } from './claim-h
 import { EnvelopeSchema } from './envelope.js';
 import { ErrorCodeSchema } from './errors.js';
 import { MemberSchema } from './member.js';
+import { WIRE_ATTESTATION_SOURCES } from './model.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 export { ClaimFrame, OccupiedFrame, PendingFrame, RefusedFrame };
@@ -52,6 +53,10 @@ export const HeartbeatFrame = z.object({
   // Absent ⇒ no change (never a clear — attestation only moves forward, `unknown` comes from
   // never attesting, not from omitting the field on one frame).
   model: z.string().max(120).optional(),
+  // WHICH TIER produced `model` (ADR 301). Rides with `model` on the same never-clear rule:
+  // absent ⇒ no change. The pair never travels split — a heartbeat that re-attests the id
+  // without the source would leave a new model under a stale tier.
+  model_source: z.enum(WIRE_ATTESTATION_SOURCES).optional(),
   // Surface re-attestation (ADR 275, additive): occupancy follows capture the same way model
   // does. A mid-session heal (ADR 270 writes `session.harness=cursor`) must not keep the
   // claim-time declaration on the presence row. Absent ⇒ no change (never a clear).
@@ -109,6 +114,19 @@ export const ErrorFrame = z.object({
   same_workspace: z.boolean().optional(),
 });
 
+/**
+ * `lease` (server → client) — a renewed agent session lease (ADR 337 §5, amended by ADR 347). The
+ * daemon mints it for the Presence this connection holds and pushes it before the current lease
+ * expires; the adapter adopts it for its HTTP calls. The old lease stays valid to its own expiry, so
+ * an HTTP call in flight under it still lands. Never sent on a human or observer connection.
+ */
+export const LeaseFrame = z.object({
+  type: z.literal('lease'),
+  session_lease: z.string(),
+  expires_at: z.number().int(),
+});
+export type LeaseFrame = z.infer<typeof LeaseFrame>;
+
 export const WSServerFrame = z.discriminatedUnion('type', [
   WelcomeFrame,
   OccupiedFrame,
@@ -119,5 +137,6 @@ export const WSServerFrame = z.discriminatedUnion('type', [
   DeliverFrame,
   PresenceEvtFrame,
   ErrorFrame,
+  LeaseFrame,
 ]);
 export type WSServerFrame = z.infer<typeof WSServerFrame>;

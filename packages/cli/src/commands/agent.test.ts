@@ -12,20 +12,34 @@ const h = vi.hoisted(() => ({
     grant: { id: 'g1', target: 'June', scope: 'seat', lifetime: 'standing' },
     token: 'msgr_standing',
   })),
+  mintBootstrapCredential: vi.fn(async () => ({
+    credential: { id: 'bc1', use: 'claim_seat', target: 'June' },
+    agent_key: 'mskey_scoped_june',
+  })),
   saveBinding: vi.fn(),
   saveWorkspaceSpec: vi.fn(),
   writeSeatFile: vi.fn(),
   configure: vi.fn(async () => ({ target: 'claude mcp', activation: '' })),
+  configureCursor: vi.fn(async () => ({ target: '.cursor/mcp.json', activation: '' })),
+  configureCodex: vi.fn(async () => ({ target: '.codex/config.toml', activation: '' })),
   // dir is set to a real temp dir per-test (the command chdir's into it to register MCP).
   workspace: { dir: '', kind: 'worktree' as const, branch: 'agent/June', created: true },
   rosterHome: {} as Record<string, string>,
+  // Mutable so a test can model the machine that has LOST the team agent key (the empty
+  // `agentKeys` map an interrupted config prune leaves behind) — see the preflight suite.
+  agentKeys: {} as Record<string, string>,
 }));
 
 vi.mock('./helpers.js', () => ({
   resolve: () => ({
     team: 'ritual',
-    config: { server: 'http://localhost:4849', agentKeys: { ritual: 'mskey_team' } },
-    http: { addMember: h.addMember, roster: h.roster, issueGrant: h.issueGrant },
+    config: { server: 'http://localhost:4849', agentKeys: h.agentKeys },
+    http: {
+      addMember: h.addMember,
+      roster: h.roster,
+      issueGrant: h.issueGrant,
+      mintBootstrapCredential: h.mintBootstrapCredential,
+    },
   }),
 }));
 vi.mock('../config.js', () => ({
@@ -37,8 +51,8 @@ vi.mock('../roster.js', () => ({ writeSeatFile: h.writeSeatFile }));
 vi.mock('../onboard/harnesses/index.js', () => ({
   HARNESSES: [
     { id: 'claude-code', label: 'Claude Code', surface: 'claude-code', configure: h.configure },
-    { id: 'cursor', label: 'Cursor', surface: 'cursor', configure: h.configure },
-    { id: 'codex', label: 'Codex', surface: 'codex', configure: h.configure },
+    { id: 'cursor', label: 'Cursor', surface: 'cursor', configure: h.configureCursor },
+    { id: 'codex', label: 'Codex', surface: 'codex', configure: h.configureCodex },
   ],
 }));
 vi.mock('../onboard/workspace.js', () => ({ provisionWorkspace: () => h.workspace }));
@@ -50,6 +64,8 @@ describe('musterd agent <name>', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     h.rosterHome = {};
+    h.agentKeys = { ritual: 'mskey_team' };
+    delete process.env['MUSTERD_AGENT_KEY'];
     h.workspace.dir = mkdtempSync(join(tmpdir(), 'magent-'));
   });
   afterEach(() => {
@@ -107,12 +123,15 @@ describe('musterd agent <name>', () => {
     expect(h.saveBinding).toHaveBeenCalledWith(
       h.workspace.dir,
       expect.objectContaining({
+        version: 2,
         team: 'ritual',
-        agent_key: 'mskey_team',
-        surface: 'claude-code',
+        agent_key: 'mskey_scoped_june',
         claim: { mode: 'seat', name: 'June' },
       }),
     );
+    // v2 identity carries no surface (ADR 281) — runtime Surface is launcher-only (ADR 286).
+    const bindingArg = h.saveBinding.mock.calls[0]![1] as Record<string, unknown>;
+    expect(bindingArg['surface']).toBeUndefined();
     // MCP registered with NO secret (agent_key/grant) in the harness config, so an in-tree config
     // (Cursor/Codex) is commit-safe (ADR 018/115) — and, critically, **no `MUSTERD_BINDING`** (ADR 143).
     //
@@ -136,14 +155,15 @@ describe('musterd agent <name>', () => {
     expect(h.saveWorkspaceSpec).toHaveBeenCalledWith(
       h.workspace.dir,
       expect.objectContaining({
+        version: 2,
         team: 'ritual',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'June' },
       }),
     );
     const specArg = h.saveWorkspaceSpec.mock.calls[0]![1] as Record<string, unknown>;
     expect(specArg.agent_key).toBeUndefined();
     expect(specArg.grant).toBeUndefined();
+    expect(specArg['surface']).toBeUndefined();
   });
 
   it('writes the ADR 261 permissions floor into the WORKTREE so a non-interactive seat works day one', async () => {
@@ -158,8 +178,8 @@ describe('musterd agent <name>', () => {
     expect(settings.permissions?.deny ?? []).toEqual([]);
   });
 
-  it('--role read-only layers the deny ceiling over the floor (ADR 261 decision 3)', async () => {
-    const code = await agentCommand(parseArgs(['Watcher', '--role', 'read-only']));
+  it('--profile read-only layers the deny ceiling over the floor (ADR 261 decision 3)', async () => {
+    const code = await agentCommand(parseArgs(['Watcher', '--profile', 'read-only']));
     expect(code).toBe(0);
     const settings = JSON.parse(
       readFileSync(join(h.workspace.dir, '.claude', 'settings.local.json'), 'utf8'),
@@ -169,8 +189,46 @@ describe('musterd agent <name>', () => {
     expect(settings.permissions?.allow).toContain('Read');
   });
 
-  it('an unknown --role still creates the seat — permissions are best-effort (floor-only, no throw)', async () => {
-    const code = await agentCommand(parseArgs(['Zed', '--role', 'no-such-role']));
+  it('--profile provisions the workspace without touching the team fact (ADR 272 inc 2)', async () => {
+    const code = await agentCommand(parseArgs(['Watcher', '--profile', 'read-only']));
+    expect(code).toBe(0);
+    // No role label reaches the roster from a profile pick — a profile is configuration, not identity.
+    expect(h.addMember).toHaveBeenCalledWith('ritual', { name: 'Watcher', kind: 'agent' });
+  });
+
+  it('--role is the team fact only — it labels the member and provisions NOTHING (ADR 272 inc 2)', async () => {
+    const code = await agentCommand(parseArgs(['Watcher', '--role', 'read-only']));
+    expect(code).toBe(0);
+    expect(h.addMember).toHaveBeenCalledWith('ritual', {
+      name: 'Watcher',
+      kind: 'agent',
+      role: 'read-only',
+    });
+    const settings = JSON.parse(
+      readFileSync(join(h.workspace.dir, '.claude', 'settings.local.json'), 'utf8'),
+    ) as { permissions?: { deny?: string[] } };
+    // Even a label that NAMES a profile compiles no ceiling — the coupling is what inc 2 removed.
+    expect(settings.permissions?.deny ?? []).toEqual([]);
+  });
+
+  it('--role <label> --profile <name> sets the label from one and the workspace from the other', async () => {
+    const code = await agentCommand(
+      parseArgs(['Watcher', '--role', 'auditor', '--profile', 'read-only']),
+    );
+    expect(code).toBe(0);
+    expect(h.addMember).toHaveBeenCalledWith('ritual', {
+      name: 'Watcher',
+      kind: 'agent',
+      role: 'auditor',
+    });
+    const settings = JSON.parse(
+      readFileSync(join(h.workspace.dir, '.claude', 'settings.local.json'), 'utf8'),
+    ) as { permissions?: { deny?: string[] } };
+    expect(settings.permissions?.deny).toEqual(expect.arrayContaining(['Edit', 'Write']));
+  });
+
+  it('an unknown --profile still creates the seat — permissions are best-effort (floor-only, no throw)', async () => {
+    const code = await agentCommand(parseArgs(['Zed', '--profile', 'no-such-profile']));
     expect(code).toBe(0);
   });
 
@@ -222,38 +280,33 @@ describe('musterd agent <name>', () => {
     expect(entry.env.MUSTERD_GRANT).toBeUndefined();
   });
 
-  it('--harness cursor wires the Cursor surface (binding, spec, and env)', async () => {
+  it('--harness cursor wires the Cursor adapter — and bakes no surface anywhere', async () => {
     const code = await agentCommand(parseArgs(['June', '--harness', 'cursor']));
     expect(code).toBe(0);
-    expect(h.saveBinding).toHaveBeenCalledWith(
-      h.workspace.dir,
-      expect.objectContaining({ surface: 'cursor' }),
-    );
-    expect(h.saveWorkspaceSpec).toHaveBeenCalledWith(
-      h.workspace.dir,
-      expect.objectContaining({ surface: 'cursor' }),
-    );
-    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_SURFACE).toBeUndefined(); // ADR 165: surface is in binding.json
+    expect(h.configureCursor).toHaveBeenCalled();
+    expect(h.configure).not.toHaveBeenCalled();
+    // v2 identity carries no surface (ADR 281): the launcher provides it at runtime (ADR 286).
+    const bindingArg = h.saveBinding.mock.calls[0]![1] as Record<string, unknown>;
+    expect(bindingArg['surface']).toBeUndefined();
+    const specArg = h.saveWorkspaceSpec.mock.calls[0]![1] as Record<string, unknown>;
+    expect(specArg['surface']).toBeUndefined();
+    const entry = h.configureCursor.mock.calls[0]![0] as { env: Record<string, string> };
+    expect(entry.env.MUSTERD_SURFACE).toBeUndefined();
   });
 
-  it('--harness codex wires the Codex surface', async () => {
+  it('--harness codex wires the Codex adapter', async () => {
     const code = await agentCommand(parseArgs(['June', '--harness', 'codex']));
     expect(code).toBe(0);
-    expect(h.saveBinding).toHaveBeenCalledWith(
-      h.workspace.dir,
-      expect.objectContaining({ surface: 'codex' }),
-    );
-    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_SURFACE).toBeUndefined(); // ADR 165: surface is in binding.json
+    expect(h.configureCodex).toHaveBeenCalled();
+    expect(h.configure).not.toHaveBeenCalled();
+    const entry = h.configureCodex.mock.calls[0]![0] as { env: Record<string, string> };
+    expect(entry.env.MUSTERD_SURFACE).toBeUndefined();
   });
 
   it('defaults to the claude-code harness when --harness is omitted', async () => {
     await agentCommand(parseArgs(['June']));
-    expect(h.saveBinding).toHaveBeenCalledWith(
-      h.workspace.dir,
-      expect.objectContaining({ surface: 'claude-code' }),
-    );
+    expect(h.configure).toHaveBeenCalled();
+    expect(h.configureCursor).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown harness with the valid set', async () => {
@@ -300,5 +353,62 @@ describe('musterd agent <name>', () => {
 
   it('rejects a name with whitespace', async () => {
     await expect(agentCommand(parseArgs(['two words']))).rejects.toThrow(/usage/);
+  });
+});
+
+describe('the agent workspace receives its own scoped bootstrap credential', () => {
+  it('does not require the legacy team agent key on this machine', async () => {
+    h.agentKeys = {};
+    h.rosterHome = { ritual: '/tmp/ritual-home' };
+    expect(await agentCommand(parseArgs(['June']), { infraGate: async () => null })).toBe(0);
+    expect(h.mintBootstrapCredential).toHaveBeenCalledWith('ritual', {
+      use: 'claim_seat',
+      target: 'June',
+      label: expect.any(String),
+    });
+    expect(h.saveBinding).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({ agent_key: 'mskey_scoped_june' }),
+    );
+  });
+
+  it('does not fall back to an ambient legacy key', async () => {
+    process.env['MUSTERD_AGENT_KEY'] = 'mskey_legacy';
+    await agentCommand(parseArgs(['June']), { infraGate: async () => null });
+    expect(h.saveBinding).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({ agent_key: 'mskey_scoped_june' }),
+    );
+  });
+});
+
+describe('musterd agent <name> --hue (ADR 374)', () => {
+  const cwd0 = process.cwd();
+  beforeEach(() => {
+    vi.clearAllMocks();
+    h.rosterHome = {};
+    h.agentKeys = { ritual: 'mskey_team' };
+    h.workspace.dir = mkdtempSync(join(tmpdir(), 'magent-hue-'));
+  });
+  afterEach(() => {
+    process.chdir(cwd0);
+    rmSync(h.workspace.dir, { recursive: true, force: true });
+  });
+
+  it('writes the hue into the seat file on a file-backed team and sends it to the daemon', async () => {
+    h.rosterHome = { ritual: h.workspace.dir };
+    await agentCommand(parseArgs(['June', '--hue', '212']));
+    expect(h.writeSeatFile).toHaveBeenCalledWith(
+      h.workspace.dir,
+      'June',
+      expect.objectContaining({ kind: 'agent', hue: 212 }),
+    );
+    expect(h.addMember).toHaveBeenCalledWith('ritual', expect.objectContaining({ hue: 212 }));
+  });
+
+  it('refuses a hue off the wheel before touching anything', async () => {
+    await expect(agentCommand(parseArgs(['June', '--hue', '360']))).rejects.toThrow(/0.*359/);
+    expect(h.writeSeatFile).not.toHaveBeenCalled();
+    expect(h.addMember).not.toHaveBeenCalled();
   });
 });

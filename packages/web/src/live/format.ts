@@ -6,7 +6,7 @@ import type {
   OfflineReason,
   Posture,
 } from '@musterd/protocol';
-import { normalizeModelId, resolvePosture, reviewGrade } from '@musterd/protocol';
+import { normalizeModelId, resolvePosture, reviewGrade } from '@musterd/protocol/wire';
 
 export type ActTone =
   | 'accent'
@@ -253,16 +253,29 @@ export function proseSegments(input: string): RichToken[][] {
   return (pieces.length > 1 ? pieces : [text]).map((p) => richTokens(p));
 }
 
-/** Where a message went, distilled to the three audiences a reader cares about (ADR 061 firehose). */
-export type ActScope = 'direct' | 'team' | 'all';
-export function recipientScope(to: Envelope['to']): ActScope {
+/**
+ * Where a message went, distilled to the audiences a reader cares about (ADR 061 firehose).
+ *
+ * `eligible` is the ADR 254 shape: 2-4 named seats, any one of whom discharges the act. It travels
+ * as `to: {kind:'team'}` with the names in `meta.eligible`, because routing still fans out to the
+ * team — so a reader of `to` alone sees a team broadcast, which is what the stream row showed until
+ * 2026-09-02 while the CLI printed the names and the office scene walked to each desk.
+ */
+export type ActScope = 'direct' | 'eligible' | 'team' | 'all';
+export function recipientScope(to: Envelope['to'], eligible?: string[] | null): ActScope {
   if (to.kind === 'member') return 'direct';
-  if (to.kind === 'team') return 'team';
+  if (to.kind === 'team') return eligible && eligible.length > 1 ? 'eligible' : 'team';
   return 'all';
 }
-/** The named recipient of a direct (1:1) message; null for team/broadcast. */
-export function recipientName(to: Envelope['to']): string | null {
-  return to.kind === 'member' ? to.name : null;
+/**
+ * Who the act names, as a list: one seat for a direct message, 2-4 for an eligible set, empty for a
+ * team or broadcast act. Plural so a caller cannot render one name and drop the rest — the failure
+ * this pair exists to end.
+ */
+export function recipientNames(to: Envelope['to'], eligible?: string[] | null): string[] {
+  if (to.kind === 'member') return [to.name];
+  if (to.kind === 'team' && eligible && eligible.length > 1) return eligible;
+  return [];
 }
 
 export function initial(name: string): string {
@@ -306,14 +319,19 @@ export function kindOf(name: string, idx: Map<string, MemberSummary>): Kind {
   return idx.get(name)?.kind === 'human' ? 'human' : 'agent';
 }
 
+/** The stored hue for a rostered name (ADR 374), or null — the colour functions then hash the name. */
+export function hueOf(name: string, idx: Map<string, MemberSummary>): number | null {
+  return idx.get(name)?.hue ?? null;
+}
+
 /**
  * A deterministic, per-member colour so every agent (and human) is individually distinguishable —
  * stable across sessions (hashed from the name, not assigned by index). Agents sit in a cool jewel
  * band, humans in a warm band, so kind still reads at a glance while individuals stay unique. The
  * golden-ratio hash spreads similar names apart. Returns an `hsl()` string usable in CSS and three.js.
  */
-export function memberColor(name: string, kind: Kind): string {
-  return `hsl(${memberHue(name, kind)}, 68%, 62%)`;
+export function memberColor(name: string, kind: Kind, hue?: number | null): string {
+  return `hsl(${memberHue(name, kind, hue)}, 68%, 62%)`;
 }
 
 /**
@@ -321,7 +339,13 @@ export function memberColor(name: string, kind: Kind): string {
  * the fill on the floor, the avatar they get in the roster and their name in the rail are all
  * unmistakably the same person.
  */
-export function memberHue(name: string, kind: Kind): number {
+export function memberHue(name: string, kind: Kind, hue?: number | null): number {
+  // ADR 374: the roster carries the member's hue — the seat file's on a file-backed team, the
+  // daemon's on a DB-only one — and it wins. Null/absent is a pre-374 daemon or a seat nobody has
+  // coloured yet; the hash below is what every surface painted before hues were stored, kept to
+  // the degree so that day looks identical (`legacyHue` in @musterd/protocol/hue is the same
+  // formula, pinned equal by test; it is not imported here to keep these bytes off /live's graph).
+  if (hue !== null && hue !== undefined) return hue;
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   const t = (h * 0.618033988749895) % 1;
@@ -396,8 +420,8 @@ function lightnessForLuminance(hue: number, target: number): number {
  * lighter `memberColor` and the room is untouched. The hue — which is what actually says *who* —
  * is identical, so the roster avatar and the person on the floor still read as one identity.
  */
-export function memberAvatar(name: string, kind: Kind): string {
-  const hue = memberHue(name, kind);
+export function memberAvatar(name: string, kind: Kind, stored?: number | null): string {
+  const hue = memberHue(name, kind, stored);
   return `hsl(${hue}, 68%, ${lightnessForLuminance(hue, 0.165)}%)`;
 }
 
@@ -406,13 +430,13 @@ export function memberAvatar(name: string, kind: Kind): string {
  * the darkest paper in the family (--lc-surface-3). Amber is the binding constraint: it is the
  * lightest hue in either band and drags the target well below where the cool hues would need it.
  */
-export function memberInk(name: string, kind: Kind): string {
-  const hue = memberHue(name, kind);
+export function memberInk(name: string, kind: Kind, stored?: number | null): string {
+  const hue = memberHue(name, kind, stored);
   return `hsl(${hue}, 68%, ${lightnessForLuminance(hue, 0.095)}%)`;
 }
 
 /* ─── roster posture + governance projection (ADR 138 / 073 / 070) ────────────────────────────────
- * Primary chip = server-projected `posture` (working|idle|away|offline). Account-status chips are
+ * Primary chip = server-projected `posture` (working|active|away|offline). Account-status chips are
  * exceptions only (disabled/banned/archived). Capability badges still show deviations from the
  * generalist default. Nothing is enforced here — this is the observable surface. */
 
@@ -421,8 +445,8 @@ export function postureMeta(posture: Posture): StatusMeta {
   switch (posture) {
     case 'working':
       return { label: 'working', tone: 'ok', quiet: false };
-    case 'idle':
-      return { label: 'idle', tone: 'ok', quiet: true };
+    case 'active':
+      return { label: 'active', tone: 'ok', quiet: true };
     case 'away':
       return { label: 'away', tone: 'pending', quiet: false };
     case 'offline':
@@ -434,10 +458,30 @@ export function postureMeta(posture: Posture): StatusMeta {
   }
 }
 
+/**
+ * The kept claim, aged (presence-honesty \u00a72.1/\u00a73): an `active` seat never erases its history —
+ * the last status renders as `last: \u201c<status>\u201d \u00b7 20m ago`, or `no status yet` when there is
+ * none. Null off the active posture: `working` wears its status as a live label instead.
+ */
+export function activeClaimLine(m: MemberSummary): string | null {
+  if (memberPosture(m) !== 'active') return null;
+  if (!m.state || m.last_status_at == null) return 'no status yet';
+  return `last: \u201c${m.state}\u201d \u00b7 ${coarseAge(Date.now() - m.last_status_at)} ago`;
+}
+
+/** Coarse age crumb (3d / 4h / 20m / now) — precision stays on hover, not in the chip. */
+export function coarseAge(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s >= 86_400) return `${Math.floor(s / 86_400)}d`;
+  if (s >= 3_600) return `${Math.floor(s / 3_600)}h`;
+  if (s >= 60) return `${Math.floor(s / 60)}m`;
+  return 'now';
+}
+
 /** Resolve the chip posture from a summary — prefer the server field; fall back for pre-138 daemons. */
 export function memberPosture(m: MemberSummary): Posture {
   if (m.posture) return m.posture;
-  const activity = m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle');
+  const activity = m.activity ?? (m.presence === 'offline' ? 'offline' : 'active');
   return resolvePosture({
     activity,
     availability: m.availability ?? null,
@@ -480,8 +524,14 @@ export function offlineReasonMeta(reason: OfflineReason): StatusMeta {
       return { label: 'reconnecting', tone: 'pending', quiet: false };
     case 'disconnected':
       return { label: 'disconnected', tone: 'muted', quiet: true };
-    case 'signed_off':
-      return { label: 'signed off', tone: 'muted', quiet: true };
+    case 'left_team':
+      return { label: 'left team', tone: 'muted', quiet: true };
+    case 'seat_released':
+      return { label: 'seat released', tone: 'muted', quiet: true };
+    case 'session_ended':
+      return { label: 'session ended', tone: 'muted', quiet: true };
+    case 'signed_off': // legacy from an old daemon — renders as the release it was
+      return { label: 'seat released', tone: 'muted', quiet: true };
     case 'off_hours':
       return { label: 'off hours', tone: 'pending', quiet: false };
     case 'unknown':
@@ -651,14 +701,14 @@ export function formatClock(d: Date): { time: string; meridiem: string; zone: st
 }
 
 /** Rank postures by how active the seat is, so the rail leads with who's actually running. Working first,
- * then idle (present, no task), then away (stepped out), then offline (gone) — the same order the chips
+ * then active (present, between claims), then away (stepped out), then offline (gone) — the same order the chips
  * read top to bottom. This subsumes the old online-before-offline split: offline simply ranks last. */
-const POSTURE_RANK: Record<Posture, number> = { working: 0, idle: 1, away: 2, offline: 3 };
+const POSTURE_RANK: Record<Posture, number> = { working: 0, active: 1, away: 2, offline: 3 };
 
 /**
- * Roster sort for the rail: by posture (working → idle → away → offline), then humans before agents, then
+ * Roster sort for the rail: by posture (working → active → away → offline), then humans before agents, then
  * by name. Sorting on the composed `posture` — the same value each row's chip shows — means the list order
- * matches what the eye reads down the chips: the working seats cluster at the top, idle below them.
+ * matches what the eye reads down the chips: the working seats cluster at the top, active below them.
  */
 export function rosterOrder(a: MemberSummary, b: MemberSummary): number {
   const pA = POSTURE_RANK[memberPosture(a)];

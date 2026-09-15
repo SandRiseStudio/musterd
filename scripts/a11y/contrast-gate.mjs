@@ -4,7 +4,7 @@
  * something, as a CI check rather than a habit.
  *
  * Usage:
- *   node scripts/a11y/contrast-gate.mjs [--dir <built client>] [--port <n>] [--routes a,b,c]
+ *   node scripts/a11y/contrast-gate.mjs [--dir <built client>] [--port <n>] [--routes a,b,c] [--static-only | --connected-only]
  *
  * Exit code is 1 if any route reports a live failure. Two phases, both self-contained — it needs
  * `pnpm build` first and nothing else:
@@ -55,19 +55,51 @@ const arg = (name, fallback) => {
 };
 
 const DIR = arg('dir', join(HERE, '../../packages/web/dist/client'));
-const PORT = Number(arg('port', '4331'));
+// Port 0 = "any free port", assigned by the OS at listen time. The gate serves a throwaway static
+// snapshot to a headless browser on loopback; nothing outside this process ever needs to predict
+// the number, so there is no reason to fight over a fixed one. An EXPLICIT --port keeps
+// first-come-first-served semantics: the caller asked for that port specifically, and silently
+// substituting another would make "--port 4331" mean "4331, probably".
+/* The two phases share nothing but the built dist, so CI runs them as two parallel leaves (ADR 106
+   amendment 2026-09-03): `--static-only` is phase 1 alone (it predates this and also serves "no CLI
+   build"), `--connected-only` is phase 2 alone. Both are a NARROWING of one run's coverage and say
+   so in their summary; only the two together — or a flagless run — are the whole gate. */
+const STATIC_ONLY = process.argv.includes('--static-only');
+const CONNECTED_ONLY = process.argv.includes('--connected-only');
+if (STATIC_ONLY && CONNECTED_ONLY) {
+  console.error('contrast-gate — --static-only and --connected-only together measure nothing.');
+  process.exit(1);
+}
+const EXPLICIT_PORT = arg('port', '');
+const PORT = EXPLICIT_PORT ? Number(EXPLICIT_PORT) : 0;
 
 /**
  * Every route the client prerenders. The preview routes carry the weight — they mount real
  * components against fixtures, so their sweep is representative. The rest are listed anyway: a
  * pre-connect state is still a state a stranger sees, and `/` is the marketing page nobody
  * re-measures.
+ *
+ * `/approval-preview` was retired 2026-08-19 (lane 01M092TRQ6): a synthetic page kept alive only
+ * for this list. Its ApprovalCard states are UNMEASURED until `/approvals` becomes a signin
+ * surface (ADR 222 limits those to board/live today) and the fixture team leaves a request
+ * pending — `/approvals` below reaches its sign-in screen only. See docs/a11y/contrast.md.
  */
 const ROUTES = arg('routes', '')
   ? arg('routes', '').split(',')
   : [
       '/',
-      '/approval-preview',
+      // The ADR 302 public routes — one representative per template (Prose.css carries the rest).
+      '/roadmap',
+      '/docs',
+      '/docs/getting-started',
+      // /docs/spec is NOT a redundant second prose page: it is the only route with tables, so the
+      // `.prose th/td` colours ship unmeasured without it. "One representative per template" holds
+      // only while every template's elements appear on the representative, and on 2026-08-24 the
+      // table rules broke that (miley). Add a route here whenever a rule paints something no
+      // listed route renders.
+      '/docs/spec',
+      '/blog',
+      '/blog/launch',
       '/office-preview',
       '/character-sheet',
       '/board',
@@ -135,15 +167,35 @@ await new Promise((resolve, reject) => {
   server.once('error', reject);
   server.listen(PORT, '127.0.0.1', resolve);
 }).catch((e) => {
-  // A raw EADDRINUSE stack reads like a broken gate. It is usually a previous run's server that
-  // outlived a Ctrl-C, and the fix is a different port, not a debugging session.
+  // A raw EADDRINUSE stack reads like a broken gate. With port 0 it cannot happen; it is reachable
+  // only when the caller pinned a port, so the message can say so plainly. The refusal used to be
+  // the DEFAULT path — every concurrent or Ctrl-C-orphaned run exited 1 in the same shape as a real
+  // contrast red, and seats debugged phantom failures. Measured 2026-08-17, twice in one session.
   console.error(
     e.code === 'EADDRINUSE'
-      ? `contrast-gate — port ${PORT} is busy (a previous run?). Retry with --port <n>.`
+      ? `contrast-gate — port ${PORT} is busy (a previous run?). Drop --port to auto-pick a free one.`
       : `contrast-gate — could not serve ${DIR}: ${e.message}`,
   );
   process.exit(1);
 });
+// The port actually bound — with `--port` it is that port, otherwise whatever the OS assigned.
+const BOUND = server.address().port;
+
+/**
+ * A currently-free port, for the one consumer that cannot take "port 0" itself: the fixture daemon
+ * is spawned by a shell script that passes an explicit `--port` through. Bind-then-release has a
+ * TOCTOU window, but the loser of that race fails loudly at daemon start — the exact failure this
+ * change demotes from "every concurrent run" to "a genuine collision".
+ */
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
 
 const sweep = (url) =>
   new Promise((resolve) => {
@@ -156,8 +208,14 @@ const sweep = (url) =>
     child.on('close', (code) => resolve({ code, out }));
   });
 
-console.log(`contrast-gate — ${ROUTES.length} routes over ${DIR}\n`);
+console.log(
+  CONNECTED_ONLY
+    ? `contrast-gate — connected phase only over ${DIR}\n`
+    : `contrast-gate — ${ROUTES.length} routes over ${DIR}\n`,
+);
 const failed = [];
+/** Routes that went UNMEASURED (sweep exit 2) — a subset of `failed`, reported apart from it. */
+const unmeasured = [];
 /**
  * @param floor minimum text nodes this route must have measured for the pass to mean anything.
  *   A connected route that measures ZERO is not clean, it is a page that never finished connecting
@@ -166,7 +224,9 @@ const failed = [];
  *   can afford. Prerendered routes legitimately measure zero (a page can be all gradient), so the
  *   floor is opt-in per route rather than global.
  */
+let measured = 0;
 const report = ({ code, out }, label, floor = 0) => {
+  measured += 1;
   const live = /live: (\d+) measured, (\d+) below AA/.exec(out);
   const skipped = /SKIPPED (\d+) —/.exec(out);
   const tail = skipped ? `, ${skipped[1]} unmeasurable` : '';
@@ -186,19 +246,145 @@ const report = ({ code, out }, label, floor = 0) => {
     console.log(`  ✓ ${label} — ${live?.[1] ?? '?'} measured${tail}${unsettled}`);
     return;
   }
+  /*
+   * EXIT 2 IS NOT A CONTRAST VERDICT. The sweep exits 2 when it could not measure at all — no
+   * browser, no debugging port, a canvas that never painted — and it says so on stderr in those
+   * words. This branch used to render that as `✗ <route> — ? below AA`: a contrast red whose count
+   * is a question mark, because there was no `live:` line to parse. The `!` marker the footer has
+   * always promised ("routes marked `!` did not measure at all") existed in the message and NOWHERE
+   * IN THE CODE.
+   *
+   * The cost is not cosmetic. On 2026-08-19 izzo hit exactly this, read `✗ / — ? below AA`, and
+   * concluded from the question mark that it could not be the Chrome-port harness flake — while the
+   * harness-failure line sat three seconds above it in the same log. A careful reader was sent to
+   * debug a contrast defect on a route that had never been measured. An instrument that dresses its
+   * own failure as a verdict about the subject is the one failure mode this gate's whole design is
+   * organised against.
+   *
+   * It still FAILS the run: a route that went unmeasured is not green, and the count is absent
+   * rather than zero. It just says which kind of wrong it is.
+   */
+  if (code === 2) {
+    failed.push(label);
+    unmeasured.push(label);
+    console.log(
+      `  ! ${label} — DID NOT MEASURE (harness failure, not a contrast result; see the` +
+        ' contrast-sweep line above). No verdict was taken on this route.',
+    );
+    return;
+  }
   failed.push(label);
   console.log(`  ✗ ${label} — ${live?.[2] ?? '?'} below AA${tail}${unsettled}`);
-  // The failing rows themselves, indented under their route — the ink/paper pair IS the fix.
-  for (const line of out.split('\n')) {
-    if (/^\s+\d+(\.\d+)? \(need /.test(line)) console.log(`   ${line.trim()}`);
+  /* The failing rows themselves, indented under their route — the ink/paper pair IS the fix.
+     ONLY the failure block: the sweep prints EXEMPT rows (WCAG 1.4.3 logotype carve-out) in the
+     identical `ratio (need N) ink on paper` shape further down, and the old grep-the-whole-output
+     hoovered those up too. An exempt row listed under a ✗ route reads as a third failure — it cost
+     izzo an hour of chasing `lc-office__mark-lockup` on 2026-08-13, a row that never set the exit
+     code. Failure rows start directly under the `live:` line; the block ends at the first line
+     that is not a row. */
+  const lines = out.split('\n');
+  const start = lines.findIndex((l) => /^live: \d+ measured/.test(l));
+  for (let i = start + 1; i > 0 && i < lines.length; i++) {
+    if (!/^\s+\d+(\.\d+)? \(need /.test(lines[i])) break;
+    console.log(`   ${lines[i].trim()}`);
   }
 };
 
-for (const route of ROUTES) {
-  report(await sweep(`http://127.0.0.1:${PORT}${route}`), route);
+/**
+ * Routes that mount the office scene get their lighting PINNED, and get measured at two of them.
+ *
+ * The scene's lighting follows the real PST sun (`pstNowHours` in office-scene/index.ts), so an
+ * unpinned sweep's verdict is a function of when it runs: at 272d4ad3 the /office-preview caption
+ * measured 5.86:1 in daylight and 2.85:1 under the night veil — same bytes, wall clock the only
+ * variable. That is exactly how main went green at 17:33–18:14 PDT and red at 21:12 PDT on the
+ * same commit (runs 31759967399 / 31760236892), and why re-running a green run after dusk flipped
+ * it. A verdict that changes with the clock cannot gate merges: a fix validated at noon is
+ * validated by nothing.
+ *
+ * `?light=HH` is the scene's own override (a dev aid it already ships). Day and night bracket the
+ * lighting range — dawn/dusk sit between them — so a green here means "readable at both ends",
+ * reproducible at any hour, on any machine. Full hour sweep measured 2026-08-14: caption 5.86 at
+ * 9–18, 5.1 at 6, 2.85 at 20–24. (lane 01KZZ7RYW6K9)
+ */
+const SCENE_LIGHTS = ['12', '21'];
+const sceneRoutes = new Set(['/office-preview']);
+/*
+ * `&still` pins the CHOREOGRAPHY the way `?light=` pins the clock, and for the same reason one layer
+ * up: a verdict that changes with what the room happened to be doing cannot gate merges.
+ *
+ * Pinning the sun fixed the lighting variable and left the motion one. The scene's script loops
+ * every cycle, bubbles are born on timers and walks reposition them, so the sweep — which freezes
+ * rAF, shoots one screenshot and pairs each row with the pixel beneath it — was racing the room.
+ * Six exclusion guards went into contrast-sweep.mjs one incident at a time (moved, born, unsettled,
+ * invisible, clipped, covered) and this route still flipped red about 1 run in 3, always an
+ * `lc-speech__text` row over whatever scene paint sat under a bubble at shutter time.
+ *
+ * `?still` plays the same script ONCE at mount with no loop behind it: the room fills, animates to
+ * its end state, and stops. The subject is kept and the motion is removed — deliberately NOT
+ * `?quiet`, which skips the choreography and would leave the speech rows unmeasured, and those rows
+ * are where the real failures on this route have been found.
+ *
+ * CONNECTED /live carries it too (ADR 285). That route was not obviously broken — it reports no
+ * MEASURED MID-FLIGHT and measures 228 rows — but it passes on luck rather than on stillness.
+ * Measured 2026-08-19: its longest quiet window across a 40s probe was 1029ms, because two 1Hz
+ * tickers never stop (the office Clock's digits, which re-mount per glyph, and the asks-strip
+ * countdown). It settles today only because the sweep's key set is class|ink|paper and therefore
+ * TEXT-BLIND, and because its two geometry snapshots 250ms apart usually fall between ticks. A
+ * verdict that depends on which 250ms the sampler chose is the same latent flake /office-preview
+ * had, one layer quieter — so it gets the same treatment before it starts costing merges.
+ */
+const SCENE_STILL = '&still';
+/*
+ * `&reduced` — SWEEP THE ROOM A REDUCED-MOTION VIEWER ACTUALLY SEES.
+ *
+ * The sweep already emulates `prefers-reduced-motion: reduce` before navigating
+ * (contrast-sweep.mjs, `Emulation.setEmulatedMedia`), so every route here is measured with the
+ * media query ON. But /office-preview mounts the scene with `reduced` read from `?reduced` and
+ * NOT from the media query — deliberately, so a designer who has Reduce Motion set in their OS
+ * still gets an animated design tool (#951, and the comment at office-preview.tsx `?reduced`).
+ *
+ * The two consequences do not cancel. Without this flag the gate measures a HYBRID room that no
+ * user is ever served: CSS keyframes disabled by the emulation, scene motion running anyway
+ * because the route's own flag is false. The real reduced room — rAF never started, walkers
+ * snapped to their desks, ambient life and the pet and the door pulse stood down, bubbles whole
+ * with no typewriter — was drawable from #951 onward and swept by nothing.
+ *
+ * Measured 2026-09-14 on d92bca0a, all four combinations, 49 measured / 0 below AA each, same two
+ * excluded rows (lc-gl-label__service, lc-speech__to) and same two translucent (lc-ov__count-of):
+ * the reduced room is contrast-IDENTICAL to the animated one at rest. That is the result worth
+ * pinning rather than a reason to skip it — the rows agree today, and this is what notices when a
+ * reduced-only branch stops agreeing.
+ *
+ * Positive control, so a later reader does not have to trust that the flag does anything: with
+ * `&still` alone the page logs 522 requestAnimationFrame callbacks in 9s, with `&still&reduced`
+ * it logs 7. The flag reaches the scene; the identical row counts are a finding, not a no-op.
+ *
+ * Both lights, not one. Reduced motion changes the motion and `?light=HH` pins the paint, so a
+ * reduced-only regression at night needs both dimensions to be visible — and this file's whole
+ * argument against unpinned verdicts (see SCENE_LIGHTS) is that "unlikely to differ" is not a
+ * measurement.
+ */
+const SCENE_MOTION = ['', '&reduced'];
+
+for (const route of CONNECTED_ONLY ? [] : ROUTES) {
+  if (sceneRoutes.has(route)) {
+    for (const light of SCENE_LIGHTS) {
+      for (const motion of SCENE_MOTION) {
+        report(
+          await sweep(`http://127.0.0.1:${BOUND}${route}?light=${light}${SCENE_STILL}${motion}`),
+          `${route} (light=${light}${motion ? ', reduced' : ''})`,
+        );
+      }
+    }
+  } else {
+    report(await sweep(`http://127.0.0.1:${BOUND}${route}`), route);
+  }
 }
 
 server.close();
+if (CONNECTED_ONLY) {
+  console.log('  ! --connected-only: the prerendered routes went unmeasured in this run');
+}
 
 /* ── phase 2: the CONNECTED board ──────────────────────────────────────────────────────────────
  *
@@ -209,10 +395,27 @@ server.close();
  *
  * `--static-only` skips it (no CLI build, or you only want the fast pass). It is a narrowing of
  * coverage, so it says so rather than passing quietly. */
-if (!process.argv.includes('--static-only')) {
+if (!STATIC_ONLY) {
+  // The fixture script is already isolation-capable — A11Y_FIXTURE_{ROOT,PORT,TEAM} exist exactly
+  // so two stacks cannot collide — but this gate never used them, so two concurrent runs raced to
+  // the same daemon port, DB, and team ("paper" already exists), and the loser exited 1 in the
+  // same shape as a contrast red. Same defect as the static phase's fixed port, one layer down.
+  // Derive per-run values unless the caller pinned their own; the same env goes to `up` and
+  // `down`, so teardown tears down THIS run's stack and nobody else's.
+  const fixtureEnv = {
+    ...process.env,
+    A11Y_FIXTURE_ROOT:
+      process.env['A11Y_FIXTURE_ROOT'] ??
+      join(process.env['TMPDIR'] ?? '/tmp', `musterd-a11y-${process.pid}`),
+    A11Y_FIXTURE_PORT: process.env['A11Y_FIXTURE_PORT'] ?? String(await freePort()),
+    A11Y_FIXTURE_TEAM: process.env['A11Y_FIXTURE_TEAM'] ?? `paper-${process.pid}`,
+  };
   const sh = (args) =>
     new Promise((resolve) => {
-      const c = spawn('bash', [join(HERE, 'fixture-team.sh'), ...args], { stdio: 'pipe' });
+      const c = spawn('bash', [join(HERE, 'fixture-team.sh'), ...args], {
+        stdio: 'pipe',
+        env: fixtureEnv,
+      });
       let out = '';
       c.stdout.on('data', (d) => (out += d));
       c.stderr.on('data', (d) => (out += d));
@@ -242,11 +445,48 @@ if (!process.argv.includes('--static-only')) {
   const base = /(http:\/\/127\.0\.0\.1:\d+)\/board/.exec(up.out)?.[1];
   const team = /team=([\w-]+)/.exec(up.out)?.[1] ?? 'paper';
   try {
-    for (const route of ['/board', '/live']) {
-      // 12 is comfortably under what a connected page renders (25 apiece today) and comfortably
-      // over the 1 a sign-in screen renders, so it separates "connected" from "never got there".
-      report(await sweep(`${base}${route}?team=${team}`), `${route} (connected)`, 12);
+    // 12 is comfortably under what a connected page renders (25 apiece today) and comfortably
+    // over the 1 a sign-in screen renders, so it separates "connected" from "never got there".
+    report(await sweep(`${base}/board?team=${team}`), '/board (connected)', 12);
+    // Connected /live mounts the office scene, so its lighting is pinned like the preview's —
+    // same clock-dependence, same two-ended bracket. See SCENE_LIGHTS above.
+    for (const light of SCENE_LIGHTS) {
+      report(
+        await sweep(`${base}/live?team=${team}&light=${light}${SCENE_STILL}`),
+        `/live (connected, light=${light})`,
+        12,
+      );
     }
+    /* The asks SHEET, open (`?asks-open`). It is `visibility: hidden; opacity: 0` while closed, so
+       the sweep's own visibility filter skipped every card in it on every run this gate has ever
+       made — the answer buttons, the deferred note, and the lapsed note the fixture now seeds. The
+       rail above it was measured all along, which is exactly why the gap was easy to miss: /live
+       reported ~215 rows and looked thorough.
+
+       One lighting value, not the bracket: the sheet floats OVER the canvas on its own paper, so
+       its inks do not vary with the room's light the way the rail's do — a second pass would
+       measure the same pairs twice and cost ~15s of fixture time for nothing. */
+    report(
+      await sweep(`${base}/live?team=${team}&light=${SCENE_LIGHTS[0]}${SCENE_STILL}&asks-open`),
+      '/live (connected, asks sheet open)',
+      12,
+    );
+    /* The nameplates, OPEN (`?plates-open`). Same gap as the asks sheet one line up, and wider: the
+       harness segment carries its own ink per harness (--lc-hz-{codex,cursor,grok,opencode}-ink) and
+       lives inside a `0fr` track whose segments are `opacity: 0` until a viewer clicks the plate.
+       The sweep skips clipped and zero-opacity rows, so those four inks had shipped since ADR 352
+       with this gate never once measuring them — and /broadcast, whose plates ARE permanently open,
+       filters the detail down to the model crumb, so no route rendered the segment at all.
+
+       The fixture seats one seat per glyphed harness (fixture-team.sh SEATS), so all four inks paint
+       in one pass. One lighting value: the plate is opaque paper over the canvas, so its inks do not
+       track the room's light the way the canvas-adjacent rows do — the bracket would measure the
+       same pairs twice for ~15s of fixture time. */
+    report(
+      await sweep(`${base}/live?team=${team}&light=${SCENE_LIGHTS[0]}${SCENE_STILL}&plates-open`),
+      '/live (connected, nameplates open)',
+      12,
+    );
   } finally {
     await sh(['down']);
   }
@@ -257,6 +497,13 @@ if (!process.argv.includes('--static-only')) {
 if (failed.length) {
   console.log(
     `\ncontrast-gate FAILED on ${failed.length} route(s): ${failed.join(', ')}` +
+      (unmeasured.length
+        ? `\n\n  ${unmeasured.length} of those DID NOT MEASURE — ${unmeasured.join(', ')} — and are` +
+          ' marked `!` above. That is a HARNESS failure, not a contrast defect: nothing on those' +
+          ' routes was looked at, so there is no colour to fix there and reading a contrast bug into' +
+          ' them will cost you the afternoon. Fix the harness (or re-run) first; the ✗ routes below,' +
+          ' if any, are the real verdicts.'
+        : '') +
       '\nRoutes marked `!` did not measure at all — fix the harness there before reading anything' +
       ' into the rest.' +
       '\nEach row is `ratio (need N) ink on paper`. Almost always the fix is the -ink variant of the' +
@@ -266,4 +513,7 @@ if (failed.length) {
   );
   process.exit(1);
 }
-console.log(`\ncontrast-gate — ${ROUTES.length} routes, 0 below AA`);
+console.log(
+  `\ncontrast-gate — ${measured} sweep(s), 0 below AA` +
+    (STATIC_ONLY ? ' (prerendered phase only)' : CONNECTED_ONLY ? ' (connected phase only)' : ''),
+);

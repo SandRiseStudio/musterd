@@ -1,0 +1,114 @@
+# Recorded, not routed
+
+A correction can be durably recorded, dated, and correct — and still fail, because the surface a reader consults at the moment of action was never updated, and the existence of the record is exactly what lets everyone stop worrying about it.
+
+This is the quiet cousin of [correct by coincidence](correct-by-coincidence.md): there a surface confidently reports a proxy that has drifted from the truth; here the truth is written down somewhere, accurately — the failure is distribution, not accuracy. Distinguish it from [a check that cannot separate two causes](cannot-separate-two-causes.md), where nothing is stale and no surface competes: the check reads the right thing and two causes produce the same reading. The test is whether a *competing surface still states the old thing* — if there is no competing surface, only an absent one, the instance belongs on that page instead (2026-08-21: a candidate fifth instance was judged over there for exactly this reason). A third sibling, [the ledger and the forge](ledger-and-forge.md), covers the case where the competing surface is not stale but simply **holds a different kind of record** — it is right, and it is answering a narrower question than the reader asked. Four instances landed in one evening (2026-08-21), the fourth found by a different seat after the first finder declined to call three a pattern, which is why it is a page.
+
+## The shape
+
+Someone learns something the hard way and records it — a wiki entry, an ADR amendment, a research addendum. The record is right. But the reader who needs it next is not reading the record: they are reading whatever surface sits in front of them at the moment the knowledge fires — a registry `exercise` field, a status line, a CONTRIBUTING step, a skill's numbered procedure. That surface still says the old thing, and an instruction-bearing surface does not self-heal: a positive enumeration, a "do not run X", a "today" label all stay confidently wrong until someone edits them.
+
+The record makes it worse in one specific way: the writer reasonably feels done. "It's in the wiki" reads as closed, and nothing in the write path asks the one routing question that matters:
+
+- **Where does this fire?** What will the person who needs this correction be reading at the moment they would otherwise make the mistake? Put the correction *there* — or at minimum grep for the old instruction and strike it everywhere it still stands.
+- The reverse question when *writing* any instruction: **what corrects this if it goes stale?** Usually nothing does. A pointer to the governed source beats a restated copy (see "one fact has one home" in AGENTS.md — this page is that rule's failure catalogue).
+
+## Four instances in one evening (2026-08-21)
+
+1. **The registry told you to bounce the daemon; the wiki knew better.** izzo's [#952](https://github.com/SandRiseStudio/musterd/pull/952) wiki addition recorded why exercising the infra-touch gate must not run `musterd service restart` — while the registry's `exercise` field, the text a person reads *at exercise time*, still opened with exactly that command. Two seats (2026-08-05, 2026-08-21) independently had to out-think their own instructions. Fixed in [#958](https://github.com/SandRiseStudio/musterd/pull/958) by putting the correction in the field itself (falsify: read `exercise` for `adr-227-infra-touch-gate` in `docs/controls/registry.ts` — if it still opens with the restart command, #958 did not land).
+2. **A status line encoded a proxy and went stale on the page that names the defect.** [correct by coincidence](correct-by-coincidence.md) recorded its speechAddressee instance as "unmerged; miley may answer this". #956 merged; the line stood, one file from the entry describing exactly this failure. The dated amendment is [#961](https://github.com/SandRiseStudio/musterd/pull/961) — open, not merged, as of 2026-08-21 (falsify: `gh pr view 961`).
+3. **A "what's missing" note outlived its fix by six weeks.** Research finding 005 named the coordination gauges as undimensioned; [#207](https://github.com/SandRiseStudio/musterd/pull/207) dimensioned them the *same day*; three documents kept citing the closed gap as the leaderboard's blocker; the correction is [#963](https://github.com/SandRiseStudio/musterd/pull/963) — open, not merged, as of 2026-08-21 (falsify: `gh pr view 963`). Anyone planning against the corpus was planning around an obstacle that had not existed since July.
+4. **CONTRIBUTING.md still forbade `pnpm format` after ADR 284 made it safe** (2026-08-21; falsify: from clean `origin/main`, `pnpm format && git status --porcelain` — any output means the warning was still warranted; observed 0 files changed at `233dfff3`). The correction was recorded in three places — ADR 284, [shipping a PR](shipping-a-pr.md)'s struck claim, `docs/architecture/07-conventions.md` — but not in the document a new contributor reads at push time, which prescribed the raw `prettier --write <files>` workaround that ADR 284's own text names as *the only remaining way back in* to the defect. Timing is the tell: CONTRIBUTING.md landed in #885, twenty-eight minutes before [#890](https://github.com/SandRiseStudio/musterd/pull/890) removed the asymmetry, and the fixing PR updated the architecture doc but not the contributor doc. Fixed alongside this page.
+
+The shape spares nobody: this page's first draft cited #961 and #963 as completed fixes while both PRs were still open — a PR number standing in for a landed correction — and it was wanderer's acceptance of the page, not its author, that caught it (2026-08-21).
+
+Instances 1–3 were found by dolly and izzo; instance 4 was hunted and verified by ryder, a seat with no stake in the first three, after dolly explicitly declined to write this page on the strength of their own findings alone. The independence was the point: three instances with two finders being the same seat is a lens as easily as a pattern.
+
+## The same sweep found more (2026-08-21, each verified from source)
+
+Confirming the pattern is not a one-evening artifact — these predate tonight by weeks:
+
+- **The lane-close procedure still prescribes what ADR 235 retired** — **fixed** in [#983](https://github.com/SandRiseStudio/musterd/pull/983) (`c8f8a234`, 2026-08-21), `GUIDANCE_CONTENT_VERSION` 14→15 (falsify: read step 3 of "Closing a lane" in `packages/protocol/src/guidance.ts` — if it does not distinguish the armed-backstop case, the fix regressed). ADR 235's decision table says *do not self-close on silence* when the acceptance backstop is armed — and it is armed on this team. The correction reached the `lane_submit` tool description and the submit response, but the musterd skill's numbered close procedure, rendered from `guidance.ts` into the SKILL.md agents load at exactly that moment, still says "On silence … `lane_resolve` yourself". Mitigation, worth naming: the submit *response* carries the corrected advice, so the route exists — it just loses to the procedure text for any reader who trusts the skill over the reply.
+- **~~Four~~ six surfaces route roadmap edits to a file deleted a month ago** — **fixed** in [#990](https://github.com/SandRiseStudio/musterd/pull/990) (falsify: `grep -rn "packages/web/src/content/roadmap.data" AGENTS.md ROADMAP.md scripts/steward/CHARTER.md scripts/gen-roadmap.ts` — any hit means the sweep missed one. ADR 041 and the dated plans under `docs/superpowers/` still say the old path on purpose: there it is history, not an instruction). #487 (2026-07-29) moved the roadmap source to `content/roadmap.data.ts`; the controls registry, `docs/architecture/08-web.md`, and `packages/web/README.md` record the new path, while `AGENTS.md`, `ROADMAP.md`'s own header *and* generated marker line, and ADR 041's frozen Decision still named the old one. **The count was four because the finder's sweep only grepped documentation.** `scripts/steward/CHARTER.md` names it twice more, and that pair is the one with teeth: the steward is a scheduled agent fed that charter verbatim, and its hard-rule allowlist (*"Only edit: …"*) named the deleted file, so the charter simultaneously ordered the roadmap task and forbade the file it needs. Everywhere else the bite is silent: recreating the file at the dead path is an edit nothing imports and no gate reads.
+
+Further leads surfaced by the same sweep but **not** verified past the finder's report — take one rather than trusting this list: the dependabot-alerts wiki page's triage model predates #937 turning the dependency graph back on; the hosted-broadcast guide predates the ADR 293 supervisor entirely; `docs/architecture/06-testing.md` justifies a still-correct instruction with a defect #754 fixed; a block comment in `archaeology.test.ts` prescribes to the next timeout-victim the exact diagnosis the team paid a week to falsify (see [running the gates](running-the-gates.md)); [web performance](web-performance.md) still describes one JS budget at +10% after ADR 183 split it and re-baselined at +15%.
+
+## The recurrence: `guidance.ts` again, four surfaces at once (2026-09-06)
+
+The first bullet above fixed one stale procedure in `packages/protocol/src/guidance.ts`. Three days after a surface-survey arc landed six command/tool fixes, the same file was stale in **four** new places — and the routing failure was textbook: [the surface map](command-and-tool-surface-map.md) had every one of them struck through as DONE 2026-09-03, which is exactly what let everyone stop worrying (lane `01M1VD1CQV`, fixed at `GUIDANCE_CONTENT_VERSION` 21→22).
+
+What the record said was fixed, and what the loaded skill still taught:
+
+| Skill still said | Surface had become |
+| --- | --- |
+| "`musterd done` closes your live lane" | attested submit **or** an unconfirmed self-close — two records |
+| only `inbox --wait` | `--wait` (blocks) and `--waiting` (returns), one letter apart |
+| `musterd availability`, CLI-only | `team_availability` shipped |
+| `team_wake_context` in the name list | still no prose in the body, since v17 |
+
+**Why no gate caught it, and why that is deliberate.** `pnpm guidance:check` asserts every name the skill *claims* still resolves — one-directional on purpose, since the skill is a playbook, not an index. So a **rename** breaks the build and a **semantic change under a stable name** does not: `done` kept its name and grew a second meaning, and nothing failed (falsify: `scripts/check-guidance.ts` imports only `CATALOG` and `TOOL_NAMES` and compares names to names). The v22 fix added a test per *distinction* rather than a reverse-index gate, so the next semantic change breaks a named test.
+
+**The sweep, done properly this time** (the lesson of the roadmap instance above): every instruction-bearing surface an agent loads was grepped, not just `docs/`. `primer.ts`, `onboard/doctor.ts`, the MCP tool descriptions and the provisioned hook strings were all already correct — the Notification hooks run `inbox --waiting`, and `lanes.ts` carries the ADR 235 advice. `guidance.ts` was the only stale surface, which is worth recording as a *negative* result: the routing failure was narrow, and knowing that took one grep.
+
+Distribution is the second half and is not this page's: see [guidance distribution](guidance-distribution.md). A version bump moves nothing until each worktree runs `musterd init --refresh-guidance` — this seat was on v18 against a v21 build when the audit started.
+
+## When the stale surface is the REPAIR instruction (2026-09-06, same day, different layer)
+
+Found an hour after the entry above, in the doctor rather than the skill — worth its own section because the failure mode is one step worse. Here the stale surface is the thing a human reads *at repair time*, so following it faithfully does not just teach the wrong model, it **fails to fix the problem and says nothing about that** (lane `01M1VEMBH7`).
+
+`musterd init --check` said a baked `MUSTERD_SURFACE=cursor` "outranks .musterd/binding.json and no observation can correct, so the roster, presence and audit report whatever it says", and prescribed re-provisioning or "drop the line from Cursor's own entry file by hand". Every clause was pre-[ADR 286](../decisions/286-launcher-surface-convergence.md) (accepted 2026-08-19); the doctor's own comment is dated 2026-08-03 and was never revisited.
+
+What the code actually does (falsify: `packages/mcp/src/config.ts`, `resolveLaunchSurface`): the marker is **retired**, and its mere presence *throws* — the adapter refuses to attach Presence at all. So nothing attests the wrong surface any more, and the failure is loud rather than silent.
+
+**All three prescriptions were wrong, each falsifiable in one grep:**
+
+| Prescribed | Why it cannot work |
+| --- | --- |
+| `musterd wire` | `commands/wire.ts` passes `legacyRepair: false` — "Never legacyRepair from here" |
+| `musterd init` / re-provision | `onboard/init.ts` passes `legacyRepair: false` too |
+| delete the line by hand | leaves **no** marker, so `resolveLaunchSurface` throws at its no-marker branch instead — one refusal becomes another |
+
+The only repair is `musterd harness configure` (`commands/harness.ts`, "the ONE caller allowed to" pass `legacyRepair: true`), which drives the `repair-launch-marker` mutation that swaps the key and preserves the rest of the entry. The doctor never named it.
+
+**The generalisable bit — a deletion prescription cannot repair a replacement defect.** The doctor shares one `repairWith` string across every baked key, and for `MUSTERD_MODEL`, `MUSTERD_AUTOJOIN`, `MUSTERD_AGENT_KEY` and friends that is right: the fix genuinely is *remove the line and let the ladder fall through*. `MUSTERD_SURFACE` is the one key whose fix is *substitute a different key*, and it inherited a prescription built for the others. Checked while here, and **not** a defect: the `MUSTERD_AUTOJOIN` line beside it is still accurate — `config.ts` reads that env ahead of the binding, and deletion really is its repair.
+
+Second-order, fixed in the same lane: the surface line also fed `anyWireRepairable`, so `--fix` would run `wire`, wire would report success on everything it *does* own, and the marker would still be there.
+
+## The sharpest instance: the fix for stale instructions shipped a stale instruction (2026-09-06, one hour later)
+
+The section above landed in #1363 at ~13:52Z. At ~13:58Z I ran its own prescription — `musterd harness configure` — on the workspace whose broken state produced the finding. It repaired nothing. The Cursor entry came back byte-identical and both drift lines survived (lane `01M1VFV8EK`, fixed in the follow-up).
+
+**Why.** Reconciliation acts on fragments of *desired* harnesses. Cursor was not in that workspace's desired set, so it owned no fragment to reconcile; being pre-ADR-281, it was in no ownership ledger either, so there was nothing to release. The entry was an **orphan** — owned by no harness and no ledger — and `harness configure` correctly ignored it. `repair-launch-marker` only ever fires for a selected harness.
+
+So the corrected message was right for one of two states and wrong for the other, and worse than wrong in the second: *"deleting the line by hand does NOT fix it"* is true when the marker must be **replaced**, and it argues the reader out of the only thing that works when there is no marker to get right at all. For an orphan the repair is removing the whole entry.
+
+| Harness in the desired set? | `harness configure` | Correct repair |
+| --- | --- | --- |
+| yes | repairs the marker | `musterd harness configure` (what #1363 fixed) |
+| no | **no-op** | remove the entry entirely — or adopt the harness, which converts it |
+
+**The generalisable lesson, and the reason this is on this page rather than in a commit message.** Every earlier instance here is *someone forgot to update a second surface*. This one is different and worse: the surface was updated, deliberately, by a lane whose entire purpose was updating stale repair instructions — and it still shipped one, because I enumerated the state I was **reading** (a selected harness, from the code path) and not the state I was **standing in** (an unselected one, in the workspace that surfaced the bug). The check "did I fix the message?" passed. The check that would have caught it is: **a prescription is a function of state, so fix it by enumerating every state it is handed out in.** The instance that surfaces a bad prescription is rarely the only state that prescription reaches.
+
+A second defect fell out of writing the fix, worth its own line because it is the same error one level down: my first orphan predicate was `!harnessIsDesired(id)`, which fires when the desired set is merely *unreadable*. That would tell a reader with a corrupt manifest that a harness is unwanted and send them to delete the entry wiring them up. Absence of the record is not absence of the desire; the predicate now requires positive knowledge (`desiredHarnesses.length > 0 && …`) and a test pins it.
+
+## The third state, and the two-command loop it produced (2026-09-14; falsify: in a throwaway worktree provisioned for Cursor, hand-write a `.cursor/mcp.json` musterd entry baking `MUSTERD_AUTOJOIN=1`, then run `musterd harness configure --select cursor --yes` and `musterd wire` — an md5 that changes means this is wrong)
+
+The table above has two rows. miley measured a third state on `agents-miley` the same afternoon #1368 landed, and it is the one that hurts: **Cursor was in the desired set**, so by the corrected rule `harness configure` repairs it. It did not. Both Cursor fragments reported `✗ drifted — evidence retained`; `harness configure --select cursor --yes` printed `cursor ✗ conflict` twice and wrote nothing; the doctor's text then flipped to `musterd wire`, which printed the same two conflicts, wrote nothing, and pointed her back at `harness configure`. **The two prescriptions pointed at each other and neither wrote.**
+
+**Why.** Desire is necessary for a reconciler to act and nowhere near sufficient. `classifyFragment` (`onboard/reconcile/engine.ts`, the ADR 282 §6 matrix) plans `none` for `unmanaged-conflict` — present, in no ownership ledger, not musterd's to overwrite — and for `owned-drifted` — ledger-owned but hand-edited since, evidence retained, never overwritten. Both reconcilers ride that same matrix, so the axis is not desired-vs-not at all: it is **MANAGED vs not**.
+
+| Fragment state | `harness configure` | `wire` | `init` | Correct repair |
+| --- | --- | --- | --- | --- |
+| absent | creates | creates | creates | run either |
+| owned-exact, representation moved | rewrites | rewrites | rewrites | run either |
+| `legacy-launch-marker` | **repairs** (`legacyRepair: true`) | no-op | no-op | `musterd harness configure` |
+| `unmanaged-conflict` / `owned-drifted` | **no-op** | **no-op** | **no-op** | delete the WHOLE entry, then `musterd wire` |
+| harness not desired (orphan) | **no-op** | **no-op** | **no-op** | remove the entry, or adopt the harness |
+
+The repair in row four is the non-obvious one, and it falls straight out of row one: **absent is the only observation the engine plans `create` for**, so deleting the entry is what hands the fragment back to the reconcilers. Verified end to end, 2026-09-14: with the baked key in place, `configure` and `wire` each printed `✗ conflict` and left the file byte-identical (same md5) and `init` did not rewrite it either; deleting musterd's whole entry and re-running `wire` gave `(create) ✓ applied`, then `mcp.musterd ✓ in place`. Deleting only the offending key — what miley did, and what cleared her doctor to 0 ✗ — clears the line but leaves the entry unmanaged, so the next drift lands in the same dead end.
+
+**The generalisable lesson, which is a level up from the one above.** The previous section's rule was *enumerate every state a prescription is handed out in*. I did that, twice, and still missed a state — because I was enumerating from a **model** of the reconciler rather than asking it. The prescription is a function of the plan, and the plan is a value the engine already computes and `musterd harness status` already prints; the doctor was re-deriving it from one input (the desired set) and getting a different answer. `commands/wire.ts` had carried the note that this predicate *"is retained for the doctor's prescriptions until it is rebuilt on `inspectHarnesses`"* since ADR 281 — the routing failure here is that the note sat beside the predicate rather than in the doctor that consumed it. **When a surface tells a reader what a command will do, read it from the command's own planner; a second implementation of the same decision is a stale surface with a compile step.** Fixed by having the doctor call `inspectHarnesses` and branch on what it plans (lane `01M2GBDHG3`); an unreadable plan degrades to the old wording rather than asserting a dead end, the same guard the orphan predicate needed.
+
+## The check that finds these
+
+After landing any correction, grep for the old instruction's key phrase before calling it done — **across the whole repo, not just `docs/`**. The roadmap instance above was reported as four surfaces and was six: the two the finder missed were in `scripts/`, and they were the two an automated reader consumes. A sweep scoped to the documentation tree finds the surfaces humans read and misses the ones agents are fed — `grep -rn "pnpm format"` on 2026-08-19 would have surfaced CONTRIBUTING.md in the same minute #890 merged. The write path that avoids the problem entirely: state a fact once in its governed home and make every instruction-bearing surface *point* rather than restate. Every instance above is a restatement that outlived its source.

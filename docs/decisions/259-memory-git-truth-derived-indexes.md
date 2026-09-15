@@ -102,6 +102,22 @@ below — if grep demonstrably fails, evaluate; not before.
     arms is pre-registered before any data exists:
     `docs/design/2026-08-13-measure-4-retrieval-sufficiency.md`. No index built, and the reading is
     _unmeasured_, not zero — the corpus is one day old; first honest read 2026-09-12.
+  - 2026-08-19 (#883, `e48854d1`): the instrument above shipped without the third clause of its own
+    operational definition. It read the working tree and took no ref, so a page committed
+    mid-session could score a HIT for a fact the seat had no way to find — and that error is
+    one-directional: it can only push measure (4) **up**, toward building the index this bullet says
+    may never be built. gptbot declined the lane for it on 2026-08-14; the decline stood five days.
+    `wiki:probe --at <sha>` / `--since <when>` now load the corpus from git at the session-start
+    commit, blobs included, so a section appended mid-session is excluded on the same grounds as a
+    whole new page. A requested bound that cannot be resolved is refused rather than downgraded to
+    the working tree, and a ref carrying no pages says it measured nothing instead of reporting a
+    zero. Unbounded runs still work and now label their counts an upper bound.
+    - Readings taken before this date were unbounded. The ledger's single HIT (dolly, 2026-08-14)
+      was re-probed against `272d4ad3` — the corpus as that session opened — and stands at 94% on
+      `shipping-a-pr.md`, which landed 2026-08-12 in #787.
+    - Still far below the pre-registered trigger (≥10 HITs / ≥3 seats / ≥40 pages): **1 HIT, 1 seat,
+      29 pages.** Unmeasured, not zero, and no index built. First honest read remains 2026-09-12,
+      scheduled.
 - Deliberately not done: no new musterd server surface; no hard enforcement on seat memory (blob
   caps stand); no retrieval-vendor commitment; no generalization beyond this repo.
 

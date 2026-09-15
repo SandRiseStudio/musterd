@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { insertFootprintTick } from '../store/footprint.js';
+import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
 /**
  * Through-HTTP coverage for the seat-footprint surfaces: GET /teams/:slug/footprint
@@ -13,20 +14,33 @@ import { insertFootprintTick } from '../store/footprint.js';
 let server: RunningServer;
 let base: string;
 let agentKey: string;
+let adaAuth: AgentHttpAuth;
 
-async function get(path: string, auth?: string) {
+async function get(path: string, auth?: string | AgentHttpAuth) {
   const res = await fetch(base + path, {
-    headers: auth ? { authorization: `Bearer ${auth}`, 'x-musterd-seat': 'Ada' } : {},
+    headers: auth
+      ? {
+          authorization: `Bearer ${typeof auth === 'string' ? auth : auth.key}`,
+          ...(typeof auth === 'object' ? { 'x-musterd-session-lease': auth.sessionLease } : {}),
+          'x-musterd-seat': 'Ada',
+        }
+      : {},
   });
   const text = await res.text();
   return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
 }
-async function post(path: string, body: unknown, auth?: string) {
+async function post(path: string, body: unknown, auth?: string | AgentHttpAuth) {
   const res = await fetch(base + path, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...(auth ? { authorization: `Bearer ${auth}`, 'x-musterd-seat': 'Ada' } : {}),
+      ...(auth
+        ? {
+            authorization: `Bearer ${typeof auth === 'string' ? auth : auth.key}`,
+            ...(typeof auth === 'object' ? { 'x-musterd-session-lease': auth.sessionLease } : {}),
+            'x-musterd-seat': 'Ada',
+          }
+        : {}),
     },
     body: JSON.stringify(body),
   });
@@ -46,6 +60,7 @@ beforeEach(async () => {
   const json = (await res.json()) as any;
   agentKey = json.agent_key;
   await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, json.human_credential);
+  adaAuth = await claimAgentHttp(base, 'dawn', agentKey, json.human_credential, 'Ada');
 });
 
 afterEach(async () => {
@@ -54,7 +69,7 @@ afterEach(async () => {
 
 describe('GET /teams/:slug/footprint', () => {
   it('is 404 while no tick exists — clients read any non-200 as "no data"', async () => {
-    const res = await get('/teams/dawn/footprint', agentKey);
+    const res = await get('/teams/dawn/footprint', adaAuth);
     expect(res.status).toBe(404);
   });
 
@@ -64,7 +79,7 @@ describe('GET /teams/:slug/footprint', () => {
       [{ ts: 7000, classification: 'orphaned', seat: null, procs: 5, rss_kb: 50_000, pids: '[3]' }],
       { ts: 7000, swap_used_mb: 1500, swap_total_mb: 2048, free_mem_mb: 140 },
     );
-    const res = await get('/teams/dawn/footprint', agentKey);
+    const res = await get('/teams/dawn/footprint', adaAuth);
     expect(res.status).toBe(200);
     expect(res.json.ts).toBe(7000);
     expect(res.json.machine.swap_used_mb).toBe(1500);
@@ -81,7 +96,7 @@ describe('POST /teams/:slug/footprint/reap', () => {
   it('re-verifies against the live process table — nonexistent pids are refused, not killed', async () => {
     // Pid 1 is launchd and 2^22 is beyond macOS's pid range; neither matches the
     // sidecar allowlist even if present, so this cannot kill anything real.
-    const res = await post('/teams/dawn/footprint/reap', { pids: [4194304] }, agentKey);
+    const res = await post('/teams/dawn/footprint/reap', { pids: [4194304] }, adaAuth);
     expect(res.status).toBe(200);
     expect(res.json.killed).toEqual([]);
     // darwin refuses it as not_found; a platform whose process table cannot be read (Linux CI)
@@ -92,7 +107,7 @@ describe('POST /teams/:slug/footprint/reap', () => {
   });
 
   it('rejects a malformed body', async () => {
-    const res = await post('/teams/dawn/footprint/reap', { pids: 'all' }, agentKey);
+    const res = await post('/teams/dawn/footprint/reap', { pids: 'all' }, adaAuth);
     expect(res.status).toBe(400);
   });
 });

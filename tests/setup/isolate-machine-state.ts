@@ -20,10 +20,15 @@ import { afterEach, beforeEach } from 'vitest';
 const root = mkdtempSync(join(tmpdir(), 'musterd-vitest-machine-'));
 const CONFIG = join(root, 'config.json');
 const HOST_REGISTRY = join(root, 'host-registry.json');
+// ADR 328 §2: node.json holds the machine's `msnode_` credentials. Pinned here for the same reason
+// as the two above, and with more at stake — an unpinned suite would write real secrets into the
+// operator's ~/.musterd, and a test that enrolls would overwrite a live enrollment.
+const NODE_STATE = join(root, 'node.json');
 
 function pin(): void {
   process.env['MUSTERD_CONFIG'] = CONFIG;
   process.env['MUSTERD_HOST_REGISTRY'] = HOST_REGISTRY;
+  process.env['MUSTERD_NODE_STATE'] = NODE_STATE;
 }
 
 pin();

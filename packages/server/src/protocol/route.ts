@@ -21,12 +21,13 @@ import { recordLaneClose } from '../store/laneClose.js';
 import { deriveHandoffLane, getLane, type HandoffLaneBasis, updateLane } from '../store/lanes.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
-import { currentAttestedModel } from '../store/presence.js';
+import { currentAttestation } from '../store/presence.js';
 import { adminHumanPresent } from '../store/reachability.js';
-import { pickHumanReviewer } from '../store/review.js';
+import { pickHumanReviewer, supersededAcceptanceAsks } from '../store/review.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
-import { getPolicy } from '../store/teams.js';
+import { getPolicy, getTeamBySlug } from '../store/teams.js';
+import { joinerEnrollment } from '../sync/claim.js';
 import {
   recordActModel,
   recordDeliveryOutcome,
@@ -43,6 +44,12 @@ export interface RouteResult {
    *  warning that the sender holds several and the daemon would not guess. Absent for every other
    *  act, and for a handoff whose sender holds no live lane (the legal lane-less case). */
   handoff_lane?: { lane: string; branch: string | null; source: 'derived' } | { warning: string };
+  /** ADR 202 — the lane this accept/decline MOVED, when it answered a `lane_review` ask: `done` on
+   *  an accept, `active` on a decline. Absent when the act moved nothing (a plain answer, an
+   *  escalation to the human stage, a superseded ask). Reported on the ack so the sender learns
+   *  they gave a verdict at the moment they gave it (lane 01M2GQFJXG, 2026-09-14: a reviewer sent
+   *  `accept` as "taking this review" and found out afterwards that the lane was already closed). */
+  lane_verdict?: { lane: string; state: 'done' | 'active' };
 }
 
 /**
@@ -84,6 +91,7 @@ function routeEnvelopeInner(
   // dogfood team named no lane). Derived HERE, on the one validate→persist→deliver path, so WS and
   // HTTP and every client above them get it from one implementation. Explicit meta always wins.
   let handoffLane: RouteResult['handoff_lane'];
+  let laneVerdict: RouteResult['lane_verdict'];
   /** ADR 243: which evidence answered — audited, never on the wire. */
   let handoffBasis: HandoffLaneBasis | undefined;
   if (env.act === 'handoff' && !(env.meta as { lane_handoff?: unknown } | null)?.lane_handoff) {
@@ -131,6 +139,12 @@ function routeEnvelopeInner(
 
   if (env.from !== sender.name || env.team !== team.slug) {
     throw new MusterdError('forbidden', 'envelope from/team must match the authenticated member');
+  }
+  // ADR 327: an insight's finding text is capped at 2048 bytes — server-enforced here on the one
+  // validate→persist→deliver path, like seat memory's blob cap (ADR 093), because actMetaRules
+  // sees only {act, thread, meta}, never the body.
+  if (env.act === 'insight' && Buffer.byteLength(env.body, 'utf8') > 2048) {
+    throw new MusterdError('validation', 'act "insight" body is limited to 2048 bytes');
   }
   // Observer seats (ADR 063) are read-only — they watch the firehose but cannot speak.
   if (sender.observer) {
@@ -240,13 +254,32 @@ function routeEnvelopeInner(
   // is stamped when present. Unattested → no stamp at all (reads as `unknown` downstream,
   // warn-never-block). Keyed on the *sending* occupancy (senderPresenceId) so a fanned-out member's
   // two sessions on different models don't cross-attribute (ADR 042 human fan-out).
-  const attestedModel = currentAttestedModel(ctx.db, sender.id, senderPresenceId);
-  if (outgoingEnv.meta && 'model' in outgoingEnv.meta) {
-    const { model: _clientModel, ...restMeta } = outgoingEnv.meta;
+  // Read as a pair from ONE row: `model_source` says which tier produced `model` — `observed` (a
+  // harness probe saw it) vs a declaration. Without it a stamp cannot say whether it is a
+  // measurement or an assumption, and an aggregate over both reports a number it cannot support.
+  const { model: attestedModel, source: attestedSource } = currentAttestation(
+    ctx.db,
+    sender.id,
+    senderPresenceId,
+  );
+  // Both keys are server-controlled and stripped from any client-supplied meta, on the same grounds:
+  // a session that could stamp its own tier could launder a declaration into an observation, which
+  // is the one substitution this field exists to make impossible.
+  if (outgoingEnv.meta && ('model' in outgoingEnv.meta || 'model_source' in outgoingEnv.meta)) {
+    const { model: _clientModel, model_source: _clientSource, ...restMeta } = outgoingEnv.meta;
     outgoingEnv = { ...outgoingEnv, meta: restMeta };
   }
   if (attestedModel) {
-    outgoingEnv = { ...outgoingEnv, meta: { ...outgoingEnv.meta, model: attestedModel } };
+    outgoingEnv = {
+      ...outgoingEnv,
+      meta: {
+        ...outgoingEnv.meta,
+        model: attestedModel,
+        // Omitted, never defaulted, when the occupancy does not know its own tier (pre-migration-42
+        // row, or a client too old to send one). Absence is not an assertion (ADR 236).
+        ...(attestedSource ? { model_source: attestedSource } : {}),
+      },
+    };
     recordActModel(attestedModel);
   }
 
@@ -338,7 +371,8 @@ function routeEnvelopeInner(
     // demanded, and that human's verdict is the one that closes.
     if ((env.act === 'accept' || env.act === 'decline') && typeof ref === 'string') {
       try {
-        if (!escalatedToHuman) applyAcceptanceVerdict(ctx, team, sender, ref, env.act, env.body);
+        if (!escalatedToHuman)
+          laneVerdict = applyAcceptanceVerdict(ctx, team, sender, ref, env.act, env.body);
       } catch (err) {
         log.warn({ msg: 'acceptance_verdict_failed', err: String(err) });
       }
@@ -356,7 +390,16 @@ function routeEnvelopeInner(
   // opens, or appends to an incident lane. Best-effort like every daemon-side hook here — a failure
   // must never fail the status_update that carried the report. `!daemonComposed` is the recursion
   // belt; the composed replies being `act:'message'` (which this hook ignores) is the suspenders.
-  if (!daemonComposed && env.act === 'status_update') {
+  //
+  // On an enrolled JOINER the hook does not run at all (ADR 371 §2): the pool is the hub's. The
+  // report crosses on this very status_update, and the hub pools it when the message folds there
+  // (`handleFoldedMessages`, called from the hub's pull). Counting here too would be one pool per
+  // machine — one incident lane per machine past the threshold, the exact thing §2 refuses.
+  if (
+    !daemonComposed &&
+    env.act === 'status_update' &&
+    !joinerEnrollment(ctx.db, team.id, team.slug)
+  ) {
     try {
       handleBlockedReport(ctx, team, sender, outgoingEnv);
     } catch (err) {
@@ -440,7 +483,13 @@ function routeEnvelopeInner(
       },
     });
   }
-  return { message, recipients, delivered, ...(handoffLane ? { handoff_lane: handoffLane } : {}) };
+  return {
+    message,
+    recipients,
+    delivered,
+    ...(handoffLane ? { handoff_lane: handoffLane } : {}),
+    ...(laneVerdict ? { lane_verdict: laneVerdict } : {}),
+  };
 }
 
 /**
@@ -455,6 +504,34 @@ function routeEnvelopeInner(
  * creator (the seat whose report tripped the threshold) — same posture as `fireGatedHumanAsk`,
  * which routes as the lane owner: incident traffic reads as coming from whoever carries the lane.
  */
+/**
+ * The hub's half of ADR 371 §2: run the route-time hooks a FOLDED message still owes. A joiner's
+ * `status_update` carrying a `blocked_by` report was never routed here — it folded — so the pool
+ * never saw it. Called from the hub's pull with the ids the fold just inserted (never from a scan
+ * of `messages`, which would re-fire on every tick). Only the incident hook lives here: every other
+ * route-time hook is either residence-local by design or already replicated as its own kind.
+ */
+export function handleFoldedMessages(ctx: Ctx, teamSlug: string, messageIds: string[]): void {
+  const team = getTeamBySlug(ctx.db, teamSlug);
+  if (!team) return;
+  for (const id of messageIds) {
+    const row = ctx.db
+      .prepare<[string, string], MessageRow>('SELECT * FROM messages WHERE team_id = ? AND id = ?')
+      .get(team.id, id);
+    if (!row || row.act !== 'status_update' || !row.meta) continue;
+    const sender = getMemberById(ctx.db, row.from_member);
+    if (!sender) continue;
+    const to = row.to_member ? getMemberById(ctx.db, row.to_member) : null;
+    const env = rowToEnvelope(row, team.slug, sender.name, to?.name ?? null);
+    if (!blockedByOf(env.meta)) continue;
+    try {
+      handleBlockedReport(ctx, team, sender, env);
+    } catch (err) {
+      log.warn({ msg: 'incident_hook_failed', message: id, err: String(err) });
+    }
+  }
+}
+
 function handleBlockedReport(ctx: Ctx, team: TeamRow, sender: MemberRow, env: Envelope): void {
   const report = blockedByOf(env.meta);
   if (!report) return;
@@ -761,6 +838,10 @@ function fireGatedHumanAsk(
  *   verified-ness cannot come out differently depending on which door the verdict came through.
  *   An owner who accepts their own lane records `verified: false` by that same derivation — the
  *   honesty is structural, not a check I have to remember to write here.
+ *
+ * Returns the move it made — lane and new state — or `undefined` when it made none, so the ack can
+ * say so (lane 01M2GQFJXG): an accept that closes a lane must not look, to its sender, like an
+ * accept that merely answered a message.
  */
 function applyAcceptanceVerdict(
   ctx: Ctx,
@@ -769,7 +850,7 @@ function applyAcceptanceVerdict(
   repliedToId: string,
   act: 'accept' | 'decline',
   body: string,
-): void {
+): RouteResult['lane_verdict'] {
   const replied = ctx.db
     .prepare<
       [string, string],
@@ -786,10 +867,30 @@ function applyAcceptanceVerdict(
   if (!laneId) return;
   const before = getLane(ctx.db, team.id, laneId, team.slug);
   if (!before || !isAwaitingAcceptance(before.state)) return;
+  // A re-route (lane 01M1QYHJFY) told this seat the acceptance moved to someone else and closed
+  // its ask. Its verdict still lands as a message — it is not refused as an act — but it binds to
+  // nothing: the lane's acceptance is the NEW seat's to give, and honouring both would let two
+  // seats close one lane.
+  if (supersededAcceptanceAsks(ctx.db, team.id, laneId).has(repliedToId)) {
+    log.info({
+      msg: 'acceptance_verdict_on_superseded_ask',
+      lane: laneId,
+      ask: repliedToId,
+      decider: decider.name,
+    });
+    return;
+  }
 
-  const lane = updateLane(ctx.db, team.id, laneId, team.slug, {
-    state: act === 'accept' ? 'done' : 'active',
-  });
+  const lane = updateLane(
+    ctx.db,
+    team.id,
+    laneId,
+    team.slug,
+    { state: act === 'accept' ? 'done' : 'active' },
+    Date.now(),
+    undefined,
+    { actor: decider.name },
+  );
   if (!lane) return;
 
   if (act === 'accept') {
@@ -819,7 +920,6 @@ function applyAcceptanceVerdict(
       },
     });
   }
-
   // The board-shape change the team sees, composed by the daemon (ADR 102) exactly as the PATCH
   // path composes it — same body, same meta, so a reader of the stream cannot tell which surface
   // the verdict arrived on, because it does not matter.
@@ -847,6 +947,7 @@ function applyAcceptanceVerdict(
       meta: note.meta,
     }),
   );
+  return { lane: lane.id, state: act === 'accept' ? 'done' : 'active' };
 }
 
 /**

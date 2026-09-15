@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GENERALIST_CAPABILITIES, parseSeatFile, parseTeamFile } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb } from '../db/open.js';
 import {
   getMemberByName,
@@ -16,7 +16,7 @@ import { listRoleNames, roleSummariesMap } from '../store/roles.js';
 import { toMember } from '../store/rows.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { loadTeamSpec } from './load.js';
-import { reconcileTeam } from './reconcile.js';
+import { reconcileAll, reconcileTeam } from './reconcile.js';
 import { projectTeamToFiles, serializeProjectedTeam } from './serialize.js';
 
 let dir: string;
@@ -195,6 +195,20 @@ end = "12:00"
 });
 
 describe('reconcile — guard 1: db projection round-trips to the files', () => {
+  it('preserves a human Slack identity through files → db → files', () => {
+    writeRoster('slug = "alpha"\n', {
+      nick: 'kind = "human"\nslack_user_id = "U123"\n',
+    });
+    reconcile();
+
+    const team = getTeamBySlug(db, 'alpha')!;
+    expect(getMemberByName(db, team.id, 'nick')?.slack_user_id).toBe('U123');
+
+    const projected = projectTeamToFiles(db, 'alpha')!;
+    const { seatFiles } = serializeProjectedTeam(projected);
+    expect(parseSeatFile(seatFiles['nick.toml']!, 'nick').slack_user_id).toBe('U123');
+  });
+
   it('projectTeamToFiles → serialize → parse deep-equals the on-disk spec', () => {
     writeRoster('slug = "alpha"\ndisplay = "Team Alpha"\n', {
       olive: 'kind = "agent"\nrole = "reviewer"\n',
@@ -318,6 +332,153 @@ describe('reconcile — fail-closed: a corrupt seat is skipped, siblings intact'
     expect(listMembers(db, team.id).map((m) => m.name)).toEqual(['olive']);
     expect(r.errors.length).toBe(1);
     expect(r.errors[0]).toContain('broken.toml');
+  });
+});
+
+describe('reconcile — unknown keys warn, never fail (nick 2026-08-21)', () => {
+  it('warns about a key no schema knows, and still projects the seat', () => {
+    // The live instance: seats/autorefresh.toml carries an authored `charter`, which is in
+    // RoleFileSchema but not SeatFileSchema. Reconcile has silently dropped it since 2026-08-05.
+    writeRoster('slug = "alpha"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\ncharter = "A paragraph a human wrote."\n',
+    });
+    const r = reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+    // WARN, not fail — the seat still lands. Failing would refuse autorefresh's seat on the live
+    // roster today, which is why this is a warning and nick decided it explicitly.
+    expect(listMembers(db, team.id).map((m) => m.name)).toEqual(['olive']);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toEqual([
+      'seats/olive.toml: dropped unknown key(s) charter — not in the schema, so reconcile ignores them',
+    ]);
+  });
+
+  it('warns on team.toml and roles/*.toml too — every durable class, not just seats', () => {
+    writeRoster('slug = "alpha"\nnot_a_team_key = "x"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\n',
+    });
+    writeRole('platform', 'summary = "P"\ncharter = "C"\nnot_a_role_key = "y"\n');
+    const r = reconcile();
+    expect(r.warnings).toEqual([
+      'team.toml: dropped unknown key(s) not_a_team_key — not in the schema, so reconcile ignores them',
+      'roles/platform.toml: dropped unknown key(s) not_a_role_key — not in the schema, so reconcile ignores them',
+    ]);
+  });
+
+  it('a clean roster warns about nothing', () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    expect(reconcile().warnings).toEqual([]);
+  });
+});
+
+describe('reconcile — canonical drift is reported, because nothing else reads it', () => {
+  /**
+   * `musterd fmt --check` has existed since ADR 058 and NOTHING RUNS IT. Measured 2026-08-24: two
+   * role files on the live roster drifted from 2026-08-04 until a human happened to check by hand,
+   * twenty days later. CI cannot cover it — the roster is not in this repo — so the reader has to be
+   * the one process that already opens every roster file on every pass.
+   */
+  it('reports a file whose bytes are not what the serializer would write', () => {
+    // The exact live shape, inverted: a flush table header is now the non-canonical one (ADR 309).
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    writeRole('platform', 'summary = "P"\n[capabilities]\nis_admin = false\n');
+    const r = reconcile();
+    expect(r.drift).toEqual(['roles/platform.toml']);
+  });
+
+  it('still projects the drifted entry — cosmetic drift is never fail-closed', () => {
+    writeRoster('slug = "alpha"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\n[capabilities]\ncan_message = "none"\n',
+    });
+    const r = reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+    expect(listMembers(db, team.id).map((m) => m.name)).toEqual(['olive']);
+    expect(r.errors).toEqual([]);
+    expect(r.drift).toEqual(['seats/olive.toml']);
+  });
+
+  it('keeps drift separate from a dropped key — they mean different things', () => {
+    // ADR 304's own lesson: a reader must be able to tell data loss from tidiness. An unknown key
+    // ALSO makes the bytes non-canonical, so this file is both — and says so twice, distinctly.
+    writeRoster('slug = "alpha"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\ncharter = "A paragraph a human wrote."\n',
+    });
+    const r = reconcile();
+    expect(r.drift).toEqual(['seats/olive.toml']);
+    expect(r.warnings).toEqual([
+      'seats/olive.toml: dropped unknown key(s) charter — not in the schema, so reconcile ignores them',
+    ]);
+  });
+
+  it('a canonical roster reports no drift — including the hand-authored blank-line shape', () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    writeRole('platform', 'summary = "P"\n\n[capabilities]\nis_admin = false\n');
+    const r = reconcile();
+    expect(r.drift).toEqual([]);
+    expect(r.warnings).toEqual([]);
+  });
+});
+
+describe('reconcileAll surfaces what a pass found (nothing did until 2026-08-21)', () => {
+  it('logs canonical drift as its own line, distinct from a dropped key', async () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    writeRole('platform', 'summary = "P"\n[capabilities]\nis_admin = false\n');
+    const { log } = await import('../log.js');
+    const seen: Array<Record<string, unknown>> = [];
+    const spy = vi.spyOn(log, 'warn').mockImplementation((f) => {
+      seen.push(f as Record<string, unknown>);
+    });
+    try {
+      reconcileAll(db, [dir]);
+    } finally {
+      spy.mockRestore();
+    }
+    const drifted = seen.find((f) => f['msg'] === 'reconcile_file_drifted');
+    expect(drifted).toBeDefined();
+    expect(String(drifted?.['detail'])).toContain('roles/platform.toml');
+    expect(drifted?.['team']).toBe('alpha');
+    // The instrument must not borrow ADR 304's channel — that would re-merge the two meanings.
+    expect(seen.map((f) => f['msg'])).not.toContain('reconcile_key_dropped');
+  });
+
+  it('logs BOTH a skipped entry and a dropped key — collected-and-discarded was the old behaviour', async () => {
+    writeRoster('slug = "alpha"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\ncharter = "A paragraph a human wrote."\n',
+      broken: 'this is not = valid toml = at all\n',
+    });
+    const { log } = await import('../log.js');
+    const seen: Array<Record<string, unknown>> = [];
+    const spy = vi.spyOn(log, 'warn').mockImplementation((f) => {
+      seen.push(f as Record<string, unknown>);
+    });
+    try {
+      reconcileAll(db, [dir]);
+    } finally {
+      spy.mockRestore();
+    }
+    const kinds = seen.map((f) => f['msg']);
+    // The skipped seat — load.ts calls this "never silently dropped", and until now it was.
+    expect(kinds).toContain('reconcile_entry_error');
+    // The dropped field — the case the promise never covered at all.
+    expect(kinds).toContain('reconcile_key_dropped');
+    const dropped = seen.find((f) => f['msg'] === 'reconcile_key_dropped');
+    expect(String(dropped?.['detail'])).toContain('charter');
+    expect(dropped?.['team']).toBe('alpha');
+  });
+
+  it('says nothing about a clean roster', async () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    const { log } = await import('../log.js');
+    const seen: string[] = [];
+    const spy = vi.spyOn(log, 'warn').mockImplementation((f) => {
+      seen.push(String((f as Record<string, unknown>)['msg']));
+    });
+    try {
+      reconcileAll(db, [dir]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(seen).toEqual([]);
   });
 });
 
@@ -481,5 +642,63 @@ describe('reconcile — governance projection (ADR 070, v0.3 P1)', () => {
     const team = getTeamBySlug(db, 'alpha')!;
     expect(listRoleNames(db, team.id)).toEqual([]);
     expect(memberView('olive').capabilities!.can_flag_urgent).toBe(true); // generalist again
+  });
+});
+
+describe('reconcile — the seat file owns the hue (ADR 374)', () => {
+  const team = 'slug = "acme"\n';
+
+  it('projects a file hue on ADD and again on UPDATE, and NULLs it when the file drops it', () => {
+    writeRoster(team, { miley: 'kind = "agent"\nrole = "designer"\nhue = 212\n' });
+    reconcile();
+    const t = getTeamBySlug(db, 'acme')!;
+    expect(getMemberByName(db, t.id, 'miley')!.hue).toBe(212);
+
+    writeRoster(team, { miley: 'kind = "agent"\nrole = "designer"\nhue = 40\n' });
+    expect(reconcile().updated).toEqual(['miley']);
+    expect(getMemberByName(db, t.id, 'miley')!.hue).toBe(40);
+
+    writeRoster(team, { miley: 'kind = "agent"\nrole = "designer"\n' });
+    expect(reconcile().updated).toEqual(['miley']);
+    expect(getMemberByName(db, t.id, 'miley')!.hue).toBeNull();
+  });
+
+  it('never invents a hue for a file-backed seat — a file without one projects null on ADD', () => {
+    writeRoster(team, { dolly: 'kind = "agent"\nrole = ""\n' });
+    reconcile();
+    const t = getTeamBySlug(db, 'acme')!;
+    expect(getMemberByName(db, t.id, 'dolly')!.hue).toBeNull();
+    expect(toMember(getMemberByName(db, t.id, 'dolly')!, 'acme').hue).toBeNull();
+  });
+
+  it('REVIVE takes the hue from the file, like every other identity field', () => {
+    writeRoster(team, { ryder: 'kind = "agent"\nrole = ""\nhue = 100\n' });
+    reconcile();
+    rmSync(join(dir, '.musterd', 'seats', 'ryder.toml'));
+    reconcile();
+    writeRoster(team, { ryder: 'kind = "agent"\nrole = ""\nhue = 130\n' });
+    expect(reconcile().revived).toEqual(['ryder']);
+    const t = getTeamBySlug(db, 'acme')!;
+    expect(getMemberByName(db, t.id, 'ryder')!.hue).toBe(130);
+  });
+
+  it('two daemons reconciling the same seat files report the same hue per name', () => {
+    writeRoster(team, {
+      miley: 'kind = "agent"\nrole = ""\nhue = 212\n',
+      nick: 'kind = "human"\nrole = "admin"\n',
+    });
+    reconcile();
+    const other = openDb(':memory:');
+    try {
+      const spec = loadTeamSpec(dir)!;
+      reconcileTeam(other, spec);
+      for (const name of ['miley', 'nick']) {
+        const a = getMemberByName(db, getTeamBySlug(db, 'acme')!.id, name)!.hue;
+        const b = getMemberByName(other, getTeamBySlug(other, 'acme')!.id, name)!.hue;
+        expect(b).toBe(a);
+      }
+    } finally {
+      other.close();
+    }
   });
 });

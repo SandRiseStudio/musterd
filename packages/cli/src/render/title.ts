@@ -78,7 +78,7 @@ export function terminalTitleFor(
 /**
  * Walk up to the workspace root, anchored on EITHER `.musterd/binding.json` (a claimed folder) or
  * the committed `.musterd/workspace.json` (a fresh clone before first claim). `findWorkspaceDir`
- * anchors on the binding alone, which would leave a spec-only worktree unlabeled — and the fresh
+ * anchors on the binding alone, which would leave a spec-only workspace unlabeled — and the fresh
  * clone is exactly the tab a human most needs to tell apart.
  */
 function findSeatWorkspace(startDir: string): string | null {

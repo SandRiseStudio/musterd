@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "whiteboard": {
+      "command": "node",
+      "args": ["packages/whiteboard/dist/mcp/index.js"]
+    }
+  }
+}

@@ -9,6 +9,7 @@ import { acquireObserver, forgetObserver, type LiveConfig } from '../live/client
 import { firehoseSound, roomTone } from '../live/sound';
 import type { OfficeHandle } from '../live/office-scene';
 import { useLiveStream } from '../live/useLiveStream';
+import { justShipped } from '../live/buildSync';
 import { officeRoom } from '../live/officeRoom';
 import { useWorkingOn } from '../live/useWorkingOn';
 import { roomEntries } from '../live/workingOn';
@@ -64,6 +65,112 @@ function captureFpsFromUrl(): number {
   return Number.isFinite(n) && n > 0 && n <= 60 ? n : 30;
 }
 
+/**
+ * Where a viewer of the stream can find the team — a fact asserted on a public surface, so it is
+ * written per team rather than derived (`<slug>@musterd.io` would claim a mailbox for every team
+ * that ever streams). The address appears only where one exists; a team without a mailbox shows
+ * nothing here, and the mark below the corner carries musterd.io for everyone.
+ */
+/**
+ * The corner block: what this stream is, where to find us, and — only when it is true — that a
+ * build just landed.
+ *
+ * The first cut said all of it, always: one 900px-wide pill reading "live from the workshop — the
+ * feed may blink while we ship", parked over the floor for the whole broadcast (nick, 2026-09-03:
+ * "the banner about the stream refreshing looks horrible"). Two faults, and the visual one is
+ * downstream of the other. A pill that wide is not a pill, it is a bar with rounded ends, and it is
+ * that wide because it is carrying a *sentence*. The sentence is there because the corner was
+ * explaining, at all times, an event that happens occasionally — a permanent apology for an
+ * intermittent blink. Nothing about the styling could fix a persistent notice about a rare thing.
+ *
+ * So the notice moves to where it is true. `justShipped()` reads the exact fact: this pageview is
+ * the result of build-sync landing a new bundle, seconds ago. At rest the corner is a mark, not a
+ * message — a live dot and three words. When a build lands, the mark says so for a beat, and then
+ * it is a mark again. That is the same information, delivered at the moment a viewer is actually
+ * asking the question ("did it just break?"), and it costs the floor nothing the rest of the time.
+ *
+ * The long form stays on the chip's title for anyone reading the DOM, and as the copy of record.
+ *
+ * The address is a fact asserted on a public surface, so it is named per team rather than derived
+ * (`<slug>@musterd.io` would claim a mailbox for every team that ever streams). Pure, so the render
+ * test can hold all of it.
+ *
+ * The corner used to say `musterd.io` here too, beside the team address — the product's name twice
+ * in one 44%-wide column, once as a domain and once again as the wordmark two rows down (nick,
+ * 2026-09-04). The domain moved INTO the mark, where it costs no extra row and where a viewer with
+ * no address bar was already looking; this line is now only ever the one thing it was for.
+ */
+export const WORKSHOP_NOTICE = {
+  /**
+   * There is no resting state here at all — no caption, and no live dot (nick, 2026-09-04: "lets get
+   * rid of 'live from the workshop'", then "no need for even the small live dot").
+   *
+   * That finishes an arc rather than starting one. The first cut was a 900px sentence parked over
+   * the floor for the whole broadcast; the second was three words; then the words went and the dot
+   * stayed; now the dot has gone too. Every step removed the same thing — a permanent explanation of
+   * something the surface itself already says. At rest the corner holds the address and the mark,
+   * and nothing that is only ever true.
+   *
+   * The copy of record survives on the beat's title, and the beat still speaks — so the corner has
+   * words exactly when something has happened, which is what it was for.
+   */
+  /** The beat after a build lands — past tense, and it names the blink the viewer just saw. */
+  shipped: 'just shipped — that was the blink',
+  /**
+   * The copy of record — the one string here a stranger might quote, so it says Team the way the
+   * brand says Team. The first cut said "the people in this room", and "room" is in brand.md §5's
+   * Not column for Team: enforced vocabulary (ADR 296), not a preference. Two sentences rather than
+   * one long one, per §4 — the premise, then the consequence. sloane's spec, verbatim.
+   */
+  full: 'This team is building musterd while you watch. Every deploy can restart the stream for a moment, and it comes back on its own.',
+};
+
+/** How long the "just shipped" beat holds before easing back to the resting mark. Long enough to
+ * read twice at a glance across a room, short enough that it is a moment and not a second banner. */
+export const SHIPPED_MS = 9000;
+
+export function broadcastCorner(team: string | null, shipped = false) {
+  return (
+    <>
+      {/* AT REST THERE IS NO NOTICE AT ALL — not a caption, and not the live dot either (nick,
+          2026-09-04). The dot was the last thing standing after the caption went, and it was
+          answering a question the surface it lives on has already answered: this is a live stream,
+          on a page whose whole content is a room moving. A "we are live" light on a live picture is
+          the same permanent explanation of a self-evident thing that the 900px pill was, just
+          smaller. The element is gone rather than emptied, so nothing paints and nothing composites
+          — an empty paper stud is still a mark in the corner of every frame.
+
+          The beat is untouched: when a build lands the notice appears with its line, holds, and
+          leaves again. The corner speaks only when it has something to say. */}
+      {shipped && (
+        <span className="bc__notice bc__notice--shipped" title={WORKSHOP_NOTICE.full}>
+          <span className="bc__pulse" aria-hidden="true" />
+          <span className="bc__notice-text">{WORKSHOP_NOTICE.shipped}</span>
+        </span>
+      )}
+      {team === 'revive' && <span className="bc__contact">revive@musterd.io</span>}
+    </>
+  );
+}
+
+/**
+ * The corner's one piece of state: whether a build landed into this pageview. The fact is about how
+ * the page got here, so it cannot become true later — `justShipped()` is decided once for the whole
+ * pageview and the marker behind it is already spent, which is why a plain reload of this tab later
+ * shows the resting mark. All this hook adds is the beat's length. Never true in dev or under test —
+ * there is no baked build id there, and no publisher.
+ */
+export function useJustShipped(): boolean {
+  const [shipped, setShipped] = useState(false);
+  useEffect(() => {
+    if (!justShipped()) return;
+    setShipped(true);
+    const timer = setTimeout(() => setShipped(false), SHIPPED_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  return shipped;
+}
+
 /** Hooks a capturer (or a headless check) probes — see ADR 157 "Observability & Evaluation". */
 interface BroadcastWindow {
   __office?: OfficeHandle | null;
@@ -92,6 +199,8 @@ function BroadcastPage() {
   const [team, setTeam] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
+  // Whether a build landed into this pageview — the corner's "just shipped" beat (see above).
+  const shipped = useJustShipped();
   // Read once per page load — a stream source's URL is its whole configuration, and it never
   // changes under a running capture.
   const [stage, setStage] = useState<{ w: number; h: number }>(DEFAULT_STAGE);
@@ -194,6 +303,7 @@ function BroadcastPage() {
             captureFps={captureFps}
             workCues="stack"
             topSlot={<AsksReel envelopes={envelopes} roster={roster} board={board} />}
+            cornerSlot={broadcastCorner(team, shipped)}
             onReady={onSceneReady}
           />
         )}

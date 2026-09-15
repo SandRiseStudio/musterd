@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  hasPlugin,
   hasServer,
   listServers,
+  readPlugin,
   readServerEnv,
+  removePlugins,
   removeServers,
+  renderPlugin,
   renderServer,
+  upsertPlugin,
   upsertServer,
 } from './codexToml.js';
 
@@ -140,5 +145,31 @@ describe('readServerEnv', () => {
   it('unescapes quoted values and tolerates a quoted key', () => {
     const toml = '[mcp_servers.musterd.env]\n"MUSTERD_DRIVER" = "a \\"quoted\\" name"\n';
     expect(readServerEnv(toml, 'musterd')).toEqual({ MUSTERD_DRIVER: 'a "quoted" name' });
+  });
+});
+
+describe('Codex plugin tables (ADR 323)', () => {
+  const ID = 'codex-security@openai-curated';
+
+  it('renders a quoted [plugins."id"] table with enabled = true', () => {
+    expect(renderPlugin(ID, { enabled: true })).toBe(
+      `[plugins.${JSON.stringify(ID)}]\nenabled = true\n`,
+    );
+  });
+
+  it('upserts additively and leaves mcp_servers + user settings intact', () => {
+    const out = upsertPlugin(USER, ID, { enabled: true });
+    expect(out).toContain('model = "o3"');
+    expect(hasServer(out, 'context7')).toBe(true);
+    expect(hasPlugin(out, ID)).toBe(true);
+    expect(readPlugin(out, ID)).toEqual({ enabled: true });
+  });
+
+  it('removePlugins drops only that plugin table', () => {
+    const added = upsertPlugin(USER, ID, { enabled: true });
+    const out = removePlugins(added, [ID]);
+    expect(hasPlugin(out, ID)).toBe(false);
+    expect(hasServer(out, 'context7')).toBe(true);
+    expect(out).toContain('model = "o3"');
   });
 });

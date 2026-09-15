@@ -8,13 +8,16 @@ import {
   parseSeatLabel,
   renderSeatLabel,
   resolveAttestedWakeLease,
+  type Binding,
   type SessionCapture,
 } from '@musterd/protocol';
+import { resolveWorkspaceKey } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { findBinding, findWorkspaceSpec, saveBinding } from '../config.js';
+import { findBinding, findWorkspaceSpec, requireUsableBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
+import { dischargedIds, openActionNeeded } from '../render/rows.js';
 import { clock, theme } from '../render/theme.js';
 import { bindThread, pruneOnDisk, readRegistry } from '../session/continuity.js';
 import { sessionDigest } from '../session/digest.js';
@@ -24,7 +27,9 @@ import {
   localSessionLiveness,
   type LocalSessionLiveness,
 } from '../session/liveness.js';
-import { findWorkspaceDir } from './helpers.js';
+import { attestedModel, findWorkspaceDir, resolveClaimWorkspace } from './helpers.js';
+import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
+import { composeSessionStatusline, type SessionStatuslineInput } from './sessionStatusline.js';
 
 /**
  * `musterd session start|end --stdin | show` (ADR 131 §5, increment 4) — session capture. The
@@ -54,10 +59,13 @@ export async function sessionCommand(parsed: Parsed): Promise<number> {
   if (sub === 'observe') return observeCommand(parsed);
   if (sub === 'resolve-labels') return resolveLabelsCommand(parsed);
   if (sub === 'label-nudge') return labelNudgeCommand();
+  if (sub === 'orient-nudge') return orientNudgeCommand();
+  if (sub === 'orient-stamp') return orientStampCommand();
+  if (sub === 'statusline') return statuslineCommand(parsed);
   if (sub === 'bind') return bindCommand(parsed);
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | bind --thread <id> | show  ' +
+    'usage: musterd session start --stdin | end --stdin | observe --stdin [--orient] [--interrupt] | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | statusline --stdin | bind --thread <id> | show  ' +
       '(start/end/observe are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
@@ -94,6 +102,8 @@ export interface HookPayload {
   model_id?: string;
   /** Cursor Agent hooks (ADR 198): legacy composer model slug. */
   model?: string;
+  /** Which harness produced this payload — inferred from field names (ADR 352). */
+  harness?: 'claude-code' | 'cursor' | 'grok';
 }
 
 function parseHookPayload(raw: string): HookPayload {
@@ -105,13 +115,28 @@ function parseHookPayload(raw: string): HookPayload {
     const sessionId =
       typeof o['session_id'] === 'string'
         ? o['session_id']
-        : typeof o['conversation_id'] === 'string'
-          ? o['conversation_id']
-          : undefined;
+        : typeof o['sessionId'] === 'string'
+          ? o['sessionId']
+          : typeof o['conversation_id'] === 'string'
+            ? o['conversation_id']
+            : undefined;
     const roots = Array.isArray(o['workspace_roots'])
       ? o['workspace_roots'].filter((r): r is string => typeof r === 'string')
       : [];
-    const cwd = typeof o['cwd'] === 'string' ? o['cwd'] : roots.length > 0 ? roots[0] : undefined;
+    const cwd =
+      typeof o['cwd'] === 'string'
+        ? o['cwd']
+        : typeof o['workspaceRoot'] === 'string'
+          ? o['workspaceRoot']
+          : roots.length > 0
+            ? roots[0]
+            : undefined;
+    const harness: HookPayload['harness'] =
+      typeof o['sessionId'] === 'string' || typeof o['hookEventName'] === 'string'
+        ? 'grok'
+        : typeof o['conversation_id'] === 'string'
+          ? 'cursor'
+          : 'claude-code';
     return {
       ...(sessionId ? { session_id: sessionId } : {}),
       ...(typeof o['transcript_path'] === 'string' && o['transcript_path']
@@ -119,7 +144,12 @@ function parseHookPayload(raw: string): HookPayload {
         : {}),
       ...(cwd ? { cwd } : {}),
       ...(typeof o['model_id'] === 'string' ? { model_id: o['model_id'] } : {}),
-      ...(typeof o['model'] === 'string' ? { model: o['model'] } : {}),
+      ...(typeof o['model'] === 'string'
+        ? { model: o['model'] }
+        : typeof o['current_model_id'] === 'string'
+          ? { model: o['current_model_id'] }
+          : {}),
+      harness,
     };
   } catch {
     return {};
@@ -134,19 +164,282 @@ async function captureCommand(event: 'start' | 'end', parsed: Parsed): Promise<n
       2,
     );
   }
-  await captureSession(event, parseHookPayload(await readStdin()));
+  const payload = parseHookPayload(await readStdin());
+  await captureSession(event, payload);
+  if (event === 'start') {
+    // The orientation resolves from the SAME anchored dir capture writes to — never bare
+    // process.cwd() (miley's #1072 review: the ADR 018 clobber shape, read edition — a mis-cwd'd
+    // hook must not emit another seat's inbox and memory headline into this session's context).
+    const orientation = await emitSessionOrientation(resolveCaptureDir(payload));
+    if (orientation) process.stdout.write(orientation + '\n');
+  }
+  return 0;
+}
+
+/** The one derivation of "which workspace does this hook payload belong to": explicit
+ *  MUSTERD_BINDING wins, else walk up from the hook-reported cwd. Shared by capture (write side)
+ *  and the orientation (read side) so the two can never disagree. */
+function resolveCaptureDir(payload: HookPayload): string | null {
+  const explicit = process.env['MUSTERD_BINDING'];
+  return explicit
+    ? dirname(dirname(explicit))
+    : (findWorkspaceDir(payload.cwd ?? process.cwd()) ?? null);
+}
+
+type OrientationFetcher = (dir: string | null) => Promise<SessionOrientationInput | null>;
+
+/** The default fetcher: three read-only GETs under the ANCHORED workspace's bound-seat identity —
+ *  the binding at `dir`, never the ambient cwd's (ADR 018/036). A folder without a seat-pinned,
+ *  keyed binding has no orientation. */
+async function defaultOrientationFetcher(
+  dir: string | null,
+): Promise<SessionOrientationInput | null> {
+  const binding = dir ? requireUsableBinding(dir) : null;
+  const seat = binding ? bindingSeat(binding) : undefined;
+  const key = binding?.seat_credential ?? binding?.agent_key;
+  if (!binding || !seat || !key) return null;
+  const team = binding.team;
+  // The ADR 246 ladder (observed > env > declared), not the bare declaration: what this client
+  // attests is what a reclaim would stamp on the seat.
+  const model = attestedModel(binding, process.env);
+  // A CLI act is intrinsically `cli` (ADR 286), matching gather()'s binding branch.
+  const http = new HttpClient({
+    server: binding.server,
+    key,
+    seat,
+    ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
+    surface: 'cli',
+    ...(model !== undefined ? { model } : {}),
+  });
+  // Lane 01M2GTB0RA: the summary, not the brief — this runs on every turn of every session, and
+  // the brief cost the daemon 0.5–1.8 s of its single thread per call for three numbers.
+  const [inboxRes, brief, memory] = await Promise.all([
+    http.inbox(team, { unread: true }),
+    http.nextSummary(team),
+    http.getMemoryEnvelope(team).catch(() => undefined), // absent memory is a normal state
+  ]);
+  const waiting = openActionNeeded(
+    inboxRes.messages,
+    seat,
+    inboxRes.answered ?? [],
+    dischargedIds(inboxRes),
+  ).map((m) => ({
+    act: m.act,
+    from: m.from,
+    id: m.id,
+  }));
+  const now = Date.now();
+  return {
+    seat,
+    team,
+    ...(memory
+      ? {
+          memory: {
+            headline: memory.headline,
+            saved_at: memory.saved_at,
+            size_bytes: memory.size_bytes,
+          },
+        }
+      : {}),
+    waiting,
+    incidents: brief.incidents.map((id) => ({ id })),
+    owed: brief.owed.map((r) => ({ laneId: r.lane, waitedMs: now - r.ts })),
+    carrying: brief.carrying,
+  };
+}
+
+/**
+ * Spec 2026-08-25 (session orientation) §A: the one deliberate exception to "capture adds zero
+ * context". Read-only, bounded, wake-suppressed, silent on ANY failure — it rides the SessionStart
+ * hook, whose stdout lands in model context. The composable-only bar lives in
+ * {@link composeSessionOrientation}; this layer only decides silence.
+ */
+export async function emitSessionOrientation(
+  dir: string | null,
+  fetch: OrientationFetcher = defaultOrientationFetcher,
+): Promise<string | null> {
+  if (process.env['MUSTERD_PROVENANCE'] === 'wake') return null;
+  try {
+    const input = await fetch(dir);
+    return input ? composeSessionOrientation(input) : null;
+  } catch {
+    return null; // hook contract: a failing orientation must never disturb the session it rides
+  }
+}
+
+/**
+ * `session statusline` — the user-facing half of the orientation (see `sessionStatusline.ts` for
+ * why the SessionStart block could never be that half itself).
+ *
+ * Same anchoring discipline as capture and the orientation: resolve from the payload's cwd via
+ * {@link resolveCaptureDir}, never bare `process.cwd()`. A statusline is the WORST place to get
+ * this wrong — it redraws every turn, so a mis-anchored chip would sit there all session telling
+ * the human they are in a seat they are not in.
+ *
+ * Unlike the orientation this is NOT wake-suppressed: a wake injects context, and suppression
+ * exists to keep the block from re-priming an already-primed agent. The chip primes nobody — it is
+ * a label on a terminal, and a woken session still needs to know which seat it belongs to.
+ */
+export type StatuslineFetcher = (dir: string | null) => Promise<SessionStatuslineInput | null>;
+
+/** How long a whole render may take before the chip gives up and shows nothing.
+ *
+ *  A stopped daemon fails fast (connection refused), but a WEDGED one — socket held, not answering —
+ *  is the mode guardian raised five times in one day, and `HttpClient` carries no AbortSignal. Without
+ *  a bound, each redraw would hang until the harness killed it, leaving a stray node process per turn
+ *  instead of the clean silence this path promises. Silence-on-failure is only true if failure is
+ *  bounded (ryder's #1076 review). */
+const STATUSLINE_BUDGET_MS = 1_500;
+
+/** The statusline's OWN fetcher — deliberately not the orientation's.
+ *
+ *  Two differences, both required rather than cosmetic:
+ *
+ *  1. **Presence-neutral.** The orientation touches presence, and that is correct: a session opening
+ *     IS liveness. A statusline redraw is not — it fires as the conversation updates, so reusing the
+ *     touching client would make an open terminal look `present` forever. That silences the
+ *     away-notifier for the very seat it was reporting on (ADR 057, `touchAmbientPresence`'s own
+ *     comment names this hazard), pins a dormant seat in the ADR 188 review pool, and — because the
+ *     presence UPDATE rewrites surface/provenance/wake_lease unstickily — a redraw can NULL the
+ *     ADR 241 lease of a woken session. A background redraw must never fake liveness.
+ *  2. **Cheaper.** Two GETs, not three: the orientation's memory-envelope call is dropped outright
+ *     because the chip renders no headline, and the inbox is asked for a bounded page instead of
+ *     full envelope bodies we only take `.length` of. */
+async function defaultStatuslineFetcher(
+  dir: string | null,
+): Promise<SessionStatuslineInput | null> {
+  const binding = dir ? requireUsableBinding(dir) : null;
+  const seat = binding ? bindingSeat(binding) : undefined;
+  const key = binding?.seat_credential ?? binding?.agent_key;
+  if (!binding || !seat || !key) return null;
+  const team = binding.team;
+  const model = attestedModel(binding, process.env); // ADR 246 ladder, same as every one-shot
+  const http = new HttpClient({
+    server: binding.server,
+    key,
+    seat,
+    ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
+    surface: 'cli',
+    ...(model !== undefined ? { model } : {}),
+  }).presenceNeutral();
+  // Lane 01M2GTB0RA: the summary, not the brief — see defaultOrientationFetcher.
+  const [inboxRes, brief] = await Promise.all([
+    http.inbox(team, { unread: true, limit: STATUSLINE_INBOX_LIMIT }),
+    http.nextSummary(team),
+  ]);
+  const waiting = openActionNeeded(
+    inboxRes.messages,
+    seat,
+    inboxRes.answered ?? [],
+    dischargedIds(inboxRes),
+  );
+  return {
+    seat,
+    team,
+    waiting: waiting.length,
+    // `unread_remaining`, NOT `truncated`: the server computes truncated as
+    // `limit === undefined && full` (http.ts:3854), so it is exclusively the no-limit caller's
+    // signal and is permanently absent here — reading it made the marker dead code (ryder's #1076
+    // re-check). `unread_remaining` is the counterpart computed for the limit-naming branch.
+    // It counts UNREAD rows while `waiting` counts the action-needed subset, so it means "more was
+    // cut that I did not classify" — exactly a floor marker, which is all `n+` claims.
+    ...((inboxRes.unread_remaining ?? 0) > 0 ? { waitingTruncated: true } : {}),
+    incidents: brief.incidents.length,
+    carrying: brief.carrying,
+  };
+}
+
+/** Enough rows to count honestly for a chip; past this the count renders as `n+`. */
+const STATUSLINE_INBOX_LIMIT = 100;
+
+export async function emitSessionStatusline(
+  dir: string | null,
+  fetch: StatuslineFetcher = defaultStatuslineFetcher,
+  budgetMs = STATUSLINE_BUDGET_MS,
+): Promise<string | null> {
+  try {
+    const input = await Promise.race([
+      fetch(dir),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs).unref?.()),
+    ]);
+    return input ? composeSessionStatusline(input) : null;
+  } catch {
+    return null; // a statusline that errors is strictly worse than no statusline
+  }
+}
+
+async function statuslineCommand(parsed: Parsed): Promise<number> {
+  if (parsed.flags['stdin'] !== true) {
+    throw new CliError(
+      'usage: musterd session statusline --stdin  — harness-driven: pipe the statusLine JSON in ' +
+        '(`musterd init` wires it); to inspect this workspace, use `musterd session show`',
+      2,
+    );
+  }
+  const payload = parseHookPayload(await readStdin());
+  const chip = await emitSessionStatusline(resolveCaptureDir(payload));
+  if (chip) process.stdout.write(chip + '\n');
   return 0;
 }
 
 async function observeCommand(parsed: Parsed): Promise<number> {
   if (parsed.flags['stdin'] !== true) {
     throw new CliError(
-      'usage: musterd session observe --stdin  — Cursor hook-driven (ADR 198): pipe the Agent hook JSON in',
+      'usage: musterd session observe --stdin [--orient] [--interrupt]  — Cursor hook-driven (ADR 198 / ADR 333 / ADR 369): pipe the Agent hook JSON in',
       2,
     );
   }
-  await observeCursorSession(parseHookPayload(await readStdin()));
+  const payload = parseHookPayload(await readStdin());
+  await observeCursorSession(payload);
+  const captureDir = resolveCaptureDir(payload);
+  if (parsed.flags['orient'] === true) {
+    const json = formatCursorOrientation(await emitSessionOrientation(captureDir));
+    if (json) process.stdout.write(json + '\n');
+  }
+  if (parsed.flags['interrupt'] === true) {
+    const line = await checkCursorInterrupt(captureDir);
+    const json = formatCursorInterrupt(line);
+    if (json) process.stdout.write(json + '\n');
+  }
   return 0;
+}
+
+/** Cursor sessionStart injection (ADR 333): wrap the orientation block as the host's JSON seam.
+ *  Null in → null out (hook stays silent). Exported for the unit that pins the shape. */
+export function formatCursorOrientation(block: string | null): string | null {
+  return block ? JSON.stringify({ additional_context: block }) : null;
+}
+
+/** Cursor postToolUse interrupt injection (ADR 369): wrap the interrupt line as the host's JSON seam.
+ *  Null in → null out (hook stays silent). Exported for the unit that pins the shape. */
+export function formatCursorInterrupt(line: string | null): string | null {
+  return line ? JSON.stringify({ additional_context: line }) : null;
+}
+
+/** Cursor postToolUse interrupt probe (ADR 369): query the daemon for waiting interrupt-class acts.
+ *  Returns the daemon-composed line or null. Best-effort, fail-open, silent on any error. */
+export async function checkCursorInterrupt(dir: string | null): Promise<string | null> {
+  if (process.env['MUSTERD_NO_NUDGE'] === '1') return null;
+  const binding = dir ? requireUsableBinding(dir) : null;
+  const seat = binding ? bindingSeat(binding) : undefined;
+  const key = binding?.seat_credential ?? binding?.agent_key;
+  if (!binding || !seat || !key) return null;
+  const team = binding.team;
+  const model = attestedModel(binding, process.env);
+  const http = new HttpClient({
+    server: binding.server,
+    key,
+    seat,
+    ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
+    surface: 'cli',
+    ...(model !== undefined ? { model } : {}),
+  });
+  try {
+    const res = await http.interruptCheck(team);
+    return res.raised && res.line ? res.line : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -243,6 +536,7 @@ function observeModelFor(harnessId: string, payload: HookPayload): string | unde
       ...(payload.session_id ? { session_id: payload.session_id } : {}),
       ...(payload.model_id ? { model_id: payload.model_id } : {}),
       ...(payload.model ? { model: payload.model } : {}),
+      ...(payload.cwd ? { cwd: payload.cwd } : {}),
     });
   } catch {
     return undefined;
@@ -253,16 +547,206 @@ function observeModelFor(harnessId: string, payload: HookPayload): string | unde
  * The capture itself, stdin-free (exported for tests + the e2e harness): resolve the workspace,
  * write/annotate `binding.session`, then push the harness-class-only attestation best-effort.
  */
+/**
+ * The resumable attestation (harness class + correlation digest), best-effort: a dead daemon must
+ * never fail a hook, and the local capture is complete without it. Returns whether the push LANDED,
+ * which is the only thing that may be written down as attested.
+ *
+ * The digest travels; the id does not. It is what lets the ledger distinguish one session flapping
+ * from two short-lived sessions of the same seat — the question that made 48 same-seat
+ * captured→ended pairs unreadable on 2026-08-05.
+ *
+ * Exported so `codexHook.ts` can share it (lane 01M1JBH9CR): codex's own `attest()` never sent
+ * `seat`/`sessionLease` and 401'd unconditionally, silently, on every call since it was written —
+ * this is the implementation that already gets the credential shape right.
+ */
+export async function pushAttestation(
+  binding: Binding,
+  session: SessionCapture,
+  event: 'start' | 'end',
+  dir: string,
+  harness: 'claude-code' | 'cursor' | 'grok' | 'codex' = CAPTURE_HARNESS,
+  // Whether a refused lease may be answered with a claim. A session event (start/end) may; the
+  // tool boundary may only while this slot has never spent its claim — see `claim_attempted_at`.
+  mayClaim = true,
+): Promise<boolean> {
+  const seat = bindingSeat(binding);
+  const key = binding.seat_credential ?? binding.agent_key;
+  if (!binding.agent_key || !key || !seat) return false;
+  // The wake lease (ADR 241/252), when this process was spawned by a wake: the correlation
+  // token rides the child's env, so it is attested here exactly as the presence-touch path
+  // attests it. Never defaulted — an ordinary session has no `MUSTERD_WAKE_LEASE` and says
+  // nothing (ADR 236). This is what lets a lease that dies `lease_expired` still be known to
+  // have PAID for a session: the captured row names the lease by identity, not by timing.
+  const wakeLease = resolveAttestedWakeLease(process.env);
+  const body = {
+    seat,
+    harness,
+    event,
+    session_digest: sessionDigest(binding.agent_key, session.id),
+    ...(wakeLease ? { wake_lease: wakeLease } : {}),
+  };
+  // A CLI hook is intrinsically `cli` (ADR 286); the workspace label is what keeps a claim from
+  // this one-shot from evicting the live adapter in the same worktree (ADR 340, #1131).
+  //
+  // The model rides too, through the ADR 246 ladder (observed > env > declared). The reclaim below
+  // is a real seat claim, and a claim is where a Presence gets its model: built without one it
+  // minted a `cli` row attesting nothing — the newest non-held row, so the seat read `unknown` to
+  // the ADR 188 picker until something else attested. Measured 2026-09-02: the two big-body
+  // `worker_unattested` rows that survived the claim storm each sat 4s after a bare `cli` claim,
+  // and post-storm the seats made 244 `cli` claims to 50 `claude-code`. The hook holds the
+  // harness's own observation in `binding.model_observed`; sending it is not a declaration.
+  const model = attestedModel(binding, process.env);
+  const client = (sessionLease: string | undefined) =>
+    new HttpClient({
+      server: binding.server,
+      team: binding.team,
+      workspace: resolveClaimWorkspace(process.env, dir),
+      workspaceKey: resolveWorkspaceKey(process.env, dir),
+      key,
+      seat,
+      surface: 'cli',
+      ...(sessionLease !== undefined ? { sessionLease } : {}),
+      ...(model !== undefined ? { model } : {}),
+    }).presenceNeutral();
+  try {
+    await client(binding.session_lease).attestSession(binding.team, body);
+    return true;
+  } catch (err) {
+    // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
+    if (!isSessionLeaseRefusal(err)) return false;
+  }
+  // The stored lease was refused, not the credential. `binding.session_lease` is minted once, at
+  // claim, and lives five minutes (ADR 337); every hook after that presented a dead lease and this
+  // path swallowed the refusal with "unreachable" — local slot written, ledger silent (lane
+  // 01M1F92X69, measured on seat ryder 2026-09-01). ADR 337 §4 is the remedy: one fresh claim, in
+  // reply to the refusal and never before it (a claim per hook is the 2026-09-01 storm, #1138).
+  //
+  // Once per slot, not once per tool call: `attestSlotIfUnattested` rides every tool call, and a
+  // claim that succeeds while the attest still fails — or a claim the daemon refuses — would
+  // otherwise be retried at the storm's cadence against an occupied seat. The slot remembers that
+  // its claim was spent; only a fresh session event gets another.
+  if (!mayClaim) return false;
+  stampClaimAttempted(dir, session.id);
+  // Never evict. Two worktrees bound to one seat is the ordinary shape here, and a claim from this
+  // worktree SUPERSEDES an adapter live in the other (`claim.superseded {same_workspace:false}` —
+  // the storm's own audit row), leaving that adapter running on a dead lease. Same-workspace
+  // coexistence is the server's (ADR 340, #1131); elsewhere is refused here, before the socket
+  // opens, and the slot stays unattested — an undercount that says so beats a silent eviction.
+  if (await heldElsewhere(client(undefined), binding, dir)) return false;
+  //
+  // The minted lease is deliberately NOT written back to the binding. It is bound to the Presence
+  // this claim holds, and closing the socket releases that Presence (`held_until`, ws.ts cleanup),
+  // which `hasValidSessionLease` reads as dead — measured 2026-09-01: a second hook presenting the
+  // lease the first had just minted was refused in ~1 of 4 runs, the other 3 being the close still
+  // in flight. A one-shot cannot leave a live lease behind; a lease that outlives its claim is a
+  // server decision, not a client one.
+  let claim: { lease: string; close: () => void };
+  try {
+    claim = await client(undefined).claimSessionLease();
+  } catch {
+    return false; // the seat is someone else's, or the daemon went away mid-way: not ours to force
+  }
+  try {
+    await client(claim.lease).attestSession(binding.team, body);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    claim.close();
+  }
+}
+
+/**
+ * Is this seat live in a workspace other than `dir`'s? Read from the roster, which answers an
+ * anonymous or stale-lease caller too (`tryAuth`) — the whole point is to ask BEFORE holding any
+ * authority. `away` counts as live: the adapter is still connected and a claim would still evict it.
+ * A roster the daemon will not give us is read as "held elsewhere": refusing to claim is the safe
+ * miss, an eviction is not.
+ */
+async function heldElsewhere(http: HttpClient, binding: Binding, dir: string): Promise<boolean> {
+  const seat = bindingSeat(binding);
+  const here = resolveClaimWorkspace(process.env, dir);
+  try {
+    const { members } = await http.roster(binding.team);
+    const me = members.find((m) => m.name === seat);
+    if (!me) return true;
+    return me.presences.some(
+      (p) => p.status !== 'offline' && p.workspace != null && p.workspace !== here,
+    );
+  } catch {
+    return true;
+  }
+}
+
+/** Remember that this slot's one claim was spent, whatever came of it. Re-read, same id, or nothing. */
+function stampClaimAttempted(dir: string, sessionId: string): void {
+  const fresh = findBinding(dir, {});
+  if (!fresh?.session || fresh.session.id !== sessionId) return;
+  saveBinding(dir, { ...fresh, session: { ...fresh.session, claim_attempted_at: Date.now() } });
+}
+
+/** The server's two lease refusals (`missing` / `invalid, expired, or revoked agent session lease`)
+ *  — as opposed to a refused credential, a refused seat, or no daemon, none of which a claim fixes. */
+function isSessionLeaseRefusal(err: unknown): boolean {
+  return (
+    err instanceof CliError &&
+    err.code === 'unauthorized' &&
+    /agent session lease/.test(err.message)
+  );
+}
+
+/**
+ * Tell the daemon about a slot it was never told about (lane 01M159BHJK).
+ *
+ * SessionStart is not the only way a session comes to hold the workspace slot, but it was the only
+ * one that attested. The interloper gate turns a newcomer away with "no slot write AND no daemon
+ * attestation" — and a fresh session cannot satisfy that gate's activity predicate, because a
+ * transcript has no turn yet at SessionStart. The heal in {@link refreshModelObservation} then hands
+ * the slot to the session actually running, at the first tool boundary, and writes it locally with
+ * nothing sent anywhere.
+ *
+ * Measured on seat ryder 2026-08-28: a session that took the slot exactly that way ran for two
+ * hours, claimed a lane and closed one, and never appeared on the ledger at all — its digest
+ * `982f768adf12` returned zero audit rows, while the newest session the daemon knew of was a wake
+ * child that had ended 90 minutes before. The gate's note that "the slot self-corrects at the next
+ * SessionStart" is true of the slot and false of the ledger, which has no later moment to correct in.
+ *
+ * So the boundary that always happens reconciles it. Deliberately narrow:
+ *   · only an un-ended slot — a corpse is not a session to announce;
+ *   · only when `attested_at` is absent, so this is one push per session, not one per tool call;
+ *   · the stamp is written only when the push LANDED, so an unreachable daemon stays due instead of
+ *     being marked done — the failure this closes must not be re-openable by one bad minute;
+ *   · nothing here writes or steals a slot, so the interloper gate keeps deciding who holds it. A
+ *     newcomer the gate turned away has no slot, and therefore still announces nothing.
+ */
+export async function attestSlotIfUnattested(dirHint?: string): Promise<void> {
+  try {
+    const dir = dirHint ?? findWorkspaceDir();
+    if (!dir) return;
+    const binding = findBinding(dir, {});
+    const session = binding?.session;
+    if (!binding || !session) return;
+    if (session.ended_at !== undefined || session.attested_at !== undefined) return;
+    const mayClaim = session.claim_attempted_at === undefined;
+    if (!(await pushAttestation(binding, session, 'start', dir, CAPTURE_HARNESS, mayClaim))) return;
+    // Re-read: the push is awaited, and a concurrent hook may have rewritten the slot meanwhile.
+    // Stamping a slot that has since changed id would mark a DIFFERENT session as announced.
+    const fresh = findBinding(dir, {});
+    if (!fresh?.session || fresh.session.id !== session.id) return;
+    saveBinding(dir, { ...fresh, session: { ...fresh.session, attested_at: Date.now() } });
+  } catch {
+    // A tool-boundary reconciler must never fail the tool call it rides on.
+  }
+}
+
 export async function captureSession(event: 'start' | 'end', payload: HookPayload): Promise<void> {
   if (!payload.session_id) return; // no id, nothing to capture — a hook must never fail
 
   // Resolve the workspace: an explicit MUSTERD_BINDING (the harness env rides through the hook)
   // wins, else walk up from the hook-reported cwd. Bare process.cwd() is only the last resort —
   // the hook one-liner cd's to CLAUDE_PROJECT_DIR, so it agrees with `payload.cwd` anyway.
-  const explicit = process.env['MUSTERD_BINDING'];
-  const dir = explicit
-    ? dirname(dirname(explicit))
-    : findWorkspaceDir(payload.cwd ?? process.cwd());
+  const dir = resolveCaptureDir(payload);
   if (!dir) return; // not a musterd workspace — nothing to capture
 
   const binding = findBinding(dir, {});
@@ -301,7 +785,7 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
       return;
     }
     session = {
-      harness: CAPTURE_HARNESS,
+      harness: payload.harness ?? CAPTURE_HARNESS,
       id: payload.session_id,
       ...(payload.transcript_path ? { transcript_path: payload.transcript_path } : {}),
       started_at: Date.now(),
@@ -322,9 +806,10 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
   // Expect this to observe NOTHING on a fresh session: the transcript named here is the new one, and
   // it carries no assistant turn yet. `refreshModelObservation` below is what actually lands the
   // observation, at the first tool boundary — this call only catches a resumed transcript.
-  const observed = event === 'start' ? observeModelFor(CAPTURE_HARNESS, payload) : undefined;
+  const captureHarness = payload.harness ?? CAPTURE_HARNESS;
+  const observed = event === 'start' ? observeModelFor(captureHarness, payload) : undefined;
   const model_observed = observed
-    ? { model: observed, harness: CAPTURE_HARNESS, observed_at: Date.now() }
+    ? { model: observed, harness: captureHarness, observed_at: Date.now() }
     : binding.model_observed;
 
   saveBinding(dir, { ...binding, session, ...(model_observed ? { model_observed } : {}) });
@@ -348,29 +833,14 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
   // flapping from two short-lived sessions of the same seat — the question that made 48 same-seat
   // captured→ended pairs unreadable on 2026-08-05. Note the `end` branch above: a mismatched id
   // returns early, so an `ended` push always carries the digest of the capture it belongs to.
-  const seat = bindingSeat(binding);
-  if (binding.agent_key && seat) {
-    try {
-      const http = new HttpClient({
-        server: binding.server,
-        key: binding.agent_key,
-      }).presenceNeutral();
-      // The wake lease (ADR 241/252), when this process was spawned by a wake: the correlation
-      // token rides the child's env, so it is attested here exactly as the presence-touch path
-      // attests it. Never defaulted — an ordinary session has no `MUSTERD_WAKE_LEASE` and says
-      // nothing (ADR 236). This is what lets a lease that dies `lease_expired` still be known to
-      // have PAID for a session: the captured row names the lease by identity, not by timing.
-      const wakeLease = resolveAttestedWakeLease(process.env);
-      await http.attestSession(binding.team, {
-        seat,
-        harness: CAPTURE_HARNESS,
-        event,
-        session_digest: sessionDigest(binding.agent_key, session.id),
-        ...(wakeLease ? { wake_lease: wakeLease } : {}),
-      });
-    } catch {
-      // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
-    }
+  // `start` records the landing so the tool boundary knows this slot is already announced; a failed
+  // push leaves `attested_at` absent, which is what makes {@link attestSlotIfUnattested} retry.
+  if ((await pushAttestation(binding, session, event, dir)) && event === 'start') {
+    // Re-read: the push is awaited, and a concurrent writer (a slot heal, a model observation) may
+    // have rewritten the binding meanwhile. Stamping from the pre-await copy would revert it.
+    const fresh = findBinding(dir, {});
+    if (!fresh?.session || fresh.session.id !== session.id) return;
+    saveBinding(dir, { ...fresh, session: { ...fresh.session, attested_at: Date.now() } });
   }
 }
 
@@ -439,25 +909,8 @@ export async function observeCursorSession(
   }
 
   if (!same || prior?.ended_at !== undefined) {
-    const seat = bindingSeat(binding);
-    if (binding.agent_key && seat) {
-      try {
-        const http = new HttpClient({
-          server: binding.server,
-          key: binding.agent_key,
-        }).presenceNeutral();
-        const wakeLease = resolveAttestedWakeLease(process.env);
-        await http.attestSession(binding.team, {
-          seat,
-          harness: 'cursor',
-          event: 'start',
-          session_digest: sessionDigest(binding.agent_key, session.id),
-          ...(wakeLease ? { wake_lease: wakeLease } : {}),
-        });
-      } catch {
-        /* daemon unreachable — local capture stands */
-      }
-    }
+    // Best-effort like the claude-code path, refused-lease reclaim included; local capture stands.
+    await pushAttestation(binding, session, 'start', dir, 'cursor');
   }
 
   return observed && !current ? observed : undefined;
@@ -924,6 +1377,75 @@ function labelNudgeCommand(): number {
     }
   } catch {
     // hook contract: never fail, never noise
+  }
+  return 0;
+}
+
+/**
+ * The orient nudge (spec 2026-08-25-session-orientation-design.md §B) — the label-nudge pattern
+ * applied to orientation: a per-turn line that repeats until a stamp lands, because the one-shot
+ * SessionStart ask was measured to fail (see the label-nudge history above). Unlike the label
+ * sweep, orientation is a property of THIS session, not this machine, so the stamp is
+ * workspace-local and keyed by the captured session id — a new capture makes the old stamp stale
+ * and the nudge fires again.
+ */
+export const ORIENT_NUDGE_TEXT =
+  'musterd: unoriented seat session — run the musterd-orient skill now.';
+
+function orientStampPath(dir: string): string {
+  return join(dir, '.musterd', 'orient-stamp.json');
+}
+
+/** Due iff this is a seat workspace with a captured session the stamp does not name.
+ *
+ *  Known first-turn race (miley's #1072 review note): at SessionStart the nudge hook and the
+ *  capture hook are unordered — if the nudge reads first, it compares the stamp against the
+ *  PREVIOUS session's capture and can stay quiet on turn 0. Deliberately left: the per-turn
+ *  UserPromptSubmit repeat self-heals on the next prompt, which is exactly why the repeat exists
+ *  (the label-nudge lesson). The stamp key is race-free from turn 1 onward. */
+export function orientNudgeDue(dir: string | null): boolean {
+  if (!dir) return false;
+  const binding = findBinding(dir, {});
+  const sessionId = binding?.session?.id;
+  if (!binding || binding.claim?.mode !== 'seat' || sessionId === undefined) return false;
+  try {
+    const rec = JSON.parse(readFileSync(orientStampPath(dir), 'utf8')) as {
+      session_id?: unknown;
+    };
+    return rec.session_id !== sessionId; // stamped for a previous session ⇒ due again
+  } catch {
+    return true; // no stamp (or unreadable) ⇒ due
+  }
+}
+
+/** Stamp the CAPTURED session oriented (exported for tests; `orient-stamp` is the CLI face). */
+export function writeOrientStamp(dir: string | null, now = Date.now()): void {
+  const sessionId = dir ? findBinding(dir, {})?.session?.id : undefined;
+  if (!dir || sessionId === undefined) return;
+  writeFileSync(
+    orientStampPath(dir),
+    JSON.stringify({ session_id: sessionId, oriented_at: now }) + '\n',
+  );
+}
+
+/** `session orient-nudge` — hook-driven, hence silent-or-one-line and never failing. */
+function orientNudgeCommand(): number {
+  try {
+    if (process.env['MUSTERD_PROVENANCE'] === 'wake') return 0; // a wake's errand IS its orientation
+    if (orientNudgeDue(findWorkspaceDir())) process.stdout.write(`${ORIENT_NUDGE_TEXT}\n`);
+  } catch {
+    // hook contract: never fail, never noise
+  }
+  return 0;
+}
+
+/** `session orient-stamp` — the musterd-orient skill's final step. Best-effort: on any failure
+ *  the stamp is simply absent and the nudge repeats, which is the correct failure direction. */
+function orientStampCommand(): number {
+  try {
+    writeOrientStamp(findWorkspaceDir());
+  } catch {
+    // best-effort; the nudge simply repeats
   }
   return 0;
 }

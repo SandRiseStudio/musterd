@@ -26,16 +26,29 @@ describe('resolveOfflineReason — ADR 141', () => {
     ).toBe('off_hours');
   });
 
-  it('surfaces sticky disconnected / signed_off', () => {
+  it('surfaces sticky disconnected', () => {
     expect(resolveOfflineReason({ live: false, lastOfflineReason: 'disconnected' })).toBe(
       'disconnected',
-    );
-    expect(resolveOfflineReason({ live: false, lastOfflineReason: 'signed_off' })).toBe(
-      'signed_off',
     );
   });
 
   it('defaults to unknown', () => {
     expect(resolveOfflineReason({ live: false })).toBe('unknown');
+  });
+
+  it('surfaces the split deliberate-exit stamps (presence-honesty §2.3)', () => {
+    expect(resolveOfflineReason({ live: false, lastOfflineReason: 'left_team' })).toBe('left_team');
+    expect(resolveOfflineReason({ live: false, lastOfflineReason: 'seat_released' })).toBe(
+      'seat_released',
+    );
+    expect(resolveOfflineReason({ live: false, lastOfflineReason: 'session_ended' })).toBe(
+      'session_ended',
+    );
+  });
+
+  it('normalizes legacy signed_off rows to seat_released on read', () => {
+    expect(resolveOfflineReason({ live: false, lastOfflineReason: 'signed_off' })).toBe(
+      'seat_released',
+    );
   });
 });

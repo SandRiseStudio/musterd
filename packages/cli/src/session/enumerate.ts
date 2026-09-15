@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { openSync, readdirSync, readFileSync, readSync, closeSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -31,6 +32,12 @@ import { findWorkspaceDir } from '../commands/helpers.js';
  * read as "no sessions" — the wake guard's safe answer when unsure is *live* (refuse to spawn), and a
  * missing projects tree must not be laundered into permission.
  */
+
+/** A transcript untouched for this long means no live local session (the guard threshold): long
+ *  enough to protect a human who is thinking, well under the 30-minute batched-wake cooldown.
+ *  Lives here (not liveness.ts, which re-exports it) so the scanners can judge warmth without an
+ *  import cycle. */
+export const LOCAL_SESSION_LIVE_MS = 10 * 60_000;
 
 /** One session the harness has on disk for a workspace. */
 export interface SessionFile {
@@ -121,12 +128,16 @@ const MEMO_MS = 1_000;
 let memo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 let codexMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 let cursorMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
+let opencodeMemo: { at: number; rows: ScannedTranscript[] | undefined } | null = null;
+let grokMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 
 /** Drop the scan memo — tests and long-lived processes that need a guaranteed-fresh read. */
 export function resetSessionScan(): void {
   memo = null;
   codexMemo = null;
   cursorMemo = null;
+  opencodeMemo = null;
+  grokMemo = null;
 }
 
 /**
@@ -334,8 +345,153 @@ export function enumerateCursorSessions(
     cursorMemo = { root, at: now, rows: scanCursorTree(root) };
   }
   if (cursorMemo.rows === undefined) return undefined;
+  // ADR 265 amendment (2026-08-21): a transcript being written RIGHT NOW in a project Cursor has
+  // not yet stamped with `.workspace-trusted` is a live session nobody can place — possibly this
+  // workspace's. Answering "no sessions here" would launder cannot-tell into permission: the ADR
+  // 166 inspection measured agents-kimi's live desktop session demoted for the 74 minutes before
+  // the trust file appeared, and most projects on the measured machine never get the file at all.
+  // A warm orphan therefore blinds the whole scan; cold orphans stay uncounted as before (they
+  // cannot affect the live judgement, and claiming them would be the slug-decoding trap).
+  if (cursorMemo.rows.some((r) => r.workspace === null && now - r.mtime < LOCAL_SESSION_LIVE_MS)) {
+    return undefined;
+  }
   const target = resolve(workspace);
   return cursorMemo.rows
+    .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
+    .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))
+    .sort((a, b) => b.mtime - a.mtime);
+}
+
+/** The only OpenCode CLI row fields that establish resume identity, liveness, and workspace
+ *  ownership (ADR 321 §6). `title`/`projectId`/`created` are display data and never parsed. */
+const OpencodeSessionSchema = z
+  .object({
+    id: z.string().min(1),
+    updated: z.number(),
+    directory: z.string().min(1),
+  })
+  .passthrough();
+
+/**
+ * Read-only OpenCode session enumeration (ADR 321 §6): the harness's own CLI JSON surface,
+ * `opencode session list --format json`, parsed at the boundary like every other external input.
+ * The CLI — not the private storage database — is the evidence boundary (the ADR 216 rule): the
+ * schema is stable public contract, the sqlite file is neither. Attribution needs no slug
+ * decoding: each row carries its working directory outright, walked up with
+ * {@link findWorkspaceDir} like every sibling. A missing binary, a non-zero exit, or unparseable
+ * output is "cannot tell" (`undefined`), never "no sessions".
+ */
+export function enumerateOpencodeSessions(
+  workspace: string,
+  now = Date.now(),
+): SessionFile[] | undefined {
+  if (!opencodeMemo || now - opencodeMemo.at > MEMO_MS) {
+    let rows: ScannedTranscript[] | undefined;
+    try {
+      const res = spawnSync(
+        process.env['OPENCODE_BIN'] ?? 'opencode',
+        ['session', 'list', '--format', 'json'],
+        {
+          encoding: 'utf8',
+          timeout: 10_000,
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      );
+      const raw: unknown = res.status === 0 && !res.error ? JSON.parse(res.stdout) : undefined;
+      if (Array.isArray(raw)) {
+        rows = [];
+        for (const item of raw) {
+          const parsed = OpencodeSessionSchema.safeParse(item);
+          if (!parsed.success) continue;
+          rows.push({
+            id: parsed.data.id,
+            // The CLI JSON names no transcript file; liveness reads `updated` (the same signal
+            // opencode's own UI sorts by), and nothing downstream stats an opencode path.
+            path: '',
+            mtime: parsed.data.updated,
+            bytes: 0,
+            workspace: findWorkspaceDir(parsed.data.directory),
+          });
+        }
+      }
+    } catch {
+      rows = undefined; // binary absent, spawn failed, output unparseable — cannot tell
+    }
+    opencodeMemo = { at: now, rows };
+  }
+  if (opencodeMemo.rows === undefined) return undefined;
+  const target = resolve(workspace);
+  return opencodeMemo.rows
+    .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
+    .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))
+    .sort((a, b) => b.mtime - a.mtime);
+}
+
+/** The only Grok summary.json fields that establish resume identity, liveness, and workspace
+ *  ownership (ADR 352 §6). Display fields are never parsed. */
+const GrokSummarySchema = z
+  .object({
+    info: z.object({ id: z.string().min(1), cwd: z.string().min(1) }),
+    last_active_at: z.string().optional(),
+    updated_at: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * Read-only Grok CLI session enumeration (ADR 352 §6): documented files under
+ * `$GROK_HOME/sessions/<encoded-cwd>/<id>/summary.json`. `grok sessions list` has no --json.
+ * I/O failure is "cannot tell" (`undefined`), never "no sessions".
+ */
+export function enumerateGrokSessions(
+  workspace: string,
+  home = process.env['GROK_HOME'] ?? join(homedir(), '.grok'),
+  now = Date.now(),
+): SessionFile[] | undefined {
+  const root = join(home, 'sessions');
+  if (!grokMemo || grokMemo.root !== root || now - grokMemo.at > MEMO_MS) {
+    let rows: ScannedTranscript[] | undefined;
+    try {
+      const groups = readdirSync(root, { withFileTypes: true });
+      rows = [];
+      for (const group of groups) {
+        if (!group.isDirectory()) continue;
+        const groupDir = join(root, group.name);
+        let sessions: string[];
+        try {
+          sessions = readdirSync(groupDir);
+        } catch {
+          continue;
+        }
+        for (const id of sessions) {
+          const summaryPath = join(groupDir, id, 'summary.json');
+          try {
+            const parsed = GrokSummarySchema.safeParse(
+              JSON.parse(readFileSync(summaryPath, 'utf8')),
+            );
+            if (!parsed.success) continue;
+            const stamp = parsed.data.last_active_at ?? parsed.data.updated_at;
+            const mtime = stamp ? Date.parse(stamp) : 0;
+            if (!Number.isFinite(mtime)) continue;
+            rows.push({
+              id: parsed.data.info.id,
+              path: summaryPath,
+              mtime,
+              bytes: 0,
+              workspace: findWorkspaceDir(parsed.data.info.cwd),
+            });
+          } catch {
+            continue;
+          }
+        }
+      }
+    } catch {
+      rows = undefined;
+    }
+    grokMemo = { root, at: now, rows };
+  }
+  if (grokMemo.rows === undefined) return undefined;
+  const target = resolve(workspace);
+  return grokMemo.rows
     .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
     .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))
     .sort((a, b) => b.mtime - a.mtime);

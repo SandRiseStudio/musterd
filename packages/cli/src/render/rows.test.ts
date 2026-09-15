@@ -17,7 +17,7 @@ import {
   renderStatusHeader,
   renderRoster,
 } from './rows.js';
-import { dayLabel } from './theme.js';
+import { dayLabel, sinceLabel } from './theme.js';
 
 // picocolors auto-disables color when stdout is not a TTY (vitest), so output is plain & deterministic.
 
@@ -81,6 +81,39 @@ describe('dayLabel (smart inbox dates)', () => {
   });
 });
 
+describe('a huddle turn says which room it is in (ADR 378)', () => {
+  const ts = Date.UTC(2026, 8, 4, 10, 0);
+  const root = env({
+    id: 'h1',
+    from: 'nick',
+    act: 'message',
+    body: 'why we are huddling',
+    ts,
+    meta: {
+      huddle: {
+        topic: { kind: 'design', id: 'doorbells' },
+        room: 'http://127.0.0.1:4851/b/huddle-h1',
+        anchor: 'docs/wiki/huddles.md',
+      },
+    },
+  } as Partial<Envelope>);
+
+  it('marks a turn with its topic instead of rendering it as a loose team message', () => {
+    const turn = env({ id: 't1', from: 'jo', act: 'message', body: 'a turn', thread: 'h1', ts });
+    const out = renderInbox([root, turn], kindOf, { cursorTs: 0, now: ts + 1000 });
+    expect(out).toContain('in huddle design:doorbells');
+    // The recipient label is noise on a turn — the room is the address.
+    const turnLine = out.split('\n').find((l) => l.includes('in huddle')) ?? '';
+    expect(turnLine).not.toContain('team');
+  });
+
+  it('leaves an ordinary message alone', () => {
+    const plain = env({ id: 'p1', from: 'jo', act: 'message', body: 'unrelated', ts });
+    const out = renderInbox([plain], kindOf, { cursorTs: 0, now: ts + 1000 });
+    expect(out).not.toContain('in huddle');
+  });
+});
+
 describe('renderInbox (day-grouped)', () => {
   const now = new Date(2026, 6, 7, 15, 0).getTime();
   const at = (m: number, d: number, h: number) => new Date(2026, m, d, h).getTime();
@@ -119,6 +152,44 @@ describe('renderRoster', () => {
     created_at: 0,
   };
 
+  it('marks a seat that is in an open huddle, naming the topic', () => {
+    const ada: MemberSummary = {
+      ...base,
+      id: 'ada',
+      name: 'ada',
+      kind: 'agent',
+      role: '',
+      presence: 'online',
+      activity: 'active',
+      presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0 }],
+    };
+    const marks = new Map([['ada', 'lane:01KZ']]);
+
+    expect(renderRoster([ada], 0, 120, undefined, marks)).toContain('huddle lane:01KZ');
+    expect(renderRoster([ada], 0, 120)).not.toContain('huddle');
+  });
+
+  it('a seat on another machine shows its node label after the surface (presence replication)', () => {
+    const remote: MemberSummary = {
+      ...base,
+      id: 'ada',
+      name: 'ada',
+      kind: 'agent',
+      role: '',
+      presence: 'online',
+      activity: 'active',
+      presences: [
+        { surface: 'codex', status: 'online', last_seen_at: 0, node: 'nB', node_label: 'laptop-b' },
+      ],
+    };
+    expect(renderRoster([remote], 0, 120)).toContain('codex @ laptop-b');
+    const local: MemberSummary = {
+      ...remote,
+      presences: [{ surface: 'codex', status: 'online', last_seen_at: 0 }],
+    };
+    expect(renderRoster([local], 0, 120)).not.toContain('@');
+  });
+
   // ADR 135: a member whose attested build differs from the daemon gets a warn facet; matching or
   // unknown builds are silence (the roster must not turn into a wall of hashes).
   it('marks a member whose build differs from the daemon, stays silent when matching/unknown', () => {
@@ -130,7 +201,7 @@ describe('renderRoster', () => {
       kind: 'agent',
       role: '',
       presence: 'online',
-      activity: 'idle',
+      activity: 'active',
       presences: [{ surface: 'cli', status: 'online', last_seen_at: 0, build }],
     });
     // differing → warn facet with the short sha
@@ -160,7 +231,7 @@ describe('renderRoster', () => {
       kind,
       role: '',
       presence,
-      activity: 'idle',
+      activity: 'active',
       presences:
         presence === 'offline'
           ? []
@@ -192,7 +263,7 @@ describe('renderRoster', () => {
         kind: 'human',
         role: 'lead',
         presence: 'online',
-        activity: 'idle',
+        activity: 'active',
         presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
       },
       {
@@ -254,7 +325,7 @@ describe('renderRoster', () => {
       kind: 'agent',
       role: '',
       presence: 'online',
-      activity: 'idle',
+      activity: 'active',
       presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
     };
     expect(renderRoster([forever])).not.toContain('forever');
@@ -274,7 +345,7 @@ describe('renderRoster', () => {
       kind: 'agent',
       role: '',
       presence: 'online',
-      activity: 'idle',
+      activity: 'active',
       presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
     };
     const out = renderRoster([bare]);
@@ -293,7 +364,7 @@ describe('renderRoster', () => {
         kind: 'agent',
         role: 'probe',
         presence: 'online',
-        activity: 'idle',
+        activity: 'active',
         presences: [
           {
             surface: 'cli',
@@ -320,7 +391,7 @@ describe('renderRoster', () => {
         kind: 'human',
         role: 'lead',
         presence: 'online',
-        activity: 'idle',
+        activity: 'active',
         presences: [{ surface: 'cli', status: 'online', last_seen_at: 0 }],
         availability: { status: 'away', until },
       },
@@ -331,7 +402,7 @@ describe('renderRoster', () => {
         kind: 'agent',
         role: '',
         presence: 'online',
-        activity: 'idle',
+        activity: 'active',
         presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0 }],
         availability: { status: 'dnd' },
       },
@@ -670,6 +741,28 @@ describe('openActionNeeded (ADR 025 — open-vs-done axis)', () => {
     const otherDone = env({ id: 'x2', act: 'resolve', to: { kind: 'team' }, thread: 'other' });
     expect(openActionNeeded([ask, otherDone], 'nick')).toHaveLength(1);
   });
+
+  // ADR 254: an eligible-set act is discharged by whoever answers FIRST, so the discharging reply is
+  // a DM to the asker that a second eligible seat never sees. The inbox row already says "answered by
+  // X — you no longer owe this"; the count has to agree, or the chip contradicts the row it summarises.
+  it('drops an eligible-set act another seat already discharged', () => {
+    const help = env({ id: 'h1', act: 'request_help', from: 'Ada', to: { kind: 'team' } });
+    expect(openActionNeeded([help], 'nick')).toHaveLength(1);
+    expect(openActionNeeded([help], 'nick', [], ['h1'])).toHaveLength(0);
+  });
+
+  it('discharges only the act named, and is independent of `answered`', () => {
+    const mine = env({ id: 'h1', act: 'request_help', to: { kind: 'team' } });
+    const other = env({ id: 'h2', act: 'request_help', to: { kind: 'team' } });
+    expect(openActionNeeded([mine, other], 'nick', [], ['h2'])).toEqual([mine]);
+    // `answered` (my own reply) and `discharged` (someone else's) both close, and neither needs the other
+    expect(openActionNeeded([mine, other], 'nick', ['h1'], ['h2'])).toHaveLength(0);
+  });
+
+  it('omitted `discharged` is exactly the previous behaviour', () => {
+    const help = env({ id: 'h1', act: 'request_help', to: { kind: 'team' } });
+    expect(openActionNeeded([help], 'nick', [])).toHaveLength(1);
+  });
 });
 
 describe('renderPendingSummary (ADR 024 — comeback summary)', () => {
@@ -687,9 +780,15 @@ describe('renderPendingSummary (ADR 024 — comeback summary)', () => {
   });
 
   it('pluralizes and shows the since-time for several', () => {
-    const out = renderPendingSummary(3, since);
+    const out = renderPendingSummary(3, since, since + 60_000);
     expect(out).toContain('3 requests waiting for you');
     expect(out).toMatch(/since \d\d:\d\d/); // local HH:MM — timezone-robust
+  });
+
+  it('dates the since-time once it is older than today (a bare clock read as "today" for 15 days)', () => {
+    const fifteenDaysLater = since + 15 * 86_400_000;
+    const out = renderPendingSummary(3, since, fifteenDaysLater);
+    expect(out).toMatch(/since Jun \d+ \d\d:\d\d/);
   });
 });
 
@@ -708,9 +807,28 @@ describe('renderReachabilityNudge (ADR 046 — agent-side reachability)', () => 
   });
 
   it('pluralizes and shows the since-time for several', () => {
-    const out = renderReachabilityNudge(3, since, 'David');
+    const out = renderReachabilityNudge(3, since, 'David', since + 60_000);
     expect(out).toContain('3 acts waiting for David');
     expect(out).toMatch(/since \d\d:\d\d/); // local HH:MM — timezone-robust
+  });
+
+  it('dates the since-time once it is older than today', () => {
+    const out = renderReachabilityNudge(3, since, 'David', since + 2 * 86_400_000);
+    expect(out).toMatch(
+      /since (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) · Jun \d+ \d\d:\d\d/,
+    );
+  });
+});
+
+describe('sinceLabel (a clock with a date once it is not today)', () => {
+  const at = (y: number, mo: number, d: number, h = 9, mi = 5) =>
+    new Date(y, mo - 1, d, h, mi).getTime();
+  it('is the bare clock on the same local day', () => {
+    expect(sinceLabel(at(2026, 8, 19, 15, 18), at(2026, 8, 19, 23))).toBe('15:18');
+  });
+  it('carries the day label once it is not today', () => {
+    expect(sinceLabel(at(2026, 8, 19, 15, 18), at(2026, 8, 20, 9))).toBe('Yesterday 15:18');
+    expect(sinceLabel(at(2026, 8, 19, 15, 18), at(2026, 9, 3, 9))).toBe('Aug 19 15:18');
   });
 });
 
@@ -800,13 +918,38 @@ describe('renderMessageRow with an eligible set (ADR 254)', () => {
   });
 
   it('says who took it, and that the reader is off the hook', () => {
-    const out = renderMessageRow(asked, kindOf, { dischargedBy: 'izzo' });
+    const out = renderMessageRow(asked, kindOf, { discharge: { by: 'izzo', reason: 'answered' } });
     expect(out).toContain('answered by izzo');
     expect(out).toContain('no longer owe');
   });
 
   it('stays silent while the act is still owed', () => {
     expect(renderMessageRow(asked, kindOf)).not.toContain('answered by');
+  });
+
+  /**
+   * Doorbell clause 7 shapes (ii) and (iv). Neither has an answering seat — the lane simply closed,
+   * or the reader was already shown the act — so the trace must say what happened and never borrow
+   * an answerer. A line reading "answered by" on a lane nobody answered would be a false statement
+   * about a teammate, which is worse than the overcount it replaced.
+   */
+  it('names the lane closing, and invents no answerer', () => {
+    const out = renderMessageRow(asked, kindOf, { discharge: { reason: 'lane_closed' } });
+    expect(out).toContain('the lane closed');
+    expect(out).toContain('no longer owe');
+    expect(out).not.toContain('answered by');
+  });
+
+  it('names the read, and invents no answerer', () => {
+    const out = renderMessageRow(asked, kindOf, { discharge: { reason: 'read' } });
+    expect(out).toContain('already been shown');
+    expect(out).not.toContain('answered by');
+  });
+
+  it('degrades to the pre-clause-7 sentence on an older daemon, which sends a `by` and no reason', () => {
+    expect(renderMessageRow(asked, kindOf, { discharge: { by: 'izzo' } })).toContain(
+      'answered by izzo',
+    );
   });
 
   it('regression: a plain team act still reads @team', () => {
@@ -823,7 +966,7 @@ describe('renderMessageRow with an eligible set (ADR 254)', () => {
     const other = env({ id: 'other', body: 'unrelated', meta: null });
     const out = renderInbox([asked, other], kindOf, {
       cursorTs: 0,
-      discharged: new Map([['el-1', 'izzo']]),
+      discharged: new Map([['el-1', { by: 'izzo', reason: 'answered' as const }]]),
       now: Date.UTC(2026, 5, 9, 15, 0),
     });
     expect(out).toContain('answered by izzo');

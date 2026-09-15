@@ -96,10 +96,22 @@ decision is the record of what was decided, not a place to record what happened 
 - **Put follow-up notes in `## Consequences`, never in `## Decision`.** A dated "completed / scope
   limit / superseded by" note belongs there — it constrains how the Decision is read without
   rewriting it.
-- **Never run Prettier on `docs/`.** `format:check` covers `packages/**/*.ts`, `tests/**` and the
-  root only, so `docs/` is deliberately not format-gated — and `prettier --write` on an ADR will
-  happily restyle a frozen section (`*x*` → `_x_`) and fail the gate on a change nobody meant to
-  make. Format the files your change actually touches, and leave ADR prose alone.
+- **To mark superseded text where a reader will meet it, add a dated marker and change nothing
+  else** — `_(Amended YYYY-MM-DD: … See the amendment below.)_`, or ADR 160's blockquote form
+  `> **Amended YYYY-MM-DD.** …`. The note goes in `## Consequences`; the marker is the pointer to
+  it, for the reader who opens Decision 2, reads it, and stops. Append-only is **checked, not
+  trusted**: `change-adr:check` strips the markers and requires the remaining words to match the
+  old Decision exactly, so a reworded sentence, a deleted clause, an undated marker, or ordinary
+  new prose all still fail (`isAppendOnlyAmendment` in `scripts/adr-sections.ts`). This exists
+  because the convention was already in use at ADR 160:48/:90 and ADR 250:67 and became unwritable
+  when the gate's status regex was widened — see [amending an ADR](../wiki/amending-an-adr.md).
+- **Prettier cannot reach `docs/`, and you no longer have to remember that** (ADR 284). `pnpm format`
+  and `pnpm format:check` both read one list — `FORMAT_GLOBS` in `scripts/format-scope.ts` — so the
+  writer's scope and the gate's scope are equal by construction; `.prettierignore` carries `docs/`
+  as a backstop for invocations that list cannot see (a bare `npx prettier --write .`, format-on-save).
+  Until 2026-08-19 this was discipline only, and `pnpm format` rewrote **214 files** no gate checked.
+  The reason the exclusion stands: `prettier --write` on an ADR will restyle a frozen section
+  (`*x*` → `_x_`), and a reflow rewrites `git blame` for arguments nobody was editing.
 
 Template:
 
@@ -146,7 +158,7 @@ A task/milestone is done only when **all** are true:
 
 ## Naming
 
-- Terminology: only the glossary terms (`brand.md` §5) — Team, Member, Presence, Surface, Act — for the concepts they name, in identifiers and prose. No synonyms (`room`, `user`, `session`-for-member, `event`-for-act).
+- Terminology: the glossary in `brand.md` §5 / `docs/glossary/terms.ts` (ADR 296). The original five (Team, Member, Presence, Surface, Act) stay; the load-bearing set also includes agent (kind/hook), member (noun), seat (durability), role, toolkit (not `profile`), workspace, harness, driver, scope (not lane-surface), permissions, capability. No synonyms. Enforced by `pnpm vocab:check` (ADR 098 work-item table on ADRs ≥ 098; ADR 296 terminology table on ADRs ≥ 300 and new user-facing files).
 - Files: kebab-case. Types/interfaces: PascalCase. Functions/vars: camelCase. Constants: SCREAMING_SNAKE for true constants (`HEARTBEAT_INTERVAL_MS`).
 - Package names: `@musterd/protocol`, `@musterd/server`, `@musterd/mcp`, `@musterd/cli`. The CLI keeps the bin name `musterd`; its package is scoped because unscoped `musterd` is blocked on npm (ADR 009).
 - **Work-item vocabulary (ADR 098).** Entities: **Goal**, **Lane** (the only code-backed work-item nouns). Field: `wave` (a Goal's shelf marker — `'later'` or unset; ADR 257 retired the numeric rank, and ordering is now derived from dependencies, status and recency). Generic: **work item** (lane-or-thread), **thread**. Sanctioned prose units: **Phase / P-N** (release arc), **increment N** (per-ADR cut, numbered within a named arc), **Task N** (plan-doc step headings only). Banned as structural tiers: `epic`, `milestone`, `sprint`, `story points`, and feature/task-as-tiers. Enforced on new docs (ADRs ≥ 098, plans ≥ 2026-07-06, new design docs) by `pnpm vocab:check` in the `format:check` chain; mention-not-use via backticks, deliberate use via `<!-- vocab:ok -->`.

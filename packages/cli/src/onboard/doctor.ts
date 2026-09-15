@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
-import { resolveWorkspace } from '@musterd/mcp';
 import {
   GUIDANCE_CONTENT_VERSION,
   bindingSeat,
@@ -10,9 +9,12 @@ import {
   TOKEN_PREFIXES,
   type Binding,
 } from '@musterd/protocol';
-import { HttpClient } from '../client.js';
+import { resolveWorkspace } from '@musterd/protocol/project';
+import { HttpClient, isSessionLeaseRefusal } from '../client.js';
+import { recoverAgentKey } from '../commands/team.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
-import { findBinding, findWorkspaceSpec, loadConfig } from '../config.js';
+import { type Config, findBinding, loadBinding, loadConfig, readBindingAt } from '../config.js';
+import { CliError } from '../errors.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
@@ -23,9 +25,11 @@ import { contentHash, establishedHarnesses, guidanceTargets, strippedBody } from
 import type { Harness } from './harness.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
 import { HARNESSES } from './harnesses/index.js';
-import { readProvisionManifest } from './manifest.js';
+import { loadProvisioning, readProvisionManifest } from './manifest.js';
 import { inspectSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget } from './primer.js';
+import { defaultHarnessContext } from './reconcile/context.js';
+import { inspectHarnesses, type FragmentInspection } from './reconcile/engine.js';
 
 /**
  * `musterd init --check` — provisioning drift detector (ADR 060). A read-only checker, never a
@@ -99,9 +103,30 @@ export interface DoctorReport {
 function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; notes: string[] } {
   const drift: string[] = [];
   const notes: string[] = [];
-  const recorded = readProvisionManifest(cwd)?.guidance;
-  if (!recorded) return { drift, notes }; // pre-085 / never written — nothing claimed, nothing to check
-  const wasRecorded = new Set(recorded.files);
+  // "Was this folder provisioned at all?" is the only gate here, and it must be asked of EVERY
+  // manifest version. Asking it of the v1 reader alone is what silently disabled this whole check
+  // (measured 2026-08-31): `readProvisionManifest` parses `version: z.literal(1)`, so once ADR 281
+  // moved the file to v2 and ADR 282 to v3, every provisioned worktree answered null and the
+  // function returned before reading a stamp. Seven seat workspaces sat at guidance v18 against a
+  // build writing v20 with `init --check` reporting nothing — the instrument was off, so the
+  // repair was never prescribed and nobody could have known. The early return's premise ("no
+  // record ⇒ pre-085, never written") was true under one manifest version and false the moment
+  // there were two.
+  const v1 = readProvisionManifest(cwd)?.guidance;
+  //
+  // Ask it of the FILE, not of today's parsers. `kind !== 'missing'` and not a list of the versions
+  // that happen to exist — dolly's REQUIRED on this PR, and she was right: keying on `valid |
+  // legacy` re-armed this very trap one version ahead, since `WorktreeProvisioningSchema` pins v3
+  // and the legacy recognizer accepts exactly v2 and v1, so a future v4 manifest classifies
+  // `invalid` and the check goes quiet again. A present `provisioned.json` is the evidence, whatever
+  // shape it is in. `invalid` counting as provisioned is the conservative direction on purpose: a
+  // corrupt or future manifest gets its drift REPORTED, never silenced.
+  const provisioned = v1 !== undefined || loadProvisioning(cwd).kind !== 'missing';
+  if (!provisioned) return { drift, notes }; // never provisioned — nothing claimed, nothing to check
+  // Only the v1 manifest recorded file paths; v2/v3 record fragment resource keys instead. Without
+  // it the missing-file line loses the "was recorded, now gone" vs "never arrived" distinction and
+  // says the latter — a wording degradation, and both prescribe the same repair.
+  const wasRecorded = new Set(v1?.files ?? []);
   // Stale files are counted, not listed: one version bump used to emit one line PER FILE — six
   // identical-in-substance lines for a single fact on a real seat. ADR 168 pre-registered "becomes
   // noise" as a failure mode of its own instrument; ADR 171 §2 pays that debt. The remedy is
@@ -224,6 +249,77 @@ async function inspectModelAttestation(binding: Binding | null): Promise<string[
       `diversity conclusions on its chains become unverifiable (ADR 120). Set MUSTERD_MODEL (or ` +
       `let the harness env carry ANTHROPIC_MODEL) and reconnect to attest.`,
   ];
+}
+
+/**
+ * The dead hook lease (lane 01M2H0GHMK): this folder's binding carries a session lease the daemon
+ * refuses, while the seat holds a live adapter Presence here — so the interrupt line is deaf on
+ * every hook probe while status, waiting, reads and the roster all look healthy. Ordinary commands
+ * self-heal through the one-shot reclaim and the probe deliberately does not (anti-storm), which
+ * is why the seat reads fine everywhere except the one surface that cannot heal. The probe is the
+ * only channel that reports it, and it reports it on the channel being refused.
+ *
+ * Best-effort + read-only like the checks above, and a **note**, never drift: silent when the
+ * folder has no seat binding, carries no lease on disk (ambient and CLI-human steady state stay
+ * quiet — their leases die between commands by design), holds no live Presence here (an offline
+ * seat owes no bell), the lease still answers, the server is unreachable, or the refusal is not
+ * a lease refusal (a bad credential or wrong seat is nobody's hook problem).
+ *
+ * The repair it names is the adapter rejoin, never `musterd claim` — a one-shot mint dies with
+ * its command (the deaf line says so, measured). Harness-neutral on purpose: the deferral
+ * round-trip differs per harness and the probe's own line already names it hook-keyed.
+ */
+async function inspectDeadHookLease(binding: Binding | null): Promise<string[]> {
+  if (!binding?.server || !binding.team) return [];
+  const seat = bindingSeat(binding);
+  const credential = binding?.seat_credential ?? binding?.agent_key;
+  if (!seat || !credential || !binding.session_lease) return [];
+  const workspace = resolveWorkspace();
+  let members;
+  try {
+    ({ members } = await new HttpClient({ server: binding.server }).roster(binding.team));
+  } catch {
+    return [];
+  }
+  const liveHere = (members.find((m) => m.name === seat)?.presences ?? []).filter(
+    (p) => p.status !== 'offline' && (p.workspace === workspace || p.workspace == null),
+  );
+  if (liveHere.length === 0) return [];
+  // The seat is live here under a different authority (the adapter socket). Ask whether THIS
+  // folder's lease — the one every hook presents — is still good: one read-only probe call with
+  // the heals off, exactly as the hook runs it.
+  try {
+    await new HttpClient({
+      server: binding.server,
+      team: binding.team,
+      workspace,
+      key: credential,
+      seat,
+      ...(credential === binding.seat_credential && binding.session_lease !== undefined
+        ? { sessionLease: binding.session_lease }
+        : {}),
+      surface: 'cli',
+      claimSeatPerRequest: false,
+    }).interruptCheck(binding.team);
+    return [];
+  } catch (err) {
+    if (
+      !(err instanceof CliError) ||
+      !isSessionLeaseRefusal({
+        code: typeof err.code === 'string' ? err.code : '',
+        message: err.message,
+      })
+    ) {
+      return [];
+    }
+    return [
+      `seat "${seat}" holds a live adapter Presence here but this folder's session lease is dead ` +
+        `— the interrupt line is deaf on every hook probe while status, waiting and reads all ` +
+        `look healthy. Read and re-join from THIS folder's harness adapter (team_join, in the ` +
+        `session that owns this folder) — never from another folder, whose claim would displace ` +
+        `this Presence; \`musterd claim\` mints a lease that dies with the command.`,
+    ];
+  }
 }
 
 /**
@@ -366,7 +462,7 @@ async function inspectSeatIdentity(
       i.key !== config.agentKeys[binding.team],
   );
   const repair = held
-    ? `\`musterd join ${binding.team} --as ${seat}\` here — this machine already holds their ` +
+    ? `\`musterd claim ${seat} --team ${binding.team}\` here — this machine already holds their ` +
       `credential, so this rebinds the folder with nothing to paste`
     : `\`musterd team credential ${seat}\` here — this machine holds no credential for them, so it ` +
       `must be re-issued (their previous one stops working), and running it in this folder repairs ` +
@@ -391,17 +487,157 @@ function harnessLabelWireConfigures(surface: string | undefined): string {
   return harnessWiredFor(surface).label;
 }
 
-export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
+/**
+ * What a reconciler would actually DO to one harness's musterd MCP entry — READ from the engine's
+ * plan (`inspectHarnesses`, the same classification `musterd harness status` prints) rather than
+ * inferred from the desired set.
+ *
+ * The inference is what shipped a two-command loop. #1368 branched on desired-vs-not and called
+ * that the axis; miley measured the third state on `agents-miley` (2026-09-06): Cursor IS desired,
+ * both its fragments report `✗ drifted — evidence retained`, and `harness configure --select cursor
+ * --yes` and `musterd wire` each print `cursor ✗ conflict` twice, write nothing, and leave the
+ * doctor pointing at the other one. Desire is necessary for a reconciler to act and nowhere near
+ * sufficient: `classifyFragment` plans `none` for `unmanaged-conflict` (no ledger evidence — not
+ * musterd's to overwrite) and for `owned-drifted` (evidence retained, never overwritten), and BOTH
+ * reconcilers ride that same matrix. The real axis is whether the fragment is MANAGED.
+ *
+ * `'legacy-marker'` stays its own answer because it is the one state where a reconciler genuinely
+ * does write: `harness configure` is the sole caller passing `legacyRepair: true`, which turns
+ * `repair-needed` into the marker swap.
+ */
+export type EntryPlan =
+  /** No plan could be read here — say nothing a plan would have to back. */
+  | 'unknown'
+  /** A reconciler will write this entry (`create` / `add-owner`). */
+  | 'reconcilable'
+  /** `harness configure` repairs the retired marker; nothing else does (ADR 286). */
+  | 'legacy-marker'
+  /** Present but in no ledger: musterd will not overwrite what it does not own. */
+  | 'unreachable-unmanaged'
+  /** Ledger-owned but hand-edited since: evidence is retained, never overwritten. */
+  | 'unreachable-drifted';
+
+/** Does this plan mean NO reconciler writes, whatever the reader runs? */
+function entryPlanIsUnreachable(plan: EntryPlan): boolean {
+  return plan === 'unreachable-unmanaged' || plan === 'unreachable-drifted';
+}
+
+/** The engine's verdict on one `mcp.musterd` fragment, in the doctor's vocabulary. */
+function entryPlanOf(f: FragmentInspection | undefined): EntryPlan {
+  if (f === undefined) return 'unknown';
+  if (f.planned === 'repair-needed') return 'legacy-marker';
+  if (f.planned === 'conflict')
+    return f.observation === 'owned-drifted' ? 'unreachable-drifted' : 'unreachable-unmanaged';
+  if (f.plan === 'create' || f.plan === 'add-owner') return 'reconcilable';
+  // `unchanged`, `satisfied-unmanaged`, a held lock, a pending journal, an unreadable container:
+  // each has its own line elsewhere, and none is evidence about reachability. Stay quiet.
+  return 'unknown';
+}
+
+/**
+ * Plan every harness's ENTRY fragment for this folder. Read-only (ADR 282: `inspectHarnesses` takes
+ * no mutation lease and saves no files), and it must CLASSIFY rather than throw — a doctor that
+ * crashes on an unreadable container is worse than one that degrades to the old wording, so every
+ * failure lands on `'unknown'`, which asserts nothing.
+ */
+async function planEntries(
+  cwd: string,
+  desired: readonly string[],
+  team: string,
+): Promise<Map<string, EntryPlan>> {
+  const plans = new Map<string, EntryPlan>();
+  if (desired.length === 0) return plans;
+  try {
+    const ctx = defaultHarnessContext(cwd, process.env, { team });
+    for (const h of await inspectHarnesses(ctx, desired)) {
+      plans.set(h.harness, entryPlanOf(h.fragments.find((f) => f.fragmentKey === 'mcp.musterd')));
+    }
+  } catch {
+    return new Map();
+  }
+  return plans;
+}
+
+export async function inspectProvisioning(
+  cwd: string,
+  deps?: {
+    /**
+     * Per-harness ENTRY plans, injected. Tests pin the prescription for a state without having to
+     * build the physical fragment that produces it; production reads the real plan (`planEntries`).
+     */
+    entryPlans?: ReadonlyMap<string, EntryPlan>;
+  },
+): Promise<DoctorReport> {
   const primerManaged = classifyPrimerTarget(cwd) === 'managed';
-  // The folder's single source of truth for which seat it claims (ADR 018). A legacy MCP registration
-  // may still carry a baked `MUSTERD_CLAIM` that outranks it — the value-coherence check below.
-  const binding = findBinding(cwd);
-  const boundClaim = binding?.claim ? formatClaimPolicy(binding.claim) : undefined;
-  // Which harness `wire` would reach here follows the folder's DECLARED surface — the committed spec
-  // first (what wire itself reads), then the gitignored binding for a folder wired before the spec
-  // existed. Undefined degrades to the default, exactly as wire does.
-  const declaredSurface = findWorkspaceSpec(cwd)?.surface ?? binding?.surface;
   const drift: string[] = [];
+  // The folder's single source of truth for which seat it claims (ADR 018). Read-only diagnosis
+  // must CLASSIFY rather than throw (ADR 282): a pre-281 or unreadable identity is drift with the
+  // configure prescription, never a crash — the doctor is exactly where the human learns this.
+  const bindingLoad = loadBinding(cwd);
+  const binding = bindingLoad.kind === 'valid' ? bindingLoad.value : null;
+  if (bindingLoad.kind === 'legacy') {
+    drift.push(
+      'this worktree is pre-ADR-281 (its .musterd/binding.json still carries `surface` and no ' +
+        '`version`) — its identity no longer loads anywhere. Run `musterd harness configure` here ' +
+        'to confirm the desired harness set and convert it.',
+    );
+  } else if (bindingLoad.kind === 'invalid') {
+    drift.push(
+      '.musterd/binding.json exists but is not a readable v2 binding — this workspace has no ' +
+        'usable identity until it is repaired or re-provisioned (`musterd init`).',
+    );
+  }
+  // Selection drift (ADR 281): the v2 manifest is the record of the desired harness set.
+  const provisioning = loadProvisioning(cwd);
+  if (provisioning.kind === 'legacy') {
+    // Say the version this file ACTUALLY carries, read off the value `loadProvisioning` already
+    // hands back. `legacy` is a CLASSIFICATION, not a version — its predicate accepts both the v2
+    // shape and the v1 one — so a hardcoded number is a promise the classifier does not make. It
+    // was hardcoded to 1, and ryder's v2 worktree was told it was version 1 (2026-09-14, found by
+    // running the prescription rather than reading it). The "single-harness era" gloss went with
+    // it: true of v1, false of v2. Same shape as `recorded-not-routed` — the surface asserting a
+    // value it had modelled instead of the one it had just read.
+    const version = (provisioning.value as { version?: unknown } | null)?.version;
+    const named =
+      typeof version === 'number'
+        ? `version ${version}${version === 1 ? ' (single-harness era)' : ''}`
+        : 'a pre-v3 shape';
+    drift.push(
+      `this folder's provisioning manifest is ${named} — run \`musterd ` +
+        'harness configure` to choose and convert the harness set; until then `musterd wire` exits 6.',
+    );
+  } else if (provisioning.kind === 'invalid') {
+    drift.push(
+      '.musterd/provisioned.json exists but is unreadable — re-run `musterd harness configure` to ' +
+        'rewrite the selection.',
+    );
+  }
+  const boundClaim = binding?.claim ? formatClaimPolicy(binding.claim) : undefined;
+  // Which harness `wire` would reach here follows the folder's PROVISIONED harness — identity no
+  // longer declares a surface (ADR 281); the v1 manifest's harness (pre-conversion) or the first
+  // selected external (v2) records the choice. Undefined degrades to the default, exactly as wire
+  // did historically.
+  const declaredSurface =
+    provisioning.kind === 'valid'
+      ? provisioning.value.desired.find((id) => id !== 'musterd')
+      : readProvisionManifest(cwd)?.harness;
+  // The WHOLE desired set, not just the first of it. `declaredSurface` above answers "which entry
+  // does wire rewrite here", which is a narrower question than "does this workspace want this
+  // harness at all" — and conflating them is what shipped a no-op prescription in #1363. A baked
+  // key on a harness NOBODY selected is an ORPHAN: reconciliation only touches fragments of desired
+  // harnesses, and a pre-ADR-281 entry was never in the ownership ledger either, so there is
+  // nothing to repair and nothing to release. Measured 2026-09-06 (lane 01M1VFV8EK): `harness
+  // configure --select claude-code --yes` left an unselected Cursor entry byte-identical.
+  const desiredHarnesses =
+    provisioning.kind === 'valid'
+      ? provisioning.value.desired
+      : ((m) => (m?.harness ? [m.harness] : []))(readProvisionManifest(cwd));
+  const harnessIsDesired = (id: string) => desiredHarnesses.includes(id);
+  // What a reconciler would ACTUALLY do to each entry, asked rather than inferred. `wire.ts` has
+  // carried the note that this predicate belongs on `inspectHarnesses` since ADR 281; inferring it
+  // is what let the doctor prescribe a reconciler that plans nothing (see `EntryPlan`).
+  const entryPlans =
+    deps?.entryPlans ?? (await planEntries(cwd, desiredHarnesses, binding?.team ?? ''));
   // Entry drift: the shared harness entry disagrees with this folder's binding.json. Tracked
   // separately from `drift` so `--fix` can route it to `musterd wire` (headless, whole-family)
   // instead of `musterd init` (mints a member, trips the bound guard, steals the shared slot).
@@ -423,24 +659,84 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // lives in a machine-global config `configure` never writes (`registeredElsewhere`). The second
     // is the quieter failure: everything looks repairable, `wire` runs, rewrites the project file,
     // and reports success with the drift untouched.
+    // Three ways a repair fails to reach the drift now, not two. The third outranks both: the
+    // engine may plan NOTHING for this fragment, in which case it does not matter which command
+    // owns which file — no command writes. Folded in here so every `wireRepairs ? … : …` in this
+    // loop inherits it, and so `--fix` never routes at a reconciler that will exit 0 unchanged.
+    const entryPlan = entryPlans.get(h.id) ?? 'unknown';
     const wireRepairs =
-      wireConfigures(h.id, declaredSurface) && d.registeredElsewhere === undefined;
+      wireConfigures(h.id, declaredSurface) &&
+      d.registeredElsewhere === undefined &&
+      !entryPlanIsUnreachable(entryPlan);
+    // ORPHAN first: a harness nobody selected here owns no fragment, so every repair that works by
+    // reconciling one is a no-op. Ordered ahead of the `registeredElsewhere` and declared-surface
+    // branches because it is the more fundamental fact — those two answer "which file / which
+    // harness does a repair reach", and this one answers "is there anything here to repair at all".
+    // Requires POSITIVE knowledge of the desired set. An unreadable or absent manifest yields an
+    // empty list, and "not in an empty set" is not evidence of anything — saying "X is NOT in this
+    // workspace's desired set" there would state as fact something the doctor cannot see, and send
+    // the reader to delete an entry that may be the only thing wiring them up. Absence of the
+    // record is not absence of the desire.
+    const orphanEntry = desiredHarnesses.length > 0 && !harnessIsDesired(h.id);
+    // No reconciler will write this entry, so name neither of them as the repair for it AS IT
+    // STANDS. Verified end to end on a throwaway worktree, 2026-09-14: with an unmanaged
+    // `.cursor/mcp.json` entry baking MUSTERD_AUTOJOIN, `harness configure --select cursor --yes`
+    // and `wire` each printed `cursor ✗ conflict` for mcp.musterd and left the file byte-identical
+    // (same md5), and `init` did not rewrite it either. Deleting the WHOLE entry and re-running
+    // `wire` gave `(create) ✓ applied` and `mcp.musterd ✓ in place` — absent is the one observation
+    // that plans `create`, which is why the repair is deletion-then-wire and not an in-place edit. This is the state that sent
+    // miley round a two-command loop: `harness configure` and `wire` both print `✗ conflict` and
+    // change nothing, and the doctor's text pointed at whichever one the reader had not just run.
+    // The hand edit is not a workaround here — it is the repair, and it is what returns the entry
+    // to a shape the reconcilers own again.
+    const unreachableEntry = entryPlanIsUnreachable(entryPlan);
     const repairWith = wireRepairs
       ? 'Run `musterd wire` here to rewrite the entry without it'
-      : d.registeredElsewhere !== undefined
-        ? `this entry lives in ${d.registeredElsewhere}, which musterd does not write — it writes ` +
-          `the project file, so no command run in this folder rewrites it. Edit that file directly, ` +
-          `and check what else depends on it first: a machine-global entry is how other seats on ` +
-          `this machine may be launching`
-        : `\`musterd wire\` does not rewrite ${h.label}'s entry here — this folder is provisioned for ` +
-          `${harnessLabelWireConfigures(declaredSurface)}, so that is the entry it rewrites. ` +
-          `Re-provision this folder with \`musterd init\` and pick ${h.label}, or drop the line from ` +
-          `${h.label}'s own entry file by hand`;
+      : unreachableEntry
+        ? `no reconciler will rewrite this entry: \`musterd harness status\` classifies it ` +
+          (entryPlan === 'unreachable-drifted'
+            ? '`✗ drifted — evidence retained` (musterd owns it but it has been edited since, and ' +
+              'the engine never overwrites evidence it did not write)'
+            : "`✗ conflict — not musterd's to overwrite` (it is in no ownership ledger, so the " +
+              'engine leaves it alone)') +
+          `, so \`musterd harness configure\`, \`musterd wire\` and \`musterd init\` all plan ` +
+          `\`none\` for it — each exits having changed nothing, whichever you run, and running one ` +
+          `after the other just alternates the two ✗ lines. Repair it in ` +
+          `${d.registeredElsewhere ?? `${h.label}'s project-local config for this workspace`}: ` +
+          `delete musterd's WHOLE entry there by hand, then run \`musterd wire\` here — an ABSENT ` +
+          `fragment is the one state the engine plans for, so it recreates the entry from ` +
+          `.musterd/binding.json, owned and without the baked key. Deleting just the key this line ` +
+          `names clears this line too, but leaves the entry unmanaged and the next drift in the ` +
+          `same dead end`
+        : orphanEntry
+          ? `${h.label} is NOT in this workspace's desired harness set (check with \`musterd harness ` +
+            `status\`), so nothing here manages that entry: \`musterd harness configure\` and ` +
+            `\`musterd wire\` both skip it, and a repair that reconciles fragments has none to ` +
+            `reconcile. Remove musterd's entry from ${d.registeredElsewhere ?? `the config ${h.label} reads for this workspace (a PROJECT-LOCAL file — not the machine-global one, which may have no musterd server at all)`} ` +
+            `— the whole entry, not one line, since musterd is not meant to launch through ` +
+            `${h.label} here. Or add ${h.label} with \`musterd harness configure\` if it SHOULD launch ` +
+            `this workspace, which converts the entry instead of deleting it`
+          : d.registeredElsewhere !== undefined
+            ? `this entry lives in ${d.registeredElsewhere}, which musterd does not write — it writes ` +
+              `the project file, so no command run in this folder rewrites it. Edit that file directly, ` +
+              `and check what else depends on it first: a machine-global entry is how other seats on ` +
+              `this machine may be launching`
+            : `\`musterd wire\` does not rewrite ${h.label}'s entry here — this folder is provisioned for ` +
+              `${harnessLabelWireConfigures(declaredSurface)}, so that is the entry it rewrites. ` +
+              `Re-provision this folder with \`musterd init\` and pick ${h.label}, or drop the line from ` +
+              `${h.label}'s own entry file by hand`;
     // Record entry drift AND whether `wire` could repair this particular one, so the `repair`
     // classification below never routes `--fix` at a command that cannot touch the drift it found.
     const noteEntryDrift = (text: string) => {
       entryDrift.push(text);
       if (wireRepairs) anyWireRepairable = true;
+    };
+    // A retired MUSTERD_SURFACE is drift that `wire` provably CANNOT repair (it passes
+    // `legacyRepair: false`), so it must never contribute to `anyWireRepairable` — otherwise `--fix`
+    // runs wire, wire reports success on everything it does own, and the marker is still there.
+    // Same list, different repair owner: `musterd harness configure`.
+    const noteEntryDriftWireCannotFix = (text: string) => {
+      entryDrift.push(text);
     };
     if (h.id === 'claude-code' && d.configured) claudeConfigured = true;
     harnesses.push({
@@ -449,10 +745,23 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       configured: d.configured,
       ...(d.detail !== undefined ? { detail: d.detail } : {}),
     });
-    for (const hookDrift of d.hookDrift ?? []) {
-      drift.push(
-        `${h.label}: ${hookDrift} — run \`musterd wire\` to install the marker-owned hooks.`,
-      );
+    // Hook drift only counts for a harness this folder actually runs musterd through. Unlike
+    // Claude Code's equivalent below — which has always been gated on `claudeConfigured` — this
+    // loop was ungated, so it demanded musterd's Codex hooks from every folder on a machine that
+    // merely has `~/.codex` present. Measured on nick's `cli` seat (2026-08-14): no `.codex/` in
+    // the folder, no `[mcp_servers.musterd]` in the Codex config, and a permanent drift line it
+    // had no way to clear. Drift a folder cannot clear is noise, and noise is how a report stops
+    // being read — the same failure ADR 171 §2 paid down for guidance drift.
+    if (d.configured) {
+      for (const hookDrift of d.hookDrift ?? []) {
+        // `musterd wire` only registers the MCP server from .musterd/workspace.json — it never
+        // calls a harness's hook installer, so it exited 0 having changed nothing and left this
+        // line standing (observed 2026-08-14). `--refresh-hooks` is the repair that actually runs
+        // them, and is the one ADR 168 sanctions in a live seat's workspace.
+        drift.push(
+          `${h.label}: ${hookDrift} — run \`musterd init --refresh-hooks\` to install the marker-owned hooks.`,
+        );
+      }
     }
     // Value-coherence: a legacy baked MUSTERD_CLAIM that disagrees with binding.json pins this
     // harness's team_* tools to a stale seat while the CLI claims the current one (the re-claim drift).
@@ -471,17 +780,49 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // A legacy baked MUSTERD_MODEL. Provisioning stopped emitting it, but entries written before that
     // still carry one at the TOP of the adapter's ladder, where no observation can correct it — the
     // exact shape that had a seat attesting `grok-4.5` for weeks while running `claude-opus-4-8`.
-    // MUSTERD_SURFACE, the one this set was missing. Same legacy-snapshot argument as the model above,
-    // and measured biting on 2026-08-03: a pre-ADR-165 `.cursor/mcp.json` still baked
-    // `MUSTERD_SURFACE=cursor`, which outranks binding.json and — unlike model — has no observation
-    // path that could ever correct it, so the seat reported `cursor` while a claude-code hook was
-    // demonstrably capturing its sessions (PR #607 made the contradiction visible; this names the
-    // entry that causes it).
+    // MUSTERD_SURFACE is the ONE entry key that does not take the shared `repairWith` prescription,
+    // because it is the only one whose repair is a REPLACEMENT rather than a deletion. ADR 286
+    // (2026-08-19) retired the marker: `resolveLaunchSurface` throws on its mere presence and
+    // refuses Presence attachment — so the pre-286 story this line used to tell ("outranks
+    // binding.json … the roster reports whatever it says", measured 2026-08-03, PR #607) has been
+    // impossible since. Nothing attests the wrong surface any more; the adapter does not attach.
+    //
+    // And every branch of `repairWith` is wrong HERE, which is why this is spelled out rather than
+    // shared (falsify each in one grep):
+    //   - `musterd wire` — `commands/wire.ts` passes `legacyRepair: false` ("Never legacyRepair from
+    //     here"), so the engine classifies the fragment `repair-needed` and plans `none`;
+    //   - `musterd init` / re-provisioning — `onboard/init.ts` likewise passes `legacyRepair: false`;
+    //   - "drop the line by hand" — leaves NO marker, so `resolveLaunchSurface` falls past
+    //     MUSTERD_TEST_SURFACE and MUSTERD_LAUNCH_SURFACE to its second throw. One refusal becomes
+    //     a different refusal, and the reader is back where they started.
+    // `musterd harness configure` is the sole caller that passes `legacyRepair: true`
+    // (`commands/harness.ts`), driving the `repair-launch-marker` mutation that swaps the retired
+    // key for MUSTERD_LAUNCH_SURFACE and preserves the rest of the entry. So it is named directly.
     if (d.registeredSurface !== undefined) {
-      noteEntryDrift(
-        `${h.label}'s musterd server bakes MUSTERD_SURFACE=${d.registeredSurface} — a wire-time ` +
-          `snapshot that outranks .musterd/binding.json and that no observation can correct, so the ` +
-          `roster, presence and audit report whatever it says. ${repairWith}.`,
+      // The ADR 286 consequence is the same either way; the REPAIR is not. When the harness is
+      // desired, the marker must be REPLACED (deleting it just moves the refusal to the no-marker
+      // branch) and only `harness configure` does that. When it is an orphan, there is no marker to
+      // get right at all and deleting the entry is correct — so the "deleting does NOT fix it"
+      // sentence, true in the first case, is actively misleading in the second. #1363 shipped it
+      // unconditionally; this is that correction (lane 01M1VFV8EK).
+      //
+      // `unreachableEntry` joins the deferral defensively. A retired marker observes as
+      // `legacy-launch-marker` BEFORE any fingerprint comparison, so the engine plans
+      // `repair-needed` (not `conflict`) and this branch keeps naming configure — which is correct,
+      // and is the one state where a reconciler really does write. But the naming is now conditional
+      // on the plan rather than on an inference about it, so if that observation ever stops holding,
+      // the doctor stops prescribing a command the engine has no plan for.
+      noteEntryDriftWireCannotFix(
+        `${h.label}'s musterd server bakes the retired MUSTERD_SURFACE=${d.registeredSurface} ` +
+          `(pre-ADR-286). The adapter does not read it — it REFUSES to attach Presence while it is ` +
+          `there, so a session launched through ${h.label} here has no seat presence at all rather ` +
+          `than a wrong one. ` +
+          (orphanEntry || unreachableEntry
+            ? `${repairWith}.`
+            : `Run \`musterd harness configure\` in this worktree to convert the registration, then ` +
+              `reload the session. Deleting the line by hand does NOT fix it: with no launch marker ` +
+              `the adapter refuses for the other reason, and neither \`musterd wire\` nor ` +
+              `\`musterd init\` repairs a retired marker${d.registeredElsewhere !== undefined ? ` (this entry lives in ${d.registeredElsewhere})` : ''}.`),
       );
     }
     if (d.registeredModel !== undefined) {
@@ -604,22 +945,9 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
         `in the harness MCP entry, which provisioning no longer writes).`,
     );
   }
-  // The same tripwire, one field over. `surface` never got the observation path `model` did (ADR 158),
-  // so it is believed on the strength of a declaration alone — while labelling every presence row,
-  // audit entry and roster line as fact. A capture is the evidence the declaration lacks: hooks are
-  // harness-specific by construction, so a `claude-code` capture is proof Claude Code ran here.
-  // Measured across eleven seat worktrees 2026-08-03 — one disagreed, declaring `cursor` while both
-  // its session and its model observation were written by `claude-code`.
-  const ranHarness = binding?.session?.harness ?? binding?.model_observed?.harness;
-  if (ranHarness && binding?.surface && binding.surface !== ranHarness) {
-    drift.push(
-      `this workspace declares surface "${binding.surface}" but its session here was captured by ` +
-        `"${ranHarness}" — a ${ranHarness} hook only fires under ${ranHarness}, so the declaration is ` +
-        `the stale one, and it is what the roster, presence and audit report this seat is running. ` +
-        `Correct it in .musterd/binding.json (and check for a baked MUSTERD_SURFACE in the harness ` +
-        `MCP entry, which outranks the binding and which no observation can reach).`,
-    );
-  }
+  // The declared-surface-vs-captured-harness tripwire that used to live here is gone with the
+  // declaration itself: v2 identity carries no `surface` (ADR 281), so there is nothing left to
+  // contradict a capture. Runtime Surface now comes only from the launcher (ADR 286).
 
   const installed = harnesses.filter((h) => h.installed);
   const anyConfigured = installed.some((h) => h.configured);
@@ -642,7 +970,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   }
   // ADR 088: the interrupt hook is reachability-critical and lives in machine-local settings (never
   // committed), so a provisioned folder can silently lose it. Check it only when Claude Code has the
-  // server wired here — the only harness with a PostToolUse hook today.
+  // server wired here; Cursor, Grok and OpenCode (ADR 392) report theirs through `detect().hookDrift`.
   if (claudeConfigured) drift.push(...inspectClaudeHookDrift(cwd));
   // ADR 261 increment 2: the harness permission layer, same machine-local settings file and the
   // same silent-loss shape — except its failure is worse, because a missing hook fails open and a
@@ -652,6 +980,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   drift.push(...guidance.drift);
   const duplicateAdapters = await inspectDuplicateAdapters(binding);
   const modelAttestation = await inspectModelAttestation(binding);
+  const deadHookLease = await inspectDeadHookLease(binding);
   const seatIdentity = await inspectSeatIdentity(binding, cwd);
   // ADR 160/185: label coverage is per-capability (cross_rename / self_rename / none). Say so
   // plainly (a note, never drift — capability gaps are not misconfiguration).
@@ -711,6 +1040,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       ...guidance.notes,
       ...duplicateAdapters,
       ...modelAttestation,
+      ...deadHookLease,
       ...seatIdentity.notes,
       ...inspectGitAttribution(binding, cwd),
       ...registryNotes,
@@ -762,6 +1092,34 @@ export async function footprintNotes(
   const mb = Math.round(orphaned.reduce((sum, s) => sum + s.rss_kb, 0) / 1024);
   return [
     `${procs} orphaned MCP sidecar proc${procs === 1 ? '' : 's'} (~${mb} MB RSS) from ended sessions — \`musterd reap\` reclaims them.`,
+  ];
+}
+
+/**
+ * Is this machine's record of the team agent key missing while the key itself is still here?
+ *
+ * `config.agentKeys` is the only copy the config keeps (ADR 075), and losing it silently disables
+ * `musterd agent` — but the failure surfaces nowhere until someone runs that command and gets an
+ * error mid-provision. On team `revive` (2026-08-14) the map had been empty for long enough that
+ * nobody could say what emptied it, while eight seat bindings on the same machine still carried the
+ * key. This turns that into a warn-only note the operator sees *before* reaching for the command.
+ *
+ * Deliberately silent unless the repair is certain to work: it fires only when a key is actually
+ * recoverable from the local bindings. A note pointing at `--rotate` when nothing can be read back
+ * would be nagging at best and a nudge toward a team-wide outage at worst.
+ */
+export function agentKeyNotes(
+  config: Pick<Config, 'agentKeys' | 'bindings'>,
+  team: string | undefined,
+  read: (dir: string) => Binding | null = readBindingAt,
+): string[] {
+  if (!team || config.agentKeys[team]) return [];
+  const found = recoverAgentKey(Object.keys(config.bindings), team, read);
+  if (!found.key) return [];
+  return [
+    `no team agent key recorded for "${team}" on this machine, so \`musterd agent\` and ` +
+      `\`musterd human\` cannot provision — but ${found.sources.length} seat binding(s) here still ` +
+      `carry it. \`musterd team agent-key --team ${team}\` reads it back; nothing on the team changes.`,
   ];
 }
 
@@ -938,6 +1296,8 @@ export async function runInitDoctor(json: boolean, cwd: string = process.cwd()):
   report.notes.push(...(await footprintNotes(cwd)));
   // ADR 232 increment 2: LaunchAgent census vs roster service seats — warn-only, never drift.
   report.notes.push(...(await inspectCensus({ cwd })));
+  // A lost local record of the team agent key — warn-only, and only when it is recoverable here.
+  report.notes.push(...agentKeyNotes(loadConfig(), findBinding(cwd)?.team ?? loadConfig().current));
   // The binary a WAKE would resolve is a different question from the one this shell resolves, and
   // nothing asked it until a poisoned shim went a day unnoticed. Warn-only for the same reason as
   // the skew notes: it is a fact about the machine, not this folder's provisioning.

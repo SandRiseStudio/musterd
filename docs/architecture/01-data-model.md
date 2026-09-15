@@ -52,7 +52,7 @@ CREATE INDEX idx_members_team ON members(team_id);
 CREATE TABLE presence (
   id            TEXT PRIMARY KEY,            -- ULID (one per attachment/connection)
   member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
-  surface       TEXT NOT NULL CHECK (surface IN ('cli','claude-code','codex','cursor','web','ios','slack','other')),
+  surface       TEXT NOT NULL CHECK (surface IN ('cli','claude-code','codex','opencode','grok','cursor','web','ios','slack','other','musterd')),
   status        TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online','away','offline')),
   conn_id       TEXT,                        -- transport connection id (WS), null for stateless HTTP pings
   last_seen_at  INTEGER NOT NULL,            -- updated on every heartbeat
@@ -108,8 +108,19 @@ CREATE TABLE schema_meta (
 - **`availability` and `lifecycle_until`** exist now but v1 does **not** enforce schedules or auto-expire `until` members at runtime (a reaper _may_ mark expired members `left_at`, but enforcement of availability windows is roadmap). Store, don't enforce. Keep the columns.
 - **`token_hash`** stores `sha256(token)`; the plaintext join token is shown once at `team add` time and never stored. The CLI/MCP present the token to authenticate as that Member.
 - **Messages are append-only.** No edits/deletes in v1. `accept`/`decline` reference the original via `thread_id`/`meta.in_reply_to`, they don't mutate it.
+- **Every message carries `(origin_node, origin_seq)`** (v47, ADR 331): the local `nodes` row for its team and a per-node gapless counter (`nodes.next_seq` holds the next value), both stamped inside `insertMessage`'s own transaction — server-derived, no wire field. `nodes` holds one self-minted row per (daemon, team), unenrolled (`credential_hash` NULL) until ADR 328's enrollment adopts it.
 
 ## Migrations
+
+### Shared Seeds (unreleased — ADR 291)
+
+Migration v43 adds an optional, Team-unique `members.slack_user_id` for human Members, Seed rows keyed
+by immutable `(team_id, relay_id)`, and a narrow public Seed-thread table. Each Seed snapshots the
+Slack user id and resolved submitting Member beside its immutable raw body, source, and capture time.
+Mutable columns hold lifecycle state, explorer, exhaustive final brief, conclusion, promotion metadata,
+completion time, and a nullable linked Lane id. The relay cursor remains separate. Promotion creates
+the ordinary Lane and links it in the same SQLite transaction. Every accepted capture starts `open`;
+only an active explorer's posted question creates `needs_clarification` (ADR 291/311/312).
 
 - Single forward-only migration runner. `schema_meta.schema_version` gates it. v1 ships version `1` = the DDL above. A migration is a `(version, up(db))` pair in `packages/server/src/db/migrations.ts`; the runner applies any with version > current inside a transaction, then bumps `schema_version`.
 - No down-migrations in v1.
@@ -126,6 +137,9 @@ CREATE TABLE schema_meta (
 - **v18 (`musterd/0.3`, ADR 136):** `ALTER TABLE members ADD COLUMN observer_scope TEXT` + backfill existing observer rows to `'full'` — observer grades: a shared watch-link mints a `public`-grade seat (team/broadcast only) while the local dashboard stays full-visibility. NULL means full.
 - **v19 (`musterd/0.3`, ADR 131 inc 4):** `ALTER TABLE residency ADD COLUMN resumable_harness TEXT` + `ALTER TABLE residency ADD COLUMN resumable_at INTEGER` — the session-capture *resumable attestation* pushed by `musterd session start --stdin` (SessionStart hook). Harness CLASS + timestamp only: a session id or transcript path never reaches the daemon (they live only in the workspace's gitignored `binding.session`, never committed, never read by the MCP adapter). Lives on the enrollment row, not `presence` — capture is presence-neutral by contract (ADR 057). The v15 additive-nullable precedent; pre-capture rows read null. The related deferral state (the local-session guard's snooze) is **derived** from `residency.wake_deferred` audit rows, never stored — and that verb is deliberately outside the `woke`/`wake_failed` rate reads, so a deferral burns no attempt/cooldown/cap budget.
 - **v20 (`musterd/0.3`, ADR 141):** `ALTER TABLE members ADD COLUMN last_offline_reason TEXT` — sticky how-the-seat-went-dark (`disconnected` on `release`, `signed_off` on unbind/remove). Projected as `MemberSummary.offline_reason` with reclaimable → `reconnecting` and availability `off_hours` overlays. Cleared on next live attach. Additive nullable.
+- **v42 (`musterd/0.3`, ADR 301):** `ALTER TABLE presence ADD COLUMN model_source TEXT` + `ALTER TABLE requests ADD COLUMN model_source TEXT`. Which tier produced the occupancy's `model` — `observed` | `environment` | `binding`. NULL for every pre-existing row and for any client that does not send it (absence is not an assertion, never defaulted to `binding`). The pair never travels split: no `model` ⇒ `model_source` is null. Per-act `meta.model_source` is derived from this occupancy value at send time, server-controlled. See [301](../decisions/301-per-act-model-source-tier.md).
+- **v52 (`musterd/0.3`, ADR 344):** adds `agent_bootstrap_credentials`: independently revocable `mskey_` hashes scoped to one seat claim, role claim, or residency host label, with optional inventory label/expiry and lifecycle timestamps. Existing `teams.agent_key_hash` values are copied to marked `legacy` records for the compatibility window; new scoped minting never creates a Team-wide record.
+- **v54 (`musterd/0.3`, ADR 350):** adds `teams.bootstrap_cutover_at` plus `agent_bootstrap_credentials.migration_target_member_id` and `first_used_at`. The Member reference proves which independently authenticated seat received a migration successor; first use records successful scoped authentication, so minting alone cannot satisfy cutover readiness. The Team timestamp is the durable, idempotent per-Team cutover marker.
 
 ## Seed data for tests (`06-testing.md` references this)
 

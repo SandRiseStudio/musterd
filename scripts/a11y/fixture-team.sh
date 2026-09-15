@@ -51,6 +51,8 @@ if [ "$PORT" = "4849" ]; then
   echo "✗ refusing to seed a fixture on the default daemon port" >&2; exit 2
 fi
 LIVE_DB="${HOME}/.musterd/musterd.db"
+# Comfortably inside the daemon's 45s PRESENCE_TIMEOUT_MS, with room for a slow re-join.
+PRESENCE_HEARTBEAT_S="${A11Y_FIXTURE_HEARTBEAT_S:-20}"
 
 BIN="$ROOT/packages/cli/dist/bin.js"
 ADMIN="$FIX/admin"
@@ -60,13 +62,56 @@ SEATDIR="$FIX/seats"
 # Who occupies the room. Names are load-bearing twice over: `memberAvatar`/`memberInk` derive colour
 # from the name, so a spread of names is a spread of inks — and the stream prints the sender's name
 # in its own ink, which is where that palette is actually read as text.
-SEATS="${A11Y_FIXTURE_SEATS-bo cy della}"
+# Entries are `name:surface`. The surface half is load-bearing and was the gap this fixture had
+# from the day it was written: a CLI claim is intrinsically `cli` (ADR 286), so with no `--surface`
+# every seat in the room was a cli seat, no plate ever rendered a harness segment, and all four
+# `--lc-hz-*-ink` tokens shipped unmeasured by the gate whose whole job is to measure shipped ink.
+# One seat per harness that HAS a glyph (surfaceGlyph.ts: codex, cursor, grok, opencode) — a fourth
+# seat over the old three, which is what covering the fourth ink costs. `claude-code` is deliberately
+# not here: it renders as bare text, so it has no ink of its own to measure.
+# A bare `name` (no colon) still means cli, so `A11Y_FIXTURE_SEATS='bo cy'` keeps working.
+SEATS="${A11Y_FIXTURE_SEATS-bo:cursor cy:codex della:grok hana:opencode}"
+seat_name() { printf '%s' "${1%%:*}"; }
+seat_surface() { case "$1" in *:*) printf '%s' "${1#*:}" ;; *) printf 'cli' ;; esac; }
+
+# The model each harness attests. These are not decoration: the nameplate paints a PROVIDER CHIP and
+# a version crumb from this string (modelProvider.ts / presenceLabel.ts), and with the field null
+# neither element exists, so the sweep measures neither. One model per family so the four inks that
+# can appear together do appear together — and `muse-spark` specifically, because its chip and crumb
+# were BOTH wrong on the live stream (#1306) and nothing here could have caught it.
+seat_model() {
+  case "$(seat_surface "$1")" in
+    cursor) printf 'claude-opus-5' ;;
+    codex) printf 'gpt-5.6-sol' ;;
+    grok) printf 'grok-4.5' ;;
+    opencode) printf 'muse-spark-1.3-contributor-free' ;;
+    *) printf 'claude-haiku-4-5-20251001' ;;
+  esac
+}
+
+# Exactly ONE seat is here because something woke it (ADR 131). The woken chip and the nameplate's
+# woken tag paint only on `provenance: wake`, so with every row `session` the sweep cannot reach
+# them — and one is the honest number: a room where every seat was woken is not a room anyone has.
+seat_provenance() { case "$(seat_name "$1")" in della) printf 'wake' ;; *) printf 'session' ;; esac; }
 
 as_seat() {
   local dir="$1"; shift
   (cd "$dir" && MUSTERD_CONFIG="$dir/config.json" node "$BIN" "$@" --server "$SERVER")
 }
 as_admin() { as_seat "$ADMIN" "$@"; }
+
+# Re-claim every seat detached, WITHOUT `--key`, carrying its attested model and provenance. Called
+# twice on purpose: once when the room is first filled, and once at the very end of `up`. See the
+# attestation block below for why the key must be absent, and the hand-off block for why twice.
+reattest_all() {
+  for e in $SEATS; do
+    local n; n="$(seat_name "$e")"
+    (cd "$SEATDIR/$n" && MUSTERD_CONFIG="$SEATDIR/$n/config.json" \
+       MUSTERD_MODEL="$(seat_model "$e")" MUSTERD_PROVENANCE="$(seat_provenance "$e")" \
+       node "$BIN" claim "$n" --team "$TEAM" --detach --surface "$(seat_surface "$e")" \
+       --server "$SERVER" >>"$SEATDIR/$n/join.log" 2>&1) || true
+  done
+}
 
 approve_pending() {
   for id in $(as_admin requests --pending --json | node -e \
@@ -104,6 +149,10 @@ preflight() {
 }
 
 down() {
+  # Heartbeats first, by RECORDED pid — a `pkill -f join` would reach into other seats' sessions.
+  if [ -f "$FIX/heartbeat.pids" ]; then
+    while read -r hb; do [ -n "$hb" ] && kill "$hb" 2>/dev/null || true; done <"$FIX/heartbeat.pids"
+  fi
   [ -f "$FIX/daemon.pid" ] && kill "$(cat "$FIX/daemon.pid")" 2>/dev/null || true
   case "$FIX" in
     ''|'/'|"$HOME"|"$HOME"/.musterd*)
@@ -191,34 +240,223 @@ up() {
   fi
   as_admin team policy --reseat-known-agents on >/dev/null 2>&1 || true
   KEY="$(node -e "console.log(require('$ADMIN/config.json').agentKeys['$TEAM'])")"
-  for s in $SEATS; do
-    mkdir -p "$SEATDIR/$s"
-    (cd "$SEATDIR/$s" && MUSTERD_CONFIG="$SEATDIR/$s/config.json" \
-       node "$BIN" claim "$s" --team "$TEAM" --key "$KEY" --server "$SERVER" \
-       >"$SEATDIR/$s/claim.log" 2>&1) &
+  want=0
+  for e in $SEATS; do
+    n="$(seat_name "$e")"; want=$((want + 1))
+    mkdir -p "$SEATDIR/$n"
+    (cd "$SEATDIR/$n" && MUSTERD_CONFIG="$SEATDIR/$n/config.json" \
+       node "$BIN" claim "$n" --team "$TEAM" --key "$KEY" \
+       --server "$SERVER" >"$SEATDIR/$n/claim.log" 2>&1) &
   done
   bound=0
   for _ in $(seq 1 25); do
     sleep 1; approve_pending
     bound=0
-    for s in $SEATS; do grep -q 'occupied on' "$SEATDIR/$s/claim.log" 2>/dev/null && bound=$((bound + 1)); done
-    [ "$bound" -eq "$(echo $SEATS | wc -w | tr -d ' ')" ] && break
+    for e in $SEATS; do
+      grep -q 'occupied on' "$SEATDIR/$(seat_name "$e")/claim.log" 2>/dev/null && bound=$((bound + 1))
+    done
+    [ "$bound" -eq "$want" ] && break
   done
-  if [ "$bound" -eq 0 ]; then
-    echo "✗ no seat bound — /live would render an empty room and measure only its quiet states" >&2
-    echo "  see $SEATDIR/*/claim.log" >&2
+  # EVERY seat, not "at least one". The old guard was `-eq 0`, which passes on a PARTIAL room, and a
+  # partial room is the failure this fixture is least able to survive: on 2026-09-02 a stale CLI dist
+  # rejected `--surface grok`, della never claimed, the room silently went from 3 seats to 2, the
+  # sweep measured 105 elements instead of 111 — AND STILL REPORTED GREEN. A gate that goes green by
+  # losing part of its subject is the exact failure docs/wiki/measuring-a-moving-page.md exists to
+  # name, and it is worse than a red because nobody goes looking. Shrinking the room is now a stop.
+  if [ "$bound" -ne "$want" ]; then
+    echo "✗ only $bound of $want seats bound — the room would be measured SHORT, and a sweep over a" >&2
+    echo "  room that quietly lost a seat reports green for coverage it does not have." >&2
+    for e in $SEATS; do
+      n="$(seat_name "$e")"
+      grep -q 'occupied on' "$SEATDIR/$n/claim.log" 2>/dev/null || {
+        echo "  ✗ $n ($(seat_surface "$e")) — $(tail -1 "$SEATDIR/$n/claim.log" 2>/dev/null || echo 'no claim log')" >&2
+      }
+    done
+    echo "  A ZodError on --surface here means the built CLI predates the surface: run \`pnpm -r build\`." >&2
+    exit 1
+  fi
+
+  # ── presence, on the seat's own harness ───────────────────────────────────────────────────────
+  #
+  # `claim` binds the folder and then EXITS, and an agent-seat presence dies with the process that
+  # holds its session lease (ADR 337) — so after a bare `up` this fixture's room had every seat
+  # OFFLINE with no presence at all. Measured on main at 5392cf53: immediately after `up` reported
+  # "3 seats in the room", the roster showed bo/cy/della `offline` with `presences: []`, and the only
+  # live row on the team was the admin's. "Seats in the room" counted BINDINGS, which is not what the
+  # page draws. Everything the header block below promises about a busy room — the posture chip, the
+  # act→tone badges, a quote in the sender's own ink — has been measured against a room that had
+  # nobody in it.
+  #
+  # `claim --detach --surface <harness>` is the fix (until 2026-09-04 this was `join --surface`, the
+  # one-shot HTTP claim; ADR 377 folded join into claim and `--detach` names that path): it
+  # attaches a presence that OUTLIVES the process (no session lease to lose) and stores the surface
+  # on the identity, so every `send` below also goes out on that harness rather than falling back to
+  # `cli`. That second half is what makes the harness segment render: the plate reads `node.surface`
+  # from the LIVE presence, so a claimed-but-absent seat is a plate with no harness seg no matter
+  # what it claimed as.
+  # Backgrounded and approved underneath, exactly like the claims above: it opens its OWN claim
+  # request and blocks on an admin decision (ADR 077), so running these in the foreground deadlocks
+  # the fixture against itself — there is nobody else to approve them.
+  for e in $SEATS; do
+    n="$(seat_name "$e")"
+    (cd "$SEATDIR/$n" && MUSTERD_CONFIG="$SEATDIR/$n/config.json" \
+       node "$BIN" claim "$n" --team "$TEAM" --detach --key "$KEY" --surface "$(seat_surface "$e")" \
+       --server "$SERVER" >"$SEATDIR/$n/join.log" 2>&1) &
+  done
+  joined=0
+  for _ in $(seq 1 25); do
+    sleep 1; approve_pending
+    joined=0
+    for e in $SEATS; do
+      grep -q 'online via' "$SEATDIR/$(seat_name "$e")/join.log" 2>/dev/null && joined=$((joined + 1))
+    done
+    [ "$joined" -eq "$want" ] && break
+  done
+
+  # ── and a heartbeat, because a presence with nobody holding it is reaped in 45s ────────────────
+  #
+  # PRESENCE_TIMEOUT_MS is 45_000 and the reaper hard-DELETEs (packages/server config.ts / presence.ts),
+  # so the join above buys the room ONE MINUTE. The gate's connected phase runs five sweeps off a
+  # single `up` — /board, /live at two lighting values, the asks sheet, the plates — at roughly 15s
+  # each, so on the old fixture the room would have emptied under the sweep somewhere around the
+  # second one even if it had ever been occupied. Measured on main at 5392cf53: joined at t+0, gone
+  # by t+70s. A room that empties partway through a run is the moving-page problem in its purest
+  # form — the same commit measures differently depending on how long the fixture took to get there.
+  #
+  # Re-claiming detached is the heartbeat because it is the ONLY path that attaches a presence on a
+  # chosen surface. A long-lived holder would be tidier, but every one of them forces `cli`: `inbox --watch`
+  # takes its surface from the binding, and the binding path pins `cli` by construction (ADR 286,
+  # config.ts). Measured: `join --surface cursor` (now `claim --detach`) then `inbox --watch` leaves the seat present on
+  # `cli`, harness segment gone. So the fixture re-asserts instead of holding.
+  #
+  # Every heartbeat's PID is recorded, and `down` kills them BY PID for the same reason the daemon is
+  # killed by PID: a `pkill -f` here would take out other seats' sessions on this machine.
+  # ── and now, ATTESTED — the half this fixture could not reach until 2026-09-04 ────────────────
+  #
+  # The claims above pass `--key $KEY`, the TEAM BOOTSTRAP key, because that is what gets a seat in
+  # the door the first time. But `client.ts` gates the three attestation headers — x-musterd-model
+  # (ADR 101/121), x-musterd-provenance (ADR 131 §6) and x-musterd-wake-lease (ADR 241) — on the
+  # AGENT-SEAT credential prefix `msac_`, and it is right to: a model is a harness fact, and a team
+  # key in a human's shell must not be able to stamp one. So every presence this fixture made
+  # carried model null and provenance null, and every element the UI paints from an attested fact —
+  # the provider chip, the model crumb, the woken chip and its nameplate tag — was not merely
+  # unmeasured but NEVER RENDERED. A green sweep over a page missing the elements it was built to
+  # check is worse than a red one (lane 01M1JEDQTP; measured again 2026-09-04: provenance null on
+  # all four seats while ada, joined another way, carried `session`).
+  #
+  # The fix needs no new minting: approving the claim above ALREADY mints an `msac_` credential and
+  # the CLI stores it (http.ts request.approve → mintAgentSeatCredential). Dropping `--key` is the
+  # whole change — the client then resolves the stored seat credential and the headers pass their
+  # own gate. Falsify: `curl $SERVER/teams/$TEAM/members` and read presences[].model — non-null on
+  # every seat, and `provenance: wake` on exactly one.
+  reattest_all
+
+  : >"$FIX/heartbeat.pids"
+  for e in $SEATS; do
+    n="$(seat_name "$e")"; sf="$(seat_surface "$e")"
+    md="$(seat_model "$e")"; pv="$(seat_provenance "$e")"
+    (
+      while :; do
+        sleep "$PRESENCE_HEARTBEAT_S"
+        (cd "$SEATDIR/$n" && MUSTERD_CONFIG="$SEATDIR/$n/config.json" \
+           MUSTERD_MODEL="$md" MUSTERD_PROVENANCE="$pv" \
+           node "$BIN" claim "$n" --team "$TEAM" --detach --surface "$sf" \
+           --server "$SERVER" >>"$SEATDIR/$n/join.log" 2>&1) || true
+      done
+    ) >/dev/null 2>&1 &
+    echo $! >>"$FIX/heartbeat.pids"
+    # Detached from the job table AND from this script's stdout (above): a child that still holds the
+    # script's stdout keeps `fixture-team.sh up | tail` from ever seeing EOF, so the caller hangs on a
+    # fixture that is actually ready. The gate pipes this output, so that hang is a 5-minute timeout
+    # rather than a visible error.
+    disown $! 2>/dev/null || true
+  done
+
+  # …and every seat is PRESENT on the surface it was told to occupy. Binding is not enough and
+  # neither is joining: a join that silently fell back to `cli` succeeds perfectly well and leaves
+  # the harness inks unrendered again, which is the whole defect this fixture is here to close.
+  # Assert against the roster the page will actually read, not against our own intent — this is the
+  # falsifier for everything above it, and it is the check that would have caught the empty room.
+  ROSTER="$(curl -sf "$SERVER/teams/$TEAM/members" || true)"
+  for e in $SEATS; do
+    n="$(seat_name "$e")"; want_surface="$(seat_surface "$e")"
+    got="$(printf '%s' "$ROSTER" | MUSTERD_SEAT="$n" node -e '
+      let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+        const m=(JSON.parse(s||"{}").members??[]).find(x=>x.name===process.env.MUSTERD_SEAT);
+        const p=(m?.presences??[]).filter(p=>p.status!=="offline");
+        process.stdout.write(p.map(p=>p.surface).join(","));
+      })')"
+    case ",$got," in
+      *",$want_surface,"*) ;;
+      *) echo "✗ $n claimed but is present on [$got], not '$want_surface' — the harness segment for" >&2
+         echo "  '$want_surface' will not render, so --lc-hz-$want_surface-ink goes unmeasured." >&2
+         # HEAD, not tail: a rejected surface is a ZodError whose last line is a bare `]`, and the
+         # line that names the cause ("invalid_enum_value", "received": …) is at the top.
+         echo "  claim said: $(tr -d '\n ' <"$SEATDIR/$n/join.log" 2>/dev/null | head -c 180 || echo 'no join log')" >&2
+         echo "  (a rejected surface here means the built CLI predates it — run \`pnpm -r build\`)" >&2
+         exit 1 ;;
+    esac
+  done
+
+  # …and every seat ATTESTS. Same idiom as the surface check above and for the same reason: intent is
+  # not evidence. A re-attest that silently lost its `msac_` credential still exits 0 and leaves the
+  # provider chip, the model crumb and the woken chip unrendered — which is exactly the shape this
+  # fixture spent three months in, green the whole time. Read the roster the page reads.
+  ROSTER="$(curl -sf "$SERVER/teams/$TEAM/members" || true)"
+  woken=0
+  for e in $SEATS; do
+    n="$(seat_name "$e")"
+    got="$(printf '%s' "$ROSTER" | MUSTERD_SEAT="$n" node -e '
+      let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+        const m=(JSON.parse(s||"{}").members??[]).find(x=>x.name===process.env.MUSTERD_SEAT);
+        const p=(m?.presences??[]).find(p=>p.status!=="offline");
+        process.stdout.write(`${p?.model ?? ""}|${p?.provenance ?? ""}`);
+      })')"
+    [ "${got#*|}" = "wake" ] && woken=$((woken + 1))
+    case "$got" in
+      "|"*|"") echo "✗ $n is present but attests NO MODEL — the provider chip and the version crumb" >&2
+         echo "  do not render, so modelProvider/presenceLabel ink goes unmeasured. The claim above" >&2
+         echo "  must NOT pass --key: client.ts gates x-musterd-model on the msac_ seat credential" >&2
+         echo "  (ADR 101/121), and a team key silently attests nothing." >&2
+         exit 1 ;;
+    esac
+  done
+  if [ "$woken" -eq 0 ] && [ -n "$SEATS" ]; then
+    echo "✗ no seat carries provenance 'wake' — the woken chip and its nameplate tag never render," >&2
+    echo "  so ADR 131's one visible claim goes unmeasured. See seat_provenance()." >&2
     exit 1
   fi
 
   # Acts across the tone map. `format.ts` paints each act a different colour and the stream is the
   # largest DOM surface on the page, so this is the bulk of what phase 2 actually measures.
   set -- $SEATS
-  A="${1:-}"; B="${2:-$A}"; C="${3:-$A}"
+  A="$(seat_name "${1:-}")"; B="$(seat_name "${2:-${1:-}}")"; C="$(seat_name "${3:-${1:-}}")"
+  D="$(seat_name "${4:-${1:-}}")"
   as_seat "$SEATDIR/$A" send --to @team --act status_update "carrying the story lane" >/dev/null 2>&1 || true
   as_seat "$SEATDIR/$B" send --to @team --act request_help "stuck behind something and out of ideas" >/dev/null 2>&1 || true
   as_seat "$SEATDIR/$C" send --to "$A" --act handoff "yours now — branch is pushed" >/dev/null 2>&1 || true
   as_seat "$SEATDIR/$A" send --to "$C" --act accept "took it, thanks" >/dev/null 2>&1 || true
   as_seat "$SEATDIR/$B" send --to @team --act status_update "back on it" >/dev/null 2>&1 || true
+  # Every seat sends at least once, and that is load-bearing rather than decorative: a seat with no
+  # work reads as posture `active`, and `assignSeats` puts an active member on the LOUNGE furniture,
+  # where there is no desk and therefore NO NAMEPLATE. Measured 2026-09-02 — with only three seats
+  # sending, the fourth (opencode) lounged and its harness ink went unmeasured while the other three
+  # were fine, which is the same "green by losing part of the subject" shape as the partial room
+  # above, one layer in. A seat that must be MEASURED must be a seat that is SEATED.
+  as_seat "$SEATDIR/$D" send --to @team --act status_update "at my desk, reading" >/dev/null 2>&1 || true
+
+  # An OPEN HUDDLE, so the huddle rail (ADR 378 increment 2) has ink to measure. Without it the rail
+  # renders nothing and the sweep goes green on a surface it never saw — the same "green by losing
+  # part of the subject" failure the room block above documents. Two turns and a named seat that has
+  # not spoken, because `.lc-huddle__silent` and `.lc-huddle__count` are their own (quietest) inks.
+  HUDDLE_ID="$(as_seat "$SEATDIR/$A" huddle open --topic lane:01FIXTURELANE     --anchor docs/design/asks-rail.md --to "$B,$C" --turns 6     "the asks rail arc — ring or bar?" --json 2>/dev/null     | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).huddle_id??'')}catch{}})")"
+  if [ -n "$HUDDLE_ID" ]; then
+    as_seat "$SEATDIR/$B" huddle say "$HUDDLE_ID" --act challenge       "why a ring at all when the strip already has the tier?" >/dev/null 2>&1 || true
+    as_seat "$SEATDIR/$A" huddle say "$HUDDLE_ID"       "because the tier is a colour and the clock is a shape" >/dev/null 2>&1 || true
+  else
+    echo "✗ a11y fixture: could not open the huddle the rail is measured on" >&2
+    exit 1
+  fi
 
   # The asks rail, loud. One per tier: the tier chips and their countdown clocks are separate inks,
   # and a rail with nothing in it renders exactly one quiet line.
@@ -229,7 +467,43 @@ up() {
   as_seat "$SEATDIR/$C" send --to evan --act ask --meta species=approve --meta tier=blocking \
     "approve this before it ships?" >/dev/null 2>&1 || true
 
-  echo "▸ a11y fixture up — team '$TEAM' at $SERVER ($bound seats in the room)"
+  # A LAPSED ask — a below-top tier whose clock ran out with no answer and no outcome envelope. It
+  # is a distinct ink and a distinct card (quiet, no answer buttons) rather than a fourth copy of
+  # the three above, and without one seeded here the sweep measures every ask state EXCEPT the one
+  # that is deliberately understated, which is the one most likely to be under-contrasted.
+  #
+  # Backdated in the DB because `send` mints `ts` at now and lapsed is DEFINED by an old ts; a day
+  # clears every tier's timeout with room to spare. Written with better-sqlite3 (already a
+  # @musterd/server dependency) rather than a `sqlite3` binary, which is not guaranteed on CI.
+  as_seat "$SEATDIR/$B" send --to evan --act ask --meta species=consult --meta tier=standard \
+    "small one — going ahead unless you say otherwise" >/dev/null 2>&1 || true
+  # Resolved from packages/server, not from cwd: pnpm does not hoist, so a bare require from the
+  # repo root is MODULE_NOT_FOUND even though the package is installed.
+  MUSTERD_SERVER_PKG="$ROOT/packages/server" node -e '
+    const Database = require(
+      require.resolve("better-sqlite3", { paths: [process.env.MUSTERD_SERVER_PKG] }),
+    );
+    const db = new Database(process.env.MUSTERD_DB);
+    const n = db.prepare(
+      "UPDATE messages SET ts = ts - 86400000 WHERE act = ? AND body LIKE ?",
+    ).run("ask", "small one — going ahead%").changes;
+    if (n !== 1) { console.error(`✗ fixture: backdated ${n} asks, expected 1`); process.exit(1); }
+  ' || { echo "✗ a11y fixture: could not seed a lapsed ask" >&2; exit 1; }
+
+  # ── the room must be FULL at hand-off, not twenty seconds later ───────────────────────────────
+  #
+  # PRESENCE_TIMEOUT_MS is 45s and everything above this line — claims, approvals, acts, asks, the
+  # backdated lapsed ask, the huddle — takes longer than that, so the seats filled at the top of this
+  # function are reaped before `up` returns. Measured 2026-09-04: at the moment `up` printed ready,
+  # the roster held ONE online member, the admin; the seats came back only on the next heartbeat, up
+  # to 20s later. The gate starts sweeping immediately, so its first sweep read a thinner room than
+  # its last — the moving-page problem this fixture's own header warns about, inside the fixture.
+  #
+  # One more re-attest costs four claims and makes the hand-off state the state the caller was
+  # promised. Falsify: `up`, then immediately curl /teams/$TEAM/members — every seat online.
+  reattest_all
+
+  echo "▸ a11y fixture up — team '$TEAM' at $SERVER ($bound seats: $SEATS)"
   echo "  $SERVER/board?team=$TEAM"
 }
 

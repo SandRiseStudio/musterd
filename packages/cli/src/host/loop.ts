@@ -4,12 +4,13 @@ import {
   type WakeLeasesResponse,
   type WakeReportBody,
 } from '@musterd/protocol';
+import { resolveWorkspace } from '@musterd/protocol/project';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import { HttpClient } from '../client.js';
 import { findBinding } from '../config.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../session/liveness.js';
-import type { ActuatorBackend, WakeBounds, WakeOutcome } from './backend.js';
-import { loadHostRegistry, type HostRegistryEntry } from './registry.js';
+import type { ActuatorBackend, VerifyResult, WakeBounds, WakeOutcome } from './backend.js';
+import { canonicalServer, loadHostRegistry, type HostRegistryEntry } from './registry.js';
 
 /**
  * The host poll loop (ADR 131 §1) — the actuator half of harness residency, in the `musterd notify`
@@ -18,10 +19,11 @@ import { loadHostRegistry, type HostRegistryEntry } from './registry.js';
  * (server, team, enrolled-host-label), hands each order to its harness's {@link ActuatorBackend},
  * and reports the outcome inside the lease TTL.
  *
- * Credentials: the loop authenticates with the team agent key read *through each seat's workspace
- * binding* — the host is harness-side infrastructure, not a seat, and holds nothing centrally
- * (ADR 131 §1). The woken session occupies via the standing grant in its own binding; the loop
- * never touches it.
+ * Credentials: the loop authenticates with `binding.host_key` (a host-scoped bootstrap credential
+ * minted at `residency on`, ADR 395), falling back to `agent_key` when the field is absent. The
+ * host is harness-side infrastructure, not a seat, and holds nothing centrally (ADR 131 §1).
+ * Claim paths may rewrite `agent_key`; they cannot rewrite `host_key` (saveBinding merge-guard).
+ * The woken session occupies via the standing grant in its own binding; the loop never touches it.
  *
  * Telemetry carve-out (ADR 131 O&E): narrator lines per *actuation* only — a quiet tick logs
  * nothing, ever.
@@ -65,10 +67,13 @@ export interface HostPollResult {
   settled: Promise<void>[];
 }
 
-const defaultReadAgentKey = (workspace: string): string | undefined =>
+const defaultReadAgentKey = (workspace: string): string | undefined => {
   // Empty env on purpose: a `MUSTERD_BINDING` override in the host's own shell must not shadow
-  // the *target workspace's* binding.
-  findBinding(workspace, {})?.agent_key;
+  // the *target workspace's* binding. Prefer host_key (ADR 395): agent_key is the claim
+  // authenticator and a woken session may rewrite it.
+  const binding = findBinding(workspace, {});
+  return binding?.host_key ?? binding?.agent_key;
+};
 
 const defaultClientFor = (server: string, agentKey: string): WakeClient => {
   const http = new HttpClient({ server, key: agentKey }).presenceNeutral();
@@ -110,11 +115,16 @@ async function verifyOccupied(
   pollMs: number,
   sinceTs: number,
   leaseId: string,
-): Promise<{ occupied: boolean; provenance?: string | null; lease_matched?: boolean }> {
+  ownWorkspace?: string,
+): Promise<VerifyResult> {
   const deadline = Date.now() + windowMs;
   const freshBar = sinceTs - VERIFY_FRESHNESS_SLACK_MS;
   // ADR 238: the newest occupancy that is not ours, seen so far. Held, not returned — see below.
   let otherOccupancy: { occupied: boolean; provenance?: string | null } | null = null;
+  // ADR 379: among the unattested fresh rows, one the actuator can identify as its own child —
+  // created in the workspace it spawned into, after it spawned. Held to the deadline like the rest:
+  // a lease-attesting row is still the answer if one arrives inside the window.
+  let ownUnattested: { provenance?: string | null } | null = null;
   for (;;) {
     const roster = await client.roster(team).catch(() => null);
     const me = roster?.members.find((m) => m.name === seat);
@@ -135,13 +145,49 @@ async function verifyOccupied(
         // the window is spent does the other session's occupancy become the answer — which the
         // backend reads as "someone else holds the seat" and defers on, never as this wake failing.
         otherOccupancy = { occupied: true, provenance: fresh[0]?.provenance ?? null };
+        // ADR 379: the actuator spawned into `ownWorkspace` at `sinceTs`. A row with no lease, in
+        // that workspace, created at-or-after the spawn is the child it is about to kill for
+        // "not attesting" — the codex env-sanitisation class (ADR 354) and any adapter dist that
+        // predates the lease token. Every term is a positive fact on the row (ADR 236): absent
+        // `attached_at` or `workspace` never qualifies. A row created BEFORE the spawn in the same
+        // workspace is a genuine prior occupant (a human in the worktree, ADR 068) and stays foreign.
+        const own = ownWorkspace
+          ? fresh.find(
+              (p) =>
+                !p.wake_lease &&
+                p.workspace === ownWorkspace &&
+                typeof p.attached_at === 'number' &&
+                p.attached_at >= freshBar,
+            )
+          : undefined;
+        if (own) ownUnattested = { provenance: own.provenance ?? null };
       }
     }
-    if (Date.now() >= deadline)
+    if (Date.now() >= deadline) {
+      if (ownUnattested)
+        return {
+          occupied: true,
+          provenance: ownUnattested.provenance ?? null,
+          lease_matched: false,
+          own_unattested: true,
+        };
       return otherOccupancy
         ? { ...otherOccupancy, lease_matched: false }
         : { occupied: false, lease_matched: false };
+    }
     await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
+
+/** The `workspace` label a session attaches with from this path (ADR 014 ladder), computed on the
+ *  actuator's side so the verifier can recognise its own child's row (ADR 379). Env is deliberately
+ *  empty: a `MUSTERD_WORKSPACE` in the HOST's environment describes the host, not the child. Best
+ *  effort — a path that cannot be labelled simply disables the own-child match. */
+function ownWorkspaceLabel(workspacePath: string): string | undefined {
+  try {
+    return resolveWorkspace({}, workspacePath);
+  } catch {
+    return undefined;
   }
 }
 
@@ -156,8 +202,13 @@ function pollGroups(
   >();
   for (const entry of entries) {
     const host = hostLabel ?? entry.host;
-    const key = `${entry.server}\u0000${entry.team}\u0000${host}`;
-    const group = groups.get(key) ?? { server: entry.server, team: entry.team, host, entries: [] };
+    // Lane 01M1J2V4EJ: group on the DAEMON, not on the spelling a binding happened to carry.
+    // `localhost` and `127.0.0.1` in two entries put one seat in a group of its own; the other
+    // group's poll claimed its lease first and reported the seat unregistered. Entries written
+    // before the registry normalised on write are still on disk, so the fold happens here too.
+    const server = canonicalServer(entry.server);
+    const key = `${server}\u0000${entry.team}\u0000${host}`;
+    const group = groups.get(key) ?? { server, team: entry.team, host, entries: [] };
     group.entries.push(entry);
     groups.set(key, group);
   }
@@ -239,14 +290,19 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
         const wakeability = registered
           ? wakeabilityFromFacts({ enrolled: true, workspace_readable: false })
           : wakeabilityFromFacts({ enrolled: false });
-        await report({
-          occupied: false,
-          wakeability,
-          reason: registered
-            ? `workspace ${registered.workspace} is missing or has no binding — the registry entry ` +
-              `outlived it; re-run \`musterd residency on --as <admin>\` in the seat's real workspace`
-            : 'seat not in this machine’s host registry — re-run `musterd residency on` in its workspace',
-        });
+        const reason = registered
+          ? `workspace ${registered.workspace} is missing or has no binding — the registry entry ` +
+            `outlived it; re-run \`musterd residency on --as <admin>\` in the seat's real workspace`
+          : 'seat not in this machine’s host registry — re-run `musterd residency on` in its workspace';
+        // DEFERRED, not failed (lane 01M1J2V4EJ, 2026-09-02; ADR 221's line). Both faults are
+        // properties of this machine's bookkeeping — nothing spawned, nothing was paid, and the fix
+        // is a local command. Reported as failures they charged `attempt_cap` and `hourly_cap`:
+        // two "not in registry" rows 46s apart spent sloane's 2/h and 2 of the act's 3 attempts,
+        // on a diagnosis that named the wrong thing. A deferral keeps the act due and the seat's
+        // budget whole; the explicit log line below keeps the rail loud (`report` is quiet on
+        // deferrals by design — that silence is for the local-session guard, not for this).
+        deps.log(`wake deferred: ${order.seat} — ${reason}`);
+        await report({ occupied: false, deferred: true, wakeability, reason });
         continue;
       }
       const backend = deps.backends.get(entry.harness);
@@ -279,7 +335,10 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
       const live = deps.liveness
         ? deps.liveness(entry.workspace, entry.harness)
         : localSessionLiveness(entry.workspace, Date.now(), undefined, entry.harness);
-      if (live.state === 'live') {
+      // ADR 166 increment 3: the guard resolves disagreement toward LIVE — a demoted slot
+      // (slotState live, enumeration disagreeing) still defers, because the slot only reads live
+      // while its own transcript is being written right now.
+      if (live.state === 'live' || live.slotState === 'live') {
         deps.log(
           `wake deferred: ${order.seat} — a live local session holds ${entry.workspace} ` +
             `(transcript active); the act stays due`,
@@ -337,6 +396,9 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
               // ADR 241: bound HERE, from the order the loop is actuating — never passed in by the
               // backend. A backend cannot name a lease other than the one it was handed.
               order.lease_id,
+              // ADR 379: the label the child will attest for THIS workspace — the same resolver the
+              // adapter runs in its cwd, with the host's own env kept out of it.
+              ownWorkspaceLabel(entry.workspace),
             ),
           log: deps.log,
         },

@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>dedupe fixture — the same page with the two rows swapped</title>
+    <style>
+      body {
+        background: #ffffff;
+        margin: 0;
+        font: 16px sans-serif;
+      }
+      /* Dark paint. Nothing to do with the freeze — it is simply where the failing row lives. */
+      #patch {
+        position: absolute;
+        left: 0;
+        top: 300px;
+        width: 420px;
+        height: 80px;
+        background: #3a4d4d;
+      }
+      /* One class, one ink. The healthy row sits on white (12.6:1); the failing row sits on the
+         patch (1.8:1). Both are placed by static CSS — no rAF, no freeze, no race. */
+      .row {
+        position: absolute;
+        color: #2b1f13;
+      }
+      #healthy {
+        left: 40px;
+        top: 120px;
+      }
+      #failing {
+        left: 40px;
+        top: 320px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="patch"></div>
+    <!--
+      DOM ORDER IS THE WHOLE FIXTURE. `rowKey` is `className|color|paperSig`, the walker keeps the
+      FIRST row per key and skips the rest, and `paperSig` reads the CSS background of the ancestor
+      chain — which for both of these is the white body, because the patch is a SIBLING that they
+      merely overlap. So both rows produce the same key, the healthy one is walked first and wins it,
+      and the failing one is never measured at all.
+
+      THIS FILE IS `dedupe-hides-a-failure.html` WITH THESE TWO ELEMENTS SWAPPED, and nothing else.
+      Before the fix it reported the failure and its sibling file did not — same CSS, same rows, verdict
+      decided by document order. Both must report it now, or the collapse is back.
+    -->
+    <div class="row" id="failing">a failing row on dark paint</div>
+    <div class="row" id="healthy">a healthy row on white</div>
+  </body>
+</html>

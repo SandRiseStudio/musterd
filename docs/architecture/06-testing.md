@@ -43,6 +43,21 @@ All three are automated and use `seedDawn`-style setup. By placement: **Scenario
 6. Assert the full transcript ordering and that all three surfaces saw the relevant messages.
    **Pass:** three members across three surfaces coordinate end-to-end; transcript matches expected act sequence. This same script drives the recorded demo.
 
+### Scenario D — multi-harness worktree selection (ADR 281/282/286)
+
+The live falsifier from the approved multi-harness spec, automated in
+[`tests/scenarios/multi-harness.test.ts`](../../tests/scenarios/multi-harness.test.ts): two machine
+config roots and sibling worktrees never share selections, ledger owners, journals, or locks; one
+worktree configured once for `claude-code`, `cursor`, `codex`, and `musterd` launches the same
+Member through each launcher's own `MUSTERD_LAUNCH_SURFACE` registration (native `musterd` is
+intrinsic) with no intervening `wire`; local state is byte-stable across launches; deselection
+releases exactly this worktree's ownership (a drifted fragment blocks with `release-blocked` and
+retains its evidence); a pre-ADR-286 registration carrying the retired `MUSTERD_SURFACE` cannot
+attach, `harness status` names it, and only a human-confirmed `harness configure` repairs the
+marker; and a fixture `future.harness` adapter participates in selection/reconciliation while
+attaching as Surface `other`. Exercises only shipped commands and launcher contracts — never
+reconciler internals.
+
 ## Per-module acceptance (must pass before the next package in build order)
 
 - **protocol**: every act's meta rule enforced (accept/decline require `in_reply_to`; unknown act rejected; unknown meta preserved); `Envelope` round-trips; version literal pinned.
@@ -87,7 +102,10 @@ MUSTERD_REAL_CODEX=1 MUSTERD_REAL_CODEX_CONFIRM=1 pnpm test:codex-cli-real
 It creates an isolated Git workspace, in-process daemon, project-local Codex MCP entry, and
 mode-600 binding; it observes MCP join through an online `codex` Presence while the CLI process is
 active, then proves directed-inbox drain and exact thread resume without a trust or configuration
-bypass. Codex desktop is separately checked using
+bypass. Last owner run: 2026-08-24, Codex CLI 0.149.1, green — the first real
+execution; the fixture as landed in #621 predated ADR 281/286 identity and could not have run
+(falsifier: `git show 1790bc6d:tests/codex-cli.acceptance.test.ts` writes a version-less binding
+with a `surface` key the strict v2 schema rejects). Codex desktop is separately checked using
 [`tests/codex-desktop.md`](../../tests/codex-desktop.md). Desktop wake is manual-resume until its
 stable supported API probe passes.
 

@@ -39,7 +39,13 @@ describe('computeLightEnv', () => {
     const empty = computeLightEnv(23, false);
     // With nobody in, the overhead fill drops out → the room falls to the floor level → a heavier veil.
     expect(empty.veilAlpha).toBeGreaterThan(occupied.veilAlpha);
-    expect(empty.veilAlpha).toBeGreaterThan(0.6);
+    // An absolute floor as well as the comparison, so "darker than occupied" can't be satisfied by a
+    // room that is barely veiled at all. 0.45, not the 0.6 this asserted before 2026-09-03: the veil's
+    // ceiling came down (VEIL_MAX 0.82 → 0.62) when the flat wash was found to be flattening the room
+    // rather than dimming it, and light was moved into the fixed fills and the warm sources instead.
+    // The old number pinned the old ceiling, not the property — an empty office is still emphatically
+    // the darkest state the model has, which is what this test is for.
+    expect(empty.veilAlpha).toBeGreaterThan(0.45);
   });
 
   it('daytime keeps a bright empty office (natural light, no one needed)', () => {
@@ -73,5 +79,45 @@ describe('computeLightEnv', () => {
     expect(computeLightEnv(13.5, true).hours).toBe(13.5);
     expect(computeLightEnv(36, true).hours).toBe(12);
     expect(computeLightEnv(-2, true).hours).toBe(22);
+  });
+
+  /** Off-shift lighting (presence spec §5.5): outside the team's declared working hours the ceiling
+   * bank is off, leaving only a small after-hours spill — a late worker reads as a lamp pool in a
+   * dark office, not a fully lit floor. No declared hours → the flavor never appears. */
+  describe('off shift', () => {
+    it('an occupied office off shift at night goes darker than in shift, but not as dark as empty', () => {
+      const inShift = computeLightEnv(23, true, true);
+      const offShift = computeLightEnv(23, true, false);
+      const empty = computeLightEnv(23, false, false);
+      expect(offShift.veilAlpha).toBeGreaterThan(inShift.veilAlpha);
+      expect(offShift.veilAlpha).toBeLessThan(empty.veilAlpha); // the after-hours spill keeps bodies readable
+    });
+
+    it('turns the ceiling bank off outside working hours even when occupied', () => {
+      expect(computeLightEnv(23, true, false).overheadOn).toBe(false);
+      expect(computeLightEnv(23, true, true).overheadOn).toBe(true);
+    });
+
+    it('keeps desk lamps available off shift — the late worker works by lamp', () => {
+      expect(computeLightEnv(23, true, false).lampsOn).toBe(true);
+    });
+
+    it('flags afterHours only when a schedule says so', () => {
+      expect(computeLightEnv(23, true, false).afterHours).toBe(true);
+      expect(computeLightEnv(23, true, true).afterHours).toBe(false);
+      expect(computeLightEnv(23, true, null).afterHours).toBe(false);
+      expect(computeLightEnv(23, true).afterHours).toBe(false);
+    });
+
+    it('no declared hours (null) behaves exactly as before', () => {
+      const legacy = computeLightEnv(23, true);
+      const nullShift = computeLightEnv(23, true, null);
+      expect(nullShift).toEqual(legacy);
+      expect(nullShift.overheadOn).toBe(true);
+    });
+
+    it('daylight still carries an off-shift office — the sun ignores the schedule', () => {
+      expect(computeLightEnv(12, true, false).veilAlpha).toBeLessThan(0.15);
+    });
   });
 });

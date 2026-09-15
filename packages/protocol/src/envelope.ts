@@ -1,16 +1,34 @@
 import { z } from 'zod';
-import { ActSchema, type Act } from './acts.js';
+import { ActSchema } from './acts.js';
 import { AskSpeciesSchema, AskTierSchema, AskOutcomeSchema } from './ask.js';
+import {
+  ELIGIBLE_ACTS,
+  MAX_ELIGIBLE,
+  buildEnvelope,
+  eligibleOf,
+  type EnvelopeInput,
+} from './envelope.wire.js';
+import { AnchorRefSchema, HuddleMetaSchema } from './huddle.js';
 import { BlockedBySchema } from './incident.js';
 import { PROTOCOL_VERSION } from './version.js';
 
-/** Recipient of an envelope: a specific member, the whole team, or broadcast. */
+/** The envelope's validator-free half lives in `envelope.wire.js`; this module is its zod face. */
+export {
+  ELIGIBLE_ACTS,
+  MAX_ELIGIBLE,
+  buildEnvelope,
+  eligibleOf,
+  type EnvelopeInput,
+  type Recipient,
+} from './envelope.wire.js';
+
+/** Recipient of an envelope: a specific member, the whole team, or broadcast. The type is in
+ *  `envelope.wire.js`; this is its validator. */
 export const RecipientSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('member'), name: z.string().min(1) }),
   z.object({ kind: z.literal('team') }),
   z.object({ kind: z.literal('broadcast') }),
 ]);
-export type Recipient = z.infer<typeof RecipientSchema>;
 
 const TEAM_SLUG = /^[a-z0-9-]{1,32}$/;
 
@@ -29,40 +47,7 @@ export const DeferUntilSchema = z.union([
 ]);
 export type DeferUntil = z.infer<typeof DeferUntilSchema>;
 
-/**
- * ADR 254: the eligible set — 2–`MAX_ELIGIBLE` named seats, **any one of whom discharges the act**.
- *
- * Four is the cap for two reasons, and the second is the load-bearing one. Above four, a named set
- * is `@team` with extra steps and the sender should be made to say so. But the cap also bounds the
- * escalation tail a later increment walks: at a 5-minute hold, four seats is ~20 minutes and at most
- * four `wake_cost` charges. Uncapped, both the latency and the spend of a serial walk are unbounded.
- */
-export const MAX_ELIGIBLE = 4;
-
-/**
- * Acts that may carry an eligible set. Deliberately narrow: a `handoff` to two seats is incoherent
- * (two owners is zero owners), and accept/decline/defer/steer are structurally single-target. That
- * restriction is what earns a single global "first answer wins" rule instead of a per-act table.
- */
-export const ELIGIBLE_ACTS: ReadonlySet<Act> = new Set<Act>([
-  'message',
-  'request_help',
-  'challenge',
-]);
-
-/**
- * The eligible set on an envelope's meta, or `null` when there isn't one (or it is malformed).
- *
- * The single reader of the shape — server, MCP, and CLI all come through here, so no package can
- * interpret `meta.eligible` differently from the schema that validated it. A mixed-type array
- * returns `null` rather than a filtered list: silently dropping a name would mean silently dropping
- * an obligation.
- */
-export function eligibleOf(meta: Record<string, unknown> | null | undefined): string[] | null {
-  const v = meta?.['eligible'];
-  if (!Array.isArray(v) || !v.every((n) => typeof n === 'string')) return null;
-  return v as string[];
-}
+// `MAX_ELIGIBLE`, `ELIGIBLE_ACTS` and `eligibleOf` live in `envelope.wire.js`; re-exported above.
 
 /**
  * The on-wire message. `actMetaRules` enforces per-act meta requirements
@@ -81,6 +66,14 @@ export const EnvelopeSchema = z
     thread: z.string().min(1).nullish(),
     meta: z.record(z.unknown()).nullish(),
     ts: z.number().int().nonnegative(),
+    /**
+     * When the daemon that served this envelope first held it — `messages.created_at`, the receipt
+     * clock. `ts` is the origin's clock and travels unchanged through federation (ADR 335), so it is
+     * not the order a reader's cursor walks; this is. Set on the read side only (inbox, history,
+     * live delivery); a client never sends it, and an older daemon omits it, in which case a client
+     * falls back to `ts` — the pre-fix comparison, correct whenever nothing arrived out of order.
+     */
+    received_at: z.number().int().nonnegative().optional(),
   })
   .superRefine(actMetaRules);
 
@@ -120,6 +113,23 @@ export function actMetaRules(
       });
     }
   }
+  // Stated confidence (ADR 294 decision 5, amended 2026-09-02): `meta.confidence` is an OPTIONAL
+  // probability in (0, 1] that the act's claim holds, on any act. It is a field on the claim, not on
+  // musterd — a PR body or a foreign harness's log may carry the same number — and the act is only one
+  // carrier. Absent is absent: never defaulted to 1.0, never required (an omission that read as certainty
+  // would make omission the cheapest hedge, the exact gaming ADR 294 §Problem 3 designs against). A
+  // malformed value is refused here rather than carried into the ledger as a number nobody can score.
+  if ('confidence' in meta && meta['confidence'] !== undefined) {
+    const c = meta['confidence'];
+    if (typeof c !== 'number' || !Number.isFinite(c) || c <= 0 || c > 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'confidence'],
+        message:
+          'meta.confidence must be a number in (0, 1] — the probability the claim holds; omit it rather than guess',
+      });
+    }
+  }
   // `defer` (ADR 103) is a plan mutation on the Goal spine: it MUST name the Goal it moves via a
   // non-empty `meta.goal_id`. Since ADR 257 it has one meaning — shelve the Goal (`wave: 'later'`).
   // A pre-257 `meta.wave: <n>` still parses, but reorders nothing; the numeric rank is retired.
@@ -150,6 +160,45 @@ export function actMetaRules(
         path: ['meta', 'tier'],
         message: 'act "ask" requires meta.tier (advisory | standard | blocking)',
       });
+    }
+  }
+  // `insight` (ADR 327) is the team-memory act: a finding saved so the whole team can find it. It
+  // MUST carry a non-empty `meta.headline` (≤120 chars — the commit-subject discipline ADR 093
+  // chose); MAY carry `meta.tags` (≤8 non-empty strings) and `meta.repo` (a slug naming the repo
+  // the finding is bound to). The finding text rides the envelope body; its ≤2048-byte cap is
+  // server-enforced at save time, like seat memory's blob cap (ADR 093), not wire-schema.
+  if (env.act === 'insight') {
+    const headline = meta['headline'];
+    if (typeof headline !== 'string' || headline.trim().length === 0 || headline.length > 120) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'headline'],
+        message: 'act "insight" requires meta.headline (1..120 chars)',
+      });
+    }
+    if (meta['tags'] !== undefined) {
+      const tags = meta['tags'];
+      const ok =
+        Array.isArray(tags) &&
+        tags.length <= 8 &&
+        tags.every((t) => typeof t === 'string' && t.trim().length > 0);
+      if (!ok) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['meta', 'tags'],
+          message: 'meta.tags must be at most 8 non-empty strings',
+        });
+      }
+    }
+    if (meta['repo'] !== undefined) {
+      const repo = meta['repo'];
+      if (typeof repo !== 'string' || repo.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['meta', 'repo'],
+          message: 'meta.repo must be a non-empty slug when present',
+        });
+      }
     }
   }
   // ADR 254: the eligible set. **Shape only.** `actMetaRules` receives `{act, thread, meta}` — no
@@ -285,6 +334,50 @@ export function actMetaRules(
       });
     }
   }
+  // A huddle is a thread (ADR 378): `meta.huddle` opens one and lives on the ROOT only — a turn
+  // that repeats it is malformed, and a root cannot already be in a thread. Optional, additive,
+  // refused when malformed; the daemon reads nothing out of it.
+  if (meta['huddle'] !== undefined) {
+    const parsed = HuddleMetaSchema.safeParse(meta['huddle']);
+    if (!parsed.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'huddle'],
+        message: `meta.huddle is malformed: ${parsed.error.issues.map((i) => i.path.join('.') + ' ' + i.message).join('; ')}`,
+      });
+    } else if (typeof env.thread === 'string' && env.thread.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'huddle'],
+        message:
+          'meta.huddle opens a huddle and belongs on the root act only — a turn in a thread must not carry it',
+      });
+    } else if (env.act !== 'message' && env.act !== 'request_help') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'huddle'],
+        message: 'meta.huddle opens a huddle on a "message" or "request_help" act',
+      });
+    }
+  }
+  // The closing `resolve` names where the anchor landed (ADR 378 §6): a ref, or `none` with the
+  // reason in the body. Optional — a resolve that is not a huddle's carries none.
+  if (meta['anchor_ref'] !== undefined) {
+    if (env.act !== 'resolve') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'anchor_ref'],
+        message: 'meta.anchor_ref rides the closing "resolve" only',
+      });
+    } else if (!AnchorRefSchema.safeParse(meta['anchor_ref']).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'anchor_ref'],
+        message:
+          'meta.anchor_ref must be a non-empty string (a repo path, PR, lane ref, or "none")',
+      });
+    }
+  }
 }
 
 /**
@@ -292,27 +385,16 @@ export function actMetaRules(
  * the identity-bound fields. The result is validated and returns the parsed
  * envelope (throws ZodError on invalid input).
  */
-export function makeEnvelope(input: {
-  id: string;
-  team: string;
-  from: string;
-  to: Recipient;
-  act: z.infer<typeof ActSchema>;
-  body?: string;
-  thread?: string | null;
-  meta?: Record<string, unknown> | null;
-  ts?: number;
-}): Envelope {
-  return EnvelopeSchema.parse({
-    id: input.id,
-    v: PROTOCOL_VERSION,
-    team: input.team,
-    from: input.from,
-    to: input.to,
-    act: input.act,
-    body: input.body ?? '',
-    thread: input.thread ?? null,
-    meta: input.meta ?? null,
-    ts: input.ts ?? Date.now(),
-  });
+/**
+ * Where an envelope sits in the order a read cursor walks: the serving daemon's receipt clock
+ * (`received_at`), falling back to the origin's `ts` when the daemon predates the field. Compare
+ * THIS against `cursor.last_read_ts`, never `ts` on its own — `ts` is the sender's clock and travels
+ * unchanged through federation, so an event can arrive after a seat last read while stamped before.
+ */
+export function envelopePosition(env: Pick<Envelope, 'ts' | 'received_at'>): number {
+  return env.received_at ?? env.ts;
+}
+
+export function makeEnvelope(input: EnvelopeInput): Envelope {
+  return EnvelopeSchema.parse(buildEnvelope(input));
 }

@@ -39,6 +39,10 @@ export interface ReconcileResult {
   minted: Record<string, string>;
   /** Fail-closed parse errors carried from the spec (skipped seats). */
   errors: string[];
+  /** Keys dropped because no schema knows them — the entry projected, minus those fields. */
+  warnings: string[];
+  /** Roster files whose bytes are not canonical (ADR 058 guard 2) — projected anyway. */
+  drift: string[];
 }
 
 function resolveLifecycle(
@@ -97,6 +101,8 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
     removed: [],
     minted: {},
     errors: [...spec.errors],
+    warnings: [...spec.warnings],
+    drift: [...spec.drift],
   };
   const desired = new Set(spec.seats.map((s) => s.name));
 
@@ -108,6 +114,10 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       lifecycle,
       lifecycleUntil,
       workingHours: seat.working_hours ?? null,
+      slackUserId: seat.slack_user_id ?? null,
+      // ADR 374: the file owns the hue. Absent in the file is a statement — null — not a gap for
+      // the daemon to fill; otherwise two machines reconciling the same roster would disagree.
+      hue: seat.hue ?? null,
     };
     const existing = getMemberByName(db, team.id, name); // includes tombstoned rows
     if (!existing) {
@@ -119,6 +129,8 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
         lifecycle: fields.lifecycle,
         lifecycleUntil: fields.lifecycleUntil,
         workingHours: fields.workingHours ?? null,
+        slackUserId: fields.slackUserId ?? null,
+        hue: fields.hue ?? null,
       });
       result.added.push(name);
       result.minted[name] = token;
@@ -132,7 +144,10 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       existing.role !== fields.role ||
       existing.lifecycle !== fields.lifecycle ||
       existing.lifecycle_until !== fields.lifecycleUntil ||
-      existing.working_hours !== (fields.workingHours ? JSON.stringify(fields.workingHours) : null)
+      existing.working_hours !==
+        (fields.workingHours ? JSON.stringify(fields.workingHours) : null) ||
+      existing.slack_user_id !== fields.slackUserId ||
+      existing.hue !== (fields.hue ?? null)
     ) {
       // UPDATE in place — id, token_hash, bound_at preserved (live session unaffected).
       updateMemberIdentity(db, existing.id, fields);
@@ -254,7 +269,30 @@ export function reconcileAll(db: Database, roots: string[]): ReconcileResult[] {
     }
     if (!spec) continue;
     try {
-      results.push(reconcileTeam(db, spec));
+      const result = reconcileTeam(db, spec);
+      // SURFACE what the pass found. Until 2026-08-21 nothing did: `errors` was collected here,
+      // returned, asserted in tests, and read by no production caller — so a fail-closed skipped
+      // seat, the case load.ts calls "never silently dropped", was in fact reported to nobody. Both
+      // channels go to the daemon log now, one line per finding, tagged by kind so a reader can
+      // tell a skipped entry from a dropped field.
+      for (const err of result.errors) {
+        log.warn({ msg: 'reconcile_entry_error', root, team: result.slug, detail: err });
+      }
+      for (const warning of result.warnings) {
+        log.warn({ msg: 'reconcile_key_dropped', root, team: result.slug, detail: warning });
+      }
+      // ADR 058 guard 2, finally read. `musterd fmt --check` was correct and unrun; two role files
+      // drifted for twenty days with nobody aware. Its own line, not folded into `reconcile_key_-
+      // dropped`, because untidy bytes and lost data are different findings with different fixes.
+      for (const file of result.drift) {
+        log.warn({
+          msg: 'reconcile_file_drifted',
+          root,
+          team: result.slug,
+          detail: `${file}: not canonical — run \`musterd fmt\` (cosmetic; the entry projected)`,
+        });
+      }
+      results.push(result);
     } catch (e) {
       log.warn({ msg: 'reconcile_failed', root, err: (e as Error).message });
     }

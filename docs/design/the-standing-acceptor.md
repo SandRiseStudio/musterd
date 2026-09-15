@@ -48,7 +48,7 @@ ADR-level trade rather than an ops fix:
   `01KZ4QH585`, claimed by gptbot itself — note the bootstrap flavour).
 
 So hand-declaring buys a working queue **by asserting exactly the thing ADR 158 says not to trust**,
-and that assertion feeds the [ADR 056](../decisions/056-research-as-first-class-practice.md) diversity
+and that assertion feeds the [ADR 314](../decisions/314-correlated-models-correlated-mistakes.md) diversity
 conclusions. That is the trade the session has to decide, not route around.
 
 ## What the session should actually chew on

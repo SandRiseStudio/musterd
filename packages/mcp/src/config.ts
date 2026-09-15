@@ -3,14 +3,15 @@ import {
   type Capabilities,
   FEATURE_EPOCH,
   parseClaimPolicy,
-  SURFACES,
   SurfaceSchema,
   type ClaimPolicy,
   type Provenance,
   resolveAttestation,
+  resolveAttestedProvenance,
   type Surface,
 } from '@musterd/protocol';
 import { readBuildStamp } from '@musterd/protocol/build-stamp';
+import { resolveWorkspaceKey } from '@musterd/protocol/project';
 import { ulid } from 'ulid';
 import {
   findBinding,
@@ -18,6 +19,8 @@ import {
   resolveBindingDir,
   warnForeignAdapterWorkspace,
 } from './binding.js';
+import { processAncestry } from './processAncestry.js';
+import { readWakeLeaseFile } from './wakeLeaseFile.js';
 import {
   resolveDriver,
   resolveModel,
@@ -41,6 +44,10 @@ export interface McpConfig {
    * with — the Bearer secret + what the `claim` frame presents. From `MUSTERD_AGENT_KEY` / the binding.
    */
   agent_key?: string | undefined;
+  /** Per-agent self-identifying HTTP credential, minted at first authorized occupancy (ADR 337). */
+  seatCredential?: string | undefined;
+  /** Short-lived lease for the current agent Presence, refreshed by each successful claim (ADR 337). */
+  sessionLease?: string | undefined;
   /**
    * The **resolved** seat, once this session has occupied one (set from the `occupied` frame). A session
    * starts unclaimed (undefined ⇒ pending presence: reachable, holding no seat) and fills this in when it
@@ -50,6 +57,8 @@ export interface McpConfig {
   /** Optional pre-issued grant (`msgr_`) that skips the pending/admin-approval lane (ADR 075). */
   grant?: string | undefined;
   surface: Surface;
+  /** Which launcher marker resolved `surface` (ADR 286) — telemetry-recorded, never env contents. */
+  markerGeneration: MarkerGeneration;
   /** Why this session attaches (provenance/where seed, ADR 014). Defaults to `session`. */
   provenance: Provenance;
   /** The wake lease that spawned this session (ADR 241), from `MUSTERD_WAKE_LEASE`. Undefined for
@@ -58,6 +67,9 @@ export interface McpConfig {
   wakeLease?: string | undefined;
   /** The gracefully-degrading "where" label, resolved once at load. */
   workspace: string;
+  /** The workspace's stable identity (the work tree root) — what displacement compares, because the
+   *  label above is branch-qualified and changes under this very session (lane 01M1JQYYAC). */
+  workspaceKey: string;
   /** The human driving this session, if one is (driver co-presence, ADR 021). Env > binding.json
    *  (ADR 165 inc 2) — per-worktree state, never the repo-root-shared harness entry. */
   driver?: string | undefined;
@@ -167,84 +179,58 @@ function asSurface(value: string | undefined): Surface | undefined {
   return SurfaceSchema.safeParse(value).success ? (value as Surface) : undefined;
 }
 
-/**
- * Capture in the binding (ADR 275). Session harness is what is running *now*; the observation's
- * harness is the same class of evidence when no session has been written. Invalid / unknown
- * harness strings are ignored — occupancy never invents a Surface from an open capture field.
- */
-function capturedHarness(binding: ReturnType<typeof findBinding>): Surface | undefined {
-  if (!binding) return undefined;
-  return asSurface(binding.session?.harness) ?? asSurface(binding.model_observed?.harness);
-}
+/** Which marker generation resolved this session's Surface (recorded in telemetry, ADR 286).
+ *  `native` is the in-process host (ADR 251): it constructs its config itself, no marker involved. */
+export type MarkerGeneration = 'launch' | 'test-override' | 'native';
 
 /**
- * Occupancy surface (ADR 275): capture outranks a stale binding/spec declaration, the same way
- * model observation outranks a declared model. Two declarations still win: `MUSTERD_SURFACE` in
- * env (explicit override) and native `musterd` (ADR 251 — capture must not clobber it).
- * Capture-less seats stay on the declaration; absence is not a contradiction.
+ * Runtime Surface comes from the LAUNCHER, and only the launcher (ADR 286). Resolution is
+ * `MUSTERD_TEST_SURFACE` (deliberate headless/testing override) first, then
+ * `MUSTERD_LAUNCH_SURFACE` (what a fragment-managed registration writes). Nothing else: no
+ * binding/spec fallback, no capture inference, and any presence of the retired `MUSTERD_SURFACE`
+ * refuses even beside a valid marker — a registration still carrying it predates the conversion
+ * and must go through a confirmed `musterd harness configure`, never a dual-read path.
+ *
+ * Refusal throws: an external adapter that cannot say what launched it must not attach Presence.
+ * The error names the repair. Env contents are never logged — only which marker was present.
  */
-function occupancySurface(opts: {
-  declared: Surface;
-  fromEnv: boolean;
-  binding: ReturnType<typeof findBinding>;
-}): Surface {
-  if (opts.fromEnv || opts.declared === 'musterd') return opts.declared;
-  return capturedHarness(opts.binding) ?? opts.declared;
-}
-
-/**
- * **Surface drift.** Occupancy follows capture (ADR 275) unless an explicit override still wins.
- *
- * The 2026-08-03 warning believed the declaration and printed the contradiction. That left the
- * roster lying. Occupancy now attests `binding.session.harness` (else `model_observed.harness`)
- * when it is a valid Surface. Warn only when occupancy will *still* attest the stale value:
- * `MUSTERD_SURFACE` in env, or native `musterd` vs a capture (ADR 251).
- *
- * Silent when occupancy follows capture, and silent when nothing has been captured — Codex has
- * no hook path, so warning on absence would fire forever on every Codex seat.
- *
- * **The prescription is deliberately narrower than the warning.** This warning used to prescribe
- * `musterd wire` (env case) and `musterd agent <seat>` (binding case). Both of those re-provision:
- * they call `harness.configure`, which does `claude mcp remove musterd -s local` + `add` — and
- * Claude Code keys local scope by **repo root**, so that slot is shared by every `agents-*` seat
- * worktree of this repo (ADR 143). Repairing one stale string in one seat's gitignored binding
- * therefore rewrote the entry every seat on the machine launches through, re-pointing its
- * `command`/`args` at whatever checkout the running CLI resolved, and reinstalled hooks besides.
- * That is a machine-wide write to fix a per-worktree field, and it is how a warning grew a
- * machine-wide repair without anyone reviewing it: the seven tests here all covered *detection*
- * and none covered what the message told the reader to do.
- *
- * So the fix named here touches only the file that holds the stale value: one `-e` in the harness's
- * own MCP entry. Native `musterd` is not a stale value to overwrite. A too-wide write is not
- * closed with another too-wide write. `packages/mcp/src/surface-drift.test.ts` binds this — including
- * a guard that fails if a fourth command learns to rewrite the shared entry.
- */
-function warnContestedSurface(
-  claim: ClaimPolicy,
-  surface: Surface,
-  binding: ReturnType<typeof findBinding>,
-  fromEnv: boolean,
-): void {
-  if (claim.mode !== 'seat' || !binding) return;
-  const ran = capturedHarness(binding);
-  if (!ran || ran === surface) return;
-  if (surface === 'musterd') {
-    console.error(
-      `[musterd] seat "${claim.name}" reports surface "musterd" (host-declared, ADR 251), but the ` +
-        `session in this workspace was captured by "${ran}". Occupancy stays musterd — capture ` +
-        `must not clobber a native occupancy. The roster, presence and audit will say musterd.`,
+export function resolveLaunchSurface(env: NodeJS.ProcessEnv): {
+  surface: Surface;
+  markerGeneration: MarkerGeneration;
+} {
+  if (env['MUSTERD_SURFACE'] !== undefined) {
+    throw new Error(
+      'musterd MCP: this registration still sets the retired MUSTERD_SURFACE marker (pre-ADR-286) — ' +
+        'it is never consulted and refuses Presence attachment. Run `musterd harness configure` in ' +
+        'this worktree to convert the registration, then reload the session.',
     );
-    return;
   }
-  const source = fromEnv
-    ? `MUSTERD_SURFACE=${surface} in this harness's MCP entry (a baked value outranks binding.json and ` +
-      `no observation can correct it — delete that one \`-e MUSTERD_SURFACE=\` from the entry)`
-    : `"surface": "${surface}" in .musterd/binding.json — set it to "${ran}" (this worktree only)`;
-  console.error(
-    `[musterd] seat "${claim.name}" reports surface "${surface}", but the session in this workspace ` +
-      `was captured by "${ran}" — a ${ran} hook only fires under ${ran}, so the declaration is the ` +
-      `stale one. It is what the roster, presence and audit will say this seat is running. ` +
-      `Fix: ${source}.`,
+  const test = env['MUSTERD_TEST_SURFACE'];
+  if (test !== undefined) {
+    const surface = asSurface(test);
+    if (!surface) {
+      throw new Error(
+        'musterd MCP: MUSTERD_TEST_SURFACE is set but not a valid Surface — fix or unset it.',
+      );
+    }
+    return { surface, markerGeneration: 'test-override' };
+  }
+  const launch = env['MUSTERD_LAUNCH_SURFACE'];
+  if (launch !== undefined) {
+    const surface = asSurface(launch);
+    if (!surface) {
+      throw new Error(
+        'musterd MCP: MUSTERD_LAUNCH_SURFACE is set but not a valid Surface — re-run `musterd ' +
+          'harness configure` to rewrite this registration.',
+      );
+    }
+    return { surface, markerGeneration: 'launch' };
+  }
+  throw new Error(
+    'musterd MCP: no launch Surface marker — this registration predates ADR 286, so the adapter ' +
+      'cannot say what launched it and refuses Presence attachment. Run `musterd harness ' +
+      'configure` in this worktree to convert the registration (headless tests may set ' +
+      'MUSTERD_TEST_SURFACE instead), then reload the session.',
   );
 }
 
@@ -264,7 +250,17 @@ function warnContestedSurface(
  * spec (plus an env-supplied `MUSTERD_AGENT_KEY`) still resolves its identity. Secrets (`agent_key`,
  * `grant`) are **never** read from the spec — only env or the gitignored binding.json.
  */
-export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
+/** Test seams for the wake-lease file fallback (ADR 354); production reads the real clock and pid. */
+export interface LoadMcpConfigDeps {
+  now?: () => number;
+  /** This process's ancestors, nearest first; defaults to a bounded `ps` walk (`processAncestry`). */
+  ancestors?: () => readonly number[];
+}
+
+export function loadMcpConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  deps: LoadMcpConfigDeps = {},
+): McpConfig {
   const binding = findBinding(process.cwd(), env);
   const spec = findWorkspaceSpec(process.cwd(), env);
   const server =
@@ -274,16 +270,15 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   // `occupied` frame), so `member` starts undefined — the target lives in the claim policy below.
   // agent_key/grant are secrets → env or binding.json only, NEVER the committed spec.
   const agentKey = env['MUSTERD_AGENT_KEY'] ?? binding?.agent_key;
+  const seatCredential = binding?.seat_credential;
+  const sessionLease = binding?.session_lease;
   const grant = env['MUSTERD_GRANT'] ?? binding?.grant;
-  const surfaceRaw = env['MUSTERD_SURFACE'] ?? binding?.surface ?? spec?.surface ?? 'other';
   if (!team) {
     throw new Error('musterd MCP: no team — set MUSTERD_TEAM or provide a .musterd/binding.json');
   }
-  const fromEnv = env['MUSTERD_SURFACE'] !== undefined;
-  const declared = (SURFACES as readonly string[]).includes(surfaceRaw)
-    ? (surfaceRaw as Surface)
-    : 'other';
-  const surface = occupancySurface({ declared, fromEnv, binding });
+  // ADR 286: Surface is resolved ONCE, at startup, from the launcher's explicit marker. No stored
+  // file, capture, or observation participates; absence or the retired marker refuses (throws).
+  const { surface, markerGeneration } = resolveLaunchSurface(env);
   // Claim policy: env wins (the ADR 018 ladder), else binding.json, else the committed spec, else chat.
   const claim: ClaimPolicy =
     env['MUSTERD_CLAIM'] !== undefined
@@ -300,7 +295,6 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   // is what makes it true; see there.
   const attestation = attestationFor(binding, env);
   warnUnattestedSeat(claim, attestation.model, binding !== null);
-  warnContestedSurface(claim, surface, binding, fromEnv);
   // A seat-mode session gets a stable disambiguation code (ADR 087) keyed by what makes it the same
   // seat across relaunches: team + workspace + seat name + surface. Role/chat sessions keep a fresh
   // per-process code (see shortCode). `connId` stays a fresh ulid — it's the transport/hub identity and
@@ -310,15 +304,36 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   const bindingDir = resolveBindingDir(process.cwd(), env);
   // ADR 213 — reverse of ADR 143: binary under seat A, identity under seat B.
   warnForeignAdapterWorkspace(import.meta.url, bindingDir);
+  // ADR 354: the wake-lease FILE is consulted only when the env is silent on BOTH provenance and
+  // lease — env always wins, so a harness that forwards it (Claude Code) never reaches this line.
+  // Codex launches MCP servers with a sanitized env (measured 2026-09-02: twelve variables, no
+  // `MUSTERD_*`), so on that harness this is the only way the adapter can learn it was woken, and
+  // without it the actuator read its own session as "held by another" and killed it. The reader
+  // honours the file only from a process descended from the one the actuator spawned (spawner_pid
+  // in our bounded ancestry — the `codex` launcher is a Node wrapper one generation above the
+  // native binary that launches us) and only while unexpired — an attestation with a source, never
+  // a default (ADR 236).
+  const envSilent =
+    resolveAttestedProvenance(env) === undefined && resolveWakeLease(env) === undefined;
+  const fromFile = envSilent
+    ? readWakeLeaseFile(bindingDir, {
+        now: deps.now?.() ?? Date.now(),
+        ancestors: deps.ancestors ?? (() => processAncestry()),
+      })
+    : undefined;
   return {
     server,
     team,
     ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
+    ...(seatCredential !== undefined ? { seatCredential } : {}),
+    ...(sessionLease !== undefined ? { sessionLease } : {}),
     ...(grant !== undefined ? { grant } : {}),
     surface,
-    provenance: resolveProvenance(env),
-    wakeLease: resolveWakeLease(env),
+    markerGeneration,
+    provenance: fromFile ? 'wake' : resolveProvenance(env),
+    wakeLease: resolveWakeLease(env) ?? fromFile?.lease_id,
     workspace,
+    workspaceKey: resolveWorkspaceKey(env),
     // Per-worktree fields moved out of the shared harness entry (ADR 165 inc 2): env stays the
     // manual override (headless/CI), the binding is what provisioning writes.
     driver: resolveDriver(env) ?? binding?.driver,
@@ -384,16 +399,8 @@ export function refreshAttestation(
 ): boolean {
   try {
     const binding = findBinding(config.bindingDir ?? process.cwd(), env);
-    // Occupancy follows capture even when the model is unchanged (ADR 270 heals harness mid-session).
-    // Native `musterd` stays sticky (ADR 251); env override stays an override.
-    if (config.surface !== 'musterd') {
-      const fromEnv = env['MUSTERD_SURFACE'] !== undefined;
-      const declaredRaw = env['MUSTERD_SURFACE'] ?? binding?.surface ?? config.surface;
-      const declared = (SURFACES as readonly string[]).includes(declaredRaw)
-        ? (declaredRaw as Surface)
-        : config.surface;
-      config.surface = occupancySurface({ declared, fromEnv, binding });
-    }
+    // ADR 286: a binding refresh may update model/capture/capability fields but NEVER
+    // `config.surface` — runtime Surface was resolved once, from the launcher, at startup.
     const next = attestationFor(binding, env);
     // Never trade a real attestation for `unknown`: a binding that momentarily fails to read must
     // not blank the roster. Same never-erase rule the observation itself follows.

@@ -365,3 +365,77 @@ describe('nextGoal (ADR 049/084, reordered by ADR 257)', () => {
     expect(nextGoal([])).toBeNull();
   });
 });
+
+describe('goal retract replay', () => {
+  /** A retraction — a team message carrying `meta.goal_retract`. */
+  function retract(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    fromId: string,
+    meta: unknown,
+    ts = ++mid,
+  ) {
+    insertMessage(
+      db,
+      teamId,
+      fromId,
+      null,
+      makeEnvelope({
+        id: `r${ts}`,
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'message',
+        body: '[goal] retract',
+        meta: meta as Record<string, unknown>,
+        ts,
+      }),
+    );
+  }
+
+  it('marks a retracted goal with provenance', () => {
+    const { db, team, nick } = seed();
+    declare(db, team.id, nick.id, { id: 'r1', title: 'Scratch' }, 10);
+    retract(db, team.id, nick.id, { goal_retract: { goal_id: 'r1' } }, 20);
+    const g = listGoals(db, team.id, 'revive')[0]!;
+    expect(g.retracted).toEqual({ by: 'nick', at: 20 });
+  });
+
+  it('a later re-declaration un-retracts (latest signal wins)', () => {
+    const { db, team, nick } = seed();
+    declare(db, team.id, nick.id, { id: 'r2', title: 'Scratch' }, 10);
+    retract(db, team.id, nick.id, { goal_retract: { goal_id: 'r2' } }, 20);
+    declare(db, team.id, nick.id, { id: 'r2', title: 'Back on' }, 30);
+    const g = listGoals(db, team.id, 'revive')[0]!;
+    expect(g.retracted).toBeUndefined();
+    expect(g.title).toBe('Back on');
+  });
+
+  it('a retraction that arrives before its declaration queues like any signal', () => {
+    const { db, team, nick } = seed();
+    retract(db, team.id, nick.id, { goal_retract: { goal_id: 'r3' } }, 10);
+    declare(db, team.id, nick.id, { id: 'r3', title: 'Scratch' }, 5); // declared EARLIER by ts
+    const g = listGoals(db, team.id, 'revive')[0]!;
+    expect(g.retracted).toEqual({ by: 'nick', at: 10 });
+  });
+
+  it('ignores malformed goal_retract meta and retractions of undeclared goals', () => {
+    const { db, team, nick } = seed();
+    declare(db, team.id, nick.id, { id: 'r4', title: 'Real' }, 10);
+    retract(db, team.id, nick.id, { goal_retract: {} }, 20); // no goal_id
+    retract(db, team.id, nick.id, { goal_retract: { goal_id: 'ghost' } }, 30);
+    const goals = listGoals(db, team.id, 'revive');
+    expect(goals).toHaveLength(1);
+    expect(goals[0]!.retracted).toBeUndefined();
+  });
+
+  it('nextGoal never offers a retracted goal', () => {
+    const { db, team, nick } = seed();
+    declare(db, team.id, nick.id, { id: 'r6', title: 'Live planned' }, 10);
+    // The retracted goal is the MORE RECENT declaration — recency alone would pick it.
+    declare(db, team.id, nick.id, { id: 'r5', title: 'Retracted planned' }, 20);
+    retract(db, team.id, nick.id, { goal_retract: { goal_id: 'r5' } }, 30);
+    const goals = listGoals(db, team.id, 'revive');
+    expect(nextGoal(goals)?.id).toBe('r6');
+  });
+});

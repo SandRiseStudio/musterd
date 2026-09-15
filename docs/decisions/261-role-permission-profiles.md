@@ -62,6 +62,9 @@ below derives from one role definition.
    What a working seat needs to function non-interactively: the musterd MCP tools, the enforced
    git loop (ADR 106), the repo gates (`pnpm` build/test/lint/format), read access. The floor is
    **allow-only — it never carries `deny`** — so it merges under any ceiling.
+
+   _(Amended 2026-09-06: the shipped floor lacked `mcp__musterd` until this date. See the
+   amendment under Consequences.)_
 3. **A `read-only` profile, made real by `deny`.** `deny: [Edit, Write, NotebookEdit]` plus `Bash`
    (or `Bash` narrowed to read-shaped prefixes: `git diff`/`log`/`show`, `ls`, `rg`). Deny outranks
    allow in Claude Code's precedence and cannot be overridden interactively — that precedence is
@@ -171,3 +174,11 @@ review-path side.
   latter carries a permission profile. The recompile bridges them by name, so a roster role with no
   same-named template compiles nothing. That is the honest behaviour today, not a chosen design;
   unifying them is a question for whichever ADR next touches ADR 227.
+
+_Amendment (2026-09-06, finding 18, lane 01M1VDY8PY): the shipped floor carried only the CLI
+form, `Bash(musterd *)`, and not `mcp__musterd` — the first item this decision names — from
+2026-08-13 until this date. Nothing noticed because a reply-only wake is handed the server on
+its argv; a seat-policy wake (every work order) is governed by this list, and on delta such a
+wake had the MCP tools refused and could not occupy the roster. `STANDARD_FLOOR.allow` now
+carries `mcp__musterd`, pinned by test; existing seats re-land it with
+`musterd init --refresh-permissions`. Companion: ADR 131 §6 amendment of the same date._

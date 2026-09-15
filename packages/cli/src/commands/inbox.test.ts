@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig } from '../config.js';
+import { claimAgentHttp } from '../test-auth.js';
 import { inboxCommand } from './inbox.js';
 import { teamCommand } from './team.js';
 
@@ -20,7 +21,7 @@ describe('inbox command', () => {
   let server: RunningServer;
   let dir: string;
   let serverUrl: string;
-  let ada: HttpClient; // sends as the agent seat Ada (team agent key + seat header)
+  let ada: HttpClient; // sends as the agent seat Ada (claimed credential + Presence lease)
   let nick: HttpClient; // nick's own credential — for advancing nick's read cursor
   const base = Date.UTC(2026, 6, 7, 12, 0);
 
@@ -37,7 +38,8 @@ describe('inbox command', () => {
     const nickKey = cfg.identities['dawn']!.key;
     const admin = new HttpClient({ server: serverUrl, key: nickKey });
     await admin.addMember('dawn', { name: 'Ada', kind: 'agent' });
-    ada = new HttpClient({ server: serverUrl, key: cfg.agentKeys['dawn']!, seat: 'Ada' });
+    const adaAuth = await claimAgentHttp(serverUrl, 'dawn', cfg.agentKeys['dawn']!, nickKey, 'Ada');
+    ada = new HttpClient({ server: serverUrl, ...adaAuth });
     nick = new HttpClient({ server: serverUrl, key: nickKey, seat: 'nick' });
   });
 
@@ -62,9 +64,14 @@ describe('inbox command', () => {
     }
   }
 
-  /** Ada broadcasts `n` messages to @team (visible to nick), one per minute, oldest first. */
-  async function seed(n: number): Promise<void> {
+  /**
+   * Ada broadcasts `n` messages to @team (visible to nick), one per minute, oldest first.
+   * `tieFrom`: every row from that index on carries the ts of the row before it — a millisecond tie,
+   * which the one-per-minute default makes unconstructible.
+   */
+  async function seed(n: number, tieFrom?: number): Promise<void> {
     for (let i = 0; i < n; i++) {
+      const slot = tieFrom !== undefined && i >= tieFrom ? tieFrom - 1 : i;
       await ada.send(
         'dawn',
         makeEnvelope({
@@ -74,7 +81,7 @@ describe('inbox command', () => {
           to: { kind: 'team' },
           act: 'message',
           body: `msg ${i}`,
-          ts: base + i * 60_000,
+          ts: base + slot * 60_000,
           thread: null,
           meta: null,
         }),
@@ -131,6 +138,51 @@ describe('inbox command', () => {
     expect((res.out.match(/msg \d+/g) ?? []).length).toBe(20);
   });
 
+  /**
+   * The seed MUST exceed the daemon's 200-row prefix bound, and the history MUST be read. With
+   * everything unread the drain's unread-only paging happens to fetch the remainder, so a small or
+   * all-unread fixture passes vacuously and cannot see the loss: 205 unread = 200 prefix + 5 paged.
+   * Mark it read and the unread-only page comes back empty, stranding everything past the bound.
+   */
+  it('--limit 0 shows the full history when it exceeds the daemon bound and is already read', async () => {
+    await seed(205);
+    // Consume everything, so the read cursor sits at the newest row.
+    await capture(() => inboxCommand(parseArgs(['--limit', '0'])));
+    expect(await unreadCount()).toBe(0);
+
+    const res = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+    expect((JSON.parse(res.out) as unknown[]).length).toBe(205);
+  });
+
+  /**
+   * A filter is a lens over the WHOLE history (ADR 067), and it takes the same unbounded branch as
+   * `--limit 0`. A lens that quietly stopped searching most of the history is worse than a slow one:
+   * it answers "no such message" for one that is sitting right there.
+   */
+  it('--from searches past the daemon bound, not just the prefix it fits in', async () => {
+    await seed(205);
+    await capture(() => inboxCommand(parseArgs(['--limit', '0'])));
+
+    const res = await capture(() => inboxCommand(parseArgs(['--from', 'Ada', '--json'])));
+    expect((JSON.parse(res.out) as unknown[]).length).toBe(205);
+  });
+
+  /**
+   * `drain` stops on an empty page, which is only sound if an empty page means "nothing left". A tie
+   * straddling the daemon's prefix bound used to empty page two through the cursor alone — the walk
+   * reported success having reached 200 of 205, and the terminal said nothing. The drain must stop
+   * on a genuinely exhausted inbox and never on one the cursor emptied.
+   */
+  it('--limit 0 reaches every message when a ts tie straddles the daemon bound', async () => {
+    await seed(205, 200); // msg 200..204 share msg 199's millisecond
+    await capture(() => inboxCommand(parseArgs(['--limit', '0'])));
+    expect(await unreadCount()).toBe(0);
+
+    const res = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+    const ids = (JSON.parse(res.out) as { id: string }[]).map((m) => m.id);
+    expect(new Set(ids).size).toBe(205); // every message, each exactly once
+  });
+
   it('--peek never advances the read cursor', async () => {
     await seed(5);
     await capture(() => inboxCommand(parseArgs(['--peek'])));
@@ -164,9 +216,9 @@ describe('inbox command', () => {
     writeFileSync(
       join(dir, '.musterd', 'binding.json'),
       JSON.stringify({
+        version: 2,
         server: serverUrl,
         team: 'dawn',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Ada' },
         model: 'claude-declared-1',
         session: {
@@ -187,6 +239,159 @@ describe('inbox command', () => {
     expect(after.model_observed?.model).toBe('claude-opus-5');
     expect(after.model).toBe('claude-declared-1'); // observed over declared, never instead of
   });
+  /**
+   * Lane 01M1QC6XST. `GET /inbox/interrupt-check` is a REFUSABLE route (it authenticates through
+   * `authMember`, not `tryAuth`), and the probe deliberately takes `claimSeatPerRequest: false` — so
+   * it is excluded from both lease heals and keeps presenting a dead lease forever. The old `catch {}`
+   * then swallowed the 401, which made a seat with a stale lease PERMANENTLY AND SILENTLY DEAF on the
+   * interrupt line while every other command self-healed by reclaiming and looked fine.
+   *
+   * Measured cross-machine by stanley on 2026-09-04 (delta, build 16b6e3d8): 12 probes, silence every
+   * time, while `inbox --peek` from the same folder worked. The repair is not to reclaim — that
+   * reinstates the 2026-09-01 claim storm — it is to make the silence audible on the one channel the
+   * probe already owns.
+   */
+  it('--interrupt-check says so when its own session lease is stale, instead of going silently deaf', async () => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: serverUrl,
+        team: 'dawn',
+        claim: { mode: 'seat', name: 'Ada' },
+        seat_credential: (ada as unknown as { opts: { key: string } }).opts.key,
+        session_lease: 'lease-that-died-with-its-presence',
+      }) + '\n',
+    );
+
+    const { code, out } = await capture(() => inboxCommand(parseArgs(['--interrupt-check'])));
+
+    // Still exit 0: a probe on every tool call must never fail the call it rides on.
+    expect(code).toBe(0);
+    expect(out).toMatch(/session lease/i);
+    // It names the STATE and points at the only thing that holds a Presence. It must NOT prescribe
+    // `musterd claim` as the repair: stanley measured that claim does not restore this lease
+    // (delta, 2026-09-04 — "✓ occupied" and the identical request still 401'd), and both paths say
+    // why in the source: `--detach` is documented "no socket held, no lease" and rewrites the
+    // binding without `session_lease`, while the attached path returns, ending the Presence its
+    // lease is bound to. A line naming a repair that does not work costs a turn and changes nothing.
+    expect(out).toMatch(/team_join/);
+    expect(out).toMatch(/dies with the command/);
+    // Locally composed, never the server's body — this line rides into a model's context uninspected.
+    expect(out).not.toMatch(/revoked/);
+  });
+
+  // ADR 088 amendment (2026-09-05, lane 01M1T4339Y). Claude Code's hook contract: PostToolUse plain
+  // stdout at exit 0 is written to the debug log and never shown to the model; only
+  // `hookSpecificOutput.additionalContext` reaches it. ADR 088 shipped the line bare, so the daemon
+  // audited `interrupt.raised` for weeks while no Claude Code model ever read a line — measured in
+  // one seat's transcript on 2026-09-05: 67 hook runs carried a musterd line in `hook_success.stdout`,
+  // zero reached context. The bell check's "(c), no bell" from every Claude Code seat was that fact.
+  it('--interrupt-check --hook claude-code wraps the deaf line in the PostToolUse JSON seam', async () => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: serverUrl,
+        team: 'dawn',
+        claim: { mode: 'seat', name: 'Ada' },
+        seat_credential: (ada as unknown as { opts: { key: string } }).opts.key,
+        session_lease: 'lease-that-died-with-its-presence',
+      }) + '\n',
+    );
+    const { code, out } = await capture(() =>
+      inboxCommand(parseArgs(['--interrupt-check', '--hook', 'claude-code'])),
+    );
+    expect(code).toBe(0);
+    // Exactly one JSON object, the shape Claude Code reads — nothing bare around it.
+    const parsed = JSON.parse(out.trim()) as {
+      hookSpecificOutput: { hookEventName: string; additionalContext: string };
+    };
+    expect(parsed.hookSpecificOutput.hookEventName).toBe('PostToolUse');
+    expect(parsed.hookSpecificOutput.additionalContext).toMatch(/interrupt line is deaf/);
+    expect(parsed.hookSpecificOutput.additionalContext).toMatch(/team_join/);
+  });
+
+  /**
+   * Lane 01M2GP25R3. The deaf line prescribes `team_join` — an MCP tool — and on a harness with a
+   * TOOL-DEFERRAL path that is exactly the class of thing the model cannot call yet.
+   *
+   * Measured by stanley on the laptop 2026-09-14 20:50Z: the musterd MCP server dropped mid-session
+   * while the daemon stayed healthy, and on reconnect all 29 tools came back deferred — names only,
+   * nothing callable until `ToolSearch` re-fetched each schema. The adapter's own lease repair
+   * (`client.ts` request(): re-join once and replay on a refused lease) is correct and complete, and
+   * is triggered ONLY by an HTTP call through the adapter — so deferral gates the repair behind the
+   * capability the reconnect removed. The seat sat deaf until the model manually ran ToolSearch and
+   * then team_join.
+   *
+   * So on a deferral harness the line must name the round trip, or it prescribes an unreachable
+   * repair — the same failure it already refuses for `musterd claim`.
+   */
+  it('names the ToolSearch round trip on a deferral harness, so the repair it prescribes is reachable', async () => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: serverUrl,
+        team: 'dawn',
+        claim: { mode: 'seat', name: 'Ada' },
+        seat_credential: (ada as unknown as { opts: { key: string } }).opts.key,
+        session_lease: 'lease-that-died-with-its-presence',
+      }) + '\n',
+    );
+    const { code, out } = await capture(() =>
+      inboxCommand(parseArgs(['--interrupt-check', '--hook', 'claude-code'])),
+    );
+    expect(code).toBe(0);
+    const line = (JSON.parse(out.trim()) as { hookSpecificOutput: { additionalContext: string } })
+      .hookSpecificOutput.additionalContext;
+    // The repair still ends at team_join — it is the only thing that holds a Presence.
+    expect(line).toMatch(/team_join/);
+    // …but it must say how to make team_join callable first, by name.
+    expect(line).toMatch(/ToolSearch/);
+    // The ordering has to be explicit: fetching the schema AFTER trying the call is the loop the
+    // seat is already stuck in.
+    expect(line.indexOf('ToolSearch')).toBeLessThan(line.lastIndexOf('team_join'));
+  });
+
+  it('does NOT name ToolSearch on a harness with no deferral path — the line stays as short as it can', async () => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: serverUrl,
+        team: 'dawn',
+        claim: { mode: 'seat', name: 'Ada' },
+        seat_credential: (ada as unknown as { opts: { key: string } }).opts.key,
+        session_lease: 'lease-that-died-with-its-presence',
+      }) + '\n',
+    );
+    // No --hook at all: a bare CLI probe, where there is no deferral and no schema to fetch.
+    const { code, out } = await capture(() => inboxCommand(parseArgs(['--interrupt-check'])));
+    expect(code).toBe(0);
+    expect(out).toMatch(/team_join/);
+    expect(out).not.toMatch(/ToolSearch/);
+  });
+
+  it('--hook claude-code stays silent when nothing is raised — the common path is still free', async () => {
+    const { code, out } = await capture(() =>
+      inboxCommand(parseArgs(['--interrupt-check', '--hook', 'claude-code'])),
+    );
+    expect(code).toBe(0);
+    expect(out).toBe('');
+  });
+
+  it('an unknown --hook value falls back to bare stdout rather than failing the tool call', async () => {
+    const { code } = await capture(() =>
+      inboxCommand(parseArgs(['--interrupt-check', '--hook', 'not-a-harness'])),
+    );
+    expect(code).toBe(0);
+  });
+
   describe('defer (ADR 211)', () => {
     /** Ada asks nick something; returns the ask id nick will postpone. */
     async function askNick(): Promise<string> {

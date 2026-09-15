@@ -54,13 +54,181 @@
   font-size: 15px;
 }
 
+/* ─── the corner: a notice and where to find us ───────────────────────────
+   Stacked above the watermark (Live.css `.lc-office__corner`). The notice is a chip in the reel's
+   paper so it reads as the room's chrome rather than a caption burned into the video; the contact
+   line is bare mono ink at the watermark's size, because it is an address, not a message. Both are
+   sized for the 720p encode like the reel — a line that survives capture is the whole bar. */
+.bc__notice {
+  --lc-paper: #f3e2c3;
+  --lc-paper-2: #e9d3ab;
+  --lc-paper-ink: #2b1f13;
+  --lc-paper-rim: rgba(120, 78, 42, 0.42);
+  --lc-paper-drop: rgba(58, 34, 12, 0.38);
+  --lc-paper-sheen: rgba(255, 252, 245, 0.55);
+  /* The warm the ship beat flares to, and the alpha of that flare. Both are custom properties so the
+     state change is two token swaps on one rule — never a second `animation:` declaration, which
+     restarts lc-fade underneath and lights up the a11y sweep on elements nobody touched (#1270). */
+  --bc-flare: 0;
+  --bc-live: #d1503f;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px 5px 10px;
+  border-radius: 999px;
+  color: var(--lc-paper-ink);
+  background:
+    radial-gradient(
+      120% 180% at 8% 50%,
+      rgba(255, 236, 190, calc(0.9 * var(--bc-flare))) 0%,
+      rgba(255, 236, 190, 0) 62%
+    ),
+    linear-gradient(
+      165deg,
+      color-mix(in srgb, var(--lc-paper) 94%, var(--lc-accent)) 0%,
+      color-mix(in srgb, var(--lc-paper-2) 92%, transparent) 100%
+    );
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 30%, var(--lc-paper-rim));
+  box-shadow:
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 2px 8px -2px var(--lc-paper-drop),
+    0 0 calc(22px * var(--bc-flare)) calc(-6px + 4px * var(--bc-flare))
+      rgba(225, 173, 1, calc(0.85 * var(--bc-flare)));
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.2;
+  white-space: nowrap;
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
+  transition:
+    box-shadow var(--lc-dur-3) var(--lc-ease-out),
+    background var(--lc-dur-3) var(--lc-ease-out);
+}
+
+/* The live dot: the one thing on this chip that says the room is happening NOW rather than being a
+   still. It breathes rather than blinks — a blink reads as an error light, a breath reads as a
+   heartbeat, and this is the same signal the roster's presence dot carries on /live. */
+.bc__pulse {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bc-live);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--bc-live) 55%, transparent);
+  animation: bc-breathe 2.6s var(--lc-ease-out) infinite;
+}
+
+@keyframes bc-breathe {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--bc-live) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--bc-live) 0%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--bc-live) 0%, transparent);
+  }
+}
+
+/* The text swaps between two lengths, so it is the text that animates in, not the chip's geometry —
+   an inline-flex pill widening to its new content is the browser's own transition and reads as a
+   growth, which is the whole reason the first cut looked like a bar. */
+.bc__notice-text {
+  animation: bc-line var(--lc-dur-3) var(--lc-ease-out) both;
+}
+
+@keyframes bc-line {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* A build landed. The paper warms toward the accent and lifts a glow, and the live dot goes from
+   the red of "on air" to the mustard of "something just happened" — the same accent /live uses for
+   `now`. It is a beat, not a banner: `SHIPPED_MS` later the whole element is gone, not just this
+   class — there is no resting notice for it to fall back to. */
+.bc__notice--shipped {
+  --bc-flare: 1;
+  --bc-live: var(--lc-accent);
+}
+
+/* Reduced motion: the state still changes — the chip warms, the copy swaps — because that is
+   information. Only the repeating breath and the entrance offset go. */
+@media (prefers-reduced-motion: reduce) {
+  .bc__pulse {
+    animation: none;
+  }
+  .bc__notice-text {
+    animation: none;
+  }
+}
+
+/* ── the identity block: the address, and the mark under it ───────────────────────────────────────
+   The corner holds three things and only ONE of them changes: the notice. So only the notice wears
+   paper. The first cut gave the address a paper tag of its own and the corner became three mustard
+   objects stacked in a column — same material, three times, for a message, a fact and a stamp
+   (nick, 2026-09-04: "we don't have to use the same musterd color style chips for everything"). The
+   address and the mark are one register now — clean type, right-aligned, no plate under either.
+
+   THE ACTUAL LEGIBILITY BUG, corrected. The first diagnosis here said the address was dark ink on a
+   dark floor. It is not: the corner sits outside the room's diamond, over `.bc__stage`'s own
+   gradient, which does not follow the room's light — measured at the corner it composites to
+   rgb(224,213,198), and dark ink on that passes AA several times over at every hour. (An earlier
+   note here recorded rgb(180,171,162) from a different sample point on the same gradient; measure at
+   the element, not once for the stage.)
+
+   It was the SIZE, which is what nick guessed first. The stage is 1920 wide and the stream encodes
+   at 720p, so 12.5px arrives as ~8.3px — and Space Mono's `@` closes into its neighbours well
+   before that. It is the same argument the reel already makes for running ~1.5× /live's rail; the
+   corner had simply never been held to it. Hence 15px and open tracking, not a colour change. */
+.bc__contact {
+  display: inline-flex;
+  color: var(--lc-paper-ink, #2b1f13);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  /* MUTED BY WEIGHT, NOT BY ALPHA (nick, 2026-09-04: "make the revive@musterd.io line more muted
+     like we had originally"). The obvious lever is the wrong one here. This ink falls THROUGH AA on
+     the way down, and NOTHING CHECKS IT: `/broadcast` reports "0 measured" in `pnpm a11y:check`,
+     because the corner sits over a gradient the ancestor walk cannot resolve and the pixel pass
+     finds no line box — `bc__contact` lands in that gate's SKIPPED list, not its passing one.
+     Measured by hand instead, on a composited frame of this build over the real stage: 7.16:1 at
+     0.82 (darkest ink pixel 74,62,50 against backdrop 224,213,198). Weight does the rest of the
+     muting, because weight costs no contrast. */
+  font-weight: 400;
+  opacity: 0.82;
+  /* The `@` is the glyph that fails first: mono metrics give it no side bearing to spare, and this
+     string is mostly consonants around it. Tracking buys the whole line, not just that character. */
+  letter-spacing: 0.055em;
+  white-space: nowrap;
+}
+
+/* The mark goes back to the watermark's own quiet (nick, same note). #1300 lifted it to 0.72 on the
+   argument that it now carries the address and someone has to be able to READ it — true of the
+   address, but the mark is a signature on a frame that leaves the app, and at 0.72 in a corner that
+   also holds a paper chip it was competing with the room instead of stamping it. It is `aria-hidden`
+   decoration, so the alpha floor above does not apply. The SIZE bump stays: that was the 720p fix
+   (12.5px on a 1920 stage arrives as ~8.3px), and it is not what was loud. */
+.bc .lc-office__mark {
+  opacity: 0.5;
+}
+.bc .lc-office__mark-lockup {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
 /* ─── the asks reel (ADR 228) ─────────────────────────────────────────────
    The floor card's sibling, not a page banner. First version shipped as a full-bleed washed-out
    bar and nick called it on the live stream — the fix is structural: the reel inherits the
-   scene-chrome paper set and the workstack frame (gradient, rim, sheen, drop), announces itself
-   with the same mono eyebrow the floor card uses, and caps its width instead of spanning the
-   stage. Type runs ~1.5× /live's rail so it survives the 720p encode (the reason this is not
-   simply .lc-asks reused). */
+   scene-chrome paper set and the workstack frame (gradient, rim, sheen, drop). The second cut grew
+   a mono eyebrow header over the ask line and nick called that too (2026-08-19: two rows of stage
+   for what /live says in one) — so the reel is now a single line, /live's rail shape: bell, the
+   rotating ask, counts and rotation dots on the right edge. Type still runs ~1.5× /live's rail so
+   it survives the 720p encode (the reason this is not simply .lc-asks reused). */
 
 /* The slot spans the room, inset by one gutter each side — the same edge the floor card sits on,
    so the two read as opposite corners of one frame rather than two floating objects. The first cut
@@ -83,7 +251,7 @@
   --lc-paper-sheen: rgba(255, 252, 245, 0.55);
   display: flex;
   flex-direction: column;
-  padding: 10px 14px 12px;
+  padding: 8px 14px;
   border-radius: 14px;
   color: var(--lc-paper-ink);
   background: linear-gradient(
@@ -98,33 +266,34 @@
     inset 0 0 22px -10px color-mix(in srgb, var(--lc-accent) 24%, transparent),
     0 3px 10px -2px var(--lc-paper-drop),
     0 0 20px -6px color-mix(in srgb, var(--lc-accent) 30%, transparent);
-  animation: lc-fade var(--lc-med) var(--lc-ease) both;
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
 }
 /* Loud breathes AMBER, exactly like /live's strip — urgency in this room is mustard, not red. */
 .bc-reel--loud {
-  border-color: color-mix(in srgb, var(--lc-accent) 55%, var(--lc-paper-rim));
+  /* `--lc-asks-glow`: the accent by default, the shown seat's hue under `.has-lead` — a variable,
+     never a second `animation:` list (see Live.css `.lc-asks--loud` for the measured reason). */
+  --lc-asks-glow: var(--lc-accent);
+  border-color: color-mix(in srgb, var(--lc-asks-glow) 55%, var(--lc-paper-rim));
   animation:
-    lc-fade var(--lc-med) var(--lc-ease) both,
+    lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
     bc-reel-breathe 2.4s ease-in-out infinite;
 }
 @keyframes bc-reel-breathe {
   50% {
     box-shadow:
       inset 0 1px 0 var(--lc-paper-sheen),
-      inset 0 0 22px -10px color-mix(in srgb, var(--lc-accent) 24%, transparent),
+      inset 0 0 22px -10px color-mix(in srgb, var(--lc-asks-glow) 24%, transparent),
       0 3px 12px -2px var(--lc-paper-drop),
-      0 0 30px -4px color-mix(in srgb, var(--lc-accent) 55%, transparent);
+      0 0 30px -4px color-mix(in srgb, var(--lc-asks-glow) 55%, transparent);
   }
 }
 
-/* Eyebrow row — the floor card's head, at stream scale. */
-.bc-reel__head {
+/* The line — everything on one row: bell, the rotating slot (grows), counts + dots (pinned). */
+.bc-reel__line {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 2px 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--lc-accent) 22%, transparent);
-  margin-bottom: 9px;
+  gap: 12px;
+  min-width: 0;
   white-space: nowrap;
 }
 .bc-reel__bell {
@@ -141,25 +310,146 @@
   animation: lc-asks-ring 2.4s ease-in-out infinite;
   transform-origin: 50% 22%;
 }
-.bc-reel__label {
-  font-family: var(--font-mono, monospace);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #8a6508;
+/* The reel wears the shown seat's hue on rim and bell, and drains the tier clock as an arc round
+   the avatar — /live's `.lc-asks.has-lead` / `.lc-asks__who.is-timed` at stage scale (a 27px
+   avatar, a 2.5px band). See the note in Live.css for why colour is WHO and weight is urgency. */
+.bc-reel.has-lead {
+  border-color: color-mix(in srgb, var(--lc-asks-hue) 62%, var(--lc-paper-rim));
 }
+.bc-reel.has-lead .bc-reel__bell {
+  stroke: var(--lc-asks-hue);
+}
+.bc-reel--loud.has-lead {
+  --lc-asks-glow: var(--lc-asks-hue);
+  border-color: color-mix(in srgb, var(--lc-asks-hue) 84%, var(--lc-paper-rim));
+}
+.bc-reel__who {
+  position: relative;
+}
+.bc-reel__who.is-timed::after,
+.bc-reel__who.is-over::after {
+  content: '';
+  position: absolute;
+  inset: -4.5px;
+  border-radius: 50%;
+  pointer-events: none;
+  --lc-arc: color-mix(
+    in srgb,
+    var(--lc-accent) calc((1 - var(--lc-ask-frac)) * 100%),
+    var(--lc-asks-hue)
+  );
+  background: conic-gradient(var(--lc-arc) calc(var(--lc-ask-frac) * 360deg), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), var(--lc-paper-ink) 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), var(--lc-paper-ink) 0);
+}
+.bc-reel__who.is-over::after {
+  background: var(--lc-danger);
+}
+/* ── the tally: what is owed, then what is answered ────────────────────────────────────────────
+   Five spans in one grey voice is a run of text, not a summary (nick, 2026-09-04). See the long
+   note on `ReelCounts` in AsksReel.tsx for the reasoning; this is the paint.
+
+   The whole group is `flex: none` so the right edge still never moves when the slot rotates — the
+   property that made the first version calm, and the one easiest to lose while restyling it. */
+.bc-reel__counts {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+/* The hairline between owed and answered. Not a border on a neighbour: as its own element it exists
+   only when BOTH sides do (AsksReel renders it conditionally), so the group never ends on a rule. */
+.bc-reel__counts-split {
+  width: 1px;
+  height: 15px;
+  background: color-mix(in srgb, var(--lc-paper-ink) 24%, transparent);
+}
+
 .bc-reel__meta {
   flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
   font-family: var(--font-mono, monospace);
-  font-size: 13px;
+  color: var(--lc-paper-ink);
+}
+
+/* The digit is the content. Tabular figures so a count ticking 9 → 10 does not shift the label
+   beside it — the reel re-renders every second, and a jittering tally reads as a glitch on video. */
+.bc-reel__meta b {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* The label is what the digit means, held quiet enough that the eye takes the number first and the
+   word only if it stopped. `em` for the tag, not the tone — nothing here is emphasis. */
+.bc-reel__meta em {
+  font-size: 11.5px;
+  font-style: normal;
+  letter-spacing: 0.02em;
   color: var(--lc-paper-dim);
 }
-.bc-reel__meta--dim {
-  opacity: 0.6;
+
+/* Colour carries the state, because colour survives the 720p encode where weight does not. The pip
+   is `aria-hidden` decoration — every count still reads as "3 waiting" with no colour at all. */
+.bc-reel__pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  align-self: center;
+  background: var(--lc-paper-dim);
 }
-.bc-reel__spacer {
-  flex: 1;
+.bc-reel__meta.is-waiting .bc-reel__pip {
+  background: var(--lc-accent);
+}
+.bc-reel__meta.is-waiting b {
+  color: var(--lc-accent-ink);
+}
+/* Elapsed is a DASH, not a dot — and deliberately not the warn amber it started as. `--lc-warn` sits
+   a few degrees from `--lc-accent`, so "1 elapsed" and "3 waiting" came out as two yellows side by
+   side and the colour coding cancelled itself exactly where it had to work hardest. Shape carries
+   what a second yellow could not: a spent clock is a line, not a live dot. */
+.bc-reel__meta.is-elapsed .bc-reel__pip {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--lc-paper-ink) 46%, transparent);
+}
+/* Answered and gone: a hollow ring — the outline of the shape the live counts fill in. */
+.bc-reel__meta.is-settled .bc-reel__pip {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--lc-paper-ink) 38%, transparent);
+}
+
+/* History steps back as a group — one rule, rather than a `--dim` modifier the caller has to
+   remember on each of two states. */
+.bc-reel__meta.is-past {
+  opacity: 0.62;
+}
+
+/* Something is genuinely waiting: the pip breathes. The only motion in the tally, on the one count
+   that is a demand — and gated on `--loud`, so it cannot pulse over a zero. */
+.bc-reel--loud .bc-reel__meta.is-waiting .bc-reel__pip {
+  animation: bc-pip-breathe 2.6s ease-in-out infinite;
+}
+@keyframes bc-pip-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-accent) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--lc-accent) 0%, transparent);
+  }
+}
+
+/* The count still says what it says; only the breath goes. Same contract as the notice's pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .bc-reel--loud .bc-reel__meta.is-waiting .bc-reel__pip {
+    animation: none;
+  }
 }
 .bc-reel__dots {
   display: flex;
@@ -177,8 +467,10 @@
   background: var(--lc-accent);
 }
 
-/* The ask line — one strict line, everything nowrap, only the gist gives ground. */
+/* The rotating slot — one strict line, everything nowrap, only the gist gives ground. It grows;
+   the counts and dots to its right are flex: none, so the right edge never moves on rotation. */
 .bc-reel__row {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -188,11 +480,14 @@
   line-height: 1;
   white-space: nowrap;
   overflow: hidden;
-  animation: bc-reel-in 420ms var(--lc-ease, ease-out) both;
+  animation: bc-reel-in var(--lc-dur-4) var(--lc-ease-out) both;
 }
 .bc-reel__row--quiet {
   color: var(--lc-paper-dim);
   font-size: 16px;
+}
+.bc-reel__row--quiet b {
+  font-weight: 680;
 }
 .bc-reel__who {
   width: 27px;

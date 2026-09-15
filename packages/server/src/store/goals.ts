@@ -1,5 +1,10 @@
 import type { Goal, GoalDeclareMeta, Lane } from '@musterd/protocol';
-import { compareGoals, GoalDeclareMetaSchema, GoalOutcomeMetaSchema } from '@musterd/protocol';
+import {
+  compareGoals,
+  GoalDeclareMetaSchema,
+  GoalOutcomeMetaSchema,
+  GoalRetractMetaSchema,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { deriveGoalStatus, listLanes } from './lanes.js';
 
@@ -116,6 +121,11 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
   // wins (the scan is ts-ascending); notes before their declaration queue like any other signal.
   const outcomes = new Map<string, { text: string; by: string; at: number }>();
   const pendingOutcomes: { goalId: string; text: string; by: string; at: number }[] = [];
+  // Retractions (goal-retract design) also live beside the skeleton: the newest retract vs the
+  // newest declaration decides by ts, so a re-declaration after a retract un-retracts. Signals
+  // before their declaration queue like outcomes do.
+  const retractions = new Map<string, { by: string; at: number }>();
+  const pendingRetractions: { goalId: string; by: string; at: number }[] = [];
 
   const applySignal = (act: string, meta: unknown, ts: number): boolean => {
     const goalId = signalGoalId(meta);
@@ -156,6 +166,14 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
       else pendingOutcomes.push({ goalId: o.goal_id, ...rec });
       continue;
     }
+    const asRetract = GoalRetractMetaSchema.safeParse(rawMeta);
+    if (asRetract.success) {
+      const r = asRetract.data.goal_retract;
+      const rec = { by: row.from_name, at: row.ts };
+      if (byId.has(r.goal_id)) retractions.set(r.goal_id, rec);
+      else pendingRetractions.push({ goalId: r.goal_id, ...rec });
+      continue;
+    }
     let parsed: GoalDeclareMeta;
     try {
       parsed = GoalDeclareMetaSchema.parse(rawMeta);
@@ -185,6 +203,11 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
   // Same for early outcome notes — the pending list is ts-ordered, so the last set is the latest.
   for (const p of pendingOutcomes)
     if (byId.has(p.goalId)) outcomes.set(p.goalId, { text: p.text, by: p.by, at: p.at });
+  for (const p of pendingRetractions) {
+    if (!byId.has(p.goalId)) continue;
+    const prior = retractions.get(p.goalId);
+    if (!prior || p.at >= prior.at) retractions.set(p.goalId, { by: p.by, at: p.at });
+  }
 
   // Derive status from lanes joined by goal_id — one lane scan, grouped in memory (not one per Goal).
   const lanesByGoal = new Map<string, Lane[]>();
@@ -200,6 +223,10 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
     title: g.title,
     ...(g.story !== undefined ? { story: g.story } : {}),
     ...(outcomes.has(g.id) ? { outcome: outcomes.get(g.id)! } : {}),
+    // Retracted iff the newest retract postdates the newest declaration — latest signal wins.
+    ...(retractions.has(g.id) && retractions.get(g.id)!.at >= g.declared_at
+      ? { retracted: retractions.get(g.id)! }
+      : {}),
     // Effective wave = the newest wave assertion (declaration or defer) by ts; ties keep the later push.
     wave: g.waveEvents.reduce((best, e) => (e.ts >= best.ts ? e : best)).wave,
     depends_on: g.depends_on,
@@ -221,7 +248,7 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
 export function nextGoal(goals: Goal[]): Goal | null {
   const shipped = new Set(goals.filter((g) => g.status === 'shipped').map((g) => g.id));
   const candidates = goals
-    .filter((g) => g.status === 'planned')
+    .filter((g) => g.status === 'planned' && g.retracted === undefined)
     .filter((g) => g.depends_on.every((d) => shipped.has(d)))
     .sort(compareGoals);
   return candidates[0] ?? null;

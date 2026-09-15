@@ -1,3 +1,5 @@
+import { CHIP_BG, CHIP_FG, CHIP_M_PATH, CHIP_NOTCH, CHIP_RADIUS } from './chipMark';
+
 type MusterdChipProps = {
   size?: number;
   className?: string;
@@ -15,12 +17,9 @@ export function MusterdChip({ size = 16, className }: MusterdChipProps) {
       aria-hidden
       role="img"
     >
-      <rect width="32" height="32" rx="7" fill="#E1AD01" />
-      <path
-        fill="#18181B"
-        d="M7.5 22V11.8h2.3v2.4c0-1.7 1-2.8 2.5-2.8 1.4 0 2.3.9 2.3 2.6V22h-2.3v-5.6c0-.9-.5-1.4-1.2-1.4-.8 0-1.2.5-1.2 1.4V22H7.5zm7.2 0v-6.2c0-1.9 1-3 2.6-3 1.1 0 1.9.5 2.2 1.3v-1.1h2.3V22h-2.3v-5.7c0-.9-.5-1.4-1.2-1.4-.8 0-1.2.5-1.2 1.4V22h-2.4z"
-      />
-      <rect x="24.5" y="18" width="2.5" height="10" rx="0.4" fill="#18181B" />
+      <rect width="32" height="32" rx={CHIP_RADIUS} fill={CHIP_BG} />
+      <path fill={CHIP_FG} d={CHIP_M_PATH} />
+      <rect {...CHIP_NOTCH} fill={CHIP_FG} />
     </svg>
   );
 }
@@ -28,14 +27,42 @@ export function MusterdChip({ size = 16, className }: MusterdChipProps) {
 type MusterdWordProps = {
   className?: string;
   chipSize?: number;
+  /**
+   * Render the lockup as the ADDRESS — `musterd.io` — rather than the bare product name.
+   *
+   * Opt-in, and it stays that way. On the site's own nav and footer the domain is where the reader
+   * already is, so appending it is noise. The office mark is the opposite case: it is stamped on
+   * every frame that leaves this app — a clip, a screenshot, the Twitch stream — for a viewer who
+   * has no address bar to read, and for whom the mark is the only way back. Same lockup, one extra
+   * fact, exactly where that fact is not already on screen.
+   *
+   * The suffix is its own span so it can be held a step quieter than the name: the brand is the
+   * word, the domain is how you reach it, and a `.io` at equal weight makes the lockup read as a
+   * URL instead of a mark wearing one.
+   */
+  domain?: boolean;
 };
 
-/** Topbar wordmark lockup: chip + lowercase musterd. */
-export function MusterdWord({ className = 'lc__word', chipSize = 16 }: MusterdWordProps) {
+/** Topbar wordmark lockup: chip + lowercase musterd, optionally carrying the address. */
+export function MusterdWord({
+  className = 'lc__word',
+  chipSize = 16,
+  domain = false,
+}: MusterdWordProps) {
   return (
     <span className={className}>
       <MusterdChip size={chipSize} className="brand__chip" />
-      musterd
+      {/* With the domain, the word and its suffix are ONE flex item. The lockup is an inline-flex
+          row with a gap between chip and word, and a bare text node beside a span makes two items —
+          so `musterd` and `.io` came out reading "musterd .io" with the chip gap between them. The
+          plain branch stays a bare text node so nothing that styles the existing lockup changes. */}
+      {domain ? (
+        <span className="brand__word">
+          musterd<span className="brand__tld">.io</span>
+        </span>
+      ) : (
+        'musterd'
+      )}
     </span>
   );
 }

@@ -1,7 +1,8 @@
 import type { Provenance, PresenceStatus, Surface } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { appendAudit } from './audit.js';
+import { REMOTE_PRESENCE_TTL_MS } from '../config.js';
+import { appendAudit, appendReplicatedEvent } from './audit.js';
 import type { MemberRow, PresenceRow } from './rows.js';
 
 export interface PresenceSummary {
@@ -18,7 +19,22 @@ export interface PresenceSummary {
     build: string | null;
     epoch: number | null;
     wake_lease: string | null;
+    /** The machine this row lives on (presence replication, 2026-09-02); null = this daemon. */
+    node: string | null;
+    node_label: string | null;
   }[];
+}
+
+/**
+ * The one definition of "live", node-aware (presence replication spec §3): a local row by its own
+ * heartbeat, a remote row by its node's last sync contact. Bind `[cutoffLocal, cutoffRemote]` in
+ * that order. Requires `presence p LEFT JOIN nodes n ON n.id = p.node` in the FROM clause.
+ */
+export const LIVE_PRESENCE_SQL =
+  'p.held_until IS NULL AND ((p.node IS NULL AND p.last_seen_at > ?) OR (p.node IS NOT NULL AND n.last_seen_at > ?))';
+
+function liveCutoffs(timeoutMs: number, now = Date.now()): [number, number] {
+  return [now - timeoutMs, now - REMOTE_PRESENCE_TTL_MS];
 }
 
 /** Attach-time context the client may supply (musterd/0.2, ADR 014 + ADR 021 + ADR 101). */
@@ -28,6 +44,9 @@ export interface AttachContext {
   driver?: string | null;
   /** Harness-attested model id (ADR 101). Attested, never verified; absent → null (`unknown`). */
   model?: string | null;
+  /** WHICH TIER produced `model` — `observed` | `environment` | `binding`. Rides with `model` and
+   *  means nothing without it; absent → null, which honestly says "this row does not know". */
+  model_source?: string | null;
   /** Client-attested build ref of the connecting dist (ADR 135); absent → null (unstamped client). */
   build?: string | null;
   /** Client-attested feature epoch (ADR 148); absent → null (older client). The roster's skew signal. */
@@ -37,10 +56,58 @@ export interface AttachContext {
   wake_lease?: string | null;
 }
 
+/** The seat and team behind a member id — every transition names the seat, never the private id. */
+function seatOf(db: Database, memberId: string): { team_id: string; name: string } | undefined {
+  return db
+    .prepare<
+      [string],
+      { team_id: string; name: string }
+    >('SELECT team_id, name FROM members WHERE id = ?')
+    .get(memberId);
+}
+
+type DetachReason = 'goodbye' | 'reaped' | 'displaced' | 'cleared';
+
+/**
+ * Emit `presence.detached` for LOCAL rows only (`node IS NULL`), then delete them. `where` selects
+ * the rows. A remote row is never the subject of a locally emitted transition: this machine did
+ * not end that session and must not say it did (presence replication spec §1).
+ */
+function detachLocalRows(
+  db: Database,
+  where: string,
+  params: unknown[],
+  reason: DetachReason,
+): void {
+  const rows = db
+    .prepare<
+      unknown[],
+      { id: string; member_id: string }
+    >(`SELECT id, member_id FROM presence WHERE node IS NULL AND ${where}`)
+    .all(...params);
+  for (const r of rows) {
+    const seat = seatOf(db, r.member_id);
+    if (seat) {
+      appendReplicatedEvent(db, seat.team_id, {
+        actor: seat.name,
+        action: 'presence.detached',
+        target: seat.name,
+        result: 'allow',
+        detail: { presence: r.id, reason },
+      });
+    }
+    db.prepare('DELETE FROM presence WHERE id = ?').run(r.id);
+  }
+}
+
 /**
  * Create a presence row (a new attachment) for a member on a surface. A member may hold multiple
  * rows at once: agents are kept single-active by the ws hello path (clear-then-attach), while human
  * seats fan out and accumulate live rows (kind-scoped single-active, ADR 042).
+ *
+ * The row and its `presence.attached` event are one transaction (presence replication, 2026-09-02):
+ * the event carries what the roster shows — never `wake_lease`, which identifies rather than
+ * describes and does not travel.
  */
 export function attach(
   db: Database,
@@ -49,31 +116,55 @@ export function attach(
   connId: string | null,
   ctx: AttachContext = {},
 ): PresenceRow {
-  const now = Date.now();
-  // Back online — clear any sticky offline reason (ADR 141).
-  db.prepare('UPDATE members SET last_offline_reason = NULL WHERE id = ?').run(memberId);
-  const row: PresenceRow = {
-    id: ulid(),
-    member_id: memberId,
-    surface,
-    status: 'online',
-    conn_id: connId,
-    last_seen_at: now,
-    held_until: null,
-    provenance: ctx.provenance ?? null,
-    workspace: ctx.workspace ?? null,
-    driver: ctx.driver ?? null,
-    model: ctx.model ?? null,
-    build: ctx.build ?? null,
-    epoch: ctx.epoch ?? null,
-    wake_lease: ctx.wake_lease ?? null,
-    created_at: now,
-  };
-  db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, build, epoch, wake_lease, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @build, @epoch, @wake_lease, @created_at)`,
-  ).run(row);
-  return row;
+  return db.transaction(() => {
+    const now = Date.now();
+    // Back online — clear any sticky offline reason (ADR 141).
+    db.prepare('UPDATE members SET last_offline_reason = NULL WHERE id = ?').run(memberId);
+    const row: PresenceRow = {
+      id: ulid(),
+      member_id: memberId,
+      surface,
+      status: 'online',
+      conn_id: connId,
+      last_seen_at: now,
+      held_until: null,
+      provenance: ctx.provenance ?? null,
+      workspace: ctx.workspace ?? null,
+      driver: ctx.driver ?? null,
+      model: ctx.model ?? null,
+      model_source: ctx.model ? (ctx.model_source ?? null) : null,
+      build: ctx.build ?? null,
+      epoch: ctx.epoch ?? null,
+      wake_lease: ctx.wake_lease ?? null,
+      node: null,
+      created_at: now,
+    };
+    db.prepare(
+      `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, model_source, build, epoch, wake_lease, node, created_at)
+       VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @model_source, @build, @epoch, @wake_lease, @node, @created_at)`,
+    ).run(row);
+    const seat = seatOf(db, memberId);
+    if (seat) {
+      appendReplicatedEvent(db, seat.team_id, {
+        actor: seat.name,
+        action: 'presence.attached',
+        target: seat.name,
+        result: 'allow',
+        detail: {
+          presence: row.id,
+          surface,
+          provenance: row.provenance,
+          workspace: row.workspace,
+          driver: row.driver,
+          model: row.model,
+          model_source: row.model_source,
+          build: row.build,
+          epoch: row.epoch,
+        },
+      });
+    }
+    return row;
+  })();
 }
 
 /**
@@ -91,8 +182,11 @@ export function release(db: Database, presenceId: string, graceMs: number): void
     'UPDATE presence SET conn_id = NULL, last_seen_at = ?, held_until = ? WHERE id = ?',
   ).run(now, now + graceMs, presenceId);
   if (member) {
+    // `disconnected` means "ended without a goodbye", so it only fills an empty slot (attach
+    // cleared it). A deliberate-exit stamp already placed this session (session_ended via the
+    // SessionEnd hook, seat_released via unbind) must survive the socket closing moments later.
     db.prepare(
-      "UPDATE members SET last_offline_reason = 'disconnected', updated_at = ? WHERE id = ?",
+      "UPDATE members SET last_offline_reason = 'disconnected', updated_at = ? WHERE id = ? AND last_offline_reason IS NULL",
     ).run(now, member.member_id);
   }
 }
@@ -103,12 +197,12 @@ export function release(db: Database, presenceId: string, graceMs: number): void
  * seat on operator reclaim/remove (any kind).
  */
 export function clearMemberPresence(db: Database, memberId: string): void {
-  db.prepare('DELETE FROM presence WHERE member_id = ?').run(memberId);
+  detachLocalRows(db, 'member_id = ?', [memberId], 'cleared');
 }
 
 /** Drop a single presence row by id — used to evict exactly a displaced connection (ADR 068). */
 export function clearPresenceById(db: Database, presenceId: string): void {
-  db.prepare('DELETE FROM presence WHERE id = ?').run(presenceId);
+  detachLocalRows(db, 'id = ?', [presenceId], 'displaced');
 }
 
 /**
@@ -117,7 +211,7 @@ export function clearPresenceById(db: Database, presenceId: string): void {
  * without touching a live same-workspace session it deliberately keeps (ADR 068).
  */
 export function clearOrphanPresence(db: Database, memberId: string): void {
-  db.prepare('DELETE FROM presence WHERE member_id = ? AND conn_id IS NULL').run(memberId);
+  detachLocalRows(db, 'member_id = ? AND conn_id IS NULL', [memberId], 'cleared');
 }
 
 /**
@@ -224,7 +318,7 @@ export function heartbeat(db: Database, presenceId: string, status?: PresenceSta
 }
 
 export function detach(db: Database, presenceId: string): void {
-  db.prepare('DELETE FROM presence WHERE id = ?').run(presenceId);
+  detachLocalRows(db, 'id = ?', [presenceId], 'goodbye');
 }
 
 /**
@@ -255,7 +349,11 @@ export function touchAmbientPresence(
   // A live resident session (real socket) already owns liveness — don't add a competing row.
   if (hasActivePresence(db, memberId)) return false;
   const wasLive = hasLivePresence(db, memberId, timeoutMs);
-  const provenance: Provenance = ctx.provenance ?? 'session';
+  // SPEC.md §"Attach context": provenance is a fact known only to the attaching client, and the
+  // server MUST NOT guess it. This used to default to `session`, which made an unstated provenance
+  // indistinguishable from a declared one — and it landed on humans every time, since `ambientTouch`
+  // reads the header for agent seats only (ADR 121). Absence is not an assertion (ADR 236).
+  const provenance: Provenance | null = ctx.provenance ?? null;
   const existing = db
     .prepare<
       [string],
@@ -274,7 +372,10 @@ export function touchAmbientPresence(
     // re-writes provenance must re-write the token in the same breath; a sticky token under a
     // fresh provenance would claim a lease the session no longer belongs to.
     db.prepare(
-      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, wake_lease = ?, model = COALESCE(?, model), build = COALESCE(?, build), epoch = COALESCE(?, epoch) WHERE id = ?',
+      // `model_source` is COALESCEd on the SAME condition as `model` (`ctx.model ? … : null`), so the
+      // pair moves or stays together. Sticky-independently would be worse than not recording it: a
+      // new model under a stale tier is a stamp that lies about its own provenance.
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, wake_lease = ?, model = COALESCE(?, model), model_source = COALESCE(?, model_source), build = COALESCE(?, build), epoch = COALESCE(?, epoch) WHERE id = ?',
     ).run(
       Date.now(),
       'online',
@@ -284,6 +385,7 @@ export function touchAmbientPresence(
       ctx.driver ?? null,
       ctx.wake_lease ?? null,
       ctx.model ?? null,
+      ctx.model ? (ctx.model_source ?? null) : null,
       ctx.build ?? null,
       ctx.epoch ?? null,
       existing.id,
@@ -299,13 +401,13 @@ export function touchAmbientPresence(
 
 /** Does this member currently have any live presence (within timeout, not a release hold)? */
 export function hasLivePresence(db: Database, memberId: string, timeoutMs: number): boolean {
-  const cutoff = Date.now() - timeoutMs;
+  const [l, r] = liveCutoffs(timeoutMs);
   const row = db
     .prepare<
-      [string, number],
+      [string, number, number],
       { n: number }
-    >('SELECT COUNT(*) AS n FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ?')
-    .get(memberId, cutoff);
+    >(`SELECT COUNT(*) AS n FROM presence p LEFT JOIN nodes n ON n.id = p.node WHERE p.member_id = ? AND ${LIVE_PRESENCE_SQL}`)
+    .get(memberId, l, r);
   return (row?.n ?? 0) > 0;
 }
 
@@ -317,14 +419,14 @@ export function hasLivePresence(db: Database, memberId: string, timeoutMs: numbe
  * session. Mirrors the live filter used by the roster (fresh heartbeat, not a release hold).
  */
 export function countLivePresences(db: Database, timeoutMs: number): number {
-  const cutoff = Date.now() - timeoutMs;
+  const [l, r] = liveCutoffs(timeoutMs);
   // Observer seats (ADR 063) watch without participating — never counted as live sessions.
   const row = db
     .prepare<
-      [number],
+      [number, number],
       { n: number }
-    >('SELECT COUNT(DISTINCT p.member_id) AS n FROM presence p JOIN members m ON m.id = p.member_id WHERE p.held_until IS NULL AND p.last_seen_at > ? AND m.observer = 0')
-    .get(cutoff);
+    >(`SELECT COUNT(DISTINCT p.member_id) AS n FROM presence p JOIN members m ON m.id = p.member_id LEFT JOIN nodes n ON n.id = p.node WHERE m.observer = 0 AND ${LIVE_PRESENCE_SQL}`)
+    .get(l, r);
   return row?.n ?? 0;
 }
 
@@ -336,19 +438,19 @@ export function countLivePresences(db: Database, timeoutMs: number): number {
  * Same live filter as the roster (fresh heartbeat, not a release hold), scoped to the team.
  */
 export function listLiveDrivers(db: Database, teamId: string, timeoutMs: number): Set<string> {
-  const cutoff = Date.now() - timeoutMs;
+  const [l, r] = liveCutoffs(timeoutMs);
   const rows = db
     .prepare<
-      [string, number],
+      [string, number, number],
       { driver: string }
-    >('SELECT DISTINCT p.driver AS driver FROM presence p JOIN members m ON m.id = p.member_id WHERE m.team_id = ? AND p.driver IS NOT NULL AND p.held_until IS NULL AND p.last_seen_at > ?')
-    .all(teamId, cutoff);
+    >(`SELECT DISTINCT p.driver AS driver FROM presence p JOIN members m ON m.id = p.member_id LEFT JOIN nodes n ON n.id = p.node WHERE m.team_id = ? AND p.driver IS NOT NULL AND ${LIVE_PRESENCE_SQL}`)
+    .all(teamId, l, r);
   return new Set(rows.map((r) => r.driver));
 }
 
 /** Roster presence summary for a team. A member is online if any fresh presence; else offline. */
 export function listPresence(db: Database, teamId: string, timeoutMs: number): PresenceSummary[] {
-  const cutoff = Date.now() - timeoutMs;
+  const [l, r] = liveCutoffs(timeoutMs);
   const members = db
     .prepare<
       [string],
@@ -358,10 +460,10 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
   return members.map((member) => {
     const presences = db
       .prepare<
-        [string, number],
-        PresenceRow
-      >('SELECT * FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ? ORDER BY last_seen_at DESC')
-      .all(member.id, cutoff);
+        [string, number, number],
+        PresenceRow & { node_label: string | null }
+      >(`SELECT p.*, n.label AS node_label FROM presence p LEFT JOIN nodes n ON n.id = p.node WHERE p.member_id = ? AND ${LIVE_PRESENCE_SQL} ORDER BY p.last_seen_at DESC`)
+      .all(member.id, l, r);
     const status: PresenceStatus =
       presences.length === 0
         ? 'offline'
@@ -382,6 +484,9 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         build: p.build ?? null,
         epoch: p.epoch ?? null,
         wake_lease: p.wake_lease ?? null,
+        attached_at: p.created_at,
+        node: p.node ?? null,
+        node_label: p.node_label ?? null,
       })),
     };
   });
@@ -408,22 +513,60 @@ export function listReclaimableMemberIds(db: Database, teamId: string, now: numb
 /**
  * Remove dead presence rows — stale live ones (no heartbeat past the timeout) and release holds
  * whose reclaim grace has expired. Returns the removed rows (for offline events).
+ *
+ * `watchedSince` is when this reaper's current unbroken run began (ADR 236's `continuousSince`).
+ * Silence is only evidence over time something was listening: while the daemon is down or suspended
+ * no socket can heartbeat and no grace can be proven, so at resumption EVERY local row looks stale
+ * at once — and because a session lease is only valid while its presence row lives
+ * (`hasValidSessionLease` joins on it), reaping them cascades into every live agent's authority
+ * dying with no revocation row to explain it. So the resumed loop judges nobody until it has
+ * watched for a full timeout window, which is the same window a live adapter needs to reconnect.
+ * The default of 0 means "always been watching" — callers with no continuity to declare are
+ * unaffected. Measured 2026-09-02: seats saw "invalid, expired, or revoked agent session lease"
+ * after daemon bounces, with no `claim.superseded` row anywhere (lane 01M1HNY302).
+ *
+ * `now` is the clock the CALLER's tick started on, and the guard and the cutoff must both run on
+ * it. Reading a fresh `Date.now()` here let one tick defeat the guard by itself: the first tick
+ * after a 3.6-day host suspend reset `watchedSince`, then blocked ~104s on a wedged daemon, and 51s
+ * in this function's own clock said the window had been watched — so the cutoff swept three live
+ * sockets whose heartbeats were sitting unread in the socket buffer until that same tick returned
+ * (2026-09-14 15:57:46Z, lane 01M2GBPX2S). No heartbeat can be heard inside a tick, so no row can
+ * go quiet inside one either.
  */
-export function reapStale(db: Database, timeoutMs: number): PresenceRow[] {
-  const now = Date.now();
+export function reapStale(
+  db: Database,
+  timeoutMs: number,
+  watchedSince = 0,
+  now = Date.now(),
+): PresenceRow[] {
+  if (now - watchedSince < timeoutMs) return [];
   const cutoff = now - timeoutMs;
-  const stale = db
-    .prepare<
-      [number, number],
-      PresenceRow
-    >('SELECT * FROM presence WHERE last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)')
-    .all(cutoff, now);
-  if (stale.length > 0) {
+  return db.transaction(() => {
+    // The heartbeat cutoff is a LOCAL rule: only this machine's sockets and ambient touches animate
+    // a local row, so only a local row can go quiet by it.
+    const stale = db
+      .prepare<
+        [number, number],
+        PresenceRow
+      >('SELECT * FROM presence WHERE node IS NULL AND (last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?))')
+      .all(cutoff, now);
+    detachLocalRows(
+      db,
+      'last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)',
+      [cutoff, now],
+      'reaped',
+    );
+    // Remote rows whose node has gone quiet: removed silently — this machine did not end that
+    // session and must not say it did (spec §1). The origin's own `detached`, if it ever arrives,
+    // deletes nothing and advances the cursor.
+    const remoteCutoff = now - REMOTE_PRESENCE_TTL_MS;
     db.prepare(
-      'DELETE FROM presence WHERE last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)',
-    ).run(cutoff, now);
-  }
-  return stale;
+      `DELETE FROM presence WHERE node IS NOT NULL AND id IN (
+         SELECT p.id FROM presence p LEFT JOIN nodes n ON n.id = p.node
+          WHERE p.node IS NOT NULL AND (n.last_seen_at IS NULL OR n.last_seen_at <= ?))`,
+    ).run(remoteCutoff);
+    return stale;
+  })();
 }
 
 export function presenceById(db: Database, id: string): PresenceRow | undefined {
@@ -440,13 +583,61 @@ export function reattestModel(
   db: Database,
   presenceId: string,
   model: string | null,
+  modelSource?: string | null,
 ): { previous: string | null } | undefined {
   const row = presenceById(db, presenceId);
   if (!row) return undefined;
   const next = model ?? null;
-  if ((row.model ?? null) === next) return undefined;
-  db.prepare('UPDATE presence SET model = ? WHERE id = ?').run(next, presenceId);
+  // The tier describes the id, so it travels with it. Three cases for `modelSource`:
+  //   - a string: the caller knows the tier — store the pair;
+  //   - `undefined` with the SAME id: the caller said nothing about the tier (an older client
+  //     re-affirming on the heartbeat). Absent means "no change", never a clear, or the first
+  //     heartbeat after a claim erases what the claim stored (measured on revive 2026-09-03: every
+  //     live occupancy had a model and a NULL tier, and `observed` acts survived exactly one
+  //     heartbeat interval);
+  //   - `undefined` with a DIFFERENT id: the old tier described a different model and cannot be
+  //     inherited — the new id is stored untiered, which reads as "unknown tier" downstream.
+  const nextSource = !next
+    ? null
+    : modelSource !== undefined
+      ? modelSource
+      : (row.model ?? null) === next
+        ? (row.model_source ?? null)
+        : null;
+  // Compare BOTH: a heal that only corrects the tier (same id, observation now backing what was a
+  // declaration) is a real change and must be written, or the stamp keeps under-reporting itself.
+  if ((row.model ?? null) === next && (row.model_source ?? null) === nextSource) return undefined;
+  db.prepare('UPDATE presence SET model = ?, model_source = ? WHERE id = ?').run(
+    next,
+    nextSource,
+    presenceId,
+  );
+  emitReattested(db, presenceId);
   return { previous: row.model ?? null };
+}
+
+/**
+ * `presence.reattested` for a LOCAL row after its model or surface changed (presence replication,
+ * 2026-09-02). Carries the whole attestation triple so a peer's fold needs no prior state beyond
+ * the row itself. Callers return early when nothing changed, so no duplicate rows.
+ */
+function emitReattested(db: Database, presenceId: string): void {
+  const after = presenceById(db, presenceId);
+  if (!after || after.node !== null) return;
+  const seat = seatOf(db, after.member_id);
+  if (!seat) return;
+  appendReplicatedEvent(db, seat.team_id, {
+    actor: seat.name,
+    action: 'presence.reattested',
+    target: seat.name,
+    result: 'allow',
+    detail: {
+      presence: presenceId,
+      model: after.model,
+      model_source: after.model_source,
+      surface: after.surface,
+    },
+  });
 }
 
 /**
@@ -464,6 +655,7 @@ export function reattestSurface(
   if (!row) return undefined;
   if (row.surface === surface) return undefined;
   db.prepare('UPDATE presence SET surface = ? WHERE id = ?').run(surface, presenceId);
+  emitReattested(db, presenceId);
   return { previous: row.surface as Surface };
 }
 
@@ -479,20 +671,36 @@ export function currentAttestedModel(
   memberId: string,
   presenceId?: string,
 ): string | null {
-  if (presenceId) {
-    const row = db
-      .prepare<
-        [string, string],
-        { model: string | null }
-      >('SELECT model FROM presence WHERE id = ? AND member_id = ?')
-      .get(presenceId, memberId);
-    return row?.model ?? null;
-  }
-  const row = db
-    .prepare<
-      [string],
-      { model: string | null }
-    >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1')
-    .get(memberId);
-  return row?.model ?? null;
+  return currentAttestation(db, memberId, presenceId).model;
+}
+
+/**
+ * The attested model **and the tier that produced it**, read together from one row (ADR 301). Always read as a pair: joining a model from one row to a tier from another is the
+ * cross-attribution the `senderPresenceId` key exists to prevent, one field over.
+ *
+ * `source` is null whenever `model` is null, and may ALSO be null beside a real model — a row
+ * written before migration 42, or by a client too old to send it. That null is honest and must not
+ * be defaulted to `binding`: "we do not know which tier" is a different fact from "it was a
+ * declaration", and guessing collapses exactly the distinction this carries.
+ */
+export function currentAttestation(
+  db: Database,
+  memberId: string,
+  presenceId?: string,
+): { model: string | null; source: string | null } {
+  const row = presenceId
+    ? db
+        .prepare<
+          [string, string],
+          { model: string | null; model_source: string | null }
+        >('SELECT model, model_source FROM presence WHERE id = ? AND member_id = ?')
+        .get(presenceId, memberId)
+    : db
+        .prepare<
+          [string],
+          { model: string | null; model_source: string | null }
+        >('SELECT model, model_source FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1')
+        .get(memberId);
+  const model = row?.model ?? null;
+  return { model, source: model ? (row?.model_source ?? null) : null };
 }

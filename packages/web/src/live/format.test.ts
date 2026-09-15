@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import type { MemberSummary } from '@musterd/protocol';
 import { toneColor } from './office-scene/render';
 import {
+  activeClaimLine,
   accountStatusException,
   accountStatusMeta,
   actLabel,
   actTone,
   formatClock,
   goalEvent,
+  initial,
   isFeatureBehind,
   memberAvatar,
   memberColor,
@@ -23,6 +25,8 @@ import {
   rosterPrimaryChip,
   type RichToken,
   acceptanceCapacity,
+  recipientNames,
+  recipientScope,
 } from './format';
 
 describe('actTone — steering acts (ADR 103)', () => {
@@ -198,7 +202,7 @@ describe('toneColor — office palette mirrors the CSS tokens', () => {
 describe('postureMeta — roster posture pill (ADR 138)', () => {
   it('renders wire posture tokens with tones', () => {
     expect(postureMeta('working')).toEqual({ label: 'working', tone: 'ok', quiet: false });
-    expect(postureMeta('idle')).toEqual({ label: 'idle', tone: 'ok', quiet: true });
+    expect(postureMeta('active')).toEqual({ label: 'active', tone: 'ok', quiet: true });
     expect(postureMeta('away')).toEqual({ label: 'away', tone: 'pending', quiet: false });
     expect(postureMeta('offline')).toEqual({ label: 'offline', tone: 'muted', quiet: true });
   });
@@ -208,11 +212,11 @@ describe('rosterPrimaryChip — posture + offline reason (ADR 138/141)', () => {
   it('shows idle/working from posture when live', () => {
     expect(
       rosterPrimaryChip({
-        posture: 'idle',
+        posture: 'active',
         presence: 'online',
-        activity: 'idle',
+        activity: 'active',
       } as MemberSummary).label,
-    ).toBe('idle');
+    ).toBe('active');
     expect(
       rosterPrimaryChip({
         posture: 'working',
@@ -239,6 +243,23 @@ describe('rosterPrimaryChip — posture + offline reason (ADR 138/141)', () => {
         offline_reason: 'unknown',
       } as MemberSummary).label,
     ).toBe('offline');
+  });
+
+  it('renders the deliberate-exit reasons calmly (presence-honesty §2.3)', () => {
+    const chip = (offline_reason: string) =>
+      rosterPrimaryChip({
+        posture: 'offline',
+        presence: 'offline',
+        activity: 'offline',
+        offline_reason,
+      } as MemberSummary);
+    expect(chip('left_team').label).toBe('left team');
+    expect(chip('seat_released').label).toBe('seat released');
+    expect(chip('session_ended').label).toBe('session ended');
+    // Legacy rows from an old daemon still render as a deliberate release, not a crash.
+    expect(chip('signed_off').label).toBe('seat released');
+    // disconnected is now the only alarming flavor, and means it.
+    expect(chip('session_ended').quiet).toBe(true);
   });
 });
 
@@ -278,22 +299,22 @@ describe('isFeatureBehind — feature-skew hint (ADR 148)', () => {
 
 describe('rosterOrder — active seats lead the rail', () => {
   const seat = (name: string, over: Partial<MemberSummary>): MemberSummary =>
-    ({ name, kind: 'agent', presence: 'online', activity: 'idle', ...over }) as MemberSummary;
+    ({ name, kind: 'agent', presence: 'online', activity: 'active', ...over }) as MemberSummary;
 
-  it('orders working → idle → away → offline, whatever the input order', () => {
+  it('orders working → active → away → offline, whatever the input order', () => {
     const roster = [
       seat('off', { posture: 'offline', presence: 'offline', activity: 'offline' }),
-      seat('idle', { posture: 'idle', activity: 'idle' }),
-      seat('away', { posture: 'away', activity: 'idle' }),
+      seat('lounging', { posture: 'active', activity: 'active' }),
+      seat('away', { posture: 'away', activity: 'active' }),
       seat('work', { posture: 'working', activity: 'working' }),
     ];
-    expect([...roster].sort(rosterOrder).map((m) => m.name)).toEqual(['work', 'idle', 'away', 'off']);
+    expect([...roster].sort(rosterOrder).map((m) => m.name)).toEqual(['work', 'lounging', 'away', 'off']);
   });
 
-  it('puts a working agent above an idle one (the reported case)', () => {
+  it('puts a working agent above an active one (the reported case)', () => {
     const working = seat('stanley', { posture: 'working', activity: 'working' });
-    const idle = seat('gptbot', { posture: 'idle', activity: 'working' }); // stale: activity lags posture
-    expect([idle, working].sort(rosterOrder).map((m) => m.name)).toEqual(['stanley', 'gptbot']);
+    const lounging = seat('gptbot', { posture: 'active', activity: 'working' }); // stale: activity lags posture
+    expect([lounging, working].sort(rosterOrder).map((m) => m.name)).toEqual(['stanley', 'gptbot']);
   });
 
   it('breaks ties within a posture by human-before-agent, then name', () => {
@@ -301,6 +322,25 @@ describe('rosterOrder — active seats lead the rail', () => {
     const b = seat('abe', { posture: 'working', activity: 'working', kind: 'agent' });
     const c = seat('cy', { posture: 'working', activity: 'working', kind: 'agent' });
     expect([b, c, a].sort(rosterOrder).map((m) => m.name)).toEqual(['zeb', 'abe', 'cy']);
+  });
+});
+
+describe('activeClaimLine — the kept claim, aged (presence-honesty \u00a72.1/\u00a73)', () => {
+  const m = (over: Partial<MemberSummary>): MemberSummary =>
+    ({ name: 'ada', kind: 'agent', presence: 'online', activity: 'active', ...over }) as MemberSummary;
+
+  it('renders last claim with a coarse age', () => {
+    expect(activeClaimLine(m({ state: 'shipping inc 3', last_status_at: Date.now() - 20 * 60_000 }))).toBe(
+      'last: \u201cshipping inc 3\u201d \u00b7 20m ago',
+    );
+  });
+
+  it('says no status yet when there is no claim to age', () => {
+    expect(activeClaimLine(m({ state: null, last_status_at: null }))).toBe('no status yet');
+  });
+
+  it('is null off the active posture — working wears its status as a live label', () => {
+    expect(activeClaimLine(m({ activity: 'working', posture: 'working', state: 'x' }))).toBeNull();
   });
 });
 
@@ -601,5 +641,104 @@ describe('memberInk — the identity colour as TEXT on paper', () => {
         );
       }
     }
+  });
+});
+
+/**
+ * `initial()` — the room's one-letter glyph, on every avatar circle, rail dot and roster row.
+ *
+ * It kept no tests of its own until 2026-09-01: its only coverage was one assertion inside the desk
+ * plate's `initials()` block, and it went out with the plate. The glyph itself is live in ten
+ * components, so it gets its own.
+ */
+describe('initial — the one-letter avatar glyph', () => {
+  it('takes the first letter, upper-cased', () => {
+    expect(initial('miley')).toBe('M');
+    expect(initial('Dolly')).toBe('D');
+  });
+
+  it('ignores leading whitespace rather than rendering a blank circle', () => {
+    expect(initial('  stanley')).toBe('S');
+  });
+
+  it('never renders nothing — an empty name still gets a glyph', () => {
+    expect(initial('')).toBe('?');
+    expect(initial('   ')).toBe('?');
+  });
+
+  it('gives every seat in the room a glyph', () => {
+    for (const name of NAMES) expect(initial(name)).toHaveLength(1);
+  });
+});
+
+
+
+/**
+ * ADR 254 eligible sets in the stream row. These travel as `to: {kind:'team'}` with the names in
+ * `meta.eligible`, so a reader of `to` alone renders "team" over an act addressed to named people —
+ * which is what /live's stream panel did until 2026-09-02, while the CLI printed the names and the
+ * office scene walked to every desk.
+ */
+describe('recipientScope / recipientNames — an eligible set is named, not a team broadcast', () => {
+  const TEAM = { kind: 'team' } as const;
+  const MEMBER = { kind: 'member', name: 'ryder' } as const;
+
+  it('reads a 2-4 name set as its own scope, and lists every name', () => {
+    expect(recipientScope(TEAM, ['ryder', 'sloane'])).toBe('eligible');
+    expect(recipientNames(TEAM, ['ryder', 'sloane'])).toEqual(['ryder', 'sloane']);
+    expect(recipientNames(TEAM, ['a', 'b', 'c', 'd'])).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('keeps a plain team act a team act', () => {
+    expect(recipientScope(TEAM, null)).toBe('team');
+    expect(recipientScope(TEAM)).toBe('team');
+    expect(recipientNames(TEAM, null)).toEqual([]);
+  });
+
+  it('treats a one-name set as a team act — that is a member act that took the wrong road', () => {
+    expect(recipientScope(TEAM, ['ryder'])).toBe('team');
+    expect(recipientNames(TEAM, ['ryder'])).toEqual([]);
+  });
+
+  it('lets a member recipient win over any eligible set on the same envelope', () => {
+    // Both shapes present is a protocol contradiction; `to` is the routed truth, so it decides.
+    expect(recipientScope(MEMBER, ['dolly', 'sloane'])).toBe('direct');
+    expect(recipientNames(MEMBER, ['dolly', 'sloane'])).toEqual(['ryder']);
+  });
+
+  it('leaves broadcast alone', () => {
+    expect(recipientScope({ kind: 'broadcast' }, ['a', 'b'])).toBe('all');
+    expect(recipientNames({ kind: 'broadcast' }, ['a', 'b'])).toEqual([]);
+  });
+});
+
+describe('memberHue — a stored hue wins, and the fallback is the old hash to the degree (ADR 374)', () => {
+  it('paints the stored hue when the roster carries one', () => {
+    expect(memberHue('miley', 'agent', 212)).toBe(212);
+    expect(memberColor('miley', 'agent', 212)).toBe('hsl(212, 68%, 62%)');
+    expect(memberAvatar('miley', 'agent', 212)).toMatch(/^hsl\(212, 68%, /);
+    expect(memberInk('miley', 'agent', 212)).toMatch(/^hsl\(212, 68%, /);
+  });
+
+  it('falls back to the name hash when the hue is null or absent — a pre-374 daemon looks the same', () => {
+    expect(memberHue('miley', 'agent', null)).toBe(memberHue('miley', 'agent'));
+    expect(memberHue('miley', 'agent', undefined)).toBe(memberHue('miley', 'agent'));
+  });
+
+  it('the fallback and the protocol’s legacyHue are one number — `team hue --assign-missing` seeds from it', async () => {
+    const { legacyHue } = await import('@musterd/protocol/hue');
+    for (const name of ['miley', 'dolly', 'ryder', 'nick', 'gptbot', 'a', 'zz-top']) {
+      expect(memberHue(name, 'agent')).toBe(legacyHue(name, 'agent'));
+      expect(memberHue(name, 'human')).toBe(legacyHue(name, 'human'));
+    }
+  });
+});
+
+describe('hueOf — the roster index answers the hue the way kindOf answers the kind (ADR 374)', () => {
+  it('returns the stored hue for a rostered name and null for anyone else', async () => {
+    const { hueOf, rosterIndex } = await import('./format');
+    const idx = rosterIndex([{ name: 'miley', kind: 'agent', hue: 212 } as never]);
+    expect(hueOf('miley', idx)).toBe(212);
+    expect(hueOf('stranger', idx)).toBeNull();
   });
 });

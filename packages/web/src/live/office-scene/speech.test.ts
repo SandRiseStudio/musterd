@@ -1,14 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import {
+  enqueueSpeech,
+  speechHoldMs,
+  SPEECH_HOLD_MS,
+  SPEECH_HOLD_MAX_MS,
+  SPEECH_HOLD_MAX_STATUS_MS,
+  SPEECH_HOLD_PER_CHAR_MS,
+  SPEECH_HOLD_QUEUED_MS,
   FULL_MAX,
   GLANCE_MAX,
   GLANCE_MAX_STATUS,
   shapeSpeech,
+  speechAddressee,
   speechLength,
   speechTokens,
   stripNoise,
   truncateSpeech,
   typeCadence,
+  speechMark,
+  SPEECH_MARK_GLYPH,
+  SPEECH_MARK_WEIGHT,
 } from './speech';
 
 describe('truncateSpeech', () => {
@@ -47,10 +58,12 @@ describe('stripNoise', () => {
   it('drops leading list bullets and blockquotes', () => {
     expect(stripNoise('- one\n- two\n> quoted')).toBe('one two quoted');
   });
-  it('unwraps a lane envelope into a speakable clause', () => {
+  it('unwraps a lane envelope into a plain-language clause (first-five-seconds §3)', () => {
     expect(stripNoise('[lane] resolved "Re-font body: Fraunces → Inter"')).toBe(
-      'resolved: Re-font body: Fraunces → Inter',
+      'finished: Re-font body: Fraunces → Inter',
     );
+    expect(stripNoise('[lane] claimed "Delight B"')).toBe('took on: Delight B');
+    expect(stripNoise('[lane] handed "Delight B"')).toBe('handing over: Delight B');
   });
   it('unwraps a goal envelope the same way', () => {
     expect(stripNoise('[goal] declared "Work items, board & insight layer (web)"')).toBe(
@@ -59,11 +72,19 @@ describe('stripNoise', () => {
   });
   it('keeps content trailing the quoted title', () => {
     expect(stripNoise('[lane] surface overlaps "Daemon refresh" (owner miley): ROADMAP.md ∩ ROADMAP.md')).toBe(
-      'surface overlaps: Daemon refresh (owner miley): ROADMAP.md ∩ ROADMAP.md',
+      'overlaps with: Daemon refresh (owner miley): ROADMAP.md ∩ ROADMAP.md',
     );
   });
-  it('drops a bare envelope tag even with no known verb', () => {
-    expect(stripNoise('[lane] "cookoff run ladder" → active')).toBe('"cookoff run ladder" → active');
+  it('unwraps a state-transition envelope into plain language', () => {
+    expect(stripNoise('[lane] "cookoff run ladder" → active')).toBe('working on: cookoff run ladder');
+    expect(stripNoise('[lane] "cookoff run ladder" → awaiting_acceptance')).toBe(
+      'ready for review: cookoff run ladder',
+    );
+    expect(stripNoise('[lane] "cookoff run ladder" → done')).toBe('finished: cookoff run ladder');
+  });
+
+  it('still drops a bare envelope tag before an unknown shape', () => {
+    expect(stripNoise('[lane] something unusual entirely')).toBe('something unusual entirely');
   });
   it('unwraps a whole-line quoted title with no verb', () => {
     expect(stripNoise('"just a quoted title"')).toBe('just a quoted title');
@@ -75,10 +96,12 @@ describe('stripNoise', () => {
 });
 
 describe('speechTokens', () => {
-  it('emits a lead token for an unwrapped lane/goal verb', () => {
-    const t = speechTokens('resolved: Re-font body — calmer UI');
-    expect(t[0]).toEqual({ kind: 'lead', text: 'resolved' });
+  it('emits a lead token for an unwrapped plain-language verb', () => {
+    const t = speechTokens('finished: Re-font body — calmer UI');
+    expect(t[0]).toEqual({ kind: 'lead', text: 'finished' });
     expect(t[1]).toEqual({ kind: 'text', text: 'Re-font body — calmer UI' });
+    expect(speechTokens('working on: X')[0]).toEqual({ kind: 'lead', text: 'working on' });
+    expect(speechTokens('ready for review: X')[0]).toEqual({ kind: 'lead', text: 'ready for review' });
   });
   it('passes plain prose through as a single text token', () => {
     expect(speechTokens('on it — checking the deploy')).toEqual([
@@ -149,5 +172,278 @@ describe('typeCadence', () => {
     const total = GLANCE_MAX * typeCadence(GLANCE_MAX);
     expect(total).toBeGreaterThan(2200);
     expect(total).toBeLessThan(3800);
+  });
+});
+
+describe('speechAddressee', () => {
+  it('names the member a directed act is aimed at', () => {
+    // The bug this fixes: "You were right, I will take the handoff…" floating with no "you".
+    expect(speechAddressee({ kind: 'member', name: 'ryder' }, 'miley')).toEqual({
+      names: ['ryder'],
+      label: 'ryder',
+      tether: true,
+    });
+  });
+
+  it('says nothing for a team act — team is the default, so a chip on every bubble is noise', () => {
+    expect(speechAddressee({ kind: 'team' }, 'miley')).toBeNull();
+  });
+
+  it('says nothing for a broadcast act', () => {
+    expect(speechAddressee({ kind: 'broadcast' }, 'miley')).toBeNull();
+  });
+
+  it('keeps the chip but drops the tether when a seat addresses itself', () => {
+    // A zero-length arc from a desk back to the same desk is a smudge, not a signal.
+    expect(speechAddressee({ kind: 'member', name: 'miley' }, 'miley')).toEqual({
+      names: ['miley'],
+      label: 'miley',
+      tether: false,
+    });
+  });
+
+  it('is case-sensitive about self-addressing only on an exact seat-name match', () => {
+    // Seat names are exact identifiers; "Miley" is not "miley" and must not be collapsed.
+    expect(speechAddressee({ kind: 'member', name: 'Miley' }, 'miley')).toEqual({
+      names: ['Miley'],
+      label: 'Miley',
+      tether: true,
+    });
+  });
+});
+
+/**
+ * ADR 254 eligible sets. An act addressed to 2-4 seats travels as `to: {kind:'team'}` with the
+ * names in `meta.eligible`, so every surface reading `to` alone saw it as unaddressed — 35 acts in
+ * the live corpus, 28 of them review routing, drawn as a megaphone to nobody while the CLI printed
+ * the names. These cases are the whole of what makes the chip and trace fire for them.
+ */
+describe('speechAddressee — the eligible set', () => {
+  const TEAM = { kind: 'team' } as const;
+
+  it('names every seat in the set, not one of them', () => {
+    // eligible[0] would be a single addressee the ledger does not have: any of them discharges it.
+    expect(speechAddressee(TEAM, 'miley', ['ryder', 'sloane'])).toEqual({
+      names: ['ryder', 'sloane'],
+      label: 'ryder or sloane',
+      tether: true,
+    });
+  });
+
+  it('reads as a list at the cap of four', () => {
+    expect(speechAddressee(TEAM, 'miley', ['ryder', 'sloane', 'dolly', 'stanley'])?.label).toBe(
+      'ryder, sloane, dolly or stanley',
+    );
+  });
+
+  it('keeps the sender in the label but never lets a lone self-address stand', () => {
+    // A set that names the sender alongside others is honest — they really are eligible — but a
+    // "set" whose only other member is the sender has no arc worth drawing.
+    expect(speechAddressee(TEAM, 'miley', ['miley', 'ryder'])?.names).toEqual(['miley', 'ryder']);
+    expect(speechAddressee(TEAM, 'miley', ['miley', 'miley'])).toBeNull();
+  });
+
+  it('ignores a one-name set — that is a member act that took the wrong road', () => {
+    expect(speechAddressee(TEAM, 'miley', ['ryder'])).toBeNull();
+  });
+
+  it('still says nothing for a plain team or broadcast act', () => {
+    // The default audience. Only an eligible set earns a chip on a non-member act.
+    expect(speechAddressee(TEAM, 'miley', null)).toBeNull();
+    expect(speechAddressee(TEAM, 'miley')).toBeNull();
+    expect(speechAddressee({ kind: 'broadcast' }, 'miley', ['ryder', 'sloane'])?.label).toBe(
+      'ryder or sloane',
+    );
+  });
+
+  it('lets a member recipient win over any eligible set on the same envelope', () => {
+    // Both shapes present is a protocol contradiction; `to` is the routed truth, so it decides.
+    expect(speechAddressee({ kind: 'member', name: 'ryder' }, 'miley', ['dolly', 'sloane'])).toEqual(
+      { names: ['ryder'], label: 'ryder', tether: true },
+    );
+  });
+});
+
+
+/* ─── the act's mark ────────────────────────────────────────────────────────────────────────────
+ * The bubble's COLOUR is the sender now; this is the whole of what it says about the act. These
+ * pin the two things that are easy to get wrong by accident: that most acts get NOTHING (the half
+ * that makes the marked ones legible), and that `holds` — the pulse, the room's single loudest
+ * device — is reachable only from a genuinely-held ask.
+ */
+describe('speechMark — which acts earn a mark', () => {
+  it('marks nothing for the acts that are just the room working', () => {
+    for (const act of ['message', 'status_update', 'handoff', 'insight', 'defer', 'goal', 'wait']) {
+      expect(speechMark(act, null, null), act).toBeNull();
+    }
+  });
+
+  /* Considered and deliberately left plain: a refusal is not an emergency, and a declining bubble's
+     first line always says so out loud ("not taking this one — …"). Pinned so it is a decision on
+     the record rather than an omission somebody later "fixes". */
+  it('leaves a decline plain — the words already carry it', () => {
+    expect(speechMark('decline', null, null)).toBeNull();
+  });
+
+  it('marks the two terminals of work as done', () => {
+    expect(speechMark('accept', null, null)).toEqual({ mark: 'done', holds: false });
+    expect(speechMark('resolve', null, null)).toEqual({ mark: 'done', holds: false });
+    expect(speechMark('message', { lane_resolve: {} }, 'lane_resolve')).toEqual({
+      mark: 'done',
+      holds: false,
+    });
+  });
+
+  it('marks the steering pair as an interrupt, and NEITHER of them holds', () => {
+    expect(speechMark('steer', null, null)).toEqual({ mark: 'interrupt', holds: false });
+    expect(speechMark('challenge', null, null)).toEqual({ mark: 'interrupt', holds: false });
+  });
+
+  /* A lane going blocked is the one lane transition that is not routine — work has STOPPED, and
+     nobody is necessarily watching the board. Every other lane state stays plain. */
+  it('marks a lane going blocked, and no other lane transition', () => {
+    const blocked = { lane_state: { state: 'blocked', title: 'x' } };
+    expect(speechMark('message', blocked, 'lane_state')).toEqual({ mark: 'interrupt', holds: false });
+    expect(speechMark('message', { lane_state: { state: 'active' } }, 'lane_state')).toBeNull();
+    expect(speechMark('message', { lane_open: {} }, 'lane_open')).toBeNull();
+    expect(speechMark('message', { lane_claim: {} }, 'lane_claim')).toBeNull();
+  });
+
+  it('reads the lane kind, not the act — a lane transition arrives as a plain `message`', () => {
+    // Same meta, no recovered kind: the act alone cannot see a lane event, so it must not guess.
+    expect(speechMark('message', { lane_state: { state: 'blocked' } }, null)).toBeNull();
+  });
+});
+
+describe('speechMark — an ask, and where its volume comes from', () => {
+  /* ADR 147 §1: `approve` is an acceptance request — somebody has to go and READ a landed outcome.
+     `consult`/`escalate` are a seat that cannot proceed without a person. Both need a human; only
+     one of them has stopped a seat, and the room must not shout them at the same volume. */
+  it('splits an ask by species: approve is a review, the rest need a human', () => {
+    expect(speechMark('ask', { species: 'approve', tier: 'standard' }, null)).toEqual({
+      mark: 'review',
+      holds: false,
+    });
+    expect(speechMark('ask', { species: 'consult', tier: 'standard' }, null)?.mark).toBe(
+      'needs-human',
+    );
+    expect(speechMark('ask', { species: 'escalate', tier: 'standard' }, null)?.mark).toBe(
+      'needs-human',
+    );
+  });
+
+  /* The find this whole path exists to spend: `meta.tier` has been on the wire since ADR 147 and
+     the asks rail already ranks by it, but the bubble painted a blocking ask and an advisory one
+     the same. A blocking ask HOLDS its sender — nothing that seat was doing moves again until a
+     person answers — and that, not "an ask happened", is what earns the pulse. */
+  it('takes the loud variant from the tier that actually holds, not from the act', () => {
+    expect(speechMark('ask', { species: 'consult', tier: 'blocking' }, null)).toEqual({
+      mark: 'needs-human',
+      holds: true,
+    });
+    for (const tier of ['standard', 'advisory']) {
+      expect(speechMark('ask', { species: 'consult', tier }, null), tier).toEqual({
+        mark: 'needs-human',
+        holds: false,
+      });
+    }
+  });
+
+  /* An approve-species ask never pulses even at the top tier: the loud treatment is a claim about
+     the SENDER being stopped, and a seat awaiting acceptance is not stopped — it has submitted and
+     moved on. Getting this wrong would put every routine review request at maximum volume, which
+     is the exact inflation the mark axis exists to prevent. */
+  it('never pulses an acceptance request, whatever tier it claims', () => {
+    expect(speechMark('ask', { species: 'approve', tier: 'blocking' }, null)).toEqual({
+      mark: 'review',
+      holds: false,
+    });
+  });
+
+  /* A malformed ask is still an ask — it just cannot claim a tier it did not send. Quiet is the
+     honest default: `holds` is a factual claim about the sender's state, not decoration. */
+  it('degrades a malformed ask to quiet rather than to loud', () => {
+    expect(speechMark('ask', {}, null)).toEqual({ mark: 'needs-human', holds: false });
+    expect(speechMark('ask', { species: 'nope', tier: 'nope' }, null)).toEqual({
+      mark: 'needs-human',
+      holds: false,
+    });
+    expect(speechMark('ask', null, null)).toEqual({ mark: 'needs-human', holds: false });
+  });
+
+  it('marks the informal review routing too — request_help, never loud', () => {
+    expect(speechMark('request_help', null, null)).toEqual({ mark: 'review', holds: false });
+  });
+});
+
+describe('the mark axis is RANKED, and every mark is drawable', () => {
+  /* The point of the axis: a viewer who has learned nothing still reads "that one first". A set of
+     unranked symbols would have rebuilt the nine-hue problem in a new medium. */
+  it('orders needs-human > interrupt > review > done', () => {
+    const order = (Object.keys(SPEECH_MARK_WEIGHT) as (keyof typeof SPEECH_MARK_WEIGHT)[]).sort(
+      (a, b) => SPEECH_MARK_WEIGHT[b] - SPEECH_MARK_WEIGHT[a],
+    );
+    expect(order).toEqual(['needs-human', 'interrupt', 'review', 'done']);
+  });
+
+  it('gives every mark a distinct glyph — a badge nothing can render is a mark that vanishes', () => {
+    const glyphs = Object.values(SPEECH_MARK_GLYPH);
+    expect(glyphs).toHaveLength(Object.keys(SPEECH_MARK_WEIGHT).length);
+    expect(new Set(glyphs).size).toBe(glyphs.length);
+    for (const g of glyphs) expect(g.trim()).not.toBe('');
+  });
+});
+
+/**
+ * The speaking queue. A member who speaks again mid-sentence used to destroy their own bubble
+ * wherever the typewriter had got to; now the next act waits. These pin the two decisions inside
+ * that which are not about the DOM — what gets dropped when the backlog overflows, and how long a
+ * finished bubble holds when something is behind it.
+ *
+ * What they do NOT cover is the behavioural claim itself — that `showSpeech` enqueues instead of
+ * clearing the live bubble. This package runs `environment: 'node'`, so there is no harness that can
+ * mount two bubbles over one head and watch. Stated here so the gap is visible rather than implied
+ * by green.
+ */
+describe('enqueueSpeech', () => {
+  it('keeps the newest acts and drops the oldest unshown, in order', () => {
+    const q = ['a'];
+    enqueueSpeech(q, 'b', 3);
+    enqueueSpeech(q, 'c', 3);
+    expect(q).toEqual(['a', 'b', 'c']);
+    // Past the cap the FRONT goes: what the room eventually shows should still be roughly now.
+    enqueueSpeech(q, 'd', 3);
+    expect(q).toEqual(['b', 'c', 'd']);
+    enqueueSpeech(q, 'e', 3);
+    expect(q).toEqual(['c', 'd', 'e']);
+  });
+
+  it('holds a single act at a cap of one — the newest always survives', () => {
+    const q: string[] = [];
+    enqueueSpeech(q, 'a', 1);
+    enqueueSpeech(q, 'b', 1);
+    expect(q).toEqual(['b']);
+  });
+});
+
+describe('speechHoldMs', () => {
+  it('gives an unqueued line a generous read that grows with its length', () => {
+    expect(speechHoldMs(0, 'message', 0)).toBe(SPEECH_HOLD_MS);
+    expect(speechHoldMs(40, 'message', 0)).toBe(SPEECH_HOLD_MS + 40 * SPEECH_HOLD_PER_CHAR_MS);
+  });
+
+  it('caps the read, and caps a routine status pulse lower', () => {
+    expect(speechHoldMs(9999, 'message', 0)).toBe(SPEECH_HOLD_MAX_MS);
+    expect(speechHoldMs(9999, 'status_update', 0)).toBe(SPEECH_HOLD_MAX_STATUS_MS);
+  });
+
+  it('cuts the hold short the moment something is waiting, whatever the line', () => {
+    // The point of the queue is that a burst does not cost the floor half a minute. A long act with
+    // someone behind it holds the SHORT beat, not its earned one.
+    expect(speechHoldMs(9999, 'message', 1)).toBe(SPEECH_HOLD_QUEUED_MS);
+    expect(speechHoldMs(0, 'status_update', 3)).toBe(SPEECH_HOLD_QUEUED_MS);
+    // And a queued hold is always shorter than the shortest unqueued one — otherwise the backlog
+    // would make the room slower, which is the opposite of the point.
+    expect(SPEECH_HOLD_QUEUED_MS).toBeLessThan(speechHoldMs(0, 'status_update', 0));
   });
 });

@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
+import * as p from '@clack/prompts';
 import {
   type Binding,
   bindingSeat,
@@ -16,16 +17,26 @@ import {
   serializeSeat,
   serializeTeam,
   type StakesDefault,
+  TOKEN_PREFIXES,
   GuardianClassSchema,
   GuardianTierSchema,
   type TeamFile,
 } from '@musterd/protocol';
-import { flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
+import {
+  HUE_MIN_SEPARATION,
+  assignHue,
+  defaultHue,
+  hueConflict,
+  legacyHue,
+  type HueKind,
+} from '@musterd/protocol/hue';
+import { flagHue, flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
   excludeCredentialFromGit,
   findBinding,
   loadConfig,
+  readBindingAt,
   recordRosterHome,
   rememberIdentity,
   saveBinding,
@@ -34,8 +45,8 @@ import {
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 import { hint, success, sym } from '../render/ui.js';
-import { writeSeatFile } from '../roster.js';
-import { findWorkspaceDir, inherited, resolve } from './helpers.js';
+import { readSeatFiles, readSeatHues, seatFilePath, setSeatHue, writeSeatFile } from '../roster.js';
+import { findWorkspaceDir, inherited, resolve, resolveRead } from './helpers.js';
 
 export async function teamCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
@@ -43,12 +54,164 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
   if (sub === 'add') return teamAdd(parsed);
   if (sub === 'observe') return teamObserve(parsed);
   if (sub === 'credential') return teamCredential(parsed);
+  if (sub === 'agent-key') return teamAgentKey(parsed);
+  if (sub === 'bootstrap') return teamBootstrap(parsed);
   if (sub === 'remove') return teamRemove(parsed);
   if (sub === 'archive') return teamArchive(parsed);
   if (sub === 'export') return teamExport(parsed);
   if (sub === 'policy') return teamPolicy(parsed);
+  if (sub === 'hue') return teamHue(parsed);
   throw new CliError(
-    'usage: musterd team <create|add|observe|credential|remove|archive|export|policy> ...',
+    'usage: musterd team <create|add|observe|credential|agent-key|bootstrap|remove|archive|export|policy|hue> ...',
+    2,
+  );
+}
+
+/** Admin lifecycle for ADR 344's independently scoped bootstrap credentials. */
+async function teamBootstrap(parsed: Parsed): Promise<number> {
+  const action = parsed.positionals[1];
+  const { team, http } = resolve(parsed.flags);
+  const json = parsed.flags['json'] === true;
+
+  if (action === 'mint') {
+    const scopes = [
+      ['claim_seat', flagStr(parsed.flags, 'seat')],
+      ['claim_role', flagStr(parsed.flags, 'role')],
+      ['host', flagStr(parsed.flags, 'host')],
+    ].filter((entry): entry is [string, string] => entry[1] !== undefined);
+    if (scopes.length !== 1) {
+      throw new CliError(
+        'bootstrap mint needs exactly one of --seat <name>, --role <name>, or --host <label>',
+        2,
+      );
+    }
+    const expiresIn = flagStr(parsed.flags, 'expires-in');
+    const expiresAt = expiresIn
+      ? Date.now() + parseDurationMs(expiresIn, '--expires-in')
+      : undefined;
+    const [use, target] = scopes[0]!;
+    const minted = await http.mintBootstrapCredential(team, {
+      use: use as 'claim_seat' | 'claim_role' | 'host',
+      target,
+      ...(flagStr(parsed.flags, 'label') ? { label: flagStr(parsed.flags, 'label')! } : {}),
+      ...(expiresAt !== undefined ? { expires_at: expiresAt } : {}),
+    });
+    if (json) {
+      process.stdout.write(JSON.stringify(minted) + '\n');
+      return 0;
+    }
+    process.stdout.write(
+      success(`minted ${minted.credential.use} bootstrap credential for ${target}`) + '\n',
+    );
+    process.stdout.write(theme.meta('shown once — store it in the intended harness now:') + '\n');
+    process.stdout.write(`  ${minted.agent_key}\n`);
+    process.stdout.write(theme.meta(`credential id: ${minted.credential.id}`) + '\n');
+    return 0;
+  }
+
+  if (action === 'list') {
+    const inventory = await http.listBootstrapCredentials(team);
+    if (json) {
+      process.stdout.write(JSON.stringify(inventory) + '\n');
+      return 0;
+    }
+    if (inventory.credentials.length === 0) {
+      process.stdout.write(theme.meta(`no bootstrap credentials on ${team}`) + '\n');
+      return 0;
+    }
+    for (const credential of inventory.credentials) {
+      const target = credential.target ? ` ${credential.target}` : '';
+      const label = credential.label ? ` · ${credential.label}` : '';
+      process.stdout.write(
+        `${credential.id}  ${credential.state}  ${credential.use}${target}${label}\n`,
+      );
+    }
+    return 0;
+  }
+
+  if (action === 'revoke') {
+    const id = parsed.positionals[2];
+    if (!id) throw new CliError('usage: musterd team bootstrap revoke <credential-id>', 2);
+    const result = await http.revokeBootstrapCredential(team, id);
+    if (json) process.stdout.write(JSON.stringify(result) + '\n');
+    else process.stdout.write(success(`revoked bootstrap credential ${id}`) + '\n');
+    return 0;
+  }
+
+  if (action === 'cutover') {
+    const readiness = await http.bootstrapCutoverReadiness(team);
+    const force = parsed.flags['force'] === true;
+    const yes = parsed.flags['yes'] === true;
+    const hasUnmet = readiness.unmet_seats.length > 0 || readiness.unmet_hosts.length > 0;
+
+    if (readiness.already_cut_over) {
+      const result = { ok: true, already_cut_over: true, forced: false, readiness };
+      if (json) process.stdout.write(JSON.stringify(result) + '\n');
+      else process.stdout.write(success(`legacy bootstrap already cut over on ${team}`) + '\n');
+      return 0;
+    }
+
+    if (hasUnmet && !force) {
+      if (json) {
+        process.stdout.write(JSON.stringify({ ok: false, readiness }) + '\n');
+      } else {
+        process.stdout.write('legacy bootstrap cutover is not ready\n');
+        process.stdout.write(
+          `  seats: ${readiness.unmet_seats.map((seat) => seat.name).join(', ') || 'none'}\n`,
+        );
+        process.stdout.write(`  hosts: ${readiness.unmet_hosts.join(', ') || 'none'}\n`);
+        process.stdout.write(
+          'repair: migrate each Workspace and verify each host credential in use\n',
+        );
+      }
+      return 1;
+    }
+
+    if (!yes) {
+      if (!process.stdin.isTTY) {
+        throw new CliError(
+          force
+            ? 'non-interactive forced cutover requires both --force and --yes'
+            : 'non-interactive cutover requires --yes',
+          2,
+        );
+      }
+      const targets = hasUnmet
+        ? ` Unmet targets: ${[
+            ...readiness.unmet_seats.map((seat) => seat.name),
+            ...readiness.unmet_hosts,
+          ].join(', ')}.`
+        : '';
+      const answer = await p.confirm({
+        message: `Permanently disable "${team}"'s legacy Team-wide bootstrap key?${targets}`,
+        initialValue: false,
+      });
+      if (p.isCancel(answer) || answer !== true) {
+        process.stdout.write(theme.meta('cutover cancelled; nothing changed') + '\n');
+        return 0;
+      }
+    }
+
+    const result = await http.cutoverLegacyBootstrap(team, force);
+    if (json) process.stdout.write(JSON.stringify(result) + '\n');
+    else {
+      process.stdout.write(success(`retired "${team}"'s legacy Team bootstrap key`) + '\n');
+      if (force && hasUnmet) {
+        process.stdout.write(
+          theme.warn(
+            `${sym.warn} forced with unmet targets: ${[
+              ...readiness.unmet_seats.map((seat) => seat.name),
+              ...readiness.unmet_hosts,
+            ].join(', ')}`,
+          ) + '\n',
+        );
+      }
+    }
+    return 0;
+  }
+
+  throw new CliError(
+    'usage: musterd team bootstrap <mint|list|revoke|cutover> [--seat|--role|--host ...]',
     2,
   );
 }
@@ -559,10 +722,10 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   // while every other unbound folder stays read-only (ADR 036). The binding carries the folder's
   // claim secret (here the creator's credential) so resolveIdentity yields the admin here.
   const binding: Binding = {
+    version: 2,
     server,
     team: slug,
     agent_key: credential,
-    surface: 'cli',
     claim: { mode: 'seat', name },
   };
   saveBinding(process.cwd(), binding);
@@ -604,12 +767,15 @@ async function teamAdd(parsed: Parsed): Promise<number> {
   const role = flagStr(parsed.flags, 'role');
   const lifecycle = flagStr(parsed.flags, 'lifecycle') as Lifecycle | undefined;
   const until = flagStr(parsed.flags, 'until');
+  // ADR 374: the seat's colour, if chosen. Absent, the seat file assigns one at write (file-backed)
+  // or the daemon does (db-only). Validated before anything is written.
+  const hue = flagHue(parsed.flags);
   // ADR 058 §5: for a file-backed team the file is the single writer — write `seats/<name>.toml`
   // first, then `addMember` becomes project-and-return (the daemon reconciles the file, mints, hands
   // back the token). A db-only team has no roster home, so this is skipped and the daemon originates.
   const home = loadConfig().rosterHome[team];
   if (home) {
-    writeSeatFile(home, name, { kind, role, lifecycle, until });
+    writeSeatFile(home, name, { kind, role, lifecycle, until, hue });
   }
   const res = await http.addMember(team, {
     name,
@@ -617,15 +783,28 @@ async function teamAdd(parsed: Parsed): Promise<number> {
     role,
     ...(lifecycle ? { lifecycle } : {}),
     ...(until ? { lifecycle_until: Date.parse(until) } : {}),
+    ...(hue !== undefined ? { hue } : {}),
   });
+  const bootstrap =
+    kind === 'agent'
+      ? await http.mintBootstrapCredential(team, {
+          use: 'claim_seat',
+          target: name,
+          label: `team-add:${name}`,
+        })
+      : undefined;
 
   if (parsed.flags['json']) {
-    // v0.3 (ADR 069): a human gets an mscr_ credential (shown once); an agent is credential-less and
-    // claims with the team agent key. The vestigial `token` is no longer an authenticator.
     process.stdout.write(
       JSON.stringify({
         member: res.member,
         ...(res.human_credential ? { human_credential: res.human_credential } : {}),
+        ...(bootstrap
+          ? {
+              agent_key: bootstrap.agent_key,
+              bootstrap_credential: bootstrap.credential,
+            }
+          : {}),
       }) + '\n',
     );
     return 0;
@@ -636,13 +815,11 @@ async function teamAdd(parsed: Parsed): Promise<number> {
     ) + '\n',
   );
   if (kind === 'agent') {
-    // Agents authenticate with the team agent key (mskey_) + a seat claim (ADR 069/075) — not a per-seat
-    // token. The simplest hand-off is `musterd agent` in the agent's folder (isolated worktree + MCP).
-    const agentKey = loadConfig().agentKeys[team] ?? 'mskey_…';
-    process.stdout.write(theme.meta('connect this agent via MCP with the team agent key:') + '\n');
+    // ADR 344: the handoff carries a one-seat bootstrap credential, never the Team-wide legacy key.
+    process.stdout.write(theme.meta('connect this agent via MCP with its scoped key:') + '\n');
     process.stdout.write(
       theme.meta(
-        `  MUSTERD_TEAM=${team} MUSTERD_AGENT_KEY=${agentKey} MUSTERD_CLAIM=seat:${name} MUSTERD_SURFACE=claude-code`,
+        `  MUSTERD_TEAM=${team} MUSTERD_AGENT_KEY=${bootstrap!.agent_key} MUSTERD_CLAIM=seat:${name} MUSTERD_LAUNCH_SURFACE=claude-code`,
       ) + '\n',
     );
     process.stdout.write(
@@ -657,7 +834,7 @@ async function teamAdd(parsed: Parsed): Promise<number> {
       theme.meta(`they authenticate with their credential (shown once — store it now):`) + '\n',
     );
     process.stdout.write(
-      theme.meta(`  musterd join ${team} --as ${name} --key ${res.human_credential}`) + '\n',
+      theme.meta(`  musterd claim ${name} --team ${team} --key ${res.human_credential}`) + '\n',
     );
   }
   return 0;
@@ -711,6 +888,177 @@ async function teamObserve(parsed: Parsed): Promise<number> {
  * *someone else's* credential touches none of that: it is a secret for another person, not a
  * sign-in for this machine.
  */
+/**
+ * `musterd team hue <name> [<deg>] | --assign-missing` — a member's colour (ADR 374).
+ *
+ * Two homes for the same fact, the split `team add` already makes: on a file-backed team the seat
+ * file owns the hue and this command edits the file (the daemon reconciles it; two machines that
+ * share the repo agree); on a db-only team the daemon owns it and this command asks the daemon.
+ *
+ * `--assign-missing` is the one-time pass for a roster that predates hues: every seat without one
+ * is seeded from the hue the web painted it with before (`legacyHue` — the name hash, banded by
+ * kind) and walked clear only if it collides, so the colours people already know survive and only
+ * the near-duplicates move. Seats that already have a hue are not touched. On a file-backed team
+ * the result is a diff to read before it is pushed.
+ *
+ * `--spread` seeds the same pass from `defaultHue` — the name hashed over the WHOLE wheel — instead.
+ * The two seeds answer different questions and the default is right for the one it was written for:
+ * continuity. But continuity is only worth having if the colours being continued are any good, and
+ * `legacyHue`'s bands are 150°–280° for agents and 320°–70° for humans, so a team that is mostly
+ * agents comes out mostly green-blue-purple no matter how far apart this walks them. That is a range
+ * problem, not a collision problem, and no amount of separation fixes it — the seats are already
+ * separated, inside a third of the wheel (nick, 2026-09-03, looking at the rail on /live: "there are
+ * a lot of purples and blues; the roster needs to start out with more range of colors").
+ *
+ * It is deliberately a flag and not the new default. Seeding over the whole wheel recolours every
+ * seat it touches at once, which on a team people watch is a visible event and someone's call to
+ * make — not a side effect of running the repair.
+ */
+async function teamHue(parsed: Parsed): Promise<number> {
+  // The file-backed path never talks to the daemon, so it must not demand an identity — a person
+  // editing the roster checkout may hold none here. Resolve the team auth-free first; the db-only
+  // branch resolves an authenticated client only when it is about to use one.
+  const { team } = resolveRead(parsed.flags);
+  const home = loadConfig().rosterHome[team];
+  const http = () => resolve(parsed.flags).http;
+  const assignMissing = Boolean(parsed.flags['assign-missing']);
+  // The seed the pass starts each seat from: the banded legacy hash (continuity, the default) or
+  // the whole wheel (range). `assignHue` walks either one clear of the seats already placed.
+  const spread = Boolean(parsed.flags.spread);
+  const seedHue = (n: string, k: HueKind): number => (spread ? defaultHue(n) : legacyHue(n, k));
+  const name = parsed.positionals[1];
+  const degRaw = parsed.positionals[2];
+
+  if (assignMissing) {
+    const assigned: Array<{
+      name: string;
+      kind: MemberKind;
+      hue: number;
+      sharedWith: string | null;
+    }> = [];
+    if (home) {
+      const seats = readSeatFiles(home);
+      const taken = readSeatHues(home);
+      for (const [seatName, seat] of Object.entries(seats)) {
+        if (seat.hue !== undefined) continue;
+        const kind = seat.kind === 'human' ? 'human' : 'agent';
+        const hue = assignHue(seedHue(seatName, kind), Object.values(taken));
+        setSeatHue(home, seatName, hue);
+        assigned.push({
+          name: seatName,
+          kind: seat.kind,
+          hue,
+          sharedWith: sharedWithName(hue, taken),
+        });
+        taken[seatName] = hue;
+      }
+    } else {
+      const { members } = await http().roster(team);
+      const taken: Record<string, number> = {};
+      for (const m of members) if (typeof m.hue === 'number') taken[m.name] = m.hue;
+      for (const m of members) {
+        if (typeof m.hue === 'number') continue;
+        const kind = m.kind === 'human' ? 'human' : 'agent';
+        const hue = assignHue(seedHue(m.name, kind), Object.values(taken));
+        await http().setHue(team, m.name, hue);
+        assigned.push({ name: m.name, kind: m.kind, hue, sharedWith: sharedWithName(hue, taken) });
+        taken[m.name] = hue;
+      }
+    }
+    if (assigned.length === 0) {
+      process.stdout.write(theme.meta(`every seat in ${team} already has a hue`) + '\n');
+      return 0;
+    }
+    for (const a of assigned) {
+      process.stdout.write(
+        success(`${theme.memberName(a.name, a.kind)} ${theme.meta('→')} hue ${a.hue}`) +
+          (a.sharedWith
+            ? `  ${theme.warn(`colour shared with ${a.sharedWith} — the wheel is full`)}`
+            : '') +
+          '\n',
+      );
+    }
+    if (home)
+      process.stdout.write(
+        hint(`written to ${seatFilePath(home, '<name>')} — review the diff, then commit and push`) +
+          '\n',
+      );
+    return 0;
+  }
+
+  if (!name) {
+    throw new CliError(
+      'usage: musterd team hue <name> [<0-359>] | musterd team hue --assign-missing [--spread]',
+      2,
+    );
+  }
+
+  // Set.
+  if (degRaw !== undefined) {
+    const hue = Number(degRaw);
+    if (!Number.isInteger(hue) || hue < 0 || hue > 359)
+      throw new CliError(
+        `hue must be an integer from 0 to 359 (an HSL degree), got "${degRaw}"`,
+        2,
+      );
+    if (home) {
+      if (!existsSync(seatFilePath(home, name)))
+        throw new CliError(`no seat "${name}" — no ${seatFilePath(home, name)}`, 4);
+      const seatKind = readSeatFiles(home)[name]?.kind ?? 'agent';
+      const taken = readSeatHues(home, name);
+      const near = hueConflict(hue, Object.values(taken));
+      if (near !== null) {
+        const who = Object.entries(taken).find(([, h]) => h === near)?.[0] ?? '?';
+        throw new CliError(
+          `hue ${hue} is within ${HUE_MIN_SEPARATION}° of "${who}" (${near}) — pick another`,
+          4,
+        );
+      }
+      const p = setSeatHue(home, name, hue);
+      process.stdout.write(
+        success(`${theme.memberName(name, seatKind)} ${theme.meta('→')} hue ${hue}`) +
+          `  ${theme.meta(`(${p} — the file owns it; commit and push)`)}\n`,
+      );
+      return 0;
+    }
+    const { member } = await http().setHue(team, name, hue);
+    process.stdout.write(
+      success(
+        `${theme.memberName(name, member.kind)} ${theme.meta('→')} hue ${member.hue ?? hue}`,
+      ) + '\n',
+    );
+    return 0;
+  }
+
+  // Show.
+  if (home) {
+    const seat = readSeatFiles(home)[name];
+    if (!seat) throw new CliError(`no seat "${name}" — no ${seatFilePath(home, name)}`, 4);
+    process.stdout.write(
+      seat.hue === undefined
+        ? `${theme.memberName(name, seat.kind)}: ${theme.meta('no hue — painted from the name hash; `musterd team hue ' + name + ' <0-359>` or `--assign-missing` sets one')}\n`
+        : `${theme.memberName(name, seat.kind)}: hue ${seat.hue}  ${theme.meta(`(seats/${name}.toml owns it)`)}\n`,
+    );
+    return 0;
+  }
+  const { members } = await http().roster(team);
+  const m = members.find((x) => x.name === name);
+  if (!m) throw new CliError(`no member "${name}" in "${team}"`, 4);
+  process.stdout.write(
+    typeof m.hue === 'number'
+      ? `${theme.memberName(name, m.kind)}: hue ${m.hue}\n`
+      : `${theme.memberName(name, m.kind)}: ${theme.meta('no hue — painted from the name hash; `musterd team hue ' + name + ' <0-359>` sets one')}\n`,
+  );
+  return 0;
+}
+
+/** Who a freshly assigned hue still sits too close to, when the wheel could not seat it clear. */
+function sharedWithName(hue: number, taken: Record<string, number>): string | null {
+  const near = hueConflict(hue, Object.values(taken));
+  if (near === null) return null;
+  return Object.entries(taken).find(([, h]) => h === near)?.[0] ?? null;
+}
+
 async function teamCredential(parsed: Parsed): Promise<number> {
   const name = parsed.positionals[1];
   if (!name)
@@ -749,7 +1097,248 @@ async function teamCredential(parsed: Parsed): Promise<number> {
     process.stdout.write(hint('open the board signed in: musterd board') + '\n');
   } else {
     process.stdout.write(
-      hint(`hand it over: musterd join ${team} --as ${res.member} --key <the line above>`) + '\n',
+      hint(`hand it over: musterd claim ${res.member} --team ${team} --key <the line above>`) +
+        '\n',
+    );
+  }
+  return 0;
+}
+
+/**
+ * Read the team agent key off the seat bindings this machine already holds.
+ *
+ * The key is a per-team secret recorded in `config.agentKeys` at `team create` (ADR 075) — and that
+ * map is the *only* copy the config keeps, so anything that empties it (an interrupted prune,
+ * `musterd reset`, a restored backup) takes `musterd agent` and `musterd human` down with it. But the
+ * key itself is rarely gone: every agent workspace `musterd agent` ever provisioned wrote it into its
+ * own gitignored `binding.json`. Measured on team `revive`, 2026-08-14: `agentKeys` empty, eleven
+ * seat bindings all carrying the same `mskey_`. The secret was on the machine the whole time.
+ *
+ * That is why recovery, not rotation, is this command's default. Rotating in that state mints a key
+ * none of those eleven bindings hold, so the repair for a bookkeeping gap would be a team-wide
+ * outage.
+ *
+ * Two abstentions are deliberate. Only `mskey_`-prefixed keys count — a human seat's binding carries
+ * that person's `mscr_` credential, and recording one as the team key would rebuild the dead binding
+ * `findHeldCredential` and `doctor.ts` both exist to catch. And disagreement returns no key at all:
+ * two keys in flight means a rotation landed partway, so this hands back every candidate and lets the
+ * operator choose with `--key` rather than guessing and re-breaking the other half.
+ *
+ * Pure and injectable (`read`) so the decision is testable without a filesystem.
+ */
+export function recoverAgentKey(
+  dirs: readonly string[],
+  team: string,
+  read: (dir: string) => Binding | null,
+): {
+  /** The single agreed key, or null when there is nothing to recover or the candidates disagree. */
+  key: string | null;
+  /** The folders that vouched for `key` — named in the output, because this writes a secret. */
+  sources: string[];
+  /** Every candidate with its folders, populated only when they disagree. */
+  conflicts: Array<{ key: string; dirs: string[] }>;
+} {
+  const byKey = new Map<string, string[]>();
+  for (const dir of dirs) {
+    const binding = read(dir);
+    if (binding?.team !== team) continue;
+    const key = binding.agent_key;
+    if (!key || !key.startsWith(TOKEN_PREFIXES.agent_key)) continue;
+    byKey.set(key, [...(byKey.get(key) ?? []), dir]);
+  }
+  if (byKey.size === 0) return { key: null, sources: [], conflicts: [] };
+  if (byKey.size > 1) {
+    return {
+      key: null,
+      sources: [],
+      conflicts: [...byKey].map(([key, dirs]) => ({ key, dirs })),
+    };
+  }
+  const [key, sources] = [...byKey][0]!;
+  return { key, sources, conflicts: [] };
+}
+
+/**
+ * `musterd team agent-key [--key <mskey_…>] [--rotate [--yes]] [--show]` — hold, recover, or replace
+ * the team agent key on this machine. See {@link recoverAgentKey} for why the default reads rather
+ * than rotates.
+ */
+async function teamAgentKey(parsed: Parsed): Promise<number> {
+  const config = loadConfig();
+  const team = flagStr(parsed.flags, 'team') ?? config.current;
+  if (!team) throw new CliError('no team — pass --team <slug> or set a current team', 2);
+  const json = parsed.flags['json'] === true;
+  const held = config.agentKeys[team];
+
+  const record = (key: string, how: string, sources: string[]): number => {
+    config.agentKeys[team] = key;
+    saveConfig(config);
+    if (json) {
+      process.stdout.write(JSON.stringify({ team, agent_key: key, source: how, sources }) + '\n');
+      return 0;
+    }
+    process.stdout.write(
+      success(`team agent key recorded for ${team} ${theme.meta(`(${how})`)}`) + '\n',
+    );
+    if (sources.length) {
+      process.stdout.write(
+        theme.meta(
+          `  read from ${sources.length} seat binding${sources.length === 1 ? '' : 's'}: `,
+        ) +
+          theme.meta(sources.join(', ')) +
+          '\n',
+      );
+    }
+    process.stdout.write(hint('musterd agent <name> now works here') + '\n');
+    return 0;
+  };
+
+  // `--show` — print what this machine holds. No round-trip; the key is already echoed by
+  // `team add`, so this exposes nothing new, but it stays behind an explicit flag.
+  if (parsed.flags['show'] === true) {
+    if (json) {
+      process.stdout.write(JSON.stringify({ team, agent_key: held ?? null }) + '\n');
+      return 0;
+    }
+    if (!held) {
+      process.stdout.write(
+        `${theme.warn(sym.warn)} no team agent key recorded for ${team} on this machine\n` +
+          theme.meta(`  try \`musterd team agent-key --team ${team}\` to recover it\n`),
+      );
+      return 4;
+    }
+    process.stdout.write(`${held}\n`);
+    return 0;
+  }
+
+  // `--key` — record a key the operator already holds (from another machine, or a conflict this
+  // command refused to resolve on its own).
+  const explicit = flagStr(parsed.flags, 'key');
+  if (explicit) {
+    if (!explicit.startsWith(TOKEN_PREFIXES.agent_key)) {
+      throw new CliError(
+        `"${explicit.slice(0, 6)}…" is not a team agent key — those start with ` +
+          `\`${TOKEN_PREFIXES.agent_key}\`. A \`${TOKEN_PREFIXES.credential}\` is a person's ` +
+          `credential (\`musterd join\`), not the team key.`,
+        2,
+      );
+    }
+    return record(explicit, 'given with --key', []);
+  }
+
+  if (parsed.flags['rotate'] === true) return rotateTeamAgentKey(parsed, config, team, held, json);
+
+  // The default: recover from the seat bindings this machine already holds.
+  const found = recoverAgentKey(Object.keys(config.bindings), team, readBindingAt);
+  if (found.key) {
+    if (found.key === held) {
+      if (json) {
+        process.stdout.write(
+          JSON.stringify({
+            team,
+            agent_key: held,
+            source: 'already recorded',
+            sources: found.sources,
+          }) + '\n',
+        );
+        return 0;
+      }
+      process.stdout.write(
+        success(`team agent key already recorded for ${team} — nothing to repair`) + '\n',
+      );
+      process.stdout.write(
+        theme.meta(`  ${found.sources.length} seat binding(s) here agree with it\n`),
+      );
+      return 0;
+    }
+    return record(found.key, 'recovered from seat bindings', found.sources);
+  }
+
+  if (found.conflicts.length) {
+    // Abstain loudly. Naming every candidate and its folders is the whole value here — the operator
+    // knows which rotation was the real one; this command does not.
+    const lines = found.conflicts
+      .map((c) => `  ${c.key.slice(0, 12)}…  ${c.dirs.length} seat(s): ${c.dirs.join(', ')}`)
+      .join('\n');
+    throw new CliError(
+      `the seat bindings on this machine disagree about "${team}"'s agent key, so nothing was ` +
+        `recorded — a rotation landed partway. Candidates:\n${lines}\n` +
+        `Pick one with \`musterd team agent-key --team ${team} --key <mskey_…>\`, or mint a fresh ` +
+        `one for everybody with \`--rotate\`.`,
+      4,
+    );
+  }
+
+  throw new CliError(
+    `no team agent key for "${team}" anywhere on this machine — not in the config, and no seat ` +
+      `binding here carries one. If you have it, record it with \`--key <mskey_…>\`; otherwise mint ` +
+      `a replacement with \`musterd team agent-key --team ${team} --rotate\` (which invalidates the ` +
+      `old key for every seat on every machine).`,
+    4,
+  );
+}
+
+/**
+ * `--rotate` — mint a new team agent key. The destructive branch, and gated accordingly: it counts
+ * the local seat bindings still carrying the current key and refuses without `--yes`. On team
+ * `revive` that count was eleven; rotating blind to fix an empty `agentKeys` map would have taken
+ * every agent on the machine offline to repair a bookkeeping gap.
+ *
+ * The stale bindings are LISTED, not rewritten. A silent multi-folder rewrite of files holding
+ * secrets is the wrong kind of convenience, and it could only ever reach this machine anyway — seats
+ * on other machines need the new key regardless, so the honest output is the list plus the repair.
+ */
+async function rotateTeamAgentKey(
+  parsed: Parsed,
+  config: ReturnType<typeof loadConfig>,
+  team: string,
+  held: string | undefined,
+  json: boolean,
+): Promise<number> {
+  const stale = Object.keys(config.bindings).filter((dir) => {
+    const binding = readBindingAt(dir);
+    return binding?.team === team && !!binding.agent_key?.startsWith(TOKEN_PREFIXES.agent_key);
+  });
+
+  if (parsed.flags['yes'] !== true) {
+    throw new CliError(
+      `rotating "${team}"'s agent key invalidates the key ${stale.length} seat binding(s) on this ` +
+        `machine currently authenticate with${stale.length ? `:\n  ${stale.join('\n  ')}\n` : ', '}` +
+        `plus every seat on every other machine. Nothing was changed. ` +
+        `If you only lost the local record, \`musterd team agent-key --team ${team}\` recovers it ` +
+        `without a rotation. To rotate anyway, re-run with \`--yes\`.`,
+      2,
+    );
+  }
+
+  // Admin act against a live daemon — `resolve` enforces an *active* identity (ADR 036), same bar as
+  // `team add`, and the daemon audits the rotate as `key.rotate`.
+  const { http } = resolve(parsed.flags);
+  const mint = await http.rotateAgentKey(team);
+  config.agentKeys[team] = mint.agent_key;
+  saveConfig(config);
+
+  if (json) {
+    process.stdout.write(
+      JSON.stringify({ team, agent_key: mint.agent_key, rotated: true, stale }) + '\n',
+    );
+    return 0;
+  }
+  process.stdout.write(success(`re-issued "${team}"'s team agent key`) + '\n');
+  process.stdout.write(
+    theme.meta('shown once — store it now, and hand it to any seat on another machine:') + '\n',
+  );
+  process.stdout.write(`  ${mint.agent_key}\n`);
+  process.stdout.write(theme.meta('recorded in this machine’s config') + '\n');
+  if (stale.length) {
+    const wasHeld = held ? '' : ' (the old key was not in this config, so it is not shown)';
+    process.stdout.write(
+      `${theme.warn(sym.warn)} ${stale.length} seat binding(s) here still hold the OLD key${wasHeld} — ` +
+        `they will 403 on their next claim:\n` +
+        stale.map((d) => theme.meta(`    ${d}`)).join('\n') +
+        '\n' +
+        theme.meta(`  repair each with \`musterd wire\` in the folder — it re-reads this config.`) +
+        '\n',
     );
   }
   return 0;

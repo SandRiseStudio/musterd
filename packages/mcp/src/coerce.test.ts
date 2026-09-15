@@ -47,24 +47,33 @@ describe('lane id aliases', () => {
 
 describe('lane surface alias', () => {
   // Reproduced 2026-07-27: `lane_open`+`lane_update` with `surface:[…]` returned SUCCESS both times
-  // with `surface_globs: []` — the schema dropped the key, so the seat believed it had declared a
+  // with an empty scope — the schema dropped the key, so the seat believed it had declared a
   // surface it had not. `surface` is the name our own render (`surface=[…]`) and the tool
   // description taught, so the natural guess now works.
-  it('accepts `surface` for `surface_globs` on lane_open and lane_update', () => {
+  it('accepts `surface` for `scope` on lane_open and lane_update', () => {
     for (const tool of ['lane_open', 'lane_update']) {
       const { args, applied } = coerceToolArgs(tool, { surface: ['packages/mcp/src/**'] });
-      expect(args).toEqual({ surface_globs: ['packages/mcp/src/**'] });
-      expect(applied).toEqual(['surface→surface_globs']);
+      expect(args).toEqual({ scope: ['packages/mcp/src/**'] });
+      expect(applied).toEqual(['surface→scope']);
     }
   });
 
-  it('lets an explicit surface_globs win', () => {
+  it('accepts the pre-ADR-296 `surface_globs` for `scope`', () => {
     const { args, applied } = coerceToolArgs('lane_update', {
       id: 'x',
       surface_globs: ['real/**'],
+    });
+    expect(args['scope']).toEqual(['real/**']);
+    expect(applied).toEqual(['surface_globs→scope']);
+  });
+
+  it('lets an explicit scope win', () => {
+    const { args, applied } = coerceToolArgs('lane_update', {
+      id: 'x',
+      scope: ['real/**'],
       surface: ['stale/**'],
     });
-    expect(args['surface_globs']).toEqual(['real/**']);
+    expect(args['scope']).toEqual(['real/**']);
     expect(applied).toEqual([]);
   });
 });
@@ -223,31 +232,31 @@ describe('team_memory_save headline overflow (2026-08-01 re-measurement)', () =>
   });
 });
 
-describe('surface_globs sent as a string (2026-08-01 re-measurement)', () => {
+describe('scope sent as a string (2026-08-01 re-measurement)', () => {
   it('parses a JSON-stringified array', () => {
     const { args, applied } = coerceToolArgs('lane_open', {
       title: 't',
-      surface_globs: '["packages/mcp/src/**", "docs/**"]',
+      scope: '["packages/mcp/src/**", "docs/**"]',
     });
-    expect(args['surface_globs']).toEqual(['packages/mcp/src/**', 'docs/**']);
-    expect(applied).toEqual(['surface_globs:json-string→array']);
+    expect(args['scope']).toEqual(['packages/mcp/src/**', 'docs/**']);
+    expect(applied).toEqual(['scope:json-string→array']);
   });
 
   it('wraps a bare single glob', () => {
     const { args, applied } = coerceToolArgs('lane_update', {
       id: 'x',
-      surface_globs: 'packages/web/src/live/**',
+      scope: 'packages/web/src/live/**',
     });
-    expect(args['surface_globs']).toEqual(['packages/web/src/live/**']);
-    expect(applied).toEqual(['surface_globs:string→[string]']);
+    expect(args['scope']).toEqual(['packages/web/src/live/**']);
+    expect(applied).toEqual(['scope:string→[string]']);
   });
 
   it('never splits on commas — a brace glob is one glob', () => {
     const { args } = coerceToolArgs('lane_open', {
       title: 't',
-      surface_globs: 'packages/{mcp,cli}/src/**',
+      scope: 'packages/{mcp,cli}/src/**',
     });
-    expect(args['surface_globs']).toEqual(['packages/{mcp,cli}/src/**']);
+    expect(args['scope']).toEqual(['packages/{mcp,cli}/src/**']);
   });
 
   it('composes with the surface alias: a string under the taught name still lands as a list', () => {
@@ -255,12 +264,12 @@ describe('surface_globs sent as a string (2026-08-01 re-measurement)', () => {
       title: 't',
       surface: 'packages/mcp/src/**',
     });
-    expect(args['surface_globs']).toEqual(['packages/mcp/src/**']);
-    expect(applied).toEqual(['surface→surface_globs', 'surface_globs:string→[string]']);
+    expect(args['scope']).toEqual(['packages/mcp/src/**']);
+    expect(applied).toEqual(['surface→scope', 'scope:string→[string]']);
   });
 
   it('leaves a real array alone', () => {
-    const { applied } = coerceToolArgs('lane_open', { title: 't', surface_globs: ['a/**'] });
+    const { applied } = coerceToolArgs('lane_open', { title: 't', scope: ['a/**'] });
     expect(applied).toEqual([]);
   });
 });

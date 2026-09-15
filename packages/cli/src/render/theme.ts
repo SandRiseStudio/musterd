@@ -84,6 +84,17 @@ export function clock(ts: number): string {
   return `${hh}:${mm}`;
 }
 
+/**
+ * A clock that carries its date once it is not today: `15:18` on the same local day, `Yesterday
+ * 15:18` / `Monday · Aug 19 15:18` / `Aug 19 15:18` after that (the inbox's own day vocabulary,
+ * `dayLabel`). A bare `since 15:18` is read as "today" by every reader; measured 2026-09-03 on a
+ * banner whose oldest act was fifteen days old. `now` is injectable for tests.
+ */
+export function sinceLabel(ts: number, now: number = Date.now()): string {
+  const day = dayLabel(ts, now);
+  return day === 'Today' ? clock(ts) : `${day} ${clock(ts)}`;
+}
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 

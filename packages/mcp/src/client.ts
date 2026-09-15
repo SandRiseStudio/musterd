@@ -1,5 +1,7 @@
 import {
   ErrorBodySchema,
+  SeedListSchema,
+  SeedResultSchema,
   PROTOCOL_VERSION,
   type AskContract,
   type DeliveryHint,
@@ -7,20 +9,28 @@ import {
   type Envelope,
   type Goal,
   type Lane,
+  isWireAttestationSource,
   type LaneWarning,
   type MemberSummary,
   type MemoryEnvelope,
   type NextBrief,
   type Report,
+  type Seed,
+  type SubmitSeedBrief,
+  type PromoteSeed,
+  type TeamMemorySearchResponse,
+  TeamMemorySearchResponseSchema,
   type ToolTelemetryReport,
   type WakeContextPacket,
   type WakeContextRequest,
   WakeContextRequestSchema,
   WakeContextResponseSchema,
   type WSServerFrame,
+  type SyncWedge,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
 import { clearGrantFromBinding } from './binding.js';
+import { persistRenewedLease } from './claim.js';
 import { refreshAttestation, type McpConfig } from './config.js';
 import { reconcileCursorCapture } from './cursorCapture.js';
 import { SessionAttestation } from './sessionLiveness.js';
@@ -33,6 +43,13 @@ import { SessionAttestation } from './sessionLiveness.js';
 export type HandoffLaneAck =
   | { lane: string; branch: string | null; source: 'derived' }
   | { warning: string };
+
+/** ADR 202 on the ack (lane 01M2GQFJXG): the lane an accept/decline moved by answering a
+ *  `lane_review` ask — `done` on accept, `active` on decline. Absent when the act moved nothing. */
+export interface LaneVerdictAck {
+  lane: string;
+  state: 'done' | 'active';
+}
 
 /** A refuse whose cause is a bad *grant*, not a bad seat — drop the grant and retry bare (ADR 193). */
 function isStaleGrantRefusal(frame: { code: string; message: string }): boolean {
@@ -47,6 +64,13 @@ function wsBase(server: string): string {
 /** Presence heartbeat cadence, and the window in which a tool call still counts as proof of life
  *  (ADR 164): one beat, so every check is judged against activity since the previous one. */
 export const HEARTBEAT_MS = 15_000;
+
+/**
+ * How many proactive re-joins the dormant watch may fail before it stops (ADR 164 amendment 2). A
+ * seat refused on re-join is usually held by someone else or refused by policy — neither changes
+ * with a fourth try — and the tool-call re-arm still stands behind it.
+ */
+export const DORMANT_REJOIN_MAX_FAILURES = 3;
 
 /**
  * Whether a non-live ladder verdict should actually release the seat — **activity outranks
@@ -118,6 +142,21 @@ function connectionNeverEstablished(err: unknown): boolean {
 }
 
 /**
+ * What a {@link MusterdClient.join} call settled as. `'pending'` is reachable only through the ADR 095
+ * non-blocking mode: the claim request is open and parked, and the seat is NOT held.
+ */
+/**
+ * Is this refusal specifically "the session lease you presented is no longer good"? Matched on the
+ * server's own lease messages rather than on `unauthorized` alone: a bad credential is also
+ * `unauthorized`, and re-joining would not fix it — it would just fail again, twice as loudly.
+ */
+export function isSessionLeaseRefusal(error: { code: string; message: string }): boolean {
+  return error.code === 'unauthorized' && /agent session lease/i.test(error.message);
+}
+
+export type JoinOutcome = 'occupied' | 'pending';
+
+/**
  * HTTP client + background WS that holds presence and buffers inbound deliveries.
  * The buffer is a convenience; the server log + cursor are authoritative, so a
  * dropped socket never loses messages (they resurface via the inbox cursor).
@@ -135,22 +174,37 @@ export class MusterdClient {
   private wantPresence = false;
   private joinedFlag = false;
   /** Resolves/rejects the in-flight join() on the first welcome / error frame. */
-  private pendingJoin: { resolve: () => void; reject: (e: Error) => void } | null = null;
+  private pendingJoin: {
+    resolve: (outcome?: JoinOutcome) => void;
+    reject: (e: Error) => void;
+  } | null = null;
   /** Bounds a parked join() waiting on admin approval (ADR 087) — cleared on any terminal frame. */
   private joinTimer: NodeJS.Timeout | null = null;
   /** True for a blocking join() (team_join): a `pending` frame parks (waits for the pushed decision)
    *  instead of rejecting. False for best-effort autojoin, which stays a pending presence on `pending`. */
   private waitOnPending = false;
+  /** ADR 095: park on `pending` but hand the caller a pending outcome instead of blocking. */
+  private returnOnPending = false;
   /** The open claim request id while parked on `pending` (surfaced by team_join on a wait timeout). */
   private pendingRequestId: string | null = null;
   /** The seat's memory envelope delivered on the occupied frame (ADR 093) — headline + age + size,
    * never the body. Rendered by team_join as the one-line pointer; null when nothing is saved. */
   private memoryEnvelope: MemoryEnvelope | null = null;
+  /** The Team Role charter delivered by authenticated occupancy; never sourced from Workspace files. */
+  private charterText: string | null = null;
   /** Why the last join attempt failed — surfaced by the dormant tool guards so a silent autojoin
    * failure (e.g. wrong-db token rejection) is visible to the agent, not just "call team_join". */
   private lastJoinErrorMsg: string | null = null;
   private releasedByLivenessFlag = false;
   private lastActivityAt = 0;
+  /**
+   * ADR 164 amendment 2: while the ladder has this seat released, watch the transcript on the
+   * heartbeat cadence and re-join the moment it moves. Armed by the liveness release only, never by
+   * `leave()`/`close()`; cleared by the next occupy, by a deliberate leave, or by giving up.
+   */
+  private dormantWatch: NodeJS.Timeout | null = null;
+  /** Proactive re-joins that failed since the last release — the watch stops after a few. */
+  private dormantRejoinFailures = 0;
   /** One drop-and-bare-retry per join attempt when a grant is refused as stale (ADR 193). */
   private staleGrantRetried = false;
   /** Invoked when this session is superseded by a successor **in its own workspace** (ADR 092): the
@@ -209,6 +263,11 @@ export class MusterdClient {
     return this.memoryEnvelope;
   }
 
+  /** The Team Role charter the last authenticated occupancy delivered, if the Member has one. */
+  get charter(): string | null {
+    return this.charterText;
+  }
+
   /**
    * Bind this session to a freshly-claimed seat (claim-on-first-use, ADR 032). After this, `join()`
    * occupies it and the act tools can send as it. Refuses to silently swap a live seat — claim only
@@ -254,6 +313,8 @@ export class MusterdClient {
     body?: unknown,
     opts: { headers?: Record<string, string>; timeoutMs?: number } = {},
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    /** Internal: set on the single re-join + replay that follows a refused session lease. */
+    afterLeaseRefusal = false,
   ): Promise<any> {
     let res: Response;
     for (let attempt = 0; ; attempt++) {
@@ -264,12 +325,15 @@ export class MusterdClient {
           method,
           headers: {
             'content-type': 'application/json',
-            // v0.3 (ADR 075): authenticate with the team agent key (Bearer); the server dispatches on the
-            // prefix → the live-presence occupancy this session holds. Roster/health stay auth-optional.
-            ...(this.config.agent_key ? { authorization: `Bearer ${this.config.agent_key}` } : {}),
-            // The agent key authenticates the harness, not a seat — reads carry the occupied seat so the
-            // server can assert occupancy (SPEC A.7 §253). A send conveys it via the envelope `from`.
+            // Agent HTTP authority is self-identifying and Presence-bound (ADR 337). Before an
+            // occupancy exists this omits auth; the bootstrap team key never reaches routine routes.
+            ...(this.config.seatCredential
+              ? { authorization: `Bearer ${this.config.seatCredential}` }
+              : {}),
             ...(this.config.member ? { 'x-musterd-seat': this.config.member } : {}),
+            ...(this.config.sessionLease
+              ? { 'x-musterd-session-lease': this.config.sessionLease }
+              : {}),
             // Ambient occupancy (ADR 275 / ADR 057): label the one-shot touch with the surface
             // this adapter attests — capture, not a stale binding declaration. Honored only when
             // no resident WS session owns liveness (`touchAmbientPresence` is a no-op under one).
@@ -292,6 +356,35 @@ export class MusterdClient {
     const json = text ? JSON.parse(text) : {};
     if (!res.ok) {
       const parsed = ErrorBodySchema.safeParse(json);
+      // A refused lease is the server saying this occupancy is gone — the one piece of DIRECT
+      // evidence the recovery path never listened to.
+      //
+      // Recovery here was armed by the ADR 164 liveness ladder alone (`releasedByLiveness`), and the
+      // deferred autojoin fires once per process. So a lease that died mid-session — a daemon bounce,
+      // a reaped presence — was never re-claimed: every later HTTP tool call presented the same dead
+      // lease and threw, for the rest of the session. Measured 2026-09-04: `lane_open` refused twice
+      // in a row through the adapter while the CLI succeeded from the same folder in the same minute.
+      // Acts travel over HTTP, not the socket, which is the same reason a handoff note was lost on
+      // 2026-07-28 (see `holdsSeat`).
+      //
+      // `holdsSeat` is the whole safety argument: it is false after a `superseded` or a deliberate
+      // `leave`, so a session that legitimately lost the seat stays down and newest-wins is not
+      // turned into a ping-pong between two adapters re-claiming each other. And this never fires
+      // speculatively — only after the server has refused, so it cannot become the #1138 claim storm.
+      if (
+        !afterLeaseRefusal &&
+        parsed.success &&
+        isSessionLeaseRefusal(parsed.data.error) &&
+        this.holdsSeat
+      ) {
+        // The server has spoken: whatever this flag says, the occupancy it names is gone.
+        this.joinedFlag = false;
+        const rejoined = await this.join().then(
+          () => true,
+          () => false,
+        );
+        if (rejoined) return await this.request(method, path, body, opts, true);
+      }
       throw new Error(parsed.success ? parsed.data.error.message : `server error ${res.status}`);
     }
     return json;
@@ -336,11 +429,13 @@ export class MusterdClient {
     ask_contract?: AskContract;
     delivery_hint?: DeliveryHint;
     handoff_lane?: HandoffLaneAck;
+    lane_verdict?: LaneVerdictAck;
   }> {
     return this.request('POST', `/teams/${this.config.team}/messages`, { envelope }) as Promise<{
       ask_contract?: AskContract;
       delivery_hint?: DeliveryHint;
       handoff_lane?: HandoffLaneAck;
+      lane_verdict?: LaneVerdictAck;
     }>;
   }
 
@@ -349,6 +444,8 @@ export class MusterdClient {
     /** The team's role library (ADR 227 discovery): name + one-line summary. Absent from an older
      *  daemon — every consumer degrades to members-only. */
     roles?: Array<{ name: string; summary: string | null }>;
+    /** ADR 360 follow-on: this machine's standing push refusal, if any. Absent from an older daemon. */
+    sync?: { wedged: SyncWedge | null };
   }> {
     // ADR 227 close-out: the role filter rides the wire so the daemon can see (and audit) the
     // discovery query. An older daemon ignores the param and returns the unfiltered roster —
@@ -357,7 +454,13 @@ export class MusterdClient {
     return this.request('GET', `/teams/${this.config.team}/members${q}`);
   }
 
-  async fetchInbox(unreadOnly = true): Promise<{
+  async fetchInbox(
+    unreadOnly = true,
+    /** The newest N — the slice this surface actually renders. Naming it keeps `GET /inbox`'s
+     *  default PREFIX bound out of the way: an agent checking once a turn must be handed the newest
+     *  acts, not the stalest (ADR 287). What the bound cuts comes back as `unread_remaining`. */
+    limit?: number,
+  ): Promise<{
     messages: Envelope[];
     cursor: { last_read_ts: number };
     /** Ids of asks this seat has already replied to (by `meta.in_reply_to`). Server-computed
@@ -369,16 +472,38 @@ export class MusterdClient {
      *  Server-computed for the same reason as `answered`, and more so: the discharging reply is a DM
      *  to the asker, so a second eligible seat is not a party to it and cannot see it at any price.
      *  Absent from an older daemon; callers degrade to showing the act as still owed. */
-    discharged?: { id: string; by: string }[];
+    /** Doorbell clause 7: why an act is no longer owed. Only `answered` carries `by` — the lane
+     *  closing and the seat having been shown the act have no answerer to name. `reason` is absent
+     *  on a pre-clause-7 daemon. */
+    discharged?: { id: string; by?: string; reason?: 'answered' | 'lane_closed' | 'read' }[];
+    /** Unread this reply could not carry. Non-zero means the read cursor must not move past what
+     *  was rendered — see `planInboxCheck`. Absent from an older daemon ⇒ nothing was cut. */
+    unread_remaining?: number;
   }> {
-    const q = unreadOnly ? '?unread=1' : '';
-    return this.request('GET', `/teams/${this.config.team}/inbox${q}`);
+    const p = new URLSearchParams();
+    if (unreadOnly) p.set('unread', '1');
+    if (limit !== undefined) p.set('limit', String(limit));
+    const q = p.toString();
+    return this.request('GET', `/teams/${this.config.team}/inbox${q ? `?${q}` : ''}`);
   }
 
   markRead(messageId: string) {
     return this.request('POST', `/teams/${this.config.team}/inbox/cursor`, {
       last_read_message_id: messageId,
     });
+  }
+
+  /**
+   * The whole-team timeline (ADR 061), recipient-scoped by the daemon like every other read.
+   *
+   * The inbox alone cannot answer "which room is this turn in": a turn carries no huddle meta of its
+   * own (ADR 378 §2), so the only row that names the topic is the ROOT — and a root the seat already
+   * read, or that was addressed to someone else, is not in an unread inbox slice at any limit. This
+   * is the same window the CLI's room view folds. Called only when a slice actually holds a threaded
+   * act, so an inbox with no huddle in it costs no extra request.
+   */
+  fetchMessages(limit: number): Promise<{ messages: Envelope[] }> {
+    return this.request('GET', `/teams/${this.config.team}/messages?limit=${limit}`);
   }
 
   // ── Coordination lanes, Phase 1 (ADR 083). Every mutation returns { lane, warnings } — warn-only.
@@ -394,6 +519,11 @@ export class MusterdClient {
     warnings: LaneWarning[];
     /** value-layer design: advisory lines for THIS caller only (e.g. the ship nudge) — never a wake. */
     notices?: string[];
+    /** ADR 283: present when THIS patch closed the lane — what the close recorded. Absent from an
+     *  older daemon and from every non-terminal patch; absence means "no verdict to report", so a
+     *  reader must fall back rather than invent one. `verified: false` alone cannot separate the
+     *  by-design exemption from the ADR 172 degradation — that is what `reason` is for. */
+    closed?: { verified: boolean; reason: string };
     /** ADR 169: present when the patch entered ready_for_review — the review routing. */
     review?: {
       reviewer?: string;
@@ -404,6 +534,10 @@ export class MusterdClient {
        *  recording a merge SHA after the PR lands. A standing report must never be read as "nobody
        *  was asked": that misread sanctioned self-close against lanes with a pending acceptor. */
       standing?: boolean;
+      /** Lane 01M1QYHJFY: an already-awaiting lane re-routed by name — a fresh ask went to
+       *  `reviewer`, and the seat in `superseded` (if any) had its ask closed and was told. */
+      rerouted?: boolean;
+      superseded?: string;
       /** ADR 234 increment 2: the submit was acceptance-exempt (declared low stakes) — no ask
        *  exists and none is coming; self-close is the designed path, not a degradation. */
       acceptance_exempt?: boolean;
@@ -437,6 +571,68 @@ export class MusterdClient {
     return this.request('GET', `/teams/${this.config.team}/lanes${qs ? `?${qs}` : ''}`);
   }
 
+  // ── Shared Seeds (ADR 319). Parse every daemon response at this wire boundary.
+  async seeds(): Promise<Seed[]> {
+    return SeedListSchema.parse(await this.request('GET', `/teams/${this.config.team}/seeds`))
+      .seeds;
+  }
+
+  async seed(id: string): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request('GET', `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}`),
+    ).seed;
+  }
+
+  async claimSeed(id: string): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/claim`,
+        {},
+      ),
+    ).seed;
+  }
+
+  async askSeed(id: string, body: string): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/clarification`,
+        { body },
+      ),
+    ).seed;
+  }
+
+  async answerSeed(id: string, body: string): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/answer`,
+        { body },
+      ),
+    ).seed;
+  }
+
+  async submitSeed(id: string, body: SubmitSeedBrief): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/brief`,
+        body,
+      ),
+    ).seed;
+  }
+
+  async promoteSeed(id: string, body: PromoteSeed): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/promote`,
+        body,
+      ),
+    ).seed;
+  }
+
   /** The orientation brief (ADR 049/084) — one server-side projection, rendered by CLI + MCP alike. */
   next(): Promise<NextBrief> {
     return this.request('GET', `/teams/${this.config.team}/next`);
@@ -454,6 +650,45 @@ export class MusterdClient {
   /** Record a goal outcome note (value-layer design). `goal: null` = not yet declared (queued). */
   goalOutcome(body: { goal_id: string; outcome: string }): Promise<{ goal: Goal | null }> {
     return this.request('POST', `/teams/${this.config.team}/goals/outcome`, body);
+  }
+
+  /** Retract a Goal (goal-retract design). `goal: null` = not yet declared (signal queued). */
+  goalRetract(body: { goal_id: string }): Promise<{ goal: Goal | null }> {
+    return this.request('POST', `/teams/${this.config.team}/goals/retract`, body);
+  }
+
+  /** Set the caller's own availability (ADR 044 — SPEC A.6 axis 2). `until` is epoch ms, `away` only. */
+  setAvailability(body: { status: string; until?: number }): Promise<{ member: MemberSummary }> {
+    return this.request('POST', `/teams/${this.config.team}/availability`, body);
+  }
+
+  /**
+   * The mid-loop interrupt probe (ADR 088) — the read half of the doorbell's clause 1, for adapters
+   * that ARE the harness rather than being hooked into one (the native row, ADR 251).
+   *
+   * Silent-or-one-line by contract: `{raised:false}` is the common path and costs one indexed read
+   * on the daemon. The line is daemon-composed from structured fields, never a message body — this
+   * text rides into model context uninspected, so composing it here would be an injection surface.
+   *
+   * Returns null rather than throwing, on every failure: a probe that rides every tool boundary
+   * must never fail the tool call it rides on. Unlike the CLI's one-shot probe, a refused lease here
+   * is repaired by `request()`'s single re-join — this object IS the Presence writer, so the
+   * permanent-deafness failure the CLI has to print a line about cannot occur (doorbell clause 3).
+   */
+  async interruptCheck(): Promise<string | null> {
+    if (!this.holdsSeat) return null;
+    try {
+      const res = (await this.request(
+        'GET',
+        `/teams/${this.config.team}/inbox/interrupt-check`,
+      )) as {
+        raised?: boolean;
+        line?: string;
+      };
+      return res.raised && res.line ? res.line : null;
+    } catch {
+      return null;
+    }
   }
 
   /** The insight report (ADR 050/084) — one server-side projection. */
@@ -502,14 +737,43 @@ export class MusterdClient {
     return response.data.context;
   }
 
+  /** ADR 327: team-memory search — the read side of `insight` acts, via the daemon's derived FTS
+   * fold. Parsed against the protocol schema so an older daemon (no route) fails loudly here
+   * rather than leaking shape guesses into a tool result. */
+  async teamMemorySearch(queryParams: string): Promise<TeamMemorySearchResponse> {
+    const json = await this.request(
+      'GET',
+      `/teams/${this.config.team}/memory/search?${queryParams}`,
+    );
+    const response = TeamMemorySearchResponseSchema.safeParse(json);
+    if (!response.success) throw new Error('team memory search response did not match the schema');
+    return response.data;
+  }
+
   /**
    * Claim the member's seat: open the WS, `hello`, and resolve once the server sends `welcome`.
    * Rejects if the seat is already live in another session (`member_busy`) or the hello is refused.
    * Idempotent while already joined. Explicit activation — nothing claims presence before this (M3).
+   *
+   * Resolves `'occupied'` when the seat is held. Resolves `'pending'` ONLY in the non-blocking
+   * keep-parking mode (ADR 095: `timeoutMs === 0` with `parkOnPending`) — the claim request is open,
+   * the socket stays parked, and a later approval still occupies in the background. Callers that
+   * ignore the value keep today's meaning, because every other path either resolves occupied or
+   * rejects.
    */
-  join(timeoutMs?: number): Promise<void> {
-    if (this.joinedFlag) return Promise.resolve();
-    if (!this.config.agent_key) {
+  join(
+    timeoutMs?: number,
+    opts?: { parkOnPending?: boolean; reoccupy?: boolean },
+  ): Promise<JoinOutcome> {
+    // `reoccupy` is an EXPLICIT re-occupy (lane 01M2GP25R3): the caller has reason to believe this
+    // Presence is dead server-side — a daemon bounce, a reaped presence, an MCP transport drop —
+    // and `joinedFlag` is in-process state that cannot see any of those. Answering from it is what
+    // made `team_join` a no-op on exactly the path the deaf line prescribes it for. Clearing the
+    // flag here is the same move the lease-refusal recovery in `request()` already makes, for the
+    // same reason; it is never set speculatively, only when a caller asks to re-occupy.
+    if (opts?.reoccupy === true) this.joinedFlag = false;
+    if (this.joinedFlag) return Promise.resolve<JoinOutcome>('occupied');
+    if (!this.config.agent_key && !this.config.seatCredential) {
       return Promise.reject(
         new Error('no agent key — set MUSTERD_AGENT_KEY (the team agent key) to claim a seat'),
       );
@@ -522,9 +786,14 @@ export class MusterdClient {
       );
     }
     this.wantPresence = true;
-    this.waitOnPending = (timeoutMs ?? 0) > 0;
+    // Who parks on a `pending` frame. Blocking team_join parks and waits; the ADR 095 non-blocking
+    // mode parks and RETURNS; best-effort launch autojoin neither parks nor waits. The old
+    // derivation from the timeout alone could not express the middle one — a zero timeout meant
+    // "give up and close", which is why `wait: 0` could not simply reuse the autojoin path.
+    this.waitOnPending = opts?.parkOnPending ?? (timeoutMs ?? 0) > 0;
+    this.returnOnPending = (opts?.parkOnPending ?? false) && (timeoutMs ?? 0) === 0;
     this.staleGrantRetried = false;
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<JoinOutcome>((resolve, reject) => {
       let settled = false;
       const clearTimer = () => {
         if (this.joinTimer) clearTimeout(this.joinTimer);
@@ -533,11 +802,11 @@ export class MusterdClient {
       // One blocking call (ADR 087): resolve on `occupied`, reject on a terminal refusal — and, when a
       // claim parks on `pending`, keep waiting for the admin's pushed decision instead of returning.
       this.pendingJoin = {
-        resolve: () => {
+        resolve: (outcome: JoinOutcome = 'occupied') => {
           if (settled) return;
           settled = true;
           clearTimer();
-          resolve();
+          resolve(outcome);
         },
         reject: (e: Error) => {
           if (settled) return;
@@ -634,7 +903,75 @@ export class MusterdClient {
       `seat presence was released because this session looked inactive ` +
       `(${verdict.rung ?? 'unknown'} check); a tool call is evidence otherwise, so the next one re-joins`;
     if (verdict.verdict === 'exit') this.onReplaced?.();
+    else this.armDormantWatch();
     return true;
+  }
+
+  /**
+   * ADR 164 amendment 2 (2026-09-05, lane 01M1T41YRA): the way back must not wait for a `team_*`
+   * call. The interrupt probe (ADR 088) is a PostToolUse hook that fires at EVERY tool boundary and
+   * presents the lease in binding.json — the lease the release above just killed. A session that
+   * resumes after a dormant stretch therefore makes N ordinary tool calls whose probes are all
+   * refused, and the seat is deaf until the model happens to reach for a team tool. Measured in the
+   * 2026-09-05 bell check: 26 of 102 probes 401, every adapter-HELD binding valid, the deaf seats all
+   * dormant adapters. So: while released, re-read the ladder on the heartbeat cadence, and the first
+   * `live` verdict — the transcript moving again — re-occupies. Same first-hand evidence a tool call
+   * is; this process just reads it from disk instead of waiting to be called.
+   *
+   * Bounded three ways: armed only by a liveness release (never `leave`/`close`); re-joins only the
+   * seat this process already held; and gives up after {@link DORMANT_REJOIN_MAX_FAILURES} failed
+   * attempts, leaving the tool-call path as it was. A `superseded` seat never gets here — that clears
+   * `wantPresence` on purpose and stays down.
+   */
+  private armDormantWatch(): void {
+    if (this.closed || this.dormantWatch !== null) return;
+    this.dormantRejoinFailures = 0;
+    const t = setInterval(() => {
+      void this.rejoinIfSessionResumed();
+    }, HEARTBEAT_MS);
+    t.unref?.();
+    this.dormantWatch = t;
+  }
+
+  private disarmDormantWatch(): void {
+    if (this.dormantWatch) clearInterval(this.dormantWatch);
+    this.dormantWatch = null;
+  }
+
+  /**
+   * One tick of the dormant watch: re-join iff the ladder released this seat and now reads `live`.
+   * Public so a test can drive it without the 15 s clock. Returns whether a re-join was attempted
+   * and succeeded.
+   */
+  async rejoinIfSessionResumed(now = Date.now()): Promise<boolean> {
+    if (this.closed || !this.releasedByLivenessFlag || this.wantPresence) {
+      this.disarmDormantWatch();
+      return false;
+    }
+    let verdict;
+    try {
+      verdict = this.session?.check(now);
+    } catch {
+      return false; // unjudgeable is not evidence of a resumed session either
+    }
+    if (verdict === undefined || verdict.verdict !== 'live') return false;
+    process.stderr.write(
+      `musterd: session shows activity again — re-occupying the seat so the interrupt line is live ` +
+        `before the first team_* call\n`,
+    );
+    try {
+      await this.join();
+      this.disarmDormantWatch();
+      return true;
+    } catch (err) {
+      this.dormantRejoinFailures += 1;
+      // Reaches the dormant guard's message, so a refused proactive re-join is not a silent one.
+      this.lastJoinErrorMsg =
+        `re-join on resumed activity failed (${this.dormantRejoinFailures}/${DORMANT_REJOIN_MAX_FAILURES}): ` +
+        (err instanceof Error ? err.message : String(err));
+      if (this.dormantRejoinFailures >= DORMANT_REJOIN_MAX_FAILURES) this.disarmDormantWatch();
+      return false;
+    }
   }
 
   /**
@@ -656,9 +993,11 @@ export class MusterdClient {
   /** Release the seat (back to dormant). The server keeps a 45s reclaim grace; tools stay registered. */
   leave(): void {
     this.releasedByLivenessFlag = false; // a deliberate release; attestSession re-sets it after
+    this.disarmDormantWatch(); // …and re-arms the watch after, for the same reason
     this.wantPresence = false;
     this.joinedFlag = false;
     this.memoryEnvelope = null; // occupy-scoped: stale once the seat is released
+    this.charterText = null;
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
     this.ws?.close();
@@ -677,14 +1016,24 @@ export class MusterdClient {
           type: 'claim',
           v: PROTOCOL_VERSION,
           team: this.config.team,
-          key: this.config.agent_key,
+          key: this.config.seatCredential ?? this.config.agent_key,
           target: this.claimTarget(),
           ...(includeGrant && this.config.grant !== undefined ? { grant: this.config.grant } : {}),
           surface: this.config.surface,
           provenance: this.config.provenance,
           workspace: this.config.workspace,
+          ...(this.config.workspaceKey ? { workspace_key: this.config.workspaceKey } : {}),
           ...(this.config.driver ? { driver: this.config.driver } : {}),
-          ...(this.config.model ? { model: this.config.model } : {}),
+          ...(this.config.model
+            ? {
+                model: this.config.model,
+                // The tier rides with the id, never alone: `model_source` describes `model` and is
+                // meaningless without it. `unknown` is not on the wire — no model, no stamp.
+                ...(isWireAttestationSource(this.config.modelSource)
+                  ? { model_source: this.config.modelSource }
+                  : {}),
+              }
+            : {}),
           ...(this.config.build ? { build: this.config.build } : {}),
           ...(this.config.epoch != null ? { epoch: this.config.epoch } : {}),
           // ADR 241: the correlation token, when a wake spawned this session. Absent otherwise —
@@ -710,11 +1059,27 @@ export class MusterdClient {
         // Claim succeeded — the server resolved + assigned the seat (a role pool's `<role>-<n>` too).
         this.joinedFlag = true;
         this.releasedByLivenessFlag = false;
+        this.disarmDormantWatch(); // occupied again — by a tool call or by the watch, either way done
         this.staleGrantRetried = false;
         this.lastJoinErrorMsg = null;
         this.pendingRequestId = null;
         this.waitOnPending = false;
+        this.returnOnPending = false;
+        this.returnOnPending = false;
         this.config.member = frame.seat.name;
+        if (frame.seat_credential) this.config.seatCredential = frame.seat_credential;
+        if (frame.session_lease) {
+          this.config.sessionLease = frame.session_lease;
+          // A reconnect's occupancy is a NEW Presence with a NEW lease (the daemon bounced, or the
+          // socket flapped), and the CLI hook in this workspace reads its lease from binding.json.
+          // Only the `lease` renewal frame used to write it, so for the ~3 minutes until the first
+          // renewal every `musterd inbox --interrupt-check` presented the pre-bounce lease and was
+          // refused as dead — every seat on the machine deaf after each autorefresh bounce, measured
+          // 2026-09-06 (lane 01M1VGJWME). Same seat-on-disk guard as the renewal; a first claim has
+          // no binding yet and is persisted by `claimAndJoin` right after this resolves.
+          persistRenewedLease(this.config);
+        }
+        this.charterText = frame.charter?.trim() || null;
         // The continuity envelope (ADR 093): headline + age, never the body — team_join renders it
         // as the one-line pointer; the body is fetched only by an explicit team_memory_read.
         this.memoryEnvelope = frame.memory ?? null;
@@ -744,7 +1109,16 @@ export class MusterdClient {
                 // Re-affirm the attested model each heartbeat (ADR 101) so a mid-occupancy switch
                 // or an attestation the claim missed lands without a reconnect; the server no-ops
                 // when unchanged.
-                ...(this.config.model ? { model: this.config.model } : {}),
+                ...(this.config.model
+                  ? {
+                      model: this.config.model,
+                      // The tier rides with the id, never alone: `model_source` describes `model` and is
+                      // meaningless without it. `unknown` is not on the wire — no model, no stamp.
+                      ...(isWireAttestationSource(this.config.modelSource)
+                        ? { model_source: this.config.modelSource }
+                        : {}),
+                    }
+                  : {}),
                 // Occupancy follows capture (ADR 275): refreshAttestation just updated
                 // config.surface from the slot; send it so the presence row does not keep the
                 // claim-time declaration. Absent on CLI/web heartbeats ⇒ no change.
@@ -756,6 +1130,14 @@ export class MusterdClient {
         this.heartbeat.unref?.();
         this.pendingJoin?.resolve();
         this.pendingJoin = null;
+      } else if (frame.type === 'lease') {
+        // ADR 347: the daemon renewed this Presence's agent session lease before it expired. Adopt
+        // it for every HTTP tool from here on (the previous one dies at its own expiry, so a call
+        // already in flight still lands) and write it to this seat's binding, so a CLI hook in the
+        // same worktree presents a live lease too. Before this, `sessionLease` was set once at claim
+        // and every HTTP tool died five minutes later (lane 01M1FC77F2, 2026-09-01).
+        this.config.sessionLease = frame.session_lease;
+        persistRenewedLease(this.config);
       } else if (frame.type === 'refused') {
         // Stale grant (ADR 193): a grant is an optimisation, not the authenticator. Drop it from
         // memory + binding and re-claim bare once on this same socket — do NOT clear wantPresence
@@ -777,6 +1159,8 @@ export class MusterdClient {
         this.wantPresence = false;
         this.pendingRequestId = null;
         this.waitOnPending = false;
+        this.returnOnPending = false;
+        this.returnOnPending = false;
         const msg = `${frame.code}: ${frame.message}`;
         this.lastJoinErrorMsg = msg;
         this.pendingJoin?.reject(new Error(msg));
@@ -786,7 +1170,15 @@ export class MusterdClient {
         // No grant — the server opened a claim request (A.5) and holds this socket open.
         this.pendingRequestId = frame.request_id;
         this.lastJoinErrorMsg = `pending approval — request ${frame.request_id} (an admin must approve)`;
-        if (this.waitOnPending) {
+        if (this.returnOnPending) {
+          // ADR 095 `wait: 0`: hand the caller the pending handle NOW, and keep the socket parked so
+          // the admin's later approval still occupies in the background — the same keep-open the
+          // blocking timeout path already relies on, minus the wait. `pendingJoin` is dropped
+          // because this call is answered; `wantPresence` stays true so nothing tears the socket down.
+          const settle = this.pendingJoin;
+          this.pendingJoin = null;
+          settle?.resolve('pending');
+        } else if (this.waitOnPending) {
           // Blocking team_join (ADR 087, spec-gap 3): park — keep the socket + pendingJoin so the
           // admin's pushed terminal `occupied`/`refused` resolves this same call. No reject, no close,
           // no reconnect thrash. join()'s timeout bounds the wait; a later push still occupies silently.
@@ -814,6 +1206,8 @@ export class MusterdClient {
           this.wantPresence = false;
           this.pendingRequestId = null;
           this.waitOnPending = false;
+          this.returnOnPending = false;
+          this.returnOnPending = false;
           this.pendingJoin?.reject(new Error(msg));
           this.pendingJoin = null;
           ws.close();
@@ -828,6 +1222,8 @@ export class MusterdClient {
         this.joinedFlag = false;
         this.pendingRequestId = null;
         this.waitOnPending = false;
+        this.returnOnPending = false;
+        this.returnOnPending = false;
         this.lastJoinErrorMsg = `${frame.code}: ${frame.message}`;
         this.pendingJoin?.reject(new Error(this.lastJoinErrorMsg));
         this.pendingJoin = null;
@@ -842,9 +1238,17 @@ export class MusterdClient {
       }
     });
     ws.on('close', () => {
+      // A socket that is no longer `this.ws` was replaced — by `leave()` + a fresh `join()`, or by a
+      // reconnect — and its late `close` says nothing about the socket that replaced it. Acting on it
+      // rejected a brand-new join with "connection closed before join completed" and cleared
+      // `wantPresence`, so the re-join lost and the seat stayed down (found by the ADR 164
+      // amendment-2 test, which re-joins within milliseconds of the release; the tool-call re-arm
+      // was slower and only ever won the race by accident).
+      if (this.ws !== null && this.ws !== ws) return;
       this.joinedFlag = false;
       this.pendingRequestId = null;
       this.waitOnPending = false;
+      this.returnOnPending = false;
       if (this.heartbeat) clearInterval(this.heartbeat);
       this.heartbeat = null;
       if (this.pendingJoin) {
@@ -887,8 +1291,11 @@ export class MusterdClient {
 
   close(): void {
     this.closed = true;
+    this.disarmDormantWatch();
     this.wantPresence = false;
     this.joinedFlag = false;
+    this.memoryEnvelope = null;
+    this.charterText = null;
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.ws?.close();
   }

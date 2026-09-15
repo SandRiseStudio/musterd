@@ -53,6 +53,7 @@ export function memberRowToSeat(
   roleDefaults: PartialCapabilities = {},
 ): { seat: SeatFile; unrepresentable?: string } {
   const seat: SeatFile = { kind: row.kind, role: row.role };
+  if (row.slack_user_id) seat.slack_user_id = row.slack_user_id;
   if (row.lifecycle !== 'forever') {
     seat.lifecycle = row.lifecycle;
     if (row.lifecycle === 'until' && row.lifecycle_until != null) {

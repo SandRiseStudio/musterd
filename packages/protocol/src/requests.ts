@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { GrantLifetimeSchema } from './grants.js';
+import { WIRE_ATTESTATION_SOURCES } from './model.js';
 
 /**
  * The request/approval lane (SPEC A.5, ADR 069 P3 / ADR 076) — a session asks to claim a seat or join as
@@ -35,6 +36,10 @@ export const RequestSchema = z.object({
   /** The claimant's harness-attested model (ADR 101), carried across the approval gap so the
    *  approved occupancy is attested; null/absent when the claimant didn't attest. */
   model: z.string().nullish(),
+  /** Which tier produced that model — `observed` | `environment` | `binding`. Crosses the approval
+   *  gap beside the id so the approved occupancy is attested with its provenance intact; null when
+   *  there is no model, or when the claimant did not say. */
+  model_source: z.enum(WIRE_ATTESTATION_SOURCES).nullish(),
 });
 export type Request = z.infer<typeof RequestSchema>;
 

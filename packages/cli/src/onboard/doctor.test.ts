@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CliError } from '../errors.js';
 import type { DetectResult } from './harness.js';
 
 // Hoisted mock state: the harnesses the doctor inspects + the primer classification + the folder
@@ -15,6 +16,8 @@ const h = vi.hoisted(() => ({
   spec: null as { surface?: string } | null,
   roster: { members: [] as any[] },
   rosterThrows: false,
+  interruptCheck: { raised: false } as { raised: boolean; line?: string },
+  interruptCheckThrows: null as unknown,
   agentKeys: {} as Record<string, string>,
   knownIdentities: [] as { team: string; name: string; key: string; surface: string }[],
 }));
@@ -23,10 +26,18 @@ vi.mock('./harnesses/index.js', () => ({
   get HARNESSES() {
     return h.harnesses;
   },
+  // The doctor now READS the reconcile plan instead of inferring it, and `inspectHarnesses` pulls
+  // its own adapter registry from here. These fixtures are detection stubs, not adapters, so the
+  // engine gets an empty registry: every default-path test plans nothing, lands on `'unknown'`, and
+  // keeps asserting the prescription it always did. Tests that exercise a specific plan inject it.
+  harnessAdapters: () => [],
 }));
 vi.mock('./primer.js', () => ({ classifyPrimerTarget: () => h.primer }));
 vi.mock('../config.js', () => ({
   findBinding: () => h.binding,
+  // The classified read (ADR 282): a mocked plain-object binding is 'valid'; null is 'missing'.
+  loadBinding: () =>
+    h.binding === null ? { kind: 'missing' } : { kind: 'valid', value: h.binding },
   // The committed launch spec decides which harness `musterd wire` reaches in this folder, and so
   // which repair the doctor may prescribe for an entry. Null ⇒ fall back to the binding's surface.
   findWorkspaceSpec: () => h.spec,
@@ -44,13 +55,21 @@ vi.mock('../client.js', () => ({
       if (h.rosterThrows) throw new Error('unreachable');
       return h.roster;
     }
+    async interruptCheck() {
+      if (h.interruptCheckThrows) throw h.interruptCheckThrows;
+      return h.interruptCheck;
+    }
   },
+  // Pure predicate — mirrored from the real module so the dead-lease tests exercise the real
+  // refusal shape (code + message), not the mock's opinion of it.
+  isSessionLeaseRefusal: (error: { code: string; message: string }) =>
+    error.code === 'unauthorized' && /agent session lease/i.test(error.message),
 }));
 
 const { buildSkewNotes, footprintNotes, inspectProvisioning, runSessionProbe } =
   await import('./doctor.js');
 const { writeGuidance, CANONICAL_SKILL_PATH } = await import('./guidance.js');
-const { writeProvisionManifest } = await import('./manifest.js');
+const { writeProvisionManifest, saveProvisioning } = await import('./manifest.js');
 
 function harness(label: string, installed: boolean, configured: boolean, registeredClaim?: string) {
   return {
@@ -208,49 +227,15 @@ describe('inspectProvisioning', () => {
     expect(r.drift).toEqual([]);
   });
 
-  // The same tripwire one field over: `surface` never got `model`'s observation path, so it is
-  // believed on a declaration alone while labelling presence, audit and the roster as fact.
-  it('flags a declared surface contradicted by the harness that captured the session', async () => {
+  // The declared-surface tripwire is gone with the declaration itself (ADR 281): v2 identity
+  // carries no `surface`, so a capture has nothing left to contradict.
+  it('raises no surface drift — there is no declared surface left to contradict a capture', async () => {
     h.primer = 'managed';
     h.binding = {
       claim: { mode: 'seat', name: 'Miley' },
-      surface: 'cursor',
       session: { harness: 'claude-code', id: 's1', started_at: 1 },
     };
     h.harnesses = [harness('Claude Code', true, true)];
-    const r = await inspectProvisioning('/x');
-    const line = r.drift.find((d) => d.includes('surface'));
-    expect(line).toBeDefined();
-    expect(line).toContain('cursor'); // the stale declaration
-    expect(line).toContain('claude-code'); // what actually ran
-    expect(line).toContain('MUSTERD_SURFACE'); // the rung above the binding, where it can also hide
-  });
-
-  it('falls back to the model observation when no session was captured', async () => {
-    h.primer = 'managed';
-    h.binding = {
-      claim: { mode: 'seat', name: 'Miley' },
-      surface: 'cursor',
-      model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 1 },
-    };
-    h.harnesses = [harness('Claude Code', true, true)];
-    const r = await inspectProvisioning('/x');
-    expect(r.drift.find((d) => d.includes('surface'))).toBeDefined();
-  });
-
-  it('is quiet about surface when the capture agrees, or when nothing was ever captured', async () => {
-    h.primer = 'managed';
-    h.binding = {
-      claim: { mode: 'seat', name: 'Miley' },
-      surface: 'claude-code',
-      session: { harness: 'claude-code', id: 's1', started_at: 1 },
-    };
-    h.harnesses = [harness('Claude Code', true, true)];
-    expect((await inspectProvisioning('/x')).drift).toEqual([]);
-
-    // A declaration with no capture is not a contradiction. Codex has no hook path at all, so it
-    // lives here permanently — warning would fire forever on every Codex seat.
-    h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'codex' };
     expect((await inspectProvisioning('/x')).drift).toEqual([]);
   });
 
@@ -289,8 +274,14 @@ describe('inspectProvisioning', () => {
 
   // MUSTERD_SURFACE was the one missing from the inspected set, and it is what pinned a seat's
   // reported surface to `cursor` while a claude-code hook was demonstrably capturing its sessions
-  // (measured 2026-08-03, PR #607). Same legacy-snapshot argument as MUSTERD_MODEL.
-  it('flags a registered MUSTERD_SURFACE as a legacy baked snapshot', async () => {
+  // (measured 2026-08-03, PR #607).
+  //
+  // ADR 286 (2026-08-19) then RETIRED the marker, and this line kept telling the pre-286 story for
+  // three weeks (found 2026-09-06, lane 01M1VEMBH7). `resolveLaunchSurface` throws on the marker's
+  // mere presence, so nothing attests the wrong surface any more — the adapter refuses to attach
+  // at all. Unlike every other baked key, the repair here is a REPLACEMENT, not a deletion, which
+  // is why this one does not take the shared `repairWith` prescription.
+  it('flags a retired MUSTERD_SURFACE as a refusal, not a wrong attestation', async () => {
     h.primer = 'managed';
     h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'claude-code' };
     h.harnesses = [harnessWithEntry('Cursor', { registeredSurface: 'cursor' })];
@@ -298,7 +289,45 @@ describe('inspectProvisioning', () => {
     const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'));
     expect(line).toBeDefined();
     expect(line).toContain('cursor');
-    expect(line).toContain('musterd wire');
+    // The ADR 286 consequence, not the pre-286 one.
+    expect(line).toMatch(/REFUSES to attach Presence/);
+    expect(line).not.toContain('outranks .musterd/binding.json');
+    expect(line).not.toMatch(/roster, presence and audit report whatever it says/);
+  });
+
+  // The three prescriptions that do NOT repair a retired marker. Each is falsifiable in one grep,
+  // and each was being handed to readers before 2026-09-06:
+  //   wire  → commands/wire.ts   passes `legacyRepair: false` ("Never legacyRepair from here")
+  //   init  → onboard/init.ts    passes `legacyRepair: false`
+  //   hand-delete → leaves no marker, so resolveLaunchSurface throws at its no-marker branch instead
+  // Only `musterd harness configure` passes `legacyRepair: true` (commands/harness.ts), driving the
+  // `repair-launch-marker` mutation that swaps the key and preserves the rest of the entry.
+  it('prescribes `harness configure` for a retired marker, and disclaims the repairs that cannot work', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'claude-code' };
+    h.harnesses = [harnessWithEntry('Cursor', { registeredSurface: 'cursor' })];
+    const r = await inspectProvisioning('/x');
+    const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'))!;
+    expect(line).toContain('musterd harness configure');
+    // Says the hand-edit is not enough, rather than prescribing it.
+    expect(line).toMatch(/Deleting the line by hand does NOT fix it/);
+    expect(line).not.toMatch(/drop the line from .* by hand/);
+    // Names wire and init only to rule them OUT.
+    expect(line).toMatch(/neither `musterd wire` nor `musterd init` repairs a retired marker/);
+    expect(line).not.toMatch(/[Rr]un `musterd wire`/);
+  });
+
+  // Second-order: `--fix` runs wire. Wire cannot repair a retired marker, so a folder whose ONLY
+  // entry drift is the marker must not be classified wire-repairable — otherwise --fix reports
+  // success on everything wire does own and the marker is still sitting there.
+  it('does not count a retired marker as wire-repairable, even where wire owns the entry', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'cursor' };
+    // 'folder' + matching id ⇒ this is the entry `wire` rewrites, i.e. wireRepairs would be true.
+    h.harnesses = [harnessWithEntry('Cursor', { registeredSurface: 'cursor' }, 'folder', 'cursor')];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift.find((d) => d.includes('MUSTERD_SURFACE'))).toBeDefined();
+    expect(r.repair).not.toBe('wire');
   });
 
   // INVERTED by ADR 165. This used to fire only on a MISMATCH, which missed the common case: the
@@ -375,8 +404,11 @@ describe('inspectProvisioning', () => {
       return inspectProvisioning('/x');
     };
 
+    // MUSTERD_SURFACE is deliberately absent from this table: since ADR 286 it carries its own
+    // prescription (`musterd harness configure`) rather than the shared `repairWith`, so the
+    // "names musterd init as the repair that exists" assertion below does not apply to it. Its
+    // cases live in the retired-marker tests above.
     it.each([
-      ['MUSTERD_SURFACE', { registeredSurface: 'cursor' }],
       ['MUSTERD_AGENT_KEY', { registeredAgentKey: 'mskey_x' }],
       ['MUSTERD_AUTOJOIN', { registeredAutojoin: '1' }],
       ['MUSTERD_DRIVER', { registeredDriver: 'nick' }],
@@ -413,39 +445,221 @@ describe('inspectProvisioning', () => {
       expect(r.repair).not.toBe('wire');
     });
 
-    // The lane this block was reopened for: a Codex seat whose `.codex/config.toml` baked
-    // MUSTERD_SURFACE — a snapshot that outranks binding.json and that no observation can correct —
-    // could only be told to hand-edit the file, because the prescription came off a hard-coded
+    // The folder's provisioning manifest is what records the harness choice now — v2 identity
+    // declares no surface (ADR 281), so wire (and the doctor's prescription) dispatch on it.
+    const codexFolder = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'musterd-doctor-codex-'));
+      mkdirSync(join(dir, '.musterd'), { recursive: true });
+      writeFileSync(
+        join(dir, '.musterd', 'provisioned.json'),
+        JSON.stringify({
+          version: 3,
+          toolkit: '',
+          desired: ['codex'],
+          contributions: {},
+          provisionedAt: '2026-08-19T00:00:00.000Z',
+        }),
+      );
+      // A provisioned folder carries the canonical guidance. Written here so this block tests the
+      // Codex prescription and nothing else: since the guidance check reads every manifest version
+      // (not just v1), a provisioned folder with no guidance on disk legitimately reports missing
+      // files, and that would decide `repair` instead of the entry drift under test.
+      writeGuidance(dir, [], { team: 'dawn' });
+      return dir;
+    };
+
+    // The lane this block was reopened for: a Codex seat whose `.codex/config.toml` baked a legacy
+    // key could only be told to hand-edit the file, because the prescription came off a hard-coded
     // ['claude-code']. In a folder provisioned FOR Codex, wire rewrites Codex's entry, so the
     // detector finally has a repair with a safe form (ADR 168).
+    //
+    // The example key was MUSTERD_SURFACE until 2026-09-06 (lane 01M1VEMBH7), which made this test
+    // assert something false: `commands/wire.ts` passes `legacyRepair: false`, so wire has never
+    // been able to repair a retired marker, and ADR 286 is what made that matter. MUSTERD_MODEL is
+    // a key wire genuinely does rewrite, so the ADR 168 point this test exists to make survives
+    // intact — it just no longer rides on the one key that is a counter-example to it.
+    // ── the plan, not the inference ──────────────────────────────────────────────────────────────
+    // miley measured this on `agents-miley`, 2026-09-06, against the rule #1368 had just shipped:
+    // Cursor IS in the desired set, so by that rule `harness configure` repairs it. It does not.
+    // Both Cursor fragments reported `✗ drifted — evidence retained`; `harness configure --select
+    // cursor --yes` printed `cursor ✗ conflict` twice and wrote nothing; the doctor's text then
+    // flipped to `musterd wire`, which printed the same two conflicts, wrote nothing, and sent her
+    // back to `harness configure`. Desire is necessary for a reconciler to act and not sufficient —
+    // `classifyFragment` plans `none` for `owned-drifted` and `unmanaged-conflict` alike — so the
+    // doctor now asks the engine what it would DO rather than inferring it from the selection.
+    const folderDesiring = (desired: string[]) => {
+      const dir = mkdtempSync(join(tmpdir(), 'musterd-doctor-plan-'));
+      mkdirSync(join(dir, '.musterd'), { recursive: true });
+      writeFileSync(
+        join(dir, '.musterd', 'provisioned.json'),
+        JSON.stringify({
+          version: 3,
+          toolkit: '',
+          desired,
+          contributions: {},
+          provisionedAt: '2026-08-19T00:00:00.000Z',
+        }),
+      );
+      writeGuidance(dir, [], { team: 'dawn' });
+      return dir;
+    };
+
+    const cursorDrift = async (
+      plan: string | undefined,
+      extra: Parameters<typeof harnessWithEntry>[1] = { registeredAutojoin: '1' },
+    ) => {
+      h.primer = 'managed';
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      h.harnesses = [harnessWithEntry('Cursor', extra, 'folder', 'cursor')];
+      return inspectProvisioning(
+        folderDesiring(['cursor']),
+        plan === undefined ? undefined : { entryPlans: new Map([['cursor', plan]]) },
+      );
+    };
+
+    it('prescribes a hand edit when the engine plans nothing for a DESIRED harness entry', async () => {
+      const r = await cursorDrift('unreachable-drifted');
+      const line = r.drift.find((d) => d.includes('MUSTERD_AUTOJOIN'))!;
+      expect(line).toMatch(/no reconciler will rewrite this entry/);
+      expect(line).toMatch(/drifted — evidence retained/);
+      // Neither reconciler may be offered as the repair for the entry AS IT STANDS — offering
+      // either is the loop itself. The line says outright that all three plan nothing.
+      expect(line).toMatch(
+        /`musterd harness configure`, `musterd wire` and `musterd init` all plan `none`/,
+      );
+      expect(line).not.toMatch(/Run `musterd wire` here to rewrite the entry/);
+      // ...and the reader is left with the repair that actually works: an absent fragment is the
+      // one state the engine plans for, so the whole entry goes and `wire` recreates it managed.
+      expect(line).toMatch(/delete musterd's WHOLE entry there by hand, then run `musterd wire`/);
+      // The machine-readable half agrees, so --fix cannot route at a command that plans `none`.
+      expect(r.repair).not.toBe('wire');
+    });
+
+    // The unmanaged half of the same axis: present, in no ledger, so musterd will not overwrite what
+    // it does not own. Same two-command dead end, a different sentence for why.
+    it("says an unmanaged entry is not musterd's to overwrite", async () => {
+      const line = (await cursorDrift('unreachable-unmanaged')).drift.find((d) =>
+        d.includes('MUSTERD_AUTOJOIN'),
+      )!;
+      expect(line).toMatch(/not musterd's to overwrite/);
+      expect(line).toMatch(/in no ownership ledger/);
+      expect(line).not.toMatch(/Run `musterd wire` here to rewrite the entry/);
+    });
+
+    // The plan is the authority in BOTH directions: when the engine will write, the cheap repair is
+    // still the right one and must not be talked out of.
+    it('still prescribes wire when the engine plans to write the entry', async () => {
+      const r = await cursorDrift('reconcilable');
+      expect(r.drift.find((d) => d.includes('MUSTERD_AUTOJOIN'))).toMatch(/Run `musterd wire`/);
+      expect(r.repair).toBe('wire');
+    });
+
+    // Symmetric to #1368's unknown-desired-set guard, and the same principle: a plan the doctor
+    // could not read is not evidence that no repair exists. With no plan it degrades to the wording
+    // it has always given rather than asserting a dead end.
+    it('degrades to the reconciler prescription when no plan can be read', async () => {
+      const r = await cursorDrift(undefined);
+      expect(r.drift.find((d) => d.includes('MUSTERD_AUTOJOIN'))).toMatch(/Run `musterd wire`/);
+    });
+
+    // The per-seat-secret lines carry their own bespoke "Run `musterd wire` here: it rewrites the
+    // entry from .musterd/binding.json without secrets" — the most confident sentence in the file,
+    // and a lie in exactly this state. It rides `wireRepairs`, which the plan now gates.
+    it('does not promise the secret-stripping wire run when the engine plans nothing', async () => {
+      const line = (
+        await cursorDrift('unreachable-drifted', { registeredAgentKey: 'mskey_x' })
+      ).drift.find((d) => d.includes('MUSTERD_AGENT_KEY'))!;
+      expect(line).not.toMatch(/Run `musterd wire` here: it rewrites the entry/);
+      expect(line).toMatch(/no reconciler will rewrite this entry/);
+    });
+
+    // A retired marker is the ONE state where a reconciler genuinely writes: the fragment observes
+    // as `legacy-launch-marker` before any fingerprint comparison, and `harness configure` is the
+    // sole caller passing `legacyRepair: true`. That prescription must survive the new branch.
+    it('keeps naming harness configure for a retired marker on a desired harness', async () => {
+      const line = (await cursorDrift('legacy-marker', { registeredSurface: 'cursor' })).drift.find(
+        (d) => d.includes('MUSTERD_SURFACE'),
+      )!;
+      expect(line).toMatch(/Run `musterd harness configure` in this worktree/);
+      expect(line).not.toMatch(/no reconciler will rewrite this entry/);
+    });
+
     it('prescribes wire for the Codex entry in a folder provisioned for Codex', async () => {
       h.primer = 'managed';
-      h.spec = { surface: 'codex' };
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
-      h.harnesses = [harnessWithEntry('Codex', { registeredSurface: 'codex' }, 'folder', 'codex')];
-      const r = await inspectProvisioning('/x');
-      const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'));
+      h.harnesses = [harnessWithEntry('Codex', { registeredModel: 'grok-4.5' }, 'folder', 'codex')];
+      const r = await inspectProvisioning(codexFolder());
+      const line = r.drift.find((d) => d.includes('MUSTERD_MODEL'));
       expect(line).toMatch(/Run `musterd wire`/);
       expect(line).not.toContain('by hand');
       // ...and the machine-readable half agrees, so --fix routes at a command that can act.
       expect(r.repair).toBe('wire');
     });
 
-    it('names the harness the folder is provisioned for when it cannot prescribe wire', async () => {
+    it('treats a stray entry for an unselected harness as an orphan, with a next step', async () => {
       h.primer = 'managed';
-      h.spec = { surface: 'codex' };
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
-      // A stray Claude Code entry in a folder that declares Codex: wire will not touch it here, and
-      // the correction has to say which entry wire *does* rewrite, or the reader has no next step.
+      // A stray Claude Code entry in a folder that declares Codex. This used to be described as
+      // "wire does not rewrite this — re-provision and pick Claude Code", which answers the narrower
+      // question (which entry does wire own) and leaves the reader running repairs that no-op:
+      // Claude Code is not in the desired set at all, so it owns no fragment and BOTH `wire` and
+      // `harness configure` skip it (measured 2026-09-06, lane 01M1VFV8EK). The requirement this
+      // test has always encoded — the reader must be left with a next step — is now met by a
+      // correct one rather than a reachable-sounding one.
       h.harnesses = [
         harnessWithEntry('Codex', {}, 'folder', 'codex'),
         harnessWithEntry('Claude Code', { registeredAgentKey: 'mskey_x' }, 'repo-shared'),
       ];
-      const r = await inspectProvisioning('/x');
+      const r = await inspectProvisioning(codexFolder());
       const line = r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'));
-      expect(line).toContain('does not rewrite');
-      expect(line).toContain('provisioned for Codex');
+      expect(line).toContain('NOT in this workspace');
+      expect(line).toMatch(/harness configure` and `musterd wire` both skip it/);
+      // Two real next steps, not one dead one: delete the entry, or adopt the harness.
+      expect(line).toMatch(/Remove musterd's entry/);
+      expect(line).toMatch(/if it SHOULD launch this workspace/);
       expect(line).not.toMatch(/Run `musterd wire`/);
+    });
+
+    // The case #1363 shipped wrong (lane 01M1VFV8EK, measured on the workspace that produced the
+    // original finding): a retired marker on a harness NOBODY selected. `harness configure` was
+    // prescribed unconditionally and is a no-op here — reconciliation only touches fragments of
+    // desired harnesses, and a pre-ADR-281 entry is in no ownership ledger either, so there is
+    // nothing to repair and nothing to release. Worse, the "deleting by hand does NOT fix it"
+    // sentence — true when the marker must be REPLACED — argues the reader out of the one thing that
+    // does work here, because for an orphan there is no marker to get right at all.
+    it('prescribes removing the entry when a retired marker sits on an unselected harness', async () => {
+      h.primer = 'managed';
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      // Folder provisioned for Codex; the stale marker is on Cursor, which nobody selected.
+      h.harnesses = [
+        harnessWithEntry('Codex', {}, 'folder', 'codex'),
+        harnessWithEntry('Cursor', { registeredSurface: 'cursor' }),
+      ];
+      const r = await inspectProvisioning(codexFolder());
+      const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'))!;
+      // The ADR 286 consequence still stated — that part does not depend on the branch.
+      expect(line).toMatch(/REFUSES to attach Presence/);
+      // ...but the repair is deletion, and the misleading sentence is gone.
+      expect(line).toMatch(/Remove musterd's entry/);
+      expect(line).toMatch(/the whole entry, not one line/);
+      expect(line).not.toMatch(/Deleting the line by hand does NOT fix it/);
+      expect(line).not.toMatch(/Run `musterd harness configure` in this worktree/);
+      // The other door stays open: adopt the harness and configure converts instead of deleting.
+      expect(line).toMatch(/if it SHOULD launch this workspace/);
+    });
+
+    // The orphan branch must never fire on ignorance. With no readable provisioning the desired set
+    // is empty, and "not in an empty set" is not evidence — claiming the harness is unwanted would
+    // send a reader to delete the entry that may be the only thing wiring them up.
+    it('does not call an entry an orphan when the desired set is unknown', async () => {
+      h.primer = 'managed';
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      h.harnesses = [harnessWithEntry('Cursor', { registeredAgentKey: 'mskey_x' })];
+      const r = await inspectProvisioning('/x'); // no provisioning manifest at this path
+      const line = r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'));
+      expect(line).toBeDefined();
+      expect(line).not.toContain('NOT in this workspace');
+      expect(line).not.toMatch(/Remove musterd's entry/);
     });
 
     // Even the harness the folder IS provisioned for can be reporting drift from a file `configure`
@@ -456,7 +670,6 @@ describe('inspectProvisioning', () => {
     // held an agent key, a grant, autojoin and a model.
     it('never prescribes wire for an entry that lives outside the file configure writes', async () => {
       h.primer = 'managed';
-      h.spec = { surface: 'codex' };
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
       h.harnesses = [
         {
@@ -470,7 +683,7 @@ describe('inspectProvisioning', () => {
           }),
         },
       ];
-      const r = await inspectProvisioning('/x');
+      const r = await inspectProvisioning(codexFolder());
       const line = r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'));
       expect(line).toBeDefined();
       expect(line).not.toMatch(/Run `musterd wire`/);
@@ -514,6 +727,90 @@ describe('inspectProvisioning', () => {
     ];
     const r = await inspectProvisioning('/x');
     expect(r.drift).toEqual([]);
+  });
+});
+
+/**
+ * ryder, 2026-09-14, found by running the doctor's own prescription rather than reading it: the
+ * line hardcodes "version 1" but fires on `provisioning.kind === 'legacy'`, which is a
+ * CLASSIFICATION covering BOTH v1 and v2 (`loadProvisioning`'s legacy predicate accepts
+ * `WorktreeProvisioningV2Schema` OR `ProvisionManifestSchema`). ryder's worktree read
+ * `"version": 2` while the doctor told him it was version 1, and the "single-harness era" gloss is
+ * false for a v2 file besides.
+ *
+ * The line had NO test of any kind, which is how a wrong number shipped. `loadProvisioning`
+ * returns `{ kind: 'legacy', value: unknown }` — the real number is in hand and was never read.
+ */
+describe('inspectProvisioning — the legacy manifest line says what it read (ryder, 2026-09-14)', () => {
+  const dirs: string[] = [];
+  // Both bodies must be COMPLETE for their frozen schema — an incomplete one classifies `invalid`,
+  // not `legacy`, and would exercise the other branch entirely. (It did, first time round.)
+  const V1 = {
+    version: 1,
+    profile: 'toolkit',
+    harness: 'claude-code',
+    mcpServers: ['musterd'],
+    permissions: { allow: [], ask: [], deny: [] },
+    provisionedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const V2 = {
+    version: 2,
+    profile: 'toolkit',
+    desired: ['claude-code'],
+    contributions: { 'claude-code': ['mcp'] },
+    provisionedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const legacyManifest = (body: Record<string, unknown>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-doctor-manifest-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(join(dir, '.musterd', 'provisioned.json'), JSON.stringify(body));
+    return dir;
+  };
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const manifestLine = (drift: string[]) =>
+    drift.find((d) => d.includes('provisioning manifest')) ?? '';
+
+  it('names version 2 as version 2 — never "version 1"', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    const dir = legacyManifest(V2);
+    const line = manifestLine((await inspectProvisioning(dir)).drift);
+    expect(line).toContain('version 2');
+    expect(line).not.toContain('version 1');
+    // v2 is the multi-harness shape; the era gloss was only ever true of v1.
+    expect(line).not.toContain('single-harness');
+  });
+
+  it('still names version 1 as version 1', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    const dir = legacyManifest(V1);
+    const line = manifestLine((await inspectProvisioning(dir)).drift);
+    expect(line).toContain('version 1');
+  });
+
+  it('degrades to naming the shape when the file carries no readable version', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    // A future frozen shape, or a `role`-keyed pre-rename v1 whose version key went missing: the
+    // classifier still says legacy, so the line must still fire — naming a number it cannot read
+    // is the defect, saying nothing at all would be worse.
+    const dir = legacyManifest({ ...V1, version: 'one' as unknown as number });
+    const line = manifestLine((await inspectProvisioning(dir)).drift);
+    expect(line === '' || line.includes('pre-v3 shape')).toBe(true);
+    expect(line).not.toContain('version 1 (');
+  });
+
+  it('prescribes the same repair either way — the classification is what the prescription rests on', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    for (const body of [V1, V2]) {
+      const line = manifestLine((await inspectProvisioning(legacyManifest(body))).drift);
+      expect(line, `v${body.version}`).toContain('musterd harness configure');
+    }
   });
 });
 
@@ -626,6 +923,91 @@ describe('inspectProvisioning — model attestation (ADR 120)', () => {
 });
 
 /**
+ * The dead hook lease (lane 01M2H0GHMK): the folder binding carries a session lease the daemon
+ * refuses, while the seat holds a live adapter Presence here — the interrupt line is deaf and
+ * every other surface reads healthy. The doctor is the second channel that names it.
+ *
+ * Red-first: the first version of the note's repair named `musterd claim`, which mints a lease
+ * that dies with the command — the exact un-prescription the deaf line refuses to give. The
+ * tests pin the adapter rejoin instead.
+ */
+describe('inspectProvisioning — the dead hook lease (lane 01M2H0GHMK)', () => {
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'none';
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      surface: 'cli',
+      claim: { mode: 'seat', name: 'Ada' },
+      seat_credential: 'msac_x',
+      session_lease: 'msls_dead',
+    };
+    h.roster = { members: [] };
+    h.rosterThrows = false;
+    h.interruptCheck = { raised: false };
+    h.interruptCheckThrows = null;
+    process.env['MUSTERD_WORKSPACE'] = 'repo@main';
+  });
+  afterEach(() => {
+    delete process.env['MUSTERD_WORKSPACE'];
+  });
+
+  function adaLive() {
+    h.roster = {
+      members: [{ name: 'Ada', presences: [{ status: 'online', workspace: 'repo@main' }] }],
+    };
+  }
+
+  function leaseRefusal() {
+    return new CliError('invalid, expired, or revoked agent session lease', 1, 'unauthorized');
+  }
+
+  it('notes (never drift) when the folder lease is refused but the seat is live here', async () => {
+    adaLive();
+    h.interruptCheckThrows = leaseRefusal();
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+    expect(r.notes).toContainEqual(expect.stringContaining('session lease is dead'));
+    expect(r.notes).toContainEqual(expect.stringContaining('team_join'));
+  });
+
+  it('is silent when the lease still answers, raised or not', async () => {
+    adaLive();
+    h.interruptCheck = { raised: true, line: 'someone took a turn' };
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent with no live Presence here — an offline seat owes no bell', async () => {
+    h.interruptCheckThrows = leaseRefusal();
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent with no lease on disk — ambient and CLI-human steady state stays quiet', async () => {
+    adaLive();
+    (h.binding as Record<string, unknown>)['session_lease'] = undefined;
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent when the server is unreachable — never invents drift', async () => {
+    adaLive();
+    h.rosterThrows = true;
+    const r = await inspectProvisioning('/x');
+    expect(r.notes).toEqual([]);
+  });
+
+  it('is silent on a refusal that is not a lease refusal — a bad credential is nobody’s hook problem', async () => {
+    adaLive();
+    h.interruptCheckThrows = new CliError('forbidden', 1, 'forbidden');
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+});
+
+/**
  * The dead binding (install-topology §6(a)): a folder claiming a HUMAN seat while carrying the TEAM
  * AGENT KEY. It occupies once and then 403s forever, which is the state `/Users/nick/agents` was in
  * for two days. L1 (#457) stopped new ones being written; this check finds the ones already on disk.
@@ -668,7 +1050,7 @@ describe('inspectProvisioning — the dead binding (install-topology §6(a))', (
 
     const report = await inspectProvisioning('/ws');
 
-    expect(report.drift.join(' ')).toContain('musterd join dawn --as nick');
+    expect(report.drift.join(' ')).toContain('musterd claim nick --team dawn');
     // The destructive verb must NOT be suggested when nothing needs re-issuing.
     expect(report.drift.join(' ')).not.toContain('musterd team credential');
   });
@@ -681,7 +1063,7 @@ describe('inspectProvisioning — the dead binding (install-topology §6(a))', (
     const report = await inspectProvisioning('/ws');
 
     expect(report.drift.join(' ')).toContain('musterd team credential nick');
-    expect(report.drift.join(' ')).not.toContain('musterd join');
+    expect(report.drift.join(' ')).not.toContain('musterd claim nick');
   });
 
   it('stays silent for an agent seat holding the same key — that is the correct shape', async () => {
@@ -754,20 +1136,22 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' }); // canonical file only
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
     });
     const r = await inspectProvisioning(dir);
-    expect(r.drift).toEqual([]);
+    // The v1 manifest itself now draws the ADR 281 configure line by design; the GUIDANCE surface
+    // must stay quiet.
+    expect(r.drift.filter((d) => !d.includes('version 1'))).toEqual([]);
     expect(r.notes).toEqual([]);
   });
 
   it('flags a stale-version skill as drift (exit-1)', async () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: [CANONICAL_SKILL_PATH], contentVersion: 0 },
@@ -780,10 +1164,78 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     expect(r.drift.some((d) => d.includes('v0') && d.includes('musterd init'))).toBe(true);
   });
 
+  /**
+   * The field defect (2026-08-31, dolly's finding on #1087): every seat workspace on this laptop
+   * sat at guidance v18 while the build wrote v20, and `musterd init --check` reported NOTHING.
+   *
+   * `inspectGuidance` gated on `readProvisionManifest`, which parses the **v1** manifest
+   * (`version: z.literal(1)`). Every worktree past the v1 era — i.e. every provisioned worktree,
+   * since ADR 281/282 moved the file to v2 then v3 — parses as null there, so the check returned
+   * before reading a single stamp. The early return's premise ("no record ⇒ pre-085, never
+   * written") was true under v1 and stopped being true the moment a second manifest version
+   * existed: a constraint outliving its premise.
+   *
+   * That the whole existing suite above writes a v1 manifest is what kept it green.
+   */
+  it('flags a stale-version skill in a v3-manifest folder (the field case)', async () => {
+    const dir = tmp();
+    saveProvisioning(dir, {
+      version: 3,
+      toolkit: '',
+      desired: ['claude-code'],
+      contributions: {},
+      provisionedAt: new Date().toISOString(),
+    });
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('v0') && d.includes('musterd init'))).toBe(true);
+  });
+
+  /**
+   * dolly's REQUIRED on #1115, and the fixture that pins it: a manifest version that does not exist
+   * yet. A first cut keyed `provisioned` to `valid | legacy` — i.e. to versions 1, 2 and 3 — which
+   * re-armed this PR's own defect one version ahead, since a v4 file classifies `invalid` and the
+   * check would go quiet again. Probe-measured before the fix: v4 manifest + a v0-stamped skill
+   * reported no drift at all. The gate now asks whether the FILE is there, so an unreadable or
+   * future manifest reports drift rather than silencing it.
+   */
+  it('flags a stale-version skill under a manifest version that does not exist yet', async () => {
+    const dir = tmp();
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'provisioned.json'),
+      JSON.stringify({
+        version: 4,
+        toolkit: '',
+        desired: ['claude-code'],
+        contributions: {},
+        provisionedAt: new Date().toISOString(),
+      }),
+    );
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('v0') && d.includes('musterd init'))).toBe(true);
+  });
+
+  it('stays quiet in a folder that was never provisioned at all', async () => {
+    // The early return this replaces was doing one job correctly: an unprovisioned folder claims
+    // nothing, so it must not be told its guidance is stale. Keep that.
+    const dir = tmp();
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('v0'))).toBe(false);
+  });
+
   it('flags a recorded-but-missing skill file as drift', async () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: [CANONICAL_SKILL_PATH], contentVersion: 1 },
@@ -799,7 +1251,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -812,7 +1264,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -821,7 +1273,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     const abs = join(dir, CANONICAL_SKILL_PATH);
     writeFileSync(abs, readFileSync(abs, 'utf8').replace('Using musterd', 'MY EDIT'));
     const r = await inspectProvisioning(dir);
-    expect(r.drift).toEqual([]);
+    expect(r.drift.filter((d) => !d.includes('version 1'))).toEqual([]);
     expect(r.notes.some((n) => n.includes('local edits'))).toBe(true);
   });
 });
@@ -861,7 +1313,7 @@ describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => 
   function provisionCanonicalOnly(dir: string): void {
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -941,7 +1393,7 @@ describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => 
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       // A path musterd used to write and no longer does — absent on disk, and that is correct.
@@ -960,7 +1412,7 @@ describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => 
     const dir = tmp();
     const stale = ['.musterd/skill/SKILL.md', '.claude/commands/musterd-standup.md'];
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: stale, contentVersion: 0 },
@@ -1162,7 +1614,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -1174,7 +1626,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -1199,7 +1651,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -1229,7 +1681,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -1374,5 +1826,45 @@ describe('seat git attribution (ADR 109)', () => {
     h.spec = null;
     const r = await inspectProvisioning(repo());
     expect(r.notes.find((n) => n.includes('attributed to'))).toBeUndefined();
+  });
+});
+
+describe('harness hook drift is scoped to harnesses this folder is CONFIGURED for', () => {
+  // Claude Code's hook drift has always been gated on `claudeConfigured`; this loop was not. So a
+  // machine that merely has `~/.codex` present drew a permanent Codex line in every folder — nick's
+  // `cli` seat had no `.codex/` at all, no musterd entry in the Codex config, and a standing
+  // instruction to run `musterd wire`, which that folder cannot even run. Unclearable drift is noise,
+  // and noise is how a report stops being read.
+  const codex = (configured: boolean) => ({
+    label: 'Codex',
+    detect: async () => ({
+      installed: true,
+      configured,
+      hookDrift: ['the project-local Codex hooks are missing from .codex/hooks.json'],
+    }),
+  });
+
+  beforeEach(() => {
+    h.primer = 'none';
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      surface: 'cli',
+      claim: { mode: 'seat', name: 'Ada' },
+    };
+    h.roster = { members: [] };
+    h.rosterThrows = false;
+  });
+
+  it('stays silent when the harness is not configured here', async () => {
+    h.harnesses = [codex(false)] as never;
+    const report = await inspectProvisioning(mkdtempSync(join(tmpdir(), 'doctor-')));
+    expect(report.drift.filter((d) => d.includes('Codex hooks'))).toEqual([]);
+  });
+
+  it('still reports it when the harness IS configured here', async () => {
+    h.harnesses = [codex(true)] as never;
+    const report = await inspectProvisioning(mkdtempSync(join(tmpdir(), 'doctor-')));
+    expect(report.drift.some((d) => d.includes('Codex hooks'))).toBe(true);
   });
 });

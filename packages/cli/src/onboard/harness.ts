@@ -197,6 +197,11 @@ export interface HarnessGuidance {
    * message each other through agent-side tools (Claude Code Desktop today, the same surface test as
    * `sessionsSkillPath`). Omit elsewhere; a `delivery_hint` an agent can't act on is simply inert. */
   nudgeSkillPath?: string;
+  /** Path for the **orient** skill (session-orientation spec 2026-08-25 §B / ADR 333) — declared by
+   * harnesses that catalog a native skill/rule shell (Claude Code + Cursor today). Harnesses with
+   * no native catalog (Codex, OpenCode) omit this; they get the canonical `.musterd/skill/orient.md`
+   * instead. Presence of this path is catalog, not a claim that the repeating nudge fires there. */
+  orientSkillPath?: string;
 }
 
 /** What a harness gets to work with when observing its own session's model. */
@@ -212,6 +217,8 @@ export interface ModelObservationInput {
   model_id?: string | undefined;
   /** Legacy composer model slug from a Cursor Agent hook (ADR 198). */
   model?: string | undefined;
+  /** Workspace cwd from the hook payload (Grok `cwd` / `workspaceRoot`, ADR 352). */
+  cwd?: string | undefined;
 }
 
 /** A pluggable onboarding adapter for one agent harness. */
@@ -273,6 +280,12 @@ export interface Harness {
   refreshHooks?: {
     applies: (dir: string) => boolean;
     run: (dir: string) => { files: string[]; warnings: string[] };
+    /**
+     * The refusable surfaces (ADR 332 names) this refresh installs. The driver resurrects a
+     * tombstone only when some present harness claims its surface — announcing "re-installed" for
+     * a name nothing installs is a lie about the folder. Omitted means "none".
+     */
+    surfaces?: () => string[];
   };
   /**
    * Observe the model this harness is *actually* running for the current session. An observation

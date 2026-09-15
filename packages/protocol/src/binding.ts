@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { SurfaceSchema } from './acts.js';
 import { CapabilitiesSchema } from './capabilities.js';
 import { ClaimPolicySchema } from './claim.js';
 
@@ -32,20 +31,30 @@ export const WORKSPACE_SPEC_FILE = 'workspace.json';
  * out). The two secrets — `agent_key` (mskey_) and `grant` (msgr_) — live only in the gitignored
  * `binding.json` / env / the 0600 global config, never here. `claim` policy is the author's choice:
  * `seat:<name>` for a personal agent worktree, `role`/`chat` for a shared repo cloned by many.
+ *
+ * Version 2 (ADR 281): identity no longer carries a Surface — runtime Surface comes from the
+ * launcher (`MUSTERD_LAUNCH_SURFACE`, ADR 286), never from a stored file. Strict: an unknown key is
+ * rejected, not stripped, so a writer can no longer derive the committed spec by parsing a Binding
+ * through this schema — it must construct the exact object. A version-1 file (the pre-281 shape
+ * with `surface` and no `version`) is classified `legacy` by the CLI loaders and converted only by
+ * a confirmed `musterd harness configure`.
  */
-export const WorkspaceSpecSchema = z.object({
-  server: z.string(),
-  team: z.string(),
-  surface: SurfaceSchema,
-  /** Folder claim policy (ADR 018 ladder); absent ⇒ assign-in-chat. The claim-frame target derives from the policy (seat→{seat:name}, role→{role:role}). */
-  claim: ClaimPolicySchema.optional(),
-});
+export const WorkspaceSpecSchema = z
+  .object({
+    version: z.literal(2),
+    server: z.string(),
+    team: z.string(),
+    /** Folder claim policy (ADR 018 ladder); absent ⇒ assign-in-chat. The claim-frame target derives from the policy (seat→{seat:name}, role→{role:role}). */
+    claim: ClaimPolicySchema.optional(),
+  })
+  .strict();
 
 export type WorkspaceSpec = z.infer<typeof WorkspaceSpecSchema>;
 
 /**
- * The captured harness session for this workspace (ADR 131 §5, increment 4) — written ONLY by the
- * SessionStart/SessionEnd hooks via `musterd session start|end --stdin`. Strictly machine-local: it
+ * The captured harness session for this workspace (ADR 131 §5, increment 4) — written by the
+ * SessionStart/SessionEnd hooks via `musterd session start|end --stdin`, and by the tool-boundary
+ * heal when the slot turns out to name a session that is not the one running. Strictly machine-local: it
  * lives in the gitignored 0600 `binding.json` (`WorkspaceSpecSchema.parse` strips it from the
  * committed `workspace.json`), the session id and transcript path NEVER cross the wire (the daemon
  * gets a harness-class-only attestation), and the MCP adapter never reads it (no hook-vs-adapter
@@ -63,6 +72,25 @@ export const SessionCaptureSchema = z.object({
   started_at: z.number().int(),
   /** Set by the advisory SessionEnd hook; absent after a crash — resumability never depends on it. */
   ended_at: z.number().int().optional(),
+  /**
+   * When the daemon was told this session exists (lane 01M159BHJK). Local-only bookkeeping: it
+   * records that an attestation LANDED, so the tool boundary can reconcile a slot SessionStart
+   * never announced without re-announcing every slot on every tool call.
+   *
+   * Absent is the honest default and it is what makes the retry work — set only after a successful
+   * push, never optimistically, so an unreachable daemon leaves the slot due rather than silently
+   * finished. Measured 2026-08-28: a session gated by the interloper gate (no attestation) that
+   * later took the slot via the heal (which does not attest) stayed invisible to the ledger for its
+   * entire two-hour life, because SessionStart was the only moment that could ever have told anyone.
+   */
+  attested_at: z.number().int().optional(),
+  /**
+   * When a hook last spent its one session-lease claim on this slot (lane 01M1F92X69). Local-only.
+   * A refused lease is answered with exactly one fresh claim per session event; the tool boundary,
+   * which runs on every tool call, may attest with what it holds but never claims again once this is
+   * set — a claim per tool call is the 2026-09-01 storm's traffic shape. Cleared with the slot.
+   */
+  claim_attempted_at: z.number().int().optional(),
 });
 
 export type SessionCapture = z.infer<typeof SessionCaptureSchema>;
@@ -92,12 +120,24 @@ export const ModelObservationSchema = z.object({
 
 export type ModelObservation = z.infer<typeof ModelObservationSchema>;
 
-/** The full workspace binding — the secret-free {@link WorkspaceSpecSchema} plus the two secrets. */
+/** The full workspace binding — the secret-free {@link WorkspaceSpecSchema} plus local secrets.
+ *  Strict like the spec (version 2, ADR 281): unknown keys are rejected, never carried along. */
 export const BindingSchema = WorkspaceSpecSchema.extend({
   /** Team agent join key (mskey_, ADR 075/076). Optional — absent for chat/human folders; enforced present at claim time for seat/role auto-claim. */
   agent_key: z.string().optional(),
+  /**
+   * Host-scoped bootstrap credential (mskey_, ADR 344 use `host`, ADR 395). The wake actuator
+   * polls `/residency/wake-leases` with this; `agent_key` is the claim authenticator and a claim
+   * path may rewrite it. Minted by `musterd residency on`. Merge-guarded on save (omit = preserve).
+   * Never committed.
+   */
+  host_key: z.string().optional(),
   /** Optional pre-issued grant (msgr_) that skips the pending/admin-approval lane (ADR 075). */
   grant: z.string().optional(),
+  /** Per-agent, self-identifying HTTP credential (msac_, ADR 337). Never committed. */
+  seat_credential: z.string().optional(),
+  /** Current short-lived Presence-bound HTTP lease (msls_, ADR 337). Never committed. */
+  session_lease: z.string().optional(),
   /** Optional harness-attested model id (ADR 101) — the model this seat runs, declared at provisioning
    *  (`musterd agent --model` / `init` capturing ambient `MUSTERD_MODEL`/`ANTHROPIC_MODEL`). Read by the
    *  MCP adapter as a fallback under the env, so the seat attests by default instead of rotting to
@@ -133,7 +173,7 @@ export const BindingSchema = WorkspaceSpecSchema.extend({
    *  the WHOLE family as driven. Per-machine, kept out of `workspace.json`; `MUSTERD_DRIVER` env stays
    *  the manual override above it. */
   driver: z.string().min(1).max(80).optional(),
-});
+}).strict();
 
 export type Binding = z.infer<typeof BindingSchema>;
 

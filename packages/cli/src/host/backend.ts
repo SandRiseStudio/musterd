@@ -1,4 +1,4 @@
-import type { WakeOrder, WakeReportBody } from '@musterd/protocol';
+import type { UnpricedReason, WakeOrder, WakeReportBody, WakeUsage } from '@musterd/protocol';
 
 /**
  * The actuator seam (ADR 131 §7): the host loop drives this interface and knows nothing about CLI
@@ -40,6 +40,12 @@ export type WakeOutcome = Omit<WakeReportBody, 'lease_id'>;
 export interface WakeCompletion {
   cost_usd?: number;
   duration_ms?: number;
+  /** ADR 364: tokens the harness printed at turn end; rides the supplementary report as-is. */
+  usage?: WakeUsage;
+  /** ADR 364: why `cost_usd` is absent — a fact about the harness's output, set by the adapter. */
+  unpriced_reason?: UnpricedReason;
+  /** ADR 364: a price the harness printed that the host cannot attest (opencode). */
+  harness_cost_usd?: number;
 }
 
 /**
@@ -52,6 +58,14 @@ export interface WakeCompletion {
 export interface WakeActuation {
   outcome: WakeOutcome;
   settled: Promise<WakeCompletion | undefined>;
+}
+
+/** The roster-derived verdict on one wake (see {@link BackendContext.verifyOccupied}). */
+export interface VerifyResult {
+  occupied: boolean;
+  provenance?: string | null;
+  lease_matched?: boolean;
+  own_unattested?: boolean;
 }
 
 /** Host-side context a backend actuates with. Verification is roster-derived on purpose — headless
@@ -71,12 +85,15 @@ export interface BackendContext {
    *  when a fresh row attests this wake's own lease token. There is deliberately no parameter for
    *  it — the loop binds the lease it is actuating, so a backend cannot verify against any other.
    *  `occupied && !lease_matched` means the seat is held by a session this wake did not create,
-   *  which is a deferral, never a failure. */
-  verifyOccupied(
-    seat: string,
-    windowMs?: number,
-    sinceTs?: number,
-  ): Promise<{ occupied: boolean; provenance?: string | null; lease_matched?: boolean }>;
+   *  which is a deferral, never a failure.
+   *
+   *  `own_unattested` (ADR 379) is the one exception the loop is allowed to make to that reading:
+   *  set only when the window expired with no lease-attesting row AND the freshest unattested row
+   *  was created in THIS wake's workspace after THIS wake spawned (`attached_at`, `workspace`) —
+   *  evidence the actuator already held, which until 2026-09-04 it never consulted before killing
+   *  the child. A backend treats `lease_matched || own_unattested` as "mine" and does not kill;
+   *  `lease_matched` alone still means the token matched. */
+  verifyOccupied(seat: string, windowMs?: number, sinceTs?: number): Promise<VerifyResult>;
   /** One narrator line to the host's stdout (never per poll tick — telemetry carve-out). */
   log(line: string): void;
 }

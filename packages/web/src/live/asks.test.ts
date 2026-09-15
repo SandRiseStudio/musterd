@@ -2,6 +2,8 @@ import { ASK_TIER_DEFAULTS, PROTOCOL_VERSION, type Envelope } from '@musterd/pro
 import { describe, expect, it } from 'vitest';
 import {
   answerableCount,
+  applyTierClock,
+  clockFraction,
   askAudience,
   askIsLoud,
   byAudienceThenUrgency,
@@ -135,6 +137,148 @@ describe('deriveAsks (ADR 149)', () => {
       env('r1', 'resolve', { from: 'ada', ts: 2000, thread: 'a1' }),
     ]);
     expect(a!.state).toBe('resolved');
+  });
+});
+
+/**
+ * nick, 2026-09-01, looking at the office page: "most of the acts on the act bar say timed out —
+ * if they are timed out, should we even show them?"
+ *
+ * Measured on the live DB the same day (last 1,000 envelopes, a 138-hour window): 41 asks, of which
+ * **14 never reached a terminal state** — and every one of those was hours-to-days past a deadline
+ * measured in MINUTES. They sat in the rail as `open`, in danger red, under Approve/Deny buttons,
+ * because leaving `open` requires some LATER envelope to reference the ask and the ADR 147 §4
+ * outcome envelope is the agent's honour system. Agents mostly do not send it.
+ *
+ * So "timed out" was doing the work of two opposite facts at once, and the rail shouted both:
+ *   - a BLOCKING ask past its clock — the agent stopped and nothing is moving. Loudest thing on
+ *     the page, and "timed out" is the wrong word for it, since it reads as over.
+ *   - a STANDARD/ADVISORY ask past its clock — the tier contract already let the agent proceed.
+ *     The decision was made days ago; inviting an answer is inviting one nobody can act on.
+ *
+ * `applyTierClock` separates them. It is deliberately NOT part of `deriveAsks`: that derivation is
+ * pure over the timeline and memoised on the envelopes, so a clock-dependent state computed inside
+ * it would go stale the moment it mattered (the 1s tick re-renders but does not re-run the memo).
+ */
+describe('clockFraction — the arc round the avatar', () => {
+  const NOW = 10_000_000;
+  const at = (id: string, tier: 'advisory' | 'standard' | 'blocking', ts: number) =>
+    deriveAsks([ask(id, ts, tier)])[0]!;
+  const total = ASK_TIER_DEFAULTS.standard.timeout_ms;
+
+  it('is the share of the tier still to run, off the caller\'s clock', () => {
+    expect(clockFraction(at('f1', 'standard', NOW), NOW)).toBe(1);
+    expect(clockFraction(at('f2', 'standard', NOW - total / 4), NOW)).toBeCloseTo(0.75);
+    expect(clockFraction(at('f3', 'standard', NOW - total), NOW)).toBe(0);
+  });
+  it('clamps past the deadline to 0 and reads a held ask as 0 — the ring is empty, not negative', () => {
+    expect(clockFraction(at('f4', 'standard', NOW - 2 * total), NOW)).toBe(0);
+    const held = applyTierClock([at('f5', 'blocking', 0)], NOW)[0]!;
+    expect(held.state).toBe('held');
+    expect(clockFraction(held, NOW)).toBe(0);
+  });
+  it('is null when there is no running clock to draw', () => {
+    const lapsed = applyTierClock([at('f6', 'standard', 0)], NOW)[0]!;
+    expect(lapsed.state).toBe('lapsed');
+    expect(clockFraction(lapsed, NOW)).toBeNull();
+  });
+});
+
+describe('applyTierClock — the clock has run out, but on which contract', () => {
+  const NOW = 10_000_000;
+  const at = (id: string, tier: 'advisory' | 'standard' | 'blocking', ts: number) =>
+    deriveAsks([ask(id, ts, tier)])[0]!;
+
+  it('leaves an ask with time left exactly as the timeline derived it', () => {
+    const live = at('a1', 'standard', NOW);
+    expect(applyTierClock([live], NOW)[0]!.state).toBe('open');
+  });
+
+  it('reads an elapsed BLOCKING ask as held — that agent stopped, and it stays loud', () => {
+    const [a] = applyTierClock([at('a1', 'blocking', NOW - ASK_TIER_DEFAULTS.blocking.timeout_ms - 1)], NOW);
+    expect(a!.state).toBe('held');
+    expect(askIsLoud(a!.state)).toBe(true);
+  });
+
+  it('reads an elapsed STANDARD ask as lapsed — the contract let them proceed, so it is not loud', () => {
+    const [a] = applyTierClock([at('a1', 'standard', NOW - ASK_TIER_DEFAULTS.standard.timeout_ms - 1)], NOW);
+    expect(a!.state).toBe('lapsed');
+    expect(askIsLoud(a!.state)).toBe(false);
+  });
+
+  it('reads an elapsed ADVISORY ask as lapsed too — every below-top tier proceeds', () => {
+    const [a] = applyTierClock([at('a1', 'advisory', NOW - ASK_TIER_DEFAULTS.advisory.timeout_ms - 1)], NOW);
+    expect(a!.state).toBe('lapsed');
+  });
+
+  it('never touches a state a human or an agent actually recorded', () => {
+    // The whole point is to fill a SILENCE. An answered, deferred or outcome-carrying ask has
+    // evidence, and evidence outranks the clock — including an elapsed one.
+    const answered = deriveAsks([
+      ask('a1', NOW - 999_999, 'standard'),
+      env('r1', 'accept', { from: 'nick', ts: NOW - 999_998, meta: { in_reply_to: 'a1' } }),
+    ]);
+    expect(applyTierClock(answered, NOW)[0]!.state).toBe('accepted');
+
+    const deferred = deriveAsks([
+      ask('a2', NOW - 999_999, 'standard'),
+      env('w1', 'wait', { from: 'nick', ts: NOW - 999_998, meta: { ask_ref: 'a2', until: '1h' } }),
+    ]);
+    expect(applyTierClock(deferred, NOW)[0]!.state).toBe('deferred');
+
+    const risked = deriveAsks([
+      ask('a3', NOW - 999_999, 'standard'),
+      env('s1', 'status_update', {
+        ts: NOW - 999_998,
+        meta: { ask_ref: 'a3', ask_outcome: 'risk_accepted', risk: 'r', chosen_approach: 'c' },
+      }),
+    ]);
+    expect(applyTierClock(risked, NOW)[0]!.state).toBe('risk_accepted');
+  });
+
+  it('does not mutate the derived views — the timeline stays the timeline', () => {
+    const derived = [at('a1', 'standard', NOW - 999_999)];
+    applyTierClock(derived, NOW);
+    expect(derived[0]!.state).toBe('open');
+  });
+
+  it('keeps a lapsed ask out of the tab-title count — nobody can answer a made decision', () => {
+    const humans = new Set(['nick']);
+    const pool = applyTierClock([at('a1', 'standard', NOW - 999_999)], NOW);
+    expect(answerableCount(pool, { you: 'nick', humans })).toBe(0);
+  });
+
+  it('keeps a lapsed ask out of the stream rotation', () => {
+    const lapsed = applyTierClock([at('a1', 'standard', NOW - 999_999)], NOW);
+    expect(reelItems(lapsed, [])).toEqual([]);
+  });
+
+  it('stops a lapsed review ask from naming an acceptor as still waited-on', () => {
+    // `waitingOn` says who has to say yes. Once the contract elapsed, that is nobody — the honest
+    // read is "unrouted", which is what the queue already says when it cannot find a routed ask.
+    const asks = applyTierClock(
+      deriveAsks([
+        env('r1', 'ask', {
+          ts: NOW - 999_999,
+          meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L1' } },
+          to: { kind: 'member', name: 'gptbot' } as Envelope['to'],
+        }),
+      ]),
+      NOW,
+    );
+    const queue = deriveReviewQueue(
+      [
+        {
+          id: 'L1',
+          state: 'awaiting_acceptance',
+          title: 'lane L1',
+          owner_seat: 'miley',
+          updated_at: 1000,
+        },
+      ] as never[],
+      asks,
+    );
+    expect(queue[0]!.waitingOn).toBeNull();
   });
 });
 

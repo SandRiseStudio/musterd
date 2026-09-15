@@ -188,6 +188,22 @@ deployment rather than of the posture.
   forecloses nothing for a later consented-prose release.
 - A withdrawal cannot un-publish. Stated in the ADR so no consent flow implies otherwise.
 - The flywheel strategy ADR no longer owns this seam; cite this ADR for publication posture.
+- **2026-08-19 — export path shipped.** `pnpm dataset:export` (`scripts/dataset/export.ts`) is the
+  DoD-1 path: structural JSONL, per-release HMAC seat names, prose omitted, pinned
+  `scripts/dataset/manifest.v1.json`, `--authorized-by` required. It reads a corpus snapshot, not
+  the live daemon db (ADR 280). A HuggingFace upload of a live release is still a per-release human
+  act; this ADR did not become an upload rail. Eval of a *candidate* export is the canary suite in
+  `scripts/dataset/export.test.ts` (planted prose and real seat names must not appear); a live-corpus
+  candidate still wants an independent reader, as §Observability already required.
+- **2026-08-19 — branch/project plaintext leak (miley, live snapshot).** HMAC on `owner`/`created_by`
+  is not enough when the team names branches `<seat>/<topic>` and worktree projects `agents-<seat>`:
+  111/564 rows re-identified. v1 now **omits `lanes.branch`** and HMAC-replaces seat-name tokens in
+  `project`. Repro that must stay red: plant `Ada/leaky-topic` + `agents-Ada` and grep the public
+  JSONL.
+- **2026-08-19 — public dir includes a dataset card.** `pnpm dataset:export` writes `README.md` from
+  `scripts/dataset/card.md` (aggregates only: counts, date range, act/kind/`to.kind` histograms) and
+  copies `manifest.v1.json` into `--out` so the folder is self-describing without the git repo.
+  HuggingFace upload remains a later human act; writing the card does not grant a data license.
 
 ## Observability & Evaluation
 

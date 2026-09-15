@@ -1,5 +1,7 @@
 import {
   eligibleOf,
+  envelopePosition,
+  huddleTopics,
   MODEL_UNKNOWN,
   type Activity,
   type Envelope,
@@ -7,7 +9,7 @@ import {
   type MemberSummary,
   type PresenceStatus,
 } from '@musterd/protocol';
-import { clock, dayLabel, theme } from './theme.js';
+import { clock, dayLabel, sinceLabel, theme } from './theme.js';
 import { heading, hint, padEndVisible, sym, termWidth, visibleLen, wrapText } from './ui.js';
 
 export type KindOf = (name: string) => MemberKind;
@@ -77,11 +79,14 @@ export function renderInbox(
   kindOf: KindOf,
   /** ADR 254: `discharged` maps an eligible-set act id → the seat that answered it, so the row can
    *  say so instead of silently retiring it. */
-  opts: { cursorTs: number; now?: number; discharged?: Map<string, string> },
+  opts: { cursorTs: number; now?: number; discharged?: Map<string, Discharge> },
 ): string {
   const now = opts.now ?? Date.now();
   const out: string[] = [];
   let lastDay: string | null = null;
+  // ADR 378: a turn carries no huddle meta of its own, so without the root it renders as a loose
+  // message from a teammate and the reader cannot tell which conversation it belongs to.
+  const topics = huddleTopics(messages);
   for (const m of messages) {
     const day = dayLabel(m.ts, now);
     if (day !== lastDay) {
@@ -89,11 +94,12 @@ export function renderInbox(
       out.push((lastDay === null ? '' : '\n') + theme.dayHeader(day));
       lastDay = day;
     }
-    const by = opts.discharged?.get(m.id);
+    const stand = opts.discharged?.get(m.id);
     out.push(
       renderMessageRow(m, kindOf, {
-        unread: m.ts > opts.cursorTs,
-        ...(by ? { dischargedBy: by } : {}),
+        unread: envelopePosition(m) > opts.cursorTs,
+        ...(stand ? { discharge: stand } : {}),
+        ...(m.thread && topics.has(m.thread) ? { huddleTopic: topics.get(m.thread)! } : {}),
       }),
     );
   }
@@ -103,21 +109,26 @@ export function renderInbox(
 export function renderMessageRow(
   env: Envelope,
   kindOf: KindOf,
-  /** ADR 254: `dischargedBy` names the seat that already answered this eligible-set act, when one
-   *  has. Omitted ⇒ the act is still owed (or is not an eligible-set act at all). */
-  opts: { unread?: boolean; dischargedBy?: string } = {},
+  /** ADR 254 / doorbell clause 7: `discharge` says WHY this act is no longer owed, when it is not.
+   *  Only `answered` names a seat — (ii) the lane closed and (iv) the seat was shown the act have
+   *  no answerer, and rendering one would invent it. Omitted ⇒ the act is still owed. */
+  opts: { unread?: boolean; discharge?: Discharge; huddleTopic?: string } = {},
 ): string {
   const marker = opts.unread ? theme.accent('▌') + ' ' : '  ';
   const eligible = eligibleOf(env.meta as Record<string, unknown> | null | undefined);
-  const head = `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${toLabel(env.to, kindOf, eligible)}`;
+  // A turn says which room it is in, and drops the recipient label: "to the team" is noise for a
+  // huddle turn — the room IS the address (ADR 378).
+  const head = opts.huddleTopic
+    ? `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${theme.meta(`in huddle ${opts.huddleTopic}`)}`
+    : `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${toLabel(env.to, kindOf, eligible)}`;
   const indent = '    ';
   const body = wrapText(env.body, termWidth() - indent.length)
     .map((line) => `${indent}${line}`)
     .join('\n');
   // The stand-down trace, on the line under the question it retires. Silence here would be the
   // silent retirement the design rejected — the reader may be mid-draft on an answered question.
-  const stood = opts.dischargedBy
-    ? `\n${indent}${theme.meta(`↳ answered by ${opts.dischargedBy} — you no longer owe this`)}`
+  const stood = opts.discharge
+    ? `\n${indent}${theme.meta(`↳ ${dischargeReason(opts.discharge)} — you no longer owe this`)}`
     : '';
   return (env.body ? `${marker}${head}\n${body}` : `${marker}${head}`) + stood;
 }
@@ -148,7 +159,7 @@ export interface StatusHead {
  * The `status` header — an orientation card, read top-down in order of what you need first:
  *
  *   1. **the team** + a live dot (mustard, bold) — the anchor, and proof the daemon answered
- *   2. **who you are here** — with six seats across worktrees, "which seat is this folder?" is the
+ *   2. **who you are here** — with six seats across workspaces, "which seat is this folder?" is the
  *      question `status` is really asked, and the old header never answered it
  *   3. **what needs you** — the ⚑ banner (inverse mustard), outranking everything by design (ADR 024)
  *   4. **what you were doing** — the seat-memory continuity line (ADR 093)
@@ -267,6 +278,8 @@ export function renderRoster(
   now = Date.now(),
   width = termWidth(),
   daemonBuild?: string,
+  /** Seat name → the open huddle it is in (`huddleMarks`, ADR 378). Absent for an unauthed read. */
+  huddles: Map<string, string> = new Map(),
 ): string {
   if (members.length === 0) {
     return theme.meta("nobody's on the team yet") + '\n' + hint('musterd team add <name>');
@@ -278,7 +291,9 @@ export function renderRoster(
     const inGroup = members.filter((m) => groupOf(m) === key);
     if (inGroup.length === 0) continue; // an empty group is not a fact worth a heading
     out.push('', `${heading(label)}  ${theme.meta(String(inGroup.length))}`);
-    const entries = inGroup.map((m) => renderMember(m, key, nameCol, now, width, daemonBuild));
+    const entries = inGroup.map((m) =>
+      renderMember(m, key, nameCol, now, width, daemonBuild, huddles.get(m.name)),
+    );
     // Multi-line entries (a working member, with their status) need air between them or they read as
     // one wall of text; a group of one-liners stays tight. Spacing follows the content, not the group.
     const multiline = entries.some((e) => e.includes('\n'));
@@ -298,10 +313,11 @@ function renderMember(
   now: number,
   width: number,
   daemonBuild?: string,
+  huddle?: string,
 ): string {
   const dot = theme.presenceDot(group === 'out' ? 'offline' : group === 'away' ? 'away' : 'online');
   const head = `  ${dot} ${padEndVisible(theme.memberName(m.name, m.kind), nameCol)}`;
-  const facets = memberFacets(m, group, daemonBuild);
+  const facets = memberFacets(m, group, daemonBuild, huddle);
   const lines = [head + (facets ? theme.meta(facets) : '')];
 
   const indent = ' '.repeat(4);
@@ -324,7 +340,12 @@ const STATUS_MAX_LINES = 2;
  * color alone encodes, and color may be off); role, attested model (ADR 101), and surface when set;
  * lifecycle only when it is not the `forever` default. An absent facet is silence, not a `—`.
  */
-function memberFacets(m: MemberSummary, group: Group, daemonBuild?: string): string {
+function memberFacets(
+  m: MemberSummary,
+  group: Group,
+  daemonBuild?: string,
+  huddle?: string,
+): string {
   const parts: string[] = [m.kind];
   // Every held role (ADR 227 multi-role), joined; an older daemon serves only the single label.
   const roles = m.roles?.length ? m.roles.join('+') : m.role;
@@ -348,7 +369,17 @@ function memberFacets(m: MemberSummary, group: Group, daemonBuild?: string): str
   if (build && daemonBuild && build !== daemonBuild) {
     parts.push(theme.warn(`build ${build.slice(0, 7)}`));
   }
-  if (group !== 'out' && m.presences[0]?.surface) parts.push(m.presences[0]!.surface);
+  if (group !== 'out' && m.presences[0]?.surface) {
+    const p = m.presences[0];
+    // A seat on another machine says so (presence replication, ADR 356): `codex @ laptop-b`. A
+    // local row is silent — the machine you are on is not news.
+    parts.push(p.node_label ? `${p.surface} @ ${p.node_label}` : p.surface);
+  }
+  // A huddle is the one thing on this roster that is a GATHERING rather than a seat, and until now
+  // it was the only thing `status` could not see: a seat in a room looked like any other busy seat.
+  // Accented rather than dim — where the work is happening is context, but who is in a room with
+  // whom is news, and it is rare enough that a bright facet stays rare (ADR 378).
+  if (huddle) parts.push(theme.accent(`huddle ${huddle}`));
   if (m.lifecycle === 'session') parts.push('session');
   // `!= null`, not truthiness: an epoch-0 timestamp is falsy and would silently drop the date.
   if (m.lifecycle === 'until' && m.lifecycle_until != null) {
@@ -417,7 +448,7 @@ function shortTs(ms: number): string {
 
 /** Activity, falling back to a presence-derived value for older rosters that predate the field. */
 function activityOf(m: MemberSummary): Activity {
-  return m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle');
+  return m.activity ?? (m.presence === 'offline' ? 'offline' : 'active');
 }
 
 /** Coarse human age: `18m` / `2h` / `3d`. */
@@ -466,20 +497,62 @@ function threadKey(env: Envelope): string {
  * alone — and the live ledger holds 199 accepts against 9 resolves, so an answered ask counted as
  * waiting forever, in the `⚑ N requests waiting for you` banner, in the notification Loud set, and
  * in the lane-acceptance candidate list. Omitted ⇒ the previous behaviour exactly.
+ *
+ * `discharged` is the ADR 254 counterpart: the server's list of eligible-set act ids some OTHER seat
+ * already answered. It has to come from outside for a stronger reason than `answered` does — the
+ * discharging accept is a DM to the asker, so a second eligible seat is not a party to it and
+ * need-to-know scoping hides it outright. Without this the count disagreed with the row beside it:
+ * {@link renderMessageRow} has printed `↳ answered by X — you no longer owe this` since ADR 254 while
+ * the same act kept counting as waiting. Most acts on this team use eligible sets, so this was a
+ * standing overcount, not an edge case. Omitted ⇒ the previous behaviour exactly.
  */
 export function openActionNeeded(
   messages: Envelope[],
   me: string,
   answered: Iterable<string> = [],
+  discharged: Iterable<string> = [],
 ): Envelope[] {
   const resolved = new Set<string>();
   for (const m of messages) {
     if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
   }
   const alreadyAnswered = new Set(answered);
+  const stoodDown = new Set(discharged);
   return messages.filter(
-    (m) => isActionNeeded(m, me) && !resolved.has(threadKey(m)) && !alreadyAnswered.has(m.id),
+    (m) =>
+      isActionNeeded(m, me) &&
+      !resolved.has(threadKey(m)) &&
+      !alreadyAnswered.has(m.id) &&
+      !stoodDown.has(m.id),
   );
+}
+
+/**
+ * The `discharged` half of an inbox reply as bare ids, for {@link openActionNeeded}. One place, so a
+ * caller cannot spell the `?? []` fallback differently and silently reinstate the overcount on an
+ * older daemon. Takes the whole reply rather than the field so the call site reads as "this inbox's
+ * stand-downs" and there is nothing to forget to pass.
+ */
+export function dischargedIds(res: { discharged?: { id: string }[] }): string[] {
+  return (res.discharged ?? []).map((d) => d.id);
+}
+
+/**
+ * Why an act is no longer owed (doorbell contract clause 7). `answered` is the co-addressee's
+ * accept and is the only one with a seat to name; `lane_closed` is the referenced lane leaving
+ * awaiting acceptance with nobody having answered at all; `read` is an act with no answering move
+ * that this seat has already been shown. An older daemon sends neither `reason` nor these shapes,
+ * so the absent-reason case renders as the pre-clause-7 sentence.
+ */
+export interface Discharge {
+  by?: string;
+  reason?: 'answered' | 'lane_closed' | 'read';
+}
+
+export function dischargeReason(d: Discharge): string {
+  if (d.reason === 'lane_closed') return 'the lane closed';
+  if (d.reason === 'read') return 'you have already been shown this';
+  return d.by ? `answered by ${d.by}` : 'answered';
 }
 
 /**
@@ -487,12 +560,12 @@ export function openActionNeeded(
  * the durable inbox cursor (unread, action-needed messages). Returns '' when nothing waits, so a
  * caller can prepend it unconditionally without adding a blank line of noise on the common path.
  */
-export function renderPendingSummary(count: number, sinceTs: number): string {
+export function renderPendingSummary(count: number, sinceTs: number, now = Date.now()): string {
   if (count <= 0) return '';
   const noun = count === 1 ? 'request' : 'requests';
   return (
     theme.actionNeeded(`⚑ ${count} ${noun} waiting for you`) +
-    theme.meta(` since ${clock(sinceTs)} — musterd inbox to read`)
+    theme.meta(` since ${sinceLabel(sinceTs, now)} — musterd inbox to read`)
   );
 }
 
@@ -539,13 +612,41 @@ export function renderMachineLine(
  * surfaced away from `status`, where "you" has no anchor) and points at the fix. Returns '' when
  * nothing waits, so a caller can append it unconditionally. Pure — same predicate as the live path.
  */
-export function renderReachabilityNudge(count: number, sinceTs: number, me: string): string {
+export function renderReachabilityNudge(
+  count: number,
+  sinceTs: number,
+  me: string,
+  now = Date.now(),
+): string {
   if (count <= 0) return '';
   const noun = count === 1 ? 'act' : 'acts';
   return (
     theme.actionNeeded(`⚑ ${count} ${noun} waiting for ${me}`) +
-    theme.meta(` — musterd inbox  (since ${clock(sinceTs)})`)
+    theme.meta(` — musterd inbox  (since ${sinceLabel(sinceTs, now)})`)
   );
+}
+
+/** How many waiting acts `renderWaitingActs` lists before it folds the rest into a `+N more`. */
+export const WAITING_ACTS_SHOWN = 5;
+
+/**
+ * The acts behind the banner, one line each, oldest first — what `musterd nudge` prints under its
+ * banner so the human at the approval prompt sees WHAT waits, not only how many (ADR 053 §1 said
+ * "prints any unread directed acts"; the banner alone had drifted to a count that pointed at an
+ * inbox which could not show it). Bounded: past {@link WAITING_ACTS_SHOWN} it says how many more.
+ */
+export function renderWaitingActs(waiting: Envelope[], now = Date.now()): string[] {
+  const rows = [...waiting].sort((a, b) => a.ts - b.ts);
+  const lines = rows.slice(0, WAITING_ACTS_SHOWN).map((m) => {
+    const head = m.body.split('\n').find((l) => l.trim() !== '') ?? '';
+    const brief = head.length > 96 ? `${head.slice(0, 95)}…` : head;
+    return `  ${theme.meta(sinceLabel(m.ts, now))} ${m.from} ${theme.actBadge(m.act)} ${brief}`;
+  });
+  if (rows.length > WAITING_ACTS_SHOWN)
+    lines.push(
+      theme.meta(`  +${rows.length - WAITING_ACTS_SHOWN} more — musterd inbox --peek --unread`),
+    );
+  return lines;
 }
 
 export function renderPresence(status: PresenceStatus, surface?: string): string {

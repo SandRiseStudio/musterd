@@ -21,6 +21,8 @@ export const ARXIV_CATEGORIES = ['cs.MA', 'cs.AI', 'cs.HC'] as const;
 export const KEYWORD_PHRASES = [
   'multi-agent',
   'multi agent',
+  // Anthropic house style — without it the filter drops the post that motivated ADR 314.
+  'multiagent',
   'human-agent',
   'human agent',
   'human-in-the-loop',
@@ -59,6 +61,14 @@ export const ARXIV_MAX_RESULTS = 100;
 
 /** HF daily_papers page size. */
 export const HF_DAILY_LIMIT = 50;
+
+/**
+ * Exploring Next public feed (read-only GET) — the third source, per nick 2026-08-24: the
+ * hand-curated podcast pipeline feeds musterd, not the other way round. Rows are already
+ * human-curated for interest; the radar's triage still judges musterd-relevance.
+ */
+export const EXN_FEED_URL = 'https://ingest.sandrise.io/feed';
+export const EXN_FEED_LIMIT = 200;
 
 /** Prompt version pin — recorded on every triage report / future digest. */
 export const PROMPT_VERSION = 'radar-v1';
