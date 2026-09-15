@@ -1183,4 +1183,38 @@ the reachability-vs-cost question is not re-litigated from the cost table alone.
 
 **Falsifier for this entry's central claim:** `fly machine stop` the delta machine, send `delta` a
 `steer` from the hub, and wait past two actuator ticks (~60 s). If the seat wakes, this is wrong and
-a push path exists that this reading missed. Unrun — it would take the seat offline to prove.
+a push path exists that this reading missed. ~~Unrun — it would take the seat offline to prove.~~
+**RUN 2026-09-15 20:31-20:36Z on nick's word — the claim holds.** See below.
+
+### The falsifier, run — result: confirmed, and the act is deferred rather than lost
+
+delta was `quiet 18m`, so no live work was at risk; the team was told before and after.
+
+| time (UTC) | event |
+| --- | --- |
+| 20:31:48 | baseline: machine `started`, actuator `◉ polling … every 30s`, `host.log` 3455 lines |
+| 20:32:14 | `fly machine stop` → state confirmed **`stopped`** |
+| 20:32:28 | steer `01M2KCAHYTRC4KGZMJ8CAPNBFT` sent to `delta` from the hub — *after* the stop |
+| 20:32:28–20:34:04 | **96 s, >3 actuator ticks, 10 samples — machine `stopped` at every one** |
+| 20:34:59 | a human runs `fly machine start` |
+| 20:35:02 | state `started` |
+| ~20:36 | the actuator's own first poll finds the queued steer and wakes the seat |
+
+**Nothing started the machine, and the hub never tried.** `wake_leases` on the hub holds **zero**
+rows for `delta` — not a stale one, not an expired one, none ever. Leases are minted by the
+*joiner's* actuator at wake time and replicate upward; the hub has no push role to skip. The lease
+for this steer, `01M2KCGP154PZQQJYR8XN27ZZT`, did not exist until after a human had started the
+machine.
+
+**The refinement worth having: the doorbell is deferred, not dropped.** The steer sat on the hub and
+was delivered on the actuator's first poll after boot —
+`wake due: delta [immediate] — steer from stanley (lease 01M2KCGP15…)`, then
+`⚡ woke delta: spawn→roster 21.8s, session=fresh provenance=wake`. So parking does not lose
+directed acts; it gives them **unbounded latency with a human on the critical path**. "Parked" is
+correctly read as *the seat is offline until someone starts it*, and the queue behind it is intact
+whenever that happens.
+
+**Incidental, already known:** the boot logged `resume skipped for delta: newest transcript is
+512.3 KiB (hygiene bound 256 KiB) — fresh spawn` — finding 18a's transcript-hygiene cold start
+firing again, costing a fresh spawn rather than a resume. Unrelated to this falsifier, recorded
+because it was in the same three log lines.
