@@ -547,7 +547,7 @@ export class MusterdClient {
      *  reader must fall back rather than invent one. `verified: false` alone cannot separate the
      *  by-design exemption from the ADR 172 degradation — that is what `reason` is for. */
     closed?: { verified: boolean; reason: string };
-    /** ADR 169: present when the patch entered ready_for_review — the review routing. */
+    /** ADR 169/192: present when the patch entered `awaiting_acceptance` — the acceptance routing. */
     review?: {
       reviewer?: string;
       route?: string;
