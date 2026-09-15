@@ -242,4 +242,61 @@ describe('Aperture posture analysis (ADR 385)', () => {
     ];
     expect(states(observation(config({ grants, quotas })))['aperture-quotas']).toBe('fail');
   });
+
+  it('compares only the generated musterd-managed policy when supplied', () => {
+    const policy = {
+      teamQuota: { capacity: '$20', rate: '$10/day' },
+      outOfScope: [],
+      members: [
+        {
+          member: 'agent',
+          workloadId: 'a7f3c2',
+          principal: 'tag:musterd-member-a7f3c2',
+          roles: [],
+          models: ['anthropic/claude-sonnet-4-6'],
+          teamBucket: 'musterd-team',
+          memberBucket: 'musterd-member-a7f3c2',
+          memberQuota: { capacity: '$5', rate: '$2/day' },
+        },
+      ],
+    };
+    const exact = config({
+      grants: [
+        {
+          src: exactSource,
+          app: {
+            'tailscale.com/cap/aperture': [
+              {
+                role: 'user',
+                models: ['anthropic/claude-sonnet-4-6'],
+                quotas: [{ bucket: 'musterd-team' }, { bucket: 'musterd-member-a7f3c2' }],
+              },
+            ],
+          },
+        },
+      ],
+      quotas: {
+        'musterd-team': { capacity: '$20', rate: '$10/day', on_exceed: 'reject' },
+        'musterd-member-a7f3c2': { capacity: '$5', rate: '$2/day', on_exceed: 'reject' },
+        unrelated: { capacity: '$1', rate: '$1/day', on_exceed: 'reject' },
+      },
+      providers: {
+        anthropic: {
+          baseurl: 'https://api.anthropic.com',
+          models: ['anthropic/claude-sonnet-4-6'],
+        },
+      },
+    });
+    expect(
+      inspectApertureConfig(observation(exact), policy).find(
+        (check) => check.key === 'aperture-managed-policy',
+      ),
+    ).toMatchObject({ state: 'ok' });
+    exact.quotas['musterd-member-a7f3c2'].rate = '$9/day';
+    expect(
+      inspectApertureConfig(observation(exact), policy).find(
+        (check) => check.key === 'aperture-managed-policy',
+      ),
+    ).toMatchObject({ state: 'fail', detail: 'managed quota drift for agent' });
+  });
 });

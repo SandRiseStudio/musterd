@@ -48,10 +48,12 @@ describe('toolkit is a first-class command (ADR 296)', () => {
   });
 });
 
-describe('integration doctor help (ADR 385)', () => {
-  it('publishes the exact optional read-only contract and all four combinations', () => {
+describe('integration help (ADR 385/400)', () => {
+  it('publishes the optional doctor and local Aperture generator contracts', () => {
     const command = CATALOG.find((entry) => entry.name === 'integration');
-    expect(command?.signature).toBe('doctor [--tailscale] [--aperture <https-url>] [--json]');
+    expect(command?.signature).toBe(
+      'doctor [--tailscale] [--aperture <https-url>] [--json] | generate aperture [--write | --check]',
+    );
     expect(`${command?.summary} ${command?.detail}`).toMatch(/read-only/i);
     expect(`${command?.detail}`).toMatch(/does not manage devices|no device management/i);
     expect(command?.examples).toEqual([
@@ -59,6 +61,8 @@ describe('integration doctor help (ADR 385)', () => {
       'musterd integration doctor --tailscale',
       'musterd integration doctor --aperture https://aperture.tailnet.ts.net',
       'musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net',
+      'musterd integration generate aperture --write',
+      'musterd integration generate aperture --check',
     ]);
   });
 });
