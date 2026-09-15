@@ -125,6 +125,43 @@ export const GESTURE = {
   call: 13,
 } as const;
 
+/**
+ * The errand beats: played on a walk's hold/sit legs via `Leg.overlay`, never chosen by the gesture
+ * scheduler. Listed here (rather than by id range) because this is the ONLY thing that separates the
+ * two families, and the separation has to be derivable — see `IDLE_GESTURES` directly below.
+ */
+const ERRAND_GESTURES = ['browse', 'fill', 'eat', 'pour', 'call'] as const;
+
+/** A beat the gesture scheduler may pick: everything in the registry that is not an errand overlay. */
+export type IdleGesture = (typeof GESTURE)[Exclude<keyof typeof GESTURE, (typeof ERRAND_GESTURES)[number]>];
+
+/**
+ * Every scheduler-pickable beat, DERIVED from the registry rather than re-listed (lane 01M2JYBGMQ).
+ * #1430 added four beats and the duration table did not hear about it, so all four silently took the
+ * shortest window in it; a re-listed set would have gone stale the same way. Add a beat to `GESTURE`
+ * and it lands here automatically — and `GESTURE_DUR`, keyed by `IdleGesture`, stops compiling until
+ * somebody chooses its window.
+ */
+export const IDLE_GESTURES: readonly IdleGesture[] = Object.entries(GESTURE)
+  .filter(([key]) => !(ERRAND_GESTURES as readonly string[]).includes(key))
+  .map(([, id]) => id as IdleGesture);
+
+/**
+ * Is this number a beat the scheduler may pick?
+ *
+ * The one place a gesture id arrives from OUTSIDE the type system is `pokeGesture`, which
+ * `/office-preview?beat=<n>` feeds a URL param. `GESTURE_DUR` is keyed by `IdleGesture` and has no
+ * fallback (#1434, correctly — a table that cannot report its own gaps is how four beats shipped on
+ * the shortest window in it), so an errand id arriving there produced `dur: undefined`, and
+ * `g.t >= g.dur` is never true against `undefined`: the member gestured for the life of the scene
+ * and was excluded from every later beat. A cast cannot catch that; this can (izzo, reviewing #1434
+ * — falsify: `pokeGesture(GESTURE.call)` and step the scene; a member still holding a gesture after
+ * its longest window means this guard is not on the path).
+ */
+export function isIdleGesture(kind: number): kind is IdleGesture {
+  return (IDLE_GESTURES as readonly number[]).includes(kind);
+}
+
 /** An arc-shaped envelope over the gesture window: 0 → 1 → 0, zero-velocity at both ends (no pop). */
 const arcEnv = (gT: number): number => Math.sin(smooth(gT) * Math.PI);
 /** A plateau envelope: ramp in over the first ~18% of the window, hold, ramp out over the last ~18%. */

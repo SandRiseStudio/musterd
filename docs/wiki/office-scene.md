@@ -64,6 +64,21 @@ Do not raise `BODY_R` as a first move — a larger radius can close narrow gaps 
 
 **The probes.** `OfficeHandle.floorSamples()` returns every posed member's logical position with both tests, read from CDP like `ambientLog`. `/character-sheet?carry=laptop|box|plate|bottle|mug|phone` draws the turnaround with something in hand — the sheet hardcoded `carry: null`, so the one defect class that is about FACING was the one class the body-review tool could not draw.
 
+## Watching the drift heartbeat fire (measured 2026-09-15; falsify: re-run the recipe below and read `beats`)
+
+A parked room keeps a slow breath — a 4fps `setInterval` (`DRIFT_FRAME_MS`) that redraws the dynamic layer while the rAF loop is stopped, so an idle office sways instead of freezing. For the whole of #1430 **nobody had ever observed it fire**: it typechecked, its cost was priced, its tests passed, and every attempt to watch it came back zero. Three separate reasons, each of which looks exactly like "the heartbeat is dead":
+
+1. **`stats()` could not see it.** `ticks`/`draws` count rAF frames only, and a drift frame never enters the loop, so a parked room reported `ticks 0, draws 0` whether the breath was beating or broken. An instrument that reads the same for working and broken is not an instrument. `OfficeStats.beats` (added with this page) is the counter that moves; everything below depends on it.
+2. **`/office-preview?quiet` alone does not park.** `living()` returns true while ANYONE is seated and working — typing is motion — so the loop never stops in a full room. `?quiet&idle=all` empties every desk, and that is the fixture that parks. `?quiet` on its own measures the ambient scheduler, which is what `scripts/perf/ambient-density.mjs` wants and not what this wants.
+3. **A headless/background tab is legitimately not visible.** `ensureDrift` refuses when `document.visibilityState !== 'visible'` — correct behaviour, indistinguishable from a bug in the counter. In an agent browser pane (which runs the tab hidden) stub it before measuring, and say that you stubbed it:
+   `Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>'visible'}); document.dispatchEvent(new Event('visibilitychange'))`.
+
+**The recipe.** `/office-preview?quiet&idle=all`, tab visible, wait ~8s for the room to settle and park, then read `window.__office.stats().beats` twice a few seconds apart. Parked and visible: **4.0 beats/s, 0 rAF draws** — the priced rate exactly. Collapsed (`setSuspended(true)`): **0** — the rule is stop-when-unseen. Re-expanded: **4.0** again.
+
+**What that recipe caught the first time it was run.** Re-expanding did NOT resume the breath: 4 → 0 → **0, still 0 eight seconds later** (2026-09-15, against `f9db6cd9`; falsify: restore the pre-fix `setSuspended` else-branch and re-run). Collapse a quiet room once and it was frozen for the rest of the session. The cause is the shape worth remembering rather than the line: there are two doors back into a room that stopped being watched — the tab becoming visible, and the panel re-expanding — they ask the identical question, and they were answered in two places that disagreed. The visibility door called `ensureDrift()`, the collapse door painted one resting frame and stopped. Fixed by giving the question one home (`reengage()`), with `alive()` as the single spelling of the predicate both doors test. <!-- claim: defect -->
+
+Same family as the two depth bugs above and the `deskNeighbourPairs`/`deskNeighbours` split in #1430: **when two call sites each write down the same rule, they drift, and the one that is wrong is the one nobody is looking at.** The fix is always one home and derive the other — never a second correct copy.
+
 ## Ownership
 
 Standing rule (nick): all frontend web UI is miley's, and must be magical/warm/quirky/on-brand — coordinate through the lane, don't restyle in passing.
