@@ -3450,7 +3450,7 @@ function deskDock(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: numbe
   const sn = dir === 'S' || dir === 'N';
   // Cradle and slot are sized to the slab they hold — a dock visibly narrower than its laptop reads
   // as the wrong furniture, so these three numbers move together or not at all.
-  box(ctx, fit, mx, my, sn ? 21 : 12, sn ? 12 : 21, 4, '#7c5230', up); // walnut cradle
+  box(ctx, fit, mx, my, sn ? 21 : DOCK_CRADLE_ALONG, sn ? DOCK_CRADLE_ALONG : 21, 4, '#7c5230', up); // walnut cradle
   box(ctx, fit, mx, my, sn ? 17 : 3, sn ? 3 : 17, 1.5, '#54371f', up + 4); // the slot, dark down its length
   if (!docked) return; // nobody has sat down here to work — the slot is empty, and that is the point
   /*
@@ -3636,6 +3636,10 @@ const LAMP_ACROSS = 42;
  * see render.test.ts, which walks every facing against the widest setup on the floor.
  */
 const DOCK_ALONG = 26;
+
+/** The cradle's footprint along the facing — the piece that must be standing on furniture. Named
+ *  because the bench has to reason about it: `deskDock` drew it as a bare 12 and nothing could ask. */
+export const DOCK_CRADLE_ALONG = 12;
 /* 40 → 38. The dock sits outboard, and `|dockAcross| + DOCK_HALF_ACROSS` must stay within the slab's
    half-width (DESK_W / 2 = 50) or the cradle hangs off the desk edge. When the docked laptop grew from
    20 to 24 across (#1394) that sum went to 52 and the stands started reading as though they were in
@@ -3675,6 +3679,59 @@ export function deskPropSort(dir: Dir, along: number, across: number): number {
   const f = FWD[dir];
   const p: [number, number] = [-f[1], f[0]];
   return f[0] * along + p[0] * across + (f[1] * along + p[1] * across);
+}
+
+/**
+ * Where a bench seat's monitor and dock stand — DERIVED FROM THE COUNTER, because the bench is not a
+ * pod desk and the pod desk's constants do not fit on it.
+ *
+ * `DOCK_ALONG` (26) and `DOCK_ACROSS` (38) are tuned to DESK_D 68 / DESK_W 100, and the comment on
+ * DOCK_ACROSS is explicit that 38 + DOCK_HALF_ACROSS lands on the pod slab's edge "exactly". The
+ * bench counter is BENCH.deep (30) deep and each seat owns BENCH.long / BENCH.seats (75) of the top.
+ * Handed the pod numbers, the dock stood 17 units past the counter's back edge — in the air — and
+ * leaned 12.5 units into the next seat. nick saw it on /live as laptops floating in front of the
+ * monitors, 2026-09-15.
+ *
+ * The monitor already did this right (`BENCH.deep / 2 - 12`); these two put the dock on the same
+ * footing, so both props are functions of the furniture rather than one of each.
+ */
+export function benchMonitorAt(slot: { lx: number; ly: number; dir: Dir }): { lx: number; ly: number } {
+  return benchAt(slot, BENCH.deep / 2 - 12, 0);
+}
+
+export function benchDockAt(slot: { lx: number; ly: number; dir: Dir; id: number }): { lx: number; ly: number } {
+  // As far back as the cradle can stand with its whole footprint on the counter…
+  const along = BENCH.deep / 2 - DOCK_CRADLE_ALONG / 2;
+  // …and outboard to the edge of THIS seat's share, on the side whose sort term subtracts — the same
+  // rule `dockAcross` applies on a pod desk, measured against the width this seat actually has.
+  const room = BENCH.long / BENCH.seats / 2 - DOCK_HALF_ACROSS;
+  const across = Math.sign(dockAcross(slot.dir)) * room;
+  return benchAt(slot, along, across);
+}
+
+/** Desk-relative (along-facing, across-shoulders) → floor, for a bench seat. */
+function benchAt(
+  slot: { lx: number; ly: number; dir: Dir },
+  along: number,
+  across: number,
+): { lx: number; ly: number } {
+  const f = FWD[slot.dir];
+  const p: [number, number] = [-f[1], f[0]];
+  return { lx: slot.lx + f[0] * along + p[0] * across, ly: slot.ly + f[1] * along + p[1] * across };
+}
+
+/** A bench prop's paint key, in floor coords — `deskPropSort` reached through the seat's own frame,
+ *  so the bench and the pod desks order their props by one rule rather than two. */
+export function benchPropSort(
+  slot: { lx: number; ly: number; dir: Dir },
+  at: { lx: number; ly: number },
+): number {
+  const f = FWD[slot.dir];
+  const p: [number, number] = [-f[1], f[0]];
+  const dx = at.lx - slot.lx;
+  const dy = at.ly - slot.ly;
+  // Project the offset back onto (along, across) — the basis is orthonormal, so a dot product each.
+  return deskPropSort(slot.dir, f[0] * dx + f[1] * dy, p[0] * dx + p[1] * dy);
 }
 
 /**
@@ -3830,7 +3887,7 @@ function drawWorkstation(
   const at = (along: number, across: number, fn: (ix: number, iy: number) => void): void => {
     const ix = lx + f[0] * along + p[0] * across;
     const iy = ly + f[1] * along + p[1] * across;
-    props.push({ sum: f[0] * along + p[0] * across + (f[1] * along + p[1] * across), fn: () => fn(ix, iy) });
+    props.push({ sum: deskPropSort(dir, along, across), fn: () => fn(ix, iy) });
   };
 
   // The monitor at the back, then the keyboard + mouse pulled in to where a seated member's hands actually
@@ -3941,17 +3998,25 @@ function benchStation(
   atWork = false,
 ): void {
   const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(slot.id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
-  monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, atWork, DESK_UP, slot.id, t);
-  // A bench seat is a workstation like any other, so it docks like one — same cradle, same rule. The
-  // bench faces N, so the across term subtracts at −DOCK_ACROSS (see the note on the constant).
-  {
-    const f = FWD[slot.dir];
-    const c = dockAcross(slot.dir);
-    const dx = slot.lx + f[0] * DOCK_ALONG - f[1] * c;
-    const dy = slot.ly + f[1] * DOCK_ALONG + f[0] * c;
-    deskDock(ctx, fit, dx, dy, slot.dir, DESK_UP, atWork);
-  }
-  deskKeyboard(ctx, fit, slot.lx, slot.ly - KEYBOARD_ALONG, true, DESK_UP, kbShoulder);
+  /*
+   * Sorted back-to-front, exactly as `drawWorkstation` sorts its own props — it used to be three
+   * sequential calls, so the dock painted over the monitor by CALL ORDER at every facing no matter
+   * where it stood. Geometry decides this now, which is the only way it can stay right when a prop
+   * moves (nick, on /live: "the laptop stands look like they are floating in front of the monitors").
+   */
+  const kbAt = benchAt(slot, KEYBOARD_ALONG, 0); // same frame drawWorkstation uses: `at(KEYBOARD_ALONG, 0)`
+  const props: { sum: number; fn: () => void }[] = [
+    { sum: benchPropSort(slot, benchMonitorAt(slot)), fn: () => {
+      const m = benchMonitorAt(slot);
+      monitor(ctx, fit, m.lx, m.ly, slot.dir, atWork, DESK_UP, slot.id, t);
+    } },
+    { sum: benchPropSort(slot, benchDockAt(slot)), fn: () => {
+      const d = benchDockAt(slot);
+      deskDock(ctx, fit, d.lx, d.ly, slot.dir, DESK_UP, atWork);
+    } },
+    { sum: benchPropSort(slot, kbAt), fn: () => deskKeyboard(ctx, fit, kbAt.lx, kbAt.ly, true, DESK_UP, kbShoulder) },
+  ];
+  for (const prop of props.sort((a, b) => a.sum - b.sum)) prop.fn();
 }
 
 export interface SceneAnchors {
