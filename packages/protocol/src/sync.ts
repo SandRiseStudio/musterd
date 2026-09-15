@@ -148,6 +148,26 @@ export type SyncContinuityEvent = z.infer<typeof SyncContinuityEventSchema>;
 export const SyncRecordEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('record') });
 export type SyncRecordEvent = z.infer<typeof SyncRecordEventSchema>;
 
+/**
+ * One replicated SEED event (ADR 399): a `seed.*` audit row carrying a relay capture — the seventh
+ * audit kind, in the lane event's shape under its own tag. One verb today, `seed.captured`.
+ *
+ * HUB-MINTED, like `policy` and `record.incident_report`, and a joiner-minted one is refused at
+ * ingest. The relay is polled in exactly one place per team (`seeds/ingest.ts` runs wherever
+ * `policy.seeds_relay_url` + `seeds_relay_token` are set, which by this ADR is the hub), so a seed
+ * has one birth and one `relay_id` and two daemons cannot race the same relay cursor.
+ *
+ * Keyed by `relay_id`, not `seeds.id`, for the same reason `record.seed_thread` is: the local id is
+ * a daemon-private ULID while `relay_id` is `UNIQUE(team_id, relay_id)` on every node. That is what
+ * makes the projection idempotent and lets a thread entry and its seed resolve to the same row.
+ *
+ * Lifecycle state does NOT ride along (ADR 371 §3, unchanged): an explorer claim is "exactly one
+ * holder", a residence-1 change this ADR deliberately leaves to the federation increment. This kind
+ * replicates the capture, not the claim. As with `record`, an unknown verb STOPS the fold.
+ */
+export const SyncSeedEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('seed') });
+export type SyncSeedEvent = z.infer<typeof SyncSeedEventSchema>;
+
 /** Any replicated kind. A plain `z.union`, not discriminated, because the message tag is optional. */
 export const SyncEventSchema = z.union([
   SyncLaneEventSchema,
@@ -156,6 +176,7 @@ export const SyncEventSchema = z.union([
   SyncPolicyEventSchema,
   SyncContinuityEventSchema,
   SyncRecordEventSchema,
+  SyncSeedEventSchema,
   SyncMessageEventSchema,
 ]);
 export type SyncEvent = z.infer<typeof SyncEventSchema>;
@@ -168,14 +189,17 @@ export function syncEventId(event: SyncEvent): string {
 /** The kinds whose payload is an audit row, as opposed to the message's envelope. */
 export function isAuditKind<T extends { kind?: string | undefined }>(
   event: T,
-): event is T & { kind: 'lane' | 'presence' | 'ledger' | 'policy' | 'continuity' | 'record' } {
+): event is T & {
+  kind: 'lane' | 'presence' | 'ledger' | 'policy' | 'continuity' | 'record' | 'seed';
+} {
   return (
     event.kind === 'lane' ||
     event.kind === 'presence' ||
     event.kind === 'ledger' ||
     event.kind === 'policy' ||
     event.kind === 'continuity' ||
-    event.kind === 'record'
+    event.kind === 'record' ||
+    event.kind === 'seed'
   );
 }
 
@@ -265,6 +289,11 @@ export const SyncPullRecordEventSchema = SyncRecordEventSchema.extend({
 });
 export type SyncPullRecordEvent = z.infer<typeof SyncPullRecordEventSchema>;
 
+export const SyncPullSeedEventSchema = SyncSeedEventSchema.extend({
+  hub_seq: z.number().int().positive(),
+});
+export type SyncPullSeedEvent = z.infer<typeof SyncPullSeedEventSchema>;
+
 export const SyncPullEventSchema = z.union([
   SyncPullLaneEventSchema,
   SyncPullPresenceEventSchema,
@@ -272,6 +301,7 @@ export const SyncPullEventSchema = z.union([
   SyncPullPolicyEventSchema,
   SyncPullContinuityEventSchema,
   SyncPullRecordEventSchema,
+  SyncPullSeedEventSchema,
   SyncPullMessageEventSchema,
 ]);
 export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;

@@ -256,8 +256,17 @@ describe('record.seed_thread (ADR 371 §3)', () => {
   it('a clarification asked on the joiner appears in the hub’s seed thread, same entry id, by NAME', async () => {
     const jt = joinerTeam();
     const ht = hubTeam();
-    const seedJ = createSeedFromRelay(joiner.db, jt.id, RELAY);
+    // ADR 399: the HUB relay-ingests and the capture crosses as a `seed` event — the joiner no
+    // longer polls the relay, so this is how it comes to hold the seed at all. Before 399 this test
+    // created the row independently on both daemons, which is the model 399 replaced.
     const seedH = createSeedFromRelay(hub.db, ht.id, RELAY);
+    await roundTrip();
+    const seedJ = joiner.db
+      .prepare<
+        [string, string],
+        { id: string }
+      >('SELECT id FROM seeds WHERE team_id = ? AND relay_id = ?')
+      .get(jt.id, RELAY.id)!;
     expect(seedJ.id).not.toBe(seedH.id); // daemon-private ids — the reason the event carries relay_id
 
     claimSeed(joiner.db, jt.id, seedJ.id, member(joiner.db, jt, 'ada'));
@@ -280,23 +289,48 @@ describe('record.seed_thread (ADR 371 §3)', () => {
     expect(getSeed(joiner.db, jt.id, seedJ.id)!.state).toBe('needs_clarification');
   });
 
-  it('an entry for a seed the hub has not relay-ingested yet BLOCKS as seed_unborn, then applies after ingest', async () => {
-    const jt = joinerTeam();
+  it('an entry for a seed this daemon holds no row for BLOCKS as seed_unborn, then applies once the seed lands', async () => {
     const ht = hubTeam();
-    const seedJ = createSeedFromRelay(joiner.db, jt.id, RELAY);
-    claimSeed(joiner.db, jt.id, seedJ.id, member(joiner.db, jt, 'ada'));
-    askSeedClarification(joiner.db, jt.id, seedJ.id, member(joiner.db, jt, 'ada'), 'why?');
+    // ADR 399 makes the ordinary joiner→hub path unable to reach this stop: a seat can only append
+    // to a seed its daemon already folded, and the capture is ordered before the entry by
+    // `origin_seq`. So the guard is exercised DIRECTLY — a thread entry folded against a daemon
+    // holding no such relay seed — which is the case the stop actually defends: a hole, not a race.
+    const entryId = 'entry-orphan-1';
+    // `origin_seq` starts at 1 for this synthetic node and does not skip: a hole there is an
+    // `origin_gap`, a different stop, and it would mask the one under test.
+    const threadEvent = (hubSeq: number, originSeq: number) => ({
+      kind: 'record' as const,
+      team: 'bravo',
+      hub_seq: hubSeq,
+      origin_node: 'node-elsewhere',
+      origin_seq: originSeq,
+      event: {
+        id: entryId,
+        ts: Date.now(),
+        actor: 'ada',
+        action: 'record.seed_thread',
+        target: RELAY.id,
+        result: 'allow',
+        detail: {
+          entry_id: entryId,
+          relay_id: RELAY.id,
+          kind: 'clarification',
+          body: 'why?',
+          by: 'ada',
+          created_at: Date.now(),
+        },
+      },
+    });
 
-    await roundTrip();
+    const orphan = foldBatch(hub.db, ht.id, [threadEvent(999_001, 1)]);
+    expect(orphan.stop?.kind).toBe('seed_unborn');
     expect(count(hub.db, 'SELECT COUNT(*) AS n FROM seed_thread_entries')).toBe(0);
-    expect(
-      count(hub.db, "SELECT COUNT(*) AS n FROM audit WHERE action = 'record.seed_thread'"),
-    ).toBe(0);
 
-    // The relay delivers the seed to the hub (every daemon ingests the relay, index.ts); next tick
-    // the entry lands under the hub's own seed id.
+    // Once the hub holds the seed — by its own relay ingest, or by folding a `seed` event from the
+    // hub (ADR 399) — the very same entry applies, under the hub's own daemon-private seed id.
     const seedH = createSeedFromRelay(hub.db, ht.id, RELAY);
-    await roundTrip();
+    const applied = foldBatch(hub.db, ht.id, [threadEvent(999_002, 1)]);
+    expect(applied.stop ?? null).toBeNull();
     expect(getSeed(hub.db, ht.id, seedH.id)!.thread).toMatchObject([{ body: 'why?', by: 'ada' }]);
   });
 });
@@ -312,7 +346,6 @@ describe('record.incident_report — the pool is the hub’s (ADR 371 §2)', () 
       body: 'blocked on the gate',
       meta: blocked(over),
     });
-
   it('two seats on two machines open exactly ONE incident lane, on the hub; the pool mirrors back so reporters resolve on the joiner', async () => {
     const ht = hubTeam();
     const jt = joinerTeam();

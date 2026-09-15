@@ -14,6 +14,7 @@ import {
   revokeResidency,
 } from '../store/residency.js';
 import type { MessageRow } from '../store/rows.js';
+import { applySeedCapture } from '../store/seeds.js';
 import { recordToolCalls } from '../store/toolCalls.js';
 
 /**
@@ -82,7 +83,12 @@ export type FoldStop =
   // poll away; blocking is the `lane_unborn` discipline — an entry with no seed to hang on would be
   // a row nothing can find.
   | { kind: 'unknown_record_event'; action: string; hub_seq: number }
-  | { kind: 'seed_unborn'; relay_id: string; hub_seq: number };
+  | { kind: 'seed_unborn'; relay_id: string; hub_seq: number }
+  // Seed events (ADR 399): the seventh kind. A seed projects into a TABLE like a record, so an
+  // unprojectable verb stops for the same reason. There is no `unborn` here — a capture depends on
+  // nothing but its submitter, and an unresolved submitter is `unresolved_seat` as for every
+  // seat-fact kind.
+  | { kind: 'unknown_seed_event'; action: string; hub_seq: number };
 
 /** The `lane.*` verbs the fold can project. Anything else stops as `unknown_lane_event`. */
 const LANE_VERBS = new Set([
@@ -261,6 +267,52 @@ function projectPolicyEvent(
     JSON.stringify(stored),
     now,
     teamId,
+  );
+  return 'applied';
+}
+
+/** The `seed.*` verbs the fold can project. Anything else stops as `unknown_seed_event`. */
+const SEED_VERBS = new Set(['seed.captured']);
+
+/**
+ * Project a replicated seed capture (ADR 399) into `seeds`. Nothing here decides: the insert is
+ * idempotent on `(team_id, relay_id)`, so a re-delivered batch is a no-op and a node that already
+ * relay-ingested the same capture keeps its own row.
+ *
+ * The seed's LIFECYCLE is not projected — no state, no explorer (ADR 371 §3, unchanged). What
+ * crosses is the capture: the relay id, the body, who submitted it, and the lane a repo capture was
+ * born promoted against. An explorer claim is "exactly one holder" and stays a residence-1 question
+ * for the federation increment.
+ */
+function projectSeedEvent(
+  db: Database,
+  teamId: string,
+  event: SyncPullLaneEvent['event'],
+  submitterId: string,
+  now: number,
+): 'applied' | 'unknown' {
+  if (event.action !== 'seed.captured') return 'unknown';
+  const d = event.detail ?? {};
+  const relayId = d['relay_id'];
+  const body = d['body'];
+  const source = d['source'];
+  if (typeof relayId !== 'string' || typeof body !== 'string' || typeof source !== 'string') {
+    return 'unknown';
+  }
+  applySeedCapture(
+    db,
+    teamId,
+    {
+      relay_id: relayId,
+      source,
+      body,
+      captured_at: typeof d['captured_at'] === 'number' ? d['captured_at'] : event.ts,
+      slack_user_id: typeof d['slack_user_id'] === 'string' ? d['slack_user_id'] : null,
+      linked_lane_id: typeof d['linked_lane_id'] === 'string' ? d['linked_lane_id'] : null,
+      promotion_kind: typeof d['promotion_kind'] === 'string' ? d['promotion_kind'] : null,
+    },
+    submitterId,
+    now,
   );
   return 'applied';
 }
@@ -1013,6 +1065,47 @@ export function foldBatch(
 
       // The second kind: a lane transition. Held in `audit` with its stamp verbatim, then projected
       // into `lanes` in this same transaction — the fold is the one foreign writer of both.
+      if (event.kind === 'seed') {
+        const e = event.event;
+        if (!SEED_VERBS.has(e.action)) {
+          stop = { kind: 'unknown_seed_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        // The submitter names a seat, resolved HERE — `members.id` is daemon-private, so the event
+        // carries the name, as every seat-fact kind does. Unresolved is git lag, not a hole.
+        const by = e.detail?.['by'];
+        const name = typeof by === 'string' ? by : (e.actor ?? '');
+        const member = getMemberByName(db, teamId, name);
+        if (!member) {
+          stop = { kind: 'unresolved_seat', seat: name, hub_seq: event.hub_seq };
+          return finish();
+        }
+        const outcome = projectSeedEvent(db, teamId, e, member.id, now);
+        if (outcome === 'unknown') {
+          stop = { kind: 'unknown_seed_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        db.prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          e.id,
+          teamId,
+          e.ts,
+          e.actor,
+          e.action,
+          e.target,
+          e.result,
+          e.detail ? JSON.stringify(e.detail) : null,
+          now,
+          event.origin_node,
+          event.origin_seq,
+        );
+        applied += 1;
+        cursor = event.hub_seq;
+        continue;
+      }
+
       if (event.kind === 'lane') {
         const e = event.event;
         if (!LANE_VERBS.has(e.action)) {
