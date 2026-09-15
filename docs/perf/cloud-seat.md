@@ -1128,3 +1128,59 @@ refusal or inventing a value. That is the right shape for a measurement page.
   not either (finding 16).~~ **Finding 16 closed 2026-09-15 by ADR 398** — the hub restates
   unstamped stored policy once joiners exist; a later silent `setPolicy` still does not ship
   (census gap 1, unchanged).
+
+## 2026-09-15 — the cost re-read, and the thing parking actually costs you
+
+Re-read at 20:10Z on nick's ask, 11.7 days into the machine's life (created 2026-09-04 04:33:31Z,
+still `started`, machine `850e40a4499168`, `shared-cpu-2x` / 2048 MB / 3 GB volume / `sjc`).
+
+**The 09-14 infrastructure arithmetic holds exactly.** Recomputed independently from
+`fly machines list --json` and Fly's published rates: `$4.04` preset + `$7.50` for the 1.5 GB above
+the 512 MB preset + `$0.45` volume = **`$11.99`/month ≈ `$0.3997`/day**, the same figure. Infra to
+date is now **~`$4.66`**. Nothing to correct in that table.
+
+**Provenance, unchanged and worth restating:** still list price, still not an invoice. Fly's
+GraphQL exposes `billingStatus`, `billable`, `creditBalance` and `paidPlan` on `Organization` and
+**no invoice or usage fields at all** (introspected 2026-09-15); there is no billing verb in
+`fly help`. The dashboard remains the only authoritative source, so the 09-14 falsifier — read the
+invoice, a >20% difference means these rates are wrong for this account — is still the way to check
+this and is still unrun.
+
+**The RAM is the bill.** `$7.50` of `$11.99` is the 1.5 GB above the preset — **63%**, and 1.9× the
+CPU it supports. Any argument about this machine's cost that starts with the CPU is looking at the
+small half. Dropping 2 GB → 1 GB would take always-on to `$7.29`/month, independent of any parking
+decision. Whether the seat's Node daemon + a woken `claude -p` fit in 1 GB is unmeasured.
+
+### The correction: parking does not buy a cold boot, it removes wakeability
+
+The 09-14 entry above reads "for a seat woken a handful of times a week, parking and accepting a
+cold boot is the cheaper shape". ~~That framing is wrong, and it is wrong in the direction that
+matters.~~ **Invalidate-dated 2026-09-15.** The cost numbers beside it are right; the operational
+conclusion is not.
+
+**A parked cloud seat cannot be woken at all.** Wakes are *pull*-based: the actuator runs **on the
+machine** and polls the hub's `/residency/wake-leases` with `binding.host_key` (ADR 395) every
+~30 s. A stopped machine runs no actuator, so it polls nothing, so no doorbell reaches it — the hub
+has no way to reach *in*. Verified 2026-09-15: nothing in `packages/cli/src`, `packages/server/src`
+or `deploy/cloud-seat/` calls `fly machine start` or the Fly Machines API; the single occurrence in
+the repo is the README's §Park instruction, typed by a human.
+
+So the trade is not `$11.46/month for lower wake latency`. It is:
+
+| | /month | what a directed act does |
+| --- | --- | --- |
+| always-up | `$11.99` | actuator polls, seat wakes, ~23.6 s cold |
+| parked | `$0.53` | **nothing — the act sits until a human runs `fly machine start`** |
+
+That makes `$11.46/month` the price of the seat being *reachable without a human in the loop*,
+which is most of what a cloud seat is for. A parked seat is not a slower seat; it is an offline one
+that also stops replicating.
+
+**What would make parking a real option** is a push path: the hub, on minting a wake lease for a
+seat whose host is a stopped Fly machine, calls the Machines API to start it, then lets the
+actuator's first poll find the lease. That is an unbuilt increment and has no lane. Named here so
+the reachability-vs-cost question is not re-litigated from the cost table alone.
+
+**Falsifier for this entry's central claim:** `fly machine stop` the delta machine, send `delta` a
+`steer` from the hub, and wait past two actuator ticks (~60 s). If the seat wakes, this is wrong and
+a push path exists that this reading missed. Unrun — it would take the seat offline to prove.
