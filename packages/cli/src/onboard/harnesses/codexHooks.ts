@@ -1,5 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
+import { FEATURE_EPOCH } from '@musterd/protocol';
 import { z } from 'zod';
 
 export const CODEX_HOOK_MARKER = 'musterd-codex-hook:v2';
@@ -19,20 +20,13 @@ const REQUIRED = [
   ['UserPromptSubmit', 'orient-nudge'],
 ] as const;
 
-function hookCommandLine(subcommand: (typeof REQUIRED)[number][1]): string {
-  if (subcommand === 'orient-nudge') {
-    return `musterd session orient-nudge # ${CODEX_HOOK_MARKER}`;
-  }
-  return `musterd codex-hook ${subcommand} --stdin # ${CODEX_HOOK_MARKER}`;
-}
+type RequiredSubcommand = (typeof REQUIRED)[number][1];
 
-function ownedSubcommand(
-  command: string | undefined,
-  subcommand: (typeof REQUIRED)[number][1],
-): boolean {
-  if (!owned(command) || typeof command !== 'string') return false;
-  if (subcommand === 'orient-nudge') return command.includes('session orient-nudge');
-  return command.includes(`codex-hook ${subcommand} --stdin`);
+function hookCommandLine(subcommand: RequiredSubcommand): string {
+  if (subcommand === 'orient-nudge') {
+    return `musterd session orient-nudge # ${CODEX_HOOK_MARKER} e${FEATURE_EPOCH}`;
+  }
+  return `musterd codex-hook ${subcommand} --stdin # ${CODEX_HOOK_MARKER} e${FEATURE_EPOCH}`;
 }
 
 /** Where this harness's project-local hooks live — exported so callers never re-derive the path. */
@@ -94,19 +88,36 @@ function owned(command: string | undefined): boolean {
   return typeof command === 'string' && command.includes(CODEX_HOOK_MARKER);
 }
 
-function requiredGroup(subcommand: (typeof REQUIRED)[number][1]): z.infer<typeof GroupSchema> {
+function requiredGroup(subcommand: RequiredSubcommand): z.infer<typeof GroupSchema> {
   return {
     hooks: [{ type: 'command', command: hookCommandLine(subcommand) }],
   };
 }
 
+function markerHandlers(file: HooksFile, event?: string): z.infer<typeof HandlerSchema>[] {
+  const groups = event ? (file.hooks?.[event] ?? []) : Object.values(file.hooks ?? {}).flat();
+  return groups.flatMap((group) => group.hooks.filter((handler) => owned(handler.command)));
+}
+
+/** A newer marker belongs to a newer checkout; this build must never overwrite it. */
+export function hasNewerCodexHookEpoch(commands: Iterable<string | undefined>): boolean {
+  return Array.from(commands)
+    .map((command) => /\se(\d+)(?:\s|$)/.exec(command ?? '')?.[1])
+    .flatMap((epoch) => (epoch === undefined ? [] : [Number(epoch)]))
+    .some((epoch) => epoch > FEATURE_EPOCH);
+}
+
 function healthy(file: HooksFile): boolean {
-  return REQUIRED.every(([event, command]) =>
-    (file.hooks?.[event] ?? []).some((group) =>
-      group.hooks.some(
-        (handler) => ownedSubcommand(handler.command, command) && handler.type === 'command',
-      ),
-    ),
+  return (
+    markerHandlers(file).length === REQUIRED.length &&
+    REQUIRED.every(([event, subcommand]) => {
+      const handlers = markerHandlers(file, event);
+      return (
+        handlers.length === 1 &&
+        handlers[0]?.type === 'command' &&
+        handlers[0].command === hookCommandLine(subcommand)
+      );
+    })
   );
 }
 
@@ -114,17 +125,25 @@ function healthy(file: HooksFile): boolean {
 function installCodexHooksAt(path: string): string[] {
   const exists = existsSync(path);
   const file = exists ? read(path) : {};
-  if (!file || healthy(file)) return [];
+  if (
+    !file ||
+    healthy(file) ||
+    hasNewerCodexHookEpoch(markerHandlers(file).map((handler) => handler.command))
+  ) {
+    return [];
+  }
 
-  const hooks = { ...(file.hooks ?? {}) };
+  const hooks: Record<string, z.infer<typeof GroupSchema>[]> = {};
+  for (const [event, groups] of Object.entries(file.hooks ?? {})) {
+    const retained = groups
+      .map((group) => ({
+        ...group,
+        hooks: group.hooks.filter((handler) => !owned(handler.command)),
+      }))
+      .filter((group) => group.hooks.length > 0);
+    if (retained.length > 0) hooks[event] = retained;
+  }
   for (const [event, command] of REQUIRED) {
-    if (
-      (hooks[event] ?? []).some((group) =>
-        group.hooks.some((handler) => ownedSubcommand(handler.command, command)),
-      )
-    ) {
-      continue;
-    }
     hooks[event] = [...(hooks[event] ?? []), requiredGroup(command)];
   }
   mkdirSync(dirname(path), { recursive: true });
@@ -140,10 +159,21 @@ function installCodexHooksAt(path: string): string[] {
  */
 export function installCodexHooks(root: string): string[] {
   const commonRoot = codexCommonDirRoot(root);
-  return [
-    ...installCodexHooksAt(pathFor(root)),
-    ...(commonRoot !== undefined ? installCodexHooksAt(pathFor(commonRoot)) : []),
-  ];
+  const paths = [pathFor(root), ...(commonRoot !== undefined ? [pathFor(commonRoot)] : [])];
+  // A worktree and its common-dir copy are one configured hook set. Preflight every readable copy
+  // before writing either one: an e21 common copy must not let an e20 checkout rewrite its e19
+  // workspace sibling and leave the pair split across generations.
+  if (
+    paths.some((path) => {
+      const file = read(path);
+      return (
+        file !== undefined && hasNewerCodexHookEpoch(markerHandlers(file).map((h) => h.command))
+      );
+    })
+  ) {
+    return [];
+  }
+  return paths.flatMap((path) => installCodexHooksAt(path));
 }
 
 /** Reverse only marker-owned additions at one path; never remove user-defined handlers or groups. */
@@ -206,21 +236,39 @@ export function inspectCodexHookDrift(root: string): string[] {
     if (!commonFile) {
       return ['the common-dir .codex/hooks.json is malformed; musterd left it untouched'];
     }
-    if (!healthy(commonFile)) {
+    if (!healthy(commonFile))
       return [
-        'the required musterd Codex hooks are missing or differ from the supported configuration ' +
-          'in the git common dir, which is what codex-cli actually reads',
+        driftMessage(commonFile, 'in the git common dir, which is what codex-cli actually reads'),
       ];
-    }
   }
   const path = pathFor(root);
   if (!existsSync(path))
     return ['the project-local Codex hooks are missing from .codex/hooks.json'];
   const file = read(path);
   if (!file) return ['.codex/hooks.json is malformed; musterd left it untouched'];
-  return healthy(file)
-    ? []
-    : ['the required musterd Codex hooks are missing or differ from the supported configuration'];
+  return healthy(file) ? [] : [driftMessage(file)];
+}
+
+function installedEpoch(file: HooksFile): number | undefined {
+  const epochs = markerHandlers(file)
+    .map((handler) => /\se(\d+)(?:\s|$)/.exec(handler.command ?? '')?.[1])
+    .flatMap((epoch) => (epoch === undefined ? [] : [Number(epoch)]));
+  return epochs.length > 0 ? Math.max(...epochs) : undefined;
+}
+
+function driftMessage(file: HooksFile, location = ''): string {
+  const suffix = location ? ` ${location}` : '';
+  const epoch = installedEpoch(file);
+  if (epoch !== undefined && epoch > FEATURE_EPOCH) {
+    return (
+      `the installed musterd Codex hook epoch e${epoch} is newer than this checkout's e${FEATURE_EPOCH}${suffix}; ` +
+      'this checkout is behind — update it and do not refresh hooks'
+    );
+  }
+  return (
+    `the required musterd Codex hooks are missing or differ from the supported configuration e${FEATURE_EPOCH}${suffix}; ` +
+    'run musterd init --refresh-hooks to repair marker-owned hooks'
+  );
 }
 
 /** The desired musterd Codex hook commands, per event — the fragment payload (ADR 282, Task 5). */

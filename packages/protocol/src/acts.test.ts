@@ -20,8 +20,8 @@ describe('SURFACES (ADR 352)', () => {
   });
 });
 
-describe('FEATURE_EPOCH (team_availability, surface survey #1245 item 6)', () => {
-  it('is 19 — an MCP seat can set its own availability; an older seat keeps shelling out', () => {
-    expect(FEATURE_EPOCH).toBe(19);
+describe('FEATURE_EPOCH (Codex doorbell model seam, ADR 397)', () => {
+  it('is 20 — an old checkout cannot rewrite the supported Codex hook command set', () => {
+    expect(FEATURE_EPOCH).toBe(20);
   });
 });

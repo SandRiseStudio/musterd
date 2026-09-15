@@ -397,7 +397,7 @@ async function observeCommand(parsed: Parsed): Promise<number> {
     if (json) process.stdout.write(json + '\n');
   }
   if (parsed.flags['interrupt'] === true) {
-    const line = await checkCursorInterrupt(captureDir);
+    const line = await checkHookInterrupt(captureDir);
     const json = formatCursorInterrupt(line);
     if (json) process.stdout.write(json + '\n');
   }
@@ -416,9 +416,9 @@ export function formatCursorInterrupt(line: string | null): string | null {
   return line ? JSON.stringify({ additional_context: line }) : null;
 }
 
-/** Cursor postToolUse interrupt probe (ADR 369): query the daemon for waiting interrupt-class acts.
+/** Hook postToolUse interrupt probe (ADR 369): query the daemon for waiting interrupt-class acts.
  *  Returns the daemon-composed line or null. Best-effort, fail-open, silent on any error. */
-export async function checkCursorInterrupt(dir: string | null): Promise<string | null> {
+export async function checkHookInterrupt(dir: string | null): Promise<string | null> {
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return null;
   const binding = dir ? requireUsableBinding(dir) : null;
   const seat = binding ? bindingSeat(binding) : undefined;

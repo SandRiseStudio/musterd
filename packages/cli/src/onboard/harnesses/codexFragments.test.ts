@@ -1,11 +1,21 @@
-import { describe, expect, it } from 'vitest';
-import { memoryFs, type HarnessContext, type MemoryFs } from '../reconcile/context.js';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FEATURE_EPOCH } from '@musterd/protocol';
+import { afterEach, describe, expect, it } from 'vitest';
+import { memoryFs, nodeFs, type HarnessContext, type MemoryFs } from '../reconcile/context.js';
 import { codexAdapter } from './codex.js';
+import { CODEX_HOOK_MARKER, codexHookCommands } from './codexHooks.js';
 import type { CodexServer } from './codexToml.js';
 
 const ROOT = '/w/a';
 const TOML = '/w/a/.codex/config.toml';
 const HOOKS = '/w/a/.codex/hooks.json';
+const realRoots: string[] = [];
+
+afterEach(() => {
+  for (const root of realRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 function ctxOf(fs: MemoryFs): HarnessContext {
   return {
@@ -178,6 +188,88 @@ describe('codexAdapter — managed fragments', () => {
     ]);
     expect(parsed.hooks.PostToolUse).toBeUndefined();
     expect(await codexAdapter.observe(ctx, hooks)).toEqual({ state: 'absent' });
+  });
+
+  it('does not downgrade a newer marker-owned hook set', async () => {
+    const fs = memoryFs();
+    const ctx = ctxOf(fs);
+    const hooks = (await intentsOf(ctx)).find((i) => i.fragmentKey === 'hooks')!;
+    const newer = JSON.stringify({
+      hooks: Object.fromEntries(
+        codexHookCommands().map(({ event, command }) => [
+          event,
+          [
+            {
+              hooks: [
+                {
+                  type: 'command',
+                  command: command.replace(
+                    new RegExp(`${CODEX_HOOK_MARKER}(?: e\\d+)?$`),
+                    `${CODEX_HOOK_MARKER} e${FEATURE_EPOCH + 1}`,
+                  ),
+                },
+              ],
+            },
+          ],
+        ]),
+      ),
+    });
+    fs.writeFile(HOOKS, newer, 0o600);
+
+    await codexAdapter.apply(ctx, { kind: 'write', intent: hooks });
+
+    expect(fs.readFile(HOOKS)).toBe(newer);
+  });
+
+  it('preflights the common-dir epoch before declarative apply writes either worktree copy', async () => {
+    const main = mkdtempSync(join(tmpdir(), 'musterd-codex-fragment-main-'));
+    const worktree = mkdtempSync(join(tmpdir(), 'musterd-codex-fragment-worktree-'));
+    realRoots.push(main, worktree);
+    writeFileSync(join(worktree, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'seat')}\n`);
+    mkdirSync(join(worktree, '.codex'));
+    mkdirSync(join(main, '.codex'));
+    const hooksFor = (epoch: number) =>
+      JSON.stringify({
+        hooks: Object.fromEntries(
+          codexHookCommands().map(({ event, command }) => [
+            event,
+            [
+              {
+                hooks: [
+                  {
+                    type: 'command',
+                    command: command.replace(
+                      new RegExp(`${CODEX_HOOK_MARKER}(?: e\\d+)?$`),
+                      `${CODEX_HOOK_MARKER} e${epoch}`,
+                    ),
+                  },
+                ],
+              },
+            ],
+          ]),
+        ),
+      });
+    const older = hooksFor(FEATURE_EPOCH - 1);
+    const newer = hooksFor(FEATURE_EPOCH + 1);
+    const worktreeHooks = join(worktree, '.codex', 'hooks.json');
+    const commonHooks = join(main, '.codex', 'hooks.json');
+    writeFileSync(worktreeHooks, older);
+    writeFileSync(commonHooks, newer);
+    const ctx: HarnessContext = {
+      worktreeRoot: worktree,
+      machineConfigRoot: '/machine/.musterd',
+      env: { HOME: '/home/u' },
+      fs: nodeFs,
+      proc: { pid: 1, startedAt: () => 's1', liveness: () => false },
+      clock: { now: () => 1 },
+      team: 'dawn',
+    };
+    const hooks = (await intentsOf(ctx)).find((intent) => intent.fragmentKey === 'hooks')!;
+
+    await codexAdapter.apply(ctx, { kind: 'write', intent: hooks });
+
+    expect(readFileSync(worktreeHooks, 'utf8')).toBe(older);
+    expect(readFileSync(commonHooks, 'utf8')).toBe(newer);
   });
 
   it('emits no plugin fragments for a generalist / empty toolkit', async () => {
