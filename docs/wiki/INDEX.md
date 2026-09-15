@@ -71,6 +71,7 @@
 - [Sync push](sync-push.md) — What actually happens when an enrolled machine pushes its events to a hub, measured on two real daemons.
 - [Probing with a temp daemon](temp-daemon-probe.md) — Run probes against a throwaway daemon on its own DB and port — never against the shared daemon on :4849, and never via `musterd team create` from an unguarded shell.
 - [The three claim paths](the-three-claim-paths.md) — `musterd claim`, `claim --detach`, and every ordinary CLI command each occupy a seat by a different route — so a fix to one is not a fix to the others, and twice in one day it was mistaken for one.
+- [A tool reply has a size contract](tool-reply-size.md) — A tool that bounds its reply by ROWS does not bound it at all: the harness refuses by tokens, and a reply that exceeds the ceiling is not truncated, it is replaced — the model gets a file path where the answer should have been.
 - [An unattested worker blinds the picker](unattested-worker-blinds-the-picker.md) — A `no_candidate` close whose worker attested nothing means "the asker could not be graded", not "the team had nobody" — and until 2026-09-01 the ledger filed both the same way.
 - [Per-package vitest configs](vitest-package-configs.md) — A package-local vitest run inherits NOTHING from the root config — each standalone package must re-declare whatever the root was giving it.
 - [Wake leases](wake-leases.md) — A wake lease is discharged by the seat REPORTING the wake — not by answering it — so `lease_expired` means the wake never landed, never "nobody answered".

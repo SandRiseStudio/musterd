@@ -494,6 +494,29 @@ export class MusterdClient {
   }
 
   /**
+   * Read named acts back in full, whatever their read state (lane 01M2JZYTAH).
+   *
+   * The retrieval half of the reply budget: `team_inbox_check` clips a long body so one act cannot
+   * spend a whole reply, and a clip that cannot be un-clipped is a loss, not a deferral. This moves
+   * NO cursor — the caller names rows it has already been shown.
+   *
+   * A daemon older than the `ids` parameter ignores it and answers with an ordinary inbox page, so
+   * the caller must not assume the reply is the named set: `readMessages` filters by id itself and
+   * reports what it could not find, which on an old daemon is everything asked for.
+   */
+  async readMessages(ids: readonly string[]): Promise<{ found: Envelope[]; missing: string[] }> {
+    if (ids.length === 0) return { found: [], missing: [] };
+    const q = ids.map((id) => encodeURIComponent(id)).join(',');
+    const reply = (await this.request('GET', `/teams/${this.config.team}/inbox?ids=${q}`)) as {
+      messages?: Envelope[];
+    };
+    const wanted = new Set(ids);
+    const found = (reply.messages ?? []).filter((m: Envelope) => wanted.has(m.id));
+    const foundIds = new Set(found.map((m: Envelope) => m.id));
+    return { found, missing: ids.filter((id) => !foundIds.has(id)) };
+  }
+
+  /**
    * The whole-team timeline (ADR 061), recipient-scoped by the daemon like every other read.
    *
    * The inbox alone cannot answer "which room is this turn in": a turn carries no huddle meta of its
