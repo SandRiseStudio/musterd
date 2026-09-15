@@ -11,7 +11,7 @@ import { resolveClaimWorkspace } from './helpers.js';
 import {
   attestSlotIfUnattested,
   captureSession,
-  checkCursorInterrupt,
+  checkHookInterrupt,
   LABEL_SWEEP_STALE_MS,
   labelSweepDue,
   lookupCcdMeta,
@@ -705,23 +705,23 @@ describe('musterd session (capture)', () => {
       expect(readBinding(wsA).model_observed).toBeUndefined();
     });
 
-    it('checkCursorInterrupt returns the line when interrupt is raised (ADR 369)', async () => {
+    it('checkHookInterrupt returns the line when interrupt is raised (ADR 369)', async () => {
       const spy = vi
         .spyOn(HttpClient.prototype, 'interruptCheck')
         .mockResolvedValue({ raised: true, line: '⚑ 1 urgent request' });
-      const line = await checkCursorInterrupt(wsA);
+      const line = await checkHookInterrupt(wsA);
       expect(line).toBe('⚑ 1 urgent request');
       spy.mockRestore();
     });
 
-    it('checkCursorInterrupt returns null when no interrupt is raised or nudges are muted', async () => {
+    it('checkHookInterrupt returns null when no interrupt is raised or nudges are muted', async () => {
       const spy = vi
         .spyOn(HttpClient.prototype, 'interruptCheck')
         .mockResolvedValue({ raised: false });
-      expect(await checkCursorInterrupt(wsA)).toBeNull();
+      expect(await checkHookInterrupt(wsA)).toBeNull();
 
       process.env['MUSTERD_NO_NUDGE'] = '1';
-      expect(await checkCursorInterrupt(wsA)).toBeNull();
+      expect(await checkHookInterrupt(wsA)).toBeNull();
       delete process.env['MUSTERD_NO_NUDGE'];
       spy.mockRestore();
     });

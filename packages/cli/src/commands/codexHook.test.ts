@@ -21,7 +21,7 @@ describe('musterd codex-hook', () => {
 
     await expect(
       handleCodexHook(parseArgs(['start', '--stdin']), event(), { start }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
 
     expect(start).toHaveBeenCalledWith({
       event: 'start',
@@ -55,7 +55,7 @@ describe('musterd codex-hook', () => {
       handleCodexHook(parseArgs(['start', '--stdin']), event({ hook_event_name: 'SessionEnd' }), {
         start,
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
 
     expect(start).not.toHaveBeenCalled();
   });
@@ -105,5 +105,55 @@ describe('Codex hook local evidence', () => {
     expect(binding.session).toMatchObject({ harness: 'codex', id: 'first' });
     expect(binding.session).not.toHaveProperty('ended_at');
     expect(binding.model_observed).toMatchObject({ harness: 'codex', model: 'gpt-5.6' });
+  });
+
+  it('observes the model before returning a raised PostToolUse context response', async () => {
+    const interrupt = vi.fn().mockResolvedValue('Ada: please review');
+
+    await expect(
+      handleCodexHook(
+        parseArgs(['post-tool-use', '--stdin']),
+        event({
+          cwd: workspace,
+          session_id: 'first',
+          hook_event_name: 'PostToolUse',
+          model: 'gpt-5.6',
+        }),
+        { interrupt },
+      ),
+    ).resolves.toBe(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext: 'Ada: please review',
+        },
+      }),
+    );
+
+    expect(interrupt).toHaveBeenCalledWith(workspace);
+    const binding = JSON.parse(
+      readFileSync(join(workspace, '.musterd', 'binding.json'), 'utf8'),
+    ) as Binding;
+    expect(binding.model_observed).toMatchObject({ harness: 'codex', model: 'gpt-5.6' });
+  });
+
+  it('keeps PostToolUse quiet when the interrupt reader is quiet or fails', async () => {
+    const payload = event({
+      cwd: workspace,
+      session_id: 'first',
+      hook_event_name: 'PostToolUse',
+      model: 'gpt-5.6',
+    });
+
+    await expect(
+      handleCodexHook(parseArgs(['post-tool-use', '--stdin']), payload, {
+        interrupt: () => null,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      handleCodexHook(parseArgs(['post-tool-use', '--stdin']), payload, {
+        interrupt: () => Promise.reject(new Error('offline')),
+      }),
+    ).resolves.toBeNull();
   });
 });
