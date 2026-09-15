@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { homePoses } from './actors';
 import { memberColor } from '../format';
 import { depth, fitFloor, project } from './iso';
-import { BENCH, CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
+import { BENCH, CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, KEYBOARD_ALONG, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import {
@@ -19,6 +19,7 @@ import {
   deskNearDepth,
   deskPropSort,
   DOCK_CRADLE_ALONG,
+  PROP_SPEC,
   benchDockAt,
   benchMonitorAt,
   benchPropSort,
@@ -1122,5 +1123,82 @@ describe('the bench row: a dock has to be standing on the counter it is docked t
     expect(src).toMatch(/sum:\s*deskPropSort\(/);
     // The inlined spelling must be gone: one home, or the test above proves nothing.
     expect(src).not.toMatch(/sum:\s*f\[0\] \* along/);
+  });
+});
+
+/**
+ * Every desk prop stands ON the desk.
+ *
+ * This is the invariant the bench dock broke (it stood 17 units past the counter's back edge), and it
+ * held on pod desks only by luck of tuning — several stations sit flush at the edge, so a prop that
+ * grows, or a station that moves, falls off with no test to say so. The dock did exactly that once
+ * already: widening the laptop 20 → 24 in #1394 pushed `|dockAcross| + DOCK_HALF_ACROSS` to 52 on a
+ * 50 half-width slab, and nick caught it on the broadcast rather than CI.
+ *
+ * It reads the footprint off `PROP_SPEC` — the same record the painter places and sizes from — so
+ * this is a property of what is drawn, not of numbers copied into a test.
+ */
+describe('desk props stand on the desk', () => {
+  const FACINGS = ['N', 'S', 'E', 'W'] as const;
+
+  it('every prop’s base is inside the slab, at every facing', () => {
+    for (const dir of FACINGS) {
+      // The slab's half-extents in the desk's own frame: DESK_W is always across the shoulders,
+      // whichever way the desk faces — the box swaps wx/dy, the desk-relative frame does not.
+      const halfAlong = DESK_D / 2;
+      const halfAcross = DESK_W / 2;
+      for (const [kind, sp] of Object.entries(PROP_SPEC)) {
+        expect(
+          Math.abs(sp.along) + sp.d / 2,
+          `${kind} runs off the ${dir} desk along the facing`,
+        ).toBeLessThanOrEqual(halfAlong);
+        expect(
+          Math.abs(sp.across) + sp.w / 2,
+          `${kind} runs off the ${dir} desk across the shoulders`,
+        ).toBeLessThanOrEqual(halfAcross);
+      }
+    }
+  });
+
+  it('no two props are stacked on the same spot', () => {
+    const specs = Object.entries(PROP_SPEC);
+    for (let i = 0; i < specs.length; i++) {
+      for (let j = i + 1; j < specs.length; j++) {
+        const [an, a] = specs[i]!;
+        const [bn, b] = specs[j]!;
+        const apart =
+          Math.abs(a.along - b.along) >= (a.d + b.d) / 2 || Math.abs(a.across - b.across) >= (a.w + b.w) / 2;
+        expect(apart, `${an} and ${bn} occupy the same patch of desk`).toBe(true);
+      }
+    }
+  });
+
+  it('no prop lands on the keyboard, the mouse, the monitor or the dock', () => {
+    /*
+     * The work gear is not optional and not hashed, so a personal prop overlapping it is a prop
+     * sitting on the keys. Two things this has to get right, both of which it got wrong first:
+     *
+     * - the MONITOR's footprint is its base plate (22 across, 11 deep), NOT the panel. The panel is
+     *   raised on a neck and a dual's outer edge reaches 35 — comparing that against a pot standing
+     *   on the desk flags a collision between things at different heights. First cut did exactly
+     *   that and "found" a plant/monitor overlap that is a panel passing over a pot.
+     * - the DOCK changes sides with the facing (`dockAcross`), so a fixed +38 tests half the floor.
+     */
+    for (const dir of FACINGS) {
+      const gear = [
+        { name: 'keyboard', along: KEYBOARD_ALONG, across: 0, d: 13, w: 40 },
+        { name: 'mouse', along: KEYBOARD_ALONG + 2, across: 27, d: 11, w: 7 },
+        { name: 'monitor base', along: MONITOR_ALONG, across: 0, d: 11, w: 22 },
+        { name: 'dock', along: 26, across: dockAcross(dir), d: DOCK_CRADLE_ALONG, w: DOCK_HALF_ACROSS * 2 },
+      ];
+      for (const [kind, sp] of Object.entries(PROP_SPEC)) {
+        for (const g of gear) {
+          const apart =
+            Math.abs(sp.along - g.along) >= (sp.d + g.d) / 2 ||
+            Math.abs(sp.across - g.across) >= (sp.w + g.w) / 2;
+          expect(apart, `${kind} overlaps the ${g.name} on a ${dir} desk`).toBe(true);
+        }
+      }
+    }
   });
 });

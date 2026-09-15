@@ -3488,7 +3488,55 @@ const KB_SALT = 32;
 /** Distinct "photos" for standing frames — each desk with a frame gets one of these by hash. */
 const PHOTOS = ['#6fa3c9', '#e0a05a', '#8db36a', '#c97f9c', '#9a8fce', '#d9b24a', '#e08585', '#5ab0a4'];
 /** Mug colours, so coffee cups aren't all identical. */
+/** Notebook covers — the same spread of muted colours the rest of the desk gear draws from. */
+const NOTEBOOK_COVERS = ['#8a5a4a', '#46607d', '#5f7a55', '#7a5a78', '#9a7b3f'];
 const MUGS = ['#d6d0c6', '#c95c4a', '#3d6b8f', '#e0a72b', '#5f8a5a'];
+
+/** A closed notebook: a pad with a slightly proud cover and a colour band down its spine. */
+function deskNotebook(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, sn: boolean, up: number, cover: string): void {
+  const { w, d } = PROP_SPEC.notebook;
+  box(ctx, fit, ix, iy, sn ? w : d, sn ? d : w, 2, '#e8e2d4', up); // the pages
+  box(ctx, fit, ix, iy, sn ? w - 1 : d - 1, sn ? d - 1 : w - 1, 3, cover, up + 1); // the cover, a touch proud
+  // The spine band: a thin stripe down the long edge, so the pad reads as a book and not as paper.
+  box(ctx, fit, ix - (sn ? w / 2 - 1.5 : 0), iy - (sn ? 0 : w / 2 - 1.5), sn ? 3 : d - 1, sn ? d - 1 : 3, 3.4, dim(cover, 0.72), up + 1);
+}
+
+/** A pen cup: a short tumbler with two or three stems leaning out of it. */
+function deskPens(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number, id: number): void {
+  const { w } = PROP_SPEC.pens;
+  box(ctx, fit, ix, iy, w, w, 9, '#6b7480', up); // the cup
+  const g = project(ix, iy, fit);
+  const top = g.y - (up + 9) * fit.scale;
+  // Stems: deterministic per desk, so a pen cup never flickers between frames.
+  const inks = ['#c9584a', '#3d6b8f', '#e0a72b', '#5f8a5a'];
+  const n = 2 + Math.floor(deskRnd(id, 44) * 2);
+  for (let i = 0; i < n; i++) {
+    const lean = (i - (n - 1) / 2) * 2.2 * fit.scale;
+    const ink = inks[Math.floor(deskRnd(id, 45 + i) * inks.length)]!;
+    ctx.strokeStyle = ink;
+    ctx.lineWidth = Math.max(1, 1.6 * fit.scale);
+    ctx.beginPath();
+    ctx.moveTo(g.x + lean * 0.3, top + 2 * fit.scale);
+    ctx.lineTo(g.x + lean, top - 7 * fit.scale);
+    ctx.stroke();
+  }
+}
+
+/** Two or three books, stacked and slightly out of true — a low mass, readable by silhouette. */
+function deskBooks(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, sn: boolean, up: number, id: number): void {
+  const { w, d } = PROP_SPEC.books;
+  const spines = ['#7b5ea7', '#c0705a', '#4e7f6e', '#c9a227', '#5a6d9a'];
+  const n = 2 + Math.floor(deskRnd(id, 46) * 2);
+  let h = up;
+  for (let i = 0; i < n; i++) {
+    // Each volume a little narrower and nudged off the one below, so the stack is not a solid block.
+    const shrink = i * 1.6;
+    const skew = (deskRnd(id, 47 + i) - 0.5) * 3;
+    const color = spines[Math.floor(deskRnd(id, 50 + i) * spines.length)]!;
+    box(ctx, fit, ix + (sn ? skew : 0), iy + (sn ? 0 : skew), sn ? w - shrink : d - shrink, sn ? d - shrink : w - shrink, 4, color, h);
+    h += 4;
+  }
+}
 
 /** FNV-ish hash of (desk id, salt) → a stable 0..1. Deterministic, so props never flicker per frame. */
 function deskRnd(id: number, salt: number): number {
@@ -3503,14 +3551,51 @@ function deskRnd(id: number, salt: number): number {
  * coords: `along` +toward the monitor / −toward the seat, `across` +right / −left. `salt`+`prob` decide
  * per-desk presence from a stable hash. Shared by the canvas draw AND the animated-overlay anchors
  * (`animatedDeskAnchors`) so the spinning fan / coffee steam land exactly on the drawn prop. */
-const PROP_KINDS = ['coffee', 'water', 'plant', 'photo', 'fan'] as const;
+const PROP_KINDS = ['coffee', 'water', 'plant', 'photo', 'fan', 'notebook', 'pens', 'books'] as const;
 type PropKind = (typeof PROP_KINDS)[number];
-const PROP_SPEC: Record<PropKind, { salt: number; prob: number; along: number; across: number }> = {
-  coffee: { salt: 1, prob: 0.4, along: -4, across: -34 },
-  water: { salt: 2, prob: 0.42, along: 7, across: -36 },
-  plant: { salt: 3, prob: 0.46, along: 20, across: -40 },
-  photo: { salt: 4, prob: 0.42, along: 20, across: 38 },
-  fan: { salt: 6, prob: 0.38, along: -10, across: 38 },
+/**
+ * Each personal prop: how likely it is on a given desk, where it stands, and the footprint it stands
+ * ON — `w` across the shoulders, `d` along the facing, both in logical units.
+ *
+ * `w`/`d` are here rather than buried in each draw function because "a prop is on the desk it is
+ * standing on" is only an invariant if something can ask. It was not one: the bench dock stood 17
+ * units past its counter's back edge, and widening the laptop 20 → 24 in #1394 pushed the pod dock
+ * off its slab, both caught by eye on the broadcast rather than by CI. `render.test.ts` reads these.
+ * They describe the BASE — the pot, not the foliage; a plant's leaves may overhang, a pot may not.
+ *
+ * The last three were added 2026-09-15 (nick: "some of the desks in the clusters have unused
+ * space"). Five kinds over two flanks left a third of desks carrying one prop or none, and only
+ * photo and fan on the `+across` side, so one flank was sparse by construction. These fill the front
+ * lip and that flank, and are chosen to read by SILHOUETTE at ~40px: a flat pad, a short cup with
+ * stems, a low stack. Deliberately not a fourth small cylinder — that reads as another mug.
+ */
+export const PROP_SPEC: Record<
+  PropKind,
+  { salt: number; prob: number; along: number; across: number; w: number; d: number }
+> = {
+  coffee: { salt: 1, prob: 0.4, along: -4, across: -34, w: 11, d: 11 },
+  water: { salt: 2, prob: 0.42, along: 7, across: -36, w: 9, d: 9 },
+  /*
+   * FRONT-left corner, not the back-left one. It stood at `along: 20`, which is the DOCK's patch on
+   * an N or E desk (`dockAcross` puts the cradle at −38 there) — so on 3 of 13 desks a plant pot and
+   * a laptop cradle occupied the same square of desk, interpenetrating. Nobody could have caught it
+   * from the desk's own frame, because the dock changes sides with the facing and the plant does not.
+   * Moved forward rather than outward: the back-left corner belongs to the dock on half the floor,
+   * and the front lip was empty on every facing anyway (2026-09-15).
+   */
+  plant: { salt: 3, prob: 0.46, along: -22, across: -40, w: 12, d: 12 },
+  /* Front-right, for the same reason the plant moved off the back-left: `along: 20` on the +across
+     flank is the dock's patch on an S or W desk. Latent rather than live — today's hashes happen to
+     put every photo on an N/E desk — but a re-hash or a re-faced desk would have framed a photo
+     inside a laptop cradle, and nothing would have said so. */
+  photo: { salt: 4, prob: 0.42, along: -27, across: 24, w: 20, d: 6 },
+  fan: { salt: 6, prob: 0.38, along: -10, across: 38, w: 9, d: 9 },
+  /** A closed pad on the front lip — the one part of every desk that was empty on every facing. */
+  notebook: { salt: 7, prob: 0.42, along: -27, across: -22, w: 18, d: 12 },
+  /** Pen cup: short, with a few coloured stems. The near end of the sparse `+across` flank. */
+  pens: { salt: 8, prob: 0.4, along: -25, across: 42, w: 9, d: 9 },
+  /** A low stack of books, outboard of the photo — mass at small scale, not another upright. */
+  books: { salt: 9, prob: 0.38, along: 6, across: -20, w: 16, d: 12 },
 };
 /** Whether a given desk carries a given prop — a stable per-desk hash, independent of who's seated.
  * Exported for the ambient scheduler: a sip beat needs a mug on that member's desk to sip from. */
@@ -3948,6 +4033,12 @@ function drawWorkstation(
           return deskPhoto(ctx, fit, ix, iy, sn, up, PHOTOS[Math.floor(deskRnd(id, 41) * PHOTOS.length)]!);
         case 'fan':
           return deskFan(ctx, fit, ix, iy, up);
+        case 'notebook':
+          return deskNotebook(ctx, fit, ix, iy, sn, up, NOTEBOOK_COVERS[Math.floor(deskRnd(id, 43) * NOTEBOOK_COVERS.length)]!);
+        case 'pens':
+          return deskPens(ctx, fit, ix, iy, up, id);
+        case 'books':
+          return deskBooks(ctx, fit, ix, iy, sn, up, id);
       }
     });
   }
