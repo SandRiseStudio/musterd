@@ -36,6 +36,8 @@ import {
   parseOptions,
   PULSE_SINK,
   resolveSink,
+  redactSink,
+  makeSecretScrubber,
   makeEncoderFeed,
   STALL_BYTES,
   sweepStaleProfiles,
@@ -741,5 +743,67 @@ describe('a lost DevTools socket is restartable, not terminal', () => {
     // relaunched a stream the operator watched die would be worse than the error.
     expect(socketLossExitCode(10 * 60_000, false)).toBe(1);
     expect(socketLossExitCode(0, false)).toBe(1);
+  });
+});
+
+describe('redactSink (stream-key never reaches the logs)', () => {
+  const twitch = {
+    kind: 'rtmp' as const,
+    target: 'rtmps://live.twitch.tv/app/live_123456789abc_secretKEY',
+  };
+
+  it('masks the key segment of an rtmp URL wherever it appears', () => {
+    const line = `[flv @ 0x1] Failed to publish to ${twitch.target}: Connection refused`;
+    const out = redactSink(line, twitch);
+    expect(out).not.toContain('live_123456789abc_secretKEY');
+    expect(out).toContain('rtmps://live.twitch.tv/app/<redacted>');
+  });
+
+  it('redacts the bare key when ffmpeg prints it alone', () => {
+    const out = redactSink('key=live_123456789abc_secretKEY done', twitch);
+    expect(out).not.toContain('live_123456789abc_secretKEY');
+    expect(out).toContain('<redacted>');
+  });
+
+  it('passes a file sink through untouched — no secret to hide', () => {
+    const file = { kind: 'file' as const, target: '/tmp/proof.mp4' };
+    const line = 'frame= 120 fps= 30 → /tmp/proof.mp4';
+    expect(redactSink(line, file)).toBe(line);
+  });
+
+  it('leaves a keyless rtmp URL untouched rather than masking its last path part', () => {
+    const keyless = { kind: 'rtmp' as const, target: 'rtmp://x' };
+    expect(redactSink('publishing to rtmp://x now', keyless)).toBe('publishing to rtmp://x now');
+  });
+});
+
+describe('makeSecretScrubber (chunk-boundary safe)', () => {
+  const twitch = {
+    kind: 'rtmp' as const,
+    target: 'rtmps://live.twitch.tv/app/live_123456789abc_secretKEY',
+  };
+
+  it('never emits the key even when the URL is split across two stderr chunks', () => {
+    const scrub = makeSecretScrubber(twitch);
+    // The secret straddles the chunk boundary; a per-chunk redactor would leak the first half.
+    const first = scrub('publishing to rtmps://live.twitch.tv/app/live_123456789');
+    const second = scrub('abc_secretKEY: broken pipe\n');
+    const combined = first + second;
+    expect(combined).not.toContain('live_123456789abc_secretKEY');
+    expect(combined).toContain('<redacted>');
+  });
+
+  it('holds an incomplete trailing line back and scrubs it on flush', () => {
+    const scrub = makeSecretScrubber(twitch);
+    // No newline yet: the partial line is buffered, nothing emitted.
+    expect(scrub('to rtmps://live.twitch.tv/app/live_123456789abc_secretKEY')).toBe('');
+    const flushed = scrub.flush();
+    expect(flushed).not.toContain('live_123456789abc_secretKEY');
+    expect(flushed).toContain('<redacted>');
+  });
+
+  it('streams complete progress lines (CR-terminated) as they arrive', () => {
+    const scrub = makeSecretScrubber(twitch);
+    expect(scrub('frame= 10 fps=30\r')).toBe('frame= 10 fps=30\r');
   });
 });

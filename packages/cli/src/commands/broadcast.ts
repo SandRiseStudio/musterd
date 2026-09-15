@@ -185,6 +185,74 @@ export async function resolveSink(
   return { kind: 'rtmp', target: `rtmps://live.twitch.tv/app/${key}` };
 }
 
+/**
+ * ffmpeg prints its output URL verbatim on error, and an RTMPS sink carries the Twitch stream key
+ * in that URL. With stderr inherited, that line lands in the machine logs where `fly logs`
+ * re-exposes the live key to whoever reads them (surfaced 2026-09-15: a single ffmpeg error put
+ * nick's key into a session transcript in cleartext). Scrub the URL — and the bare key — before
+ * ffmpeg's stderr reaches ours. A file sink has no secret and passes through untouched.
+ */
+export function redactSink(text: string, sink: { kind: 'file' | 'rtmp'; target: string }): string {
+  if (sink.kind !== 'rtmp') return text;
+  const masked = maskRtmpUrl(sink.target);
+  if (masked === sink.target) return text; // no key segment to hide (e.g. a keyless test URL)
+  let out = text.split(sink.target).join(masked);
+  const key = sink.target.slice(sink.target.lastIndexOf('/') + 1);
+  // Only redact the bare key on its own when it is long enough to be the secret and not an
+  // incidental substring — real Twitch/RTMP keys are far longer than this floor.
+  if (key.length >= 12) out = out.split(key).join('<redacted>');
+  return out;
+}
+
+/**
+ * Replace the trailing path segment (the stream key) of an rtmp(s) URL with `<redacted>`. A URL
+ * with only a host and no path (e.g. `rtmp://x`) carries no key segment, so it is left as-is.
+ */
+function maskRtmpUrl(url: string): string {
+  const schemeEnd = url.indexOf('://');
+  if (schemeEnd < 0) return url;
+  const pathStart = url.indexOf('/', schemeEnd + 3);
+  if (pathStart < 0) return url; // host only — nothing after it to be a key
+  const lastSlash = url.lastIndexOf('/');
+  if (lastSlash === url.length - 1) return url; // trailing slash — empty final segment
+  return `${url.slice(0, lastSlash + 1)}<redacted>`;
+}
+
+/**
+ * A stateful scrubber for a child's stderr stream. Chunk boundaries can split the secret URL
+ * across two `data` events, so a per-chunk `redactSink` could emit half a key before the mask
+ * matches. This buffers the incomplete trailing line and only scrubs-then-emits complete
+ * segments (up to the last CR or LF — ffmpeg's progress uses CR, its errors LF, so live output
+ * still streams). Call `flush()` when the stream closes to scrub and emit the final partial line.
+ */
+export function makeSecretScrubber(sink: { kind: 'file' | 'rtmp'; target: string }): {
+  (chunk: string): string;
+  flush(): string;
+} {
+  let buf = '';
+  const push = (chunk: string): string => {
+    buf += chunk;
+    let cut = -1;
+    for (let i = buf.length - 1; i >= 0; i--) {
+      const c = buf[i];
+      if (c === '\n' || c === '\r') {
+        cut = i;
+        break;
+      }
+    }
+    if (cut < 0) return '';
+    const emit = buf.slice(0, cut + 1);
+    buf = buf.slice(cut + 1);
+    return redactSink(emit, sink);
+  };
+  push.flush = (): string => {
+    const rest = buf;
+    buf = '';
+    return rest ? redactSink(rest, sink) : '';
+  };
+  return push;
+}
+
 /** macOS Keychain lookup (`security find-generic-password -w`); null on any miss/error. */
 export function keychainLookup(service: string): Promise<string | null> {
   return new Promise((res) => {
@@ -1066,8 +1134,20 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     },
   );
   const ffmpeg: ChildProcess = spawn('ffmpeg', ffmpegArgs(opts, sink), {
-    stdio: ['pipe', 'inherit', 'inherit'],
+    // stderr is piped (not inherited) so a secret scrubber sits between ffmpeg and our own
+    // stderr: ffmpeg prints its RTMPS output URL — stream key and all — verbatim on error, and an
+    // inherited stderr put that straight into the machine logs where `fly logs` re-exposes it.
+    stdio: ['pipe', 'inherit', 'pipe'],
     detached: true,
+  });
+  const scrubStderr = makeSecretScrubber(sink);
+  ffmpeg.stderr?.on('data', (d: Buffer) => {
+    const clean = scrubStderr(d.toString());
+    if (clean) process.stderr.write(clean);
+  });
+  ffmpeg.stderr?.on('close', () => {
+    const rest = scrubStderr.flush();
+    if (rest) process.stderr.write(rest);
   });
   // ffmpeg closes its stdin the moment `-t <duration>` is satisfied (or its sink dies) — a pump tick
   // racing that close is an EPIPE, which on a Socket is an *emitted* error that would crash the
