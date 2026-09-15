@@ -2,7 +2,7 @@
 
 CI's `gates` job is install → build → typecheck → lint → coverage → format:check, in that order — running a subset and calling it green is the classic red-CI cause, and grepping a gate's output instead of trusting its exit code has lied at least once.
 
-## The order is load-bearing (2026-07-13, #246/#250; falsify: lint a fresh clone pre-build)
+## The order is load-bearing (2026-07-13, #246/#250; falsify: lint a fresh clone pre-build) <!-- claim: other -->
 
 `build` must precede `typecheck` AND `lint`: eslint's import resolver follows workspace packages to their `dist/`, so linting pre-build yields ~9 phantom `import/order` errors from unresolved `@musterd/*`. `format:check` chains all the doc gates (obs-evals, vocab, adr-numbers, roadmap, guidance, arch-trees, wiki — see [shipping-a-pr](shipping-a-pr.md)); every ADR ≥ 060 needs an `## Observability & Evaluation` section answering Traces / Eval / Experiment. `roadmap:gen` output is not prettier-stable — generate last, don't prettier it. Root `pnpm test` is the gate, not `pnpm -r test`.
 
@@ -20,11 +20,11 @@ Cross-package imports resolve to `dist/`, so a stale build lies two ways, neithe
 
 **Both halves are gated (2026-08-14; falsify with the recipe below), and the recipe that proves it is the original incident itself.** Vitest no longer reads `dist` at all — ADR 267 aliases `@musterd/*` to src in all six configs, with a module-identity falsifier. Typecheck still does, by design, so `pnpm typecheck` now runs `pnpm dist:check` first (`scripts/check-dist-freshness.ts`) and refuses rather than letting tsc blame a stranger's file; it reads the ADR 135 `dist/build.json` stamp and fires on never-built, src-newer-than-build, or built-from-another-commit-whose-src-moved. To falsify either half, rebuild the third incident above: `git checkout 350752e8^ -- packages/protocol/src/credentials.ts && pnpm --filter @musterd/protocol build && git checkout HEAD -- packages/protocol/src/credentials.ts`. On that tree, measured 2026-08-14: the two suites that failed 2+2 in the original now pass 44/44, and `pnpm typecheck` stops at the gate naming `packages/protocol/src/credentials.ts` instead of emitting `TS2339: Property 'guardian_tiers' does not exist` in `http.ts`. **One dist reader survives inside vitest on purpose:** `packages/mcp/src/dist-imports.test.ts` tests the published tarball's import graph, and a stale dist passes it silently — it is covered by `dist:check`, not by the alias.
 
-## Two noises under load that are the runner, not a test (2026-08-12; falsify: rerun the named file alone)
+## Two noises under load that are the runner, not a test (2026-08-12; falsify: rerun the named file alone) <!-- claim: other -->
 
 On a busy machine the CLI suite can emit a spurious `[vitest-worker]: Timeout calling "onTaskUpdate"` — that is vitest's own worker RPC timing out, not a test failure; the verdict lines above it are still authoritative. Related but distinct: ~~`pnpm -r test` intermittently fails 3–13 CLI tests (`service`/`inbox`/`archaeology`) that pass in isolation and under `pnpm coverage` — parallel-run spawn starvation (see #782: a test 10× under its cap failing at load 17.9), to be lived with rather than chased (2026-08-12).~~ **CAUSE FOUND AND FIXED 2026-08-19** — see the section below. `pnpm coverage` is the real CI gate; chasing the `onTaskUpdate` noise as a defect has wasted sessions, but the `pnpm -r test` half was a real, fixable defect that this page spent seven days telling people to ignore.
 
-## The whole-workspace suite on the laptop takes the live daemon down with it (2026-09-14; falsify: sample `curl -m 5 localhost:4849/health` every 5s during a root `pnpm exec vitest run` — if every probe answers under 100ms, this is wrong)
+## The whole-workspace suite on the laptop takes the live daemon down with it (2026-09-14; falsify: sample `curl -m 5 localhost:4849/health` every 5s during a root `pnpm exec vitest run` — if every probe answers under 100ms, this is wrong) <!-- claim: defect -->
 
 Measured 2026-09-14, 13:00–13:10 local, from seat izzo: the mcp suite, then the whole-workspace
 `vitest run` from the repo root (476 files, `pool: 'forks'`), twice. The 5-minute load average
@@ -40,7 +40,7 @@ The rule: on this laptop, with seat sessions live, run the package suite you tou
 (`cd packages/<pkg> && pnpm exec vitest run`) and leave the whole-workspace run to CI. The
 server suite alone (98 files, ~50s) did not trip it earlier the same afternoon.
 
-## `pnpm -r test` ran at a different timeout than `pnpm test`, and that WAS the flake (2026-08-19; falsify: `grep -c TEST_TIMEOUT_MS vitest.config.ts packages/*/vitest.config.ts` — any 0 revives it)
+## `pnpm -r test` ran at a different timeout than `pnpm test`, and that WAS the flake (2026-08-19; falsify: `grep -c TEST_TIMEOUT_MS vitest.config.ts packages/*/vitest.config.ts` — any 0 revives it) <!-- claim: defect -->
 
 A package-local vitest config inherits **nothing** from the root. The root raised `testTimeout` to 30s in #491 with a measured rationale; none of the five package configs ever set it, so `pnpm -r test` — which runs each package's own `vitest run` against its own config, and loads the machine hardest by starting every package's forks at once — ran the whole monorepo at vitest's 5s default.
 
@@ -50,9 +50,9 @@ A third trap, about this page's own earlier claim: it carried a date AND a falsi
 
 Two traps worth keeping. **A synchronous test does hit this ceiling** — three of the five were sync (`session.test.ts:851`, `:873`, `:897`), which is worth knowing because "vitest cannot interrupt a sync test" is a plausible-sounding reason to rule the timeout out, and it is wrong. And **a fix applied only at the root reaches only `pnpm test`** — the number is now single-sourced in `vitest.shared.ts` and `tests/vitest-config-parity.test.ts` fails if any config drifts off it.
 
-## `pnpm format:check` on an uncommitted tree is a FALSE GREEN for two of its own gates (2026-08-21, #987; falsify: edit an ADR's Observability without committing, run `pnpm format:check` — green — then commit and run it again)
+## `pnpm format:check` on an uncommitted tree is a FALSE GREEN for two of its own gates (2026-08-21, #987; falsify: edit an ADR's Observability without committing, run `pnpm format:check` — green — then commit and run it again) <!-- claim: defect -->
 
-`watch:check` rules B/C and `change-adr:check` are **diff** checks against `base...HEAD`, and `HEAD` means committed (2026-08-21; falsify: `grep -n 'base\.\.\.HEAD' scripts/check-watches.ts scripts/check-change-adr.ts` — if either moved to a tree walk, this is stale). Every other gate in `format:check` is a tree check. So the two gates that judge your ADR edits are precisely the two that cannot see them until you commit, and running the suite "before committing, to be safe" reports success on the checks most likely to fail in CI.
+`watch:check` rules B/C and `change-adr:check` are **diff** checks against `base...HEAD`, and `HEAD` means committed (2026-08-21; falsify: `grep -n 'base\.\.\.HEAD' scripts/check-watches.ts scripts/check-change-adr.ts` — if either moved to a tree walk, this is stale). Every other gate in `format:check` is a tree check. So the two gates that judge your ADR edits are precisely the two that cannot see them until you commit, and running the suite "before committing, to be safe" reports success on the checks most likely to fail in CI. <!-- claim: defect -->
 
 Measured: #987 passed `pnpm format:check` locally with an edited-but-uncommitted `docs/decisions/250-*.md`, then failed `gates` on `watch:check` for a `rare` in that ADR's frozen `## Decision` — a pre-existing term the edit dragged into scope by touching the file at all. The script says so itself (`check-watches.ts:110`, "that is the house convention... not an oversight"), which is the point: the convention is documented in the place you read only after it has already bitten you.
 

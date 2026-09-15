@@ -11,7 +11,7 @@ worker whose live occupancy attested nothing excluded every gradeable reviewer a
 `lane.ready_for_review` row read as a complete, empty candidate set.
 
 ~~The ADR 303 snapshot cannot separate an ungradeable worker from an absent candidate set
-(2026-09-01; falsify: find a `lane.ready_for_review` row with `review_selection.outcome =
+(2026-09-01; falsify: find a `lane.ready_for_review` row with `review_selection.outcome = <!-- claim: defect -->
 'no_candidate'` whose candidates carry `unknown_grade` while their own `family` is known)~~ FIXED
 2026-09-01 by lane `01M1FJYETP6809EW45WY0S71V8`: the snapshot carries `worker_family`, and a
 gradeable candidate blinded by the worker is filed `worker_unattested`. `unknown_grade` now means

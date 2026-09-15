@@ -2,7 +2,7 @@
 
 `lastActivityAt` ticks only on musterd MCP calls, so the ADR 164 ladder demotes exactly the seats heads-down on real work — builds, browser runs, and filesystem sweeps are all invisible to it.
 
-## The one condition (2026-08-05, four-seat reconciliation; falsify: read noteActivity's callers in packages/mcp/src/index.ts)
+## The one condition (2026-08-05, four-seat reconciliation; falsify: read noteActivity's callers in packages/mcp/src/index.ts) <!-- claim: other -->
 
 Three contradictory demotion repros (a long build, many fast filesystem calls, a browser sweep) were one condition: zero musterd traffic. `noteActivity()` has a single caller — the autojoin tool wrapper — and covers every tool but `team_join`/`team_leave`; there is no read/write asymmetry (`team_inbox_check` counts). Do not chase call duration; it is the wrong variable. Practical rule: at task boundaries, make a musterd call — the inbox check the house loop already prescribes is the liveness heartbeat.
 

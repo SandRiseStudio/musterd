@@ -36,7 +36,7 @@ Across Cursor Desktop and `cursor-agent` CLI:
 - Headless Agent Client Protocol (`cursor-agent acp`) exposes `session/prompt` over stdio JSON-RPC, but this is a parent-controller protocol for external harnesses, not an inter-session peer rail.
 - Subagents (`Task` tool) execute in a child context and report back to their parent; they do not provide peer-to-peer messaging between independent seats.
 
-> Cursor provides no documented peer-injection API (2026-09-03; falsify: discover an MCP tool, CLI command, or local RPC endpoint that allows one Cursor session to push text into another active session's conversation).
+> Cursor provides no documented peer-injection API (2026-09-03; falsify: discover an MCP tool, CLI command, or local RPC endpoint that allows one Cursor session to push text into another active session's conversation). <!-- claim: defect -->
 
 ---
 
@@ -64,7 +64,7 @@ When an `afterShellExecution` hook emits JSON:
 - **Mechanism:** In Cursor's architecture, `afterShellExecution` and `afterMCPExecution` are purely observational fire-and-forget hooks. Cursor reads the exit code for errors but discards stdout entirely.
 - **Clarification on ADR 268:** [ADR 268](../decisions/268-clear-model-observed-on-session-change.md) addressed clearing `model_observed` in `binding.json` when session IDs change without a new model; it was not a harness-level transcript drop.
 
-> `postToolUse` stdout `additional_context` enters the model prompt; `afterShellExecution` stdout is dropped (2026-09-03; falsify: an `afterShellExecution` stdout injection witnessed inside model context).
+> `postToolUse` stdout `additional_context` enters the model prompt; `afterShellExecution` stdout is dropped (2026-09-03; falsify: an `afterShellExecution` stdout injection witnessed inside model context). <!-- claim: other -->
 
 ---
 
@@ -87,7 +87,7 @@ Cursor includes a native `stop` hook (and `subagentStop` for child tasks) that f
 ### Proposed doorbell role
 If an urgent act arrives during a turn and the agent does not invoke another tool before completing, the `stop` hook intercepts completion at turn-end and injects a continuation turn before the agent can go idle.
 
-> Cursor's `stop` hook can block turn-completion and continue execution via `followup_message` under a `loop_limit` guard (2026-09-03; falsify: verify whether `stop` with `followup_message` fails to trigger a follow-up turn in interactive `cursor-agent`).
+> Cursor's `stop` hook can block turn-completion and continue execution via `followup_message` under a `loop_limit` guard (2026-09-03; falsify: verify whether `stop` with `followup_message` fails to trigger a follow-up turn in interactive `cursor-agent`). <!-- claim: other -->
 
 ---
 
@@ -134,7 +134,7 @@ When the musterd daemon restarts or the MCP stdio server process drops mid-sessi
 - **Invisible to the daemon:** The daemon's roster, presence table, and doctor inspect the filesystem (`binding.json`, `.cursor/mcp.json`, `.cursor/hooks.json`) and socket leases. The daemon cannot observe that Cursor's local stdio MCP child process has terminated or that `CallDynamicTool` is returning `Not connected`. The seat appears healthy and granted while being functionally incapable of answering.
 - **Fail-safe fallback:** When Cursor's MCP transport drops, the seat must fall back to the CLI channel (`musterd send`, `musterd inbox`). However, CLI commands run without a long-lived Presence lease (`musterd claim` leases die with the command), which causes subsequent hook-based interrupt checks to fail closed with `the interrupt line is deaf`.
 
-> In Cursor, a dropped MCP connection leaves the schema catalog cached but severs execution (`Error: Tool execution error. Not connected`), causing permanent in-session callability loss until window reload (2026-09-14; falsify: observe a Cursor session whose dropped MCP stdio transport reconnects and executes `CallDynamicTool` without a window reload or session restart).
+> In Cursor, a dropped MCP connection leaves the schema catalog cached but severs execution (`Error: Tool execution error. Not connected`), causing permanent in-session callability loss until window reload (2026-09-14; falsify: observe a Cursor session whose dropped MCP stdio transport reconnects and executes `CallDynamicTool` without a window reload or session restart). <!-- claim: defect -->
 
 ## Related
 

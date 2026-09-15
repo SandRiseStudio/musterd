@@ -10,13 +10,13 @@ An MCP adapter that loads into an unclaimed folder is reachable but holds no sea
 
 ## `ts` is a boot stamp, not a heartbeat
 
-`writePendingMarker` is called **once**, from `main()` in `packages/mcp/src/index.ts`, and never again — nothing refreshes the file while the session runs (2026-09-05; falsify: grep `writePendingMarker` across `packages/` and look for a second call site or an interval).
+`writePendingMarker` is called **once**, from `main()` in `packages/mcp/src/index.ts`, and never again — nothing refreshes the file while the session runs (2026-09-05; falsify: grep `writePendingMarker` across `packages/` and look for a second call site or an interval). <!-- claim: other -->
 
 This is the fact that decides every design on top of these files. `ts` says when the adapter booted, not when it was last alive, so a marker's age does **not** distinguish a live session from a dead one — only a long-dead one from a possibly-live one. A session genuinely still waiting to be claimed can carry an old `ts`, and reaping its marker strands it, because the resolution sidecar it is waiting on is keyed by that marker's code.
 
 ## They accumulated forever
 
-~~Nothing ever removes an unclaimed marker (2026-09-04; falsify: read `consumePending` / `clearPendingMarker` and find a caller that is not an adopting claim)~~ FIXED 2026-09-05 by #1310. `consumePending` and `clearPendingMarker` only fire when a claim actually **adopts** that code, so a session that exited without ever being claimed left its file behind permanently.
+~~Nothing ever removes an unclaimed marker (2026-09-04; falsify: read `consumePending` / `clearPendingMarker` and find a caller that is not an adopting claim)~~ FIXED 2026-09-05 by #1310. `consumePending` and `clearPendingMarker` only fire when a claim actually **adopts** that code, so a session that exited without ever being claimed left its file behind permanently. <!-- claim: defect -->
 
 Measured on one machine, 2026-09-04: **189 marker files across 15 `.musterd/pending/` dirs; 176 older than seven days.** The oldest in `agents-dolly` was from Jul 31.
 
@@ -24,7 +24,7 @@ Measured on one machine, 2026-09-04: **189 marker files across 15 `.musterd/pend
 
 ### Why seven days and not one
 
-The asymmetry decides it, not a feel. Offering a two-day-old marker costs one `--for` flag; deleting a live session's marker breaks its only path online (2026-09-05; falsify: delete a running unclaimed adapter's marker and see whether `claim --for <code>` can still bring it online). Since `ts` is a boot stamp (above), a short TTL cannot tell "stale" from "patient". Seven days sits outside any plausible waiting window and still cleared 176 of the 189 measured files.
+The asymmetry decides it, not a feel. Offering a two-day-old marker costs one `--for` flag; deleting a live session's marker breaks its only path online (2026-09-05; falsify: delete a running unclaimed adapter's marker and see whether `claim --for <code>` can still bring it online). Since `ts` is a boot stamp (above), a short TTL cannot tell "stale" from "patient". Seven days sits outside any plausible waiting window and still cleared 176 of the 189 measured files. <!-- claim: other -->
 
 ## A stale marker is not inert — it blocks the claim
 

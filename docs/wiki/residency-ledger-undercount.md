@@ -7,7 +7,7 @@ Any session count read from `residency.session_captured` rows that crosses 2026-
 Before #1110 (merged 2026-08-31 as `a647b9cc`), a session that took the workspace slot by the
 tool-boundary heal — gated at SessionStart beside a live-looking occupant, handed the slot at its
 first tool boundary — was never attested. It ran, acted as the seat, and produced **zero**
-`residency.session_captured` / `residency.session_ended` rows (2026-08-28; falsify: query the
+`residency.session_captured` / `residency.session_ended` rows (2026-08-28; falsify: query the <!-- claim: defect -->
 `audit` table for digest `982f768adf12` — the incident session in
 [ADR 336](../decisions/336-attestation-follows-the-slot.md) — and find any row).
 
@@ -44,7 +44,7 @@ the capture path). Bounds that stay true after the fix:
 ~~The post-change arm of ADR 336's experiment is unit tests only (five tests, four mutations). The
 owed live observation — a real gated-then-healed session producing its first
 `session_captured` row at a tool boundary on a build ≥ `a647b9cc` — has not been made yet
-(2026-08-31; falsify: a dated entry below records it).~~ **Made 2026-09-01 13:26–13:28, seat
+(2026-08-31; falsify: a dated entry below records it).~~ **Made 2026-09-01 13:26–13:28, seat <!-- claim: other -->
 `ryder`, daemon on `8e1ff296`, CLI `main` + #1150** (falsify: the three `audit` rows below, and
 `heal-probe-rig/run.sh` on this page's branch, which stages the sequence again in ~90 s).
 
@@ -83,7 +83,7 @@ in `session.ts` presented that stored lease and never reclaimed — #1119 gave i
 the reclaim every other CLI path got — so **every SessionStart / SessionEnd / heal-path attestation
 more than five minutes after the claim was refused with `401 invalid, expired, or revoked agent
 session lease` and the refusal swallowed as "daemon unreachable": local slot written, no ledger
-row (2026-09-01, seat `ryder`; falsify: on a build before #1150, POST the route with the binding's
+row (2026-09-01, seat `ryder`; falsify: on a build before #1150, POST the route with the binding's <!-- claim: defect -->
 stored lease and read the 401; the same credential and lease on `GET /members` answer 200).**
 Consistent with the ledger's shape — 1229 `captured` against 622 `ended` all-time, 211 against 87
 over the seven days to 2026-09-01 — though that ratio is suggestive only, since a session can also
@@ -99,7 +99,7 @@ that outlives its socket is a server decision under ADR 337.
 For an analyst: the undercount window for this cause is `7498d25f`..#1150, for every seat, and it
 is heaviest on `session_ended`.
 
-One gap #1150 keeps, on purpose (2026-09-01; falsify: read `heldElsewhere` in
+One gap #1150 keeps, on purpose (2026-09-01; falsify: read `heldElsewhere` in <!-- claim: other -->
 `packages/cli/src/commands/session.ts`): a hook whose seat is live in **another** workspace never
 claims, because that claim would supersede the live adapter — so a SessionStart in a second
 worktree while the adapter runs in the first attests nothing, and the slot stays unattested rather

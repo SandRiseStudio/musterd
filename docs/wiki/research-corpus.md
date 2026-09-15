@@ -28,13 +28,13 @@ tool_call_stats 3,440 · wake_leases 310 · seat_memory 8 · members 26. The aud
 record of which model actually occupied which seat, and the reason this corpus is unusual rather
 than merely large.
 
-**The corpus is 94 MB, not 4.3 GB** (2026-08-18; falsify: re-run the dry-run). The headline size is
+**The corpus is 94 MB, not 4.3 GB** (2026-08-18; falsify: re-run the dry-run). The headline size is <!-- claim: other -->
 git clones. Everything irreplaceable gzips to **5.7 MB in 2.7 seconds**, because the sweep series is
 4,714 near-identical snapshots and compresses 79×. That number is why
 [ADR 280](../decisions/280-the-evidence-base-lives-on-one-laptop.md) keeps every snapshot forever
 instead of writing a retention policy — and it is a property of _this_ corpus, not a general law.
 
-## Preservation status (2026-08-18; falsify: `ls ~/.musterd/corpus-snapshots/`)
+## Preservation status (2026-08-18; falsify: `ls ~/.musterd/corpus-snapshots/`) <!-- claim: other -->
 
 `pnpm corpus:snapshot` captures all of the above into a dated, checksummed directory, using
 `VACUUM INTO` for live SQLite so the daemon keeps running. Restore drilled the same day: integrity
@@ -89,12 +89,12 @@ Three of these print to stdout and persist nothing, which is fine for a re-runna
 a preserved corpus and fatal for one over a corpus that moves. It is a second reason the rail comes
 first.
 
-## What is designed and not built (2026-08-18; falsify: grep the ADRs named)
+## What is designed and not built (2026-08-18; falsify: grep the ADRs named) <!-- claim: other -->
 
 - **The dataset itself.** ADR 184 decided the gate (structural fields only, no agent prose). The
   export path shipped 2026-08-19 (`pnpm dataset:export`; falsify: `ls scripts/dataset/export.ts`).
   Each public dir now includes a filled `README.md` card (falsify: `ls scripts/dataset/card.md`).
-  A HuggingFace upload of a live release has not been cut (2026-08-19; falsify: a dataset card
+  A HuggingFace upload of a live release has not been cut (2026-08-19; falsify: a dataset card <!-- claim: other -->
   under the Sandrise org on HF). Roadmap item `coordination-dataset`.
 - ~~**ADR 056 is still `proposed`** — the charter that eight findings, the obs-eval CI gate, and ADR
   184 all build on has never been accepted.~~ **ACCEPTED 2026-08-24** (nick; amended on acceptance).
@@ -135,7 +135,7 @@ first.
   `scripts/radar/digest.ts` writes the weekly digest and appends `seen.json`, landed with
   [#1049](https://github.com/SandRiseStudio/musterd/pull/1049). ~~What is still true is the half that
   matters, and it is the half nobody can see from the code:
-  **the instrument has never been run** (2026-09-03; falsify: a non-empty `seen.json`, or any digest
+  **the instrument has never been run** (2026-09-03; falsify: a non-empty `seen.json`, or any digest <!-- claim: defect -->
   file committed under `docs/research/radar/`). `seen.json` is verbatim `{"arxiv": [], "hf": []}`,
   there is no `radar:sweep` LaunchAgent, and `package.json` wires no `--emit` script. What remains is
   M5 plus a first real run.~~

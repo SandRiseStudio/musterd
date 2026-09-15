@@ -120,7 +120,7 @@ it are catalogued there, with [guidance distribution](guidance-distribution.md) 
 **The standing implication for this page:** striking an item through here records a *surface* fix. It
 does not update the prose that teaches the surface. A lane that changes what a command **means** —
 rather than what it is called — should edit `guidance.ts` in the same lane, because `guidance:check`
-verifies names and cannot see a meaning move under a stable one (2026-09-06; falsify:
+verifies names and cannot see a meaning move under a stable one (2026-09-06; falsify: <!-- claim: defect -->
 `scripts/check-guidance.ts` imports only `CATALOG` and `TOOL_NAMES`).
 
 Related: [what-is-waiting-for-me.md](what-is-waiting-for-me.md) (the four "waiting" surfaces are two), [musterd-cli-messaging.md](musterd-cli-messaging.md), [correct-by-coincidence.md](correct-by-coincidence.md) (the assertion that passes on the reference footer).

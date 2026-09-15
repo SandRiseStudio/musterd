@@ -28,7 +28,7 @@ clock at all. So a daemon bounce deleted every local presence row on the first t
 The part that made it expensive rather than cosmetic: **a session lease is only valid while its
 presence row exists**. `hasValidSessionLease` joins `presence p ON p.id = l.presence_id`, so deleting
 the row invalidates the lease with no `revoked_at`, no `claim.superseded`, and no audit row naming
-the cause. The seat is told only `invalid, expired, or revoked agent session lease`, so it cannot tell a bounce from a rival's displacement (2026-09-02; falsify: the `sqlite3` query below).
+the cause. The seat is told only `invalid, expired, or revoked agent session lease`, so it cannot tell a bounce from a rival's displacement (2026-09-02; falsify: the `sqlite3` query below). <!-- claim: defect -->
 Three seats misdiagnosed exactly that on 2026-09-02, one of them spending a lane on the wrong
 candidate before withdrawing it.
 

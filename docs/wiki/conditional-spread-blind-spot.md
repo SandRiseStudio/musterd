@@ -6,7 +6,7 @@ TypeScript's excess-property check fires on a direct object literal and not on a
 
 Excess-property checking is a *freshness* check on object literals assigned to a typed target. A spread element is not part of that check: the spread's own type is computed, then merged, and unknown keys arriving that way are tolerated rather than flagged. Everything in this codebase that says `...(cond ? { field: value } : {})` is therefore **unchecked for the field's name** — the pattern is used constantly and correctly for omitting optional fields, which is what makes it a good hiding place.
 
-## The measured instance (2026-09-05; falsify: check out `1edda93c~1`, change `commands/claim.ts:403` to `workspaceKey:`, and run `pnpm --filter @musterd/cli exec tsc --noEmit` — it compiles, and the field still does not reach the wire)
+## The measured instance (2026-09-05; falsify: check out `1edda93c~1`, change `commands/claim.ts:403` to `workspaceKey:`, and run `pnpm --filter @musterd/cli exec tsc --noEmit` — it compiles, and the field still does not reach the wire) <!-- claim: defect -->
 
 `HttpClient.claim` forwarded the caller's key into the frame builder:
 

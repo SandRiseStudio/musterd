@@ -2,7 +2,7 @@
 
 Any floor edit is bound by measured invariants (stand-behind clearance, nav-grid rounding, seat-assignment hashing) — the working method is a throwaway probe that prints the walkability map and every pairwise gap, never coordinate guessing.
 
-## The invariants (2026-08-02/03 overhaul, PRs #586–#590; falsify: layout.test.ts + nav.test.ts)
+## The invariants (2026-08-02/03 overhaul, PRs #586–#590; falsify: layout.test.ts + nav.test.ts) <!-- claim: other -->
 
 - Seat assignment is `hash % DESK_SLOTS.length` — changing the slot count reshuffles every member once per deploy; never promise cross-deploy seat stability.
 - The nav grid is 15-unit cells rounding a footprint's edge to its starting cell — a clearance real by 5 units can be zero after rounding; probe with `walkable()`, don't arithmetic.

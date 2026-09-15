@@ -20,7 +20,7 @@ For how the refresher actually works — the log, the debounce stamp, and the th
 
 ## guardian and streamwatch carry no charter
 
-Both are `kind = "service"` with `role = "platform"` and nothing else (2026-08-24; falsify: `cat .musterd/seats/guardian.toml`). The guardian's operating knowledge is on [platform guardian](platform-guardian.md) instead — which is where autorefresh's now is too. **A ledger seat's charter belongs on its wiki page, not in its roster file**, and the reason is the next section.
+Both are `kind = "service"` with `role = "platform"` and nothing else (2026-08-24; falsify: `cat .musterd/seats/guardian.toml`). The guardian's operating knowledge is on [platform guardian](platform-guardian.md) instead — which is where autorefresh's now is too. **A ledger seat's charter belongs on its wiki page, not in its roster file**, and the reason is the next section. <!-- claim: other -->
 
 ## The census cannot see guardian or streamwatch (~~2026-09-04~~ FIXED 2026-09-04, lane 01M1Q9D90X)
 
@@ -29,7 +29,7 @@ the three ledger seats on this roster.
 
 *A LaunchAgent with no seat* is reported for any `studio.sandrise.musterd-*` label. That half works,
 and it is currently loud: **five unattributed actors** — `adr260-rerun`, `host`, `live`, `otel-sink`,
-`sweep` (2026-09-04, build 064db424; falsify: `musterd init --check | grep 'no service seat'`).
+`sweep` (2026-09-04, build 064db424; falsify: `musterd init --check | grep 'no service seat'`). <!-- claim: defect -->
 
 *A seat whose LaunchAgent is gone* is reported only for the four labels ADR 232 named on 2026-08-12,
 because `census.ts` iterates a frozen literal rather than the roster:
@@ -39,7 +39,7 @@ const PLATFORM_SERVICE_LABELS = [AUTOREFRESH_LABEL, HOST_LABEL, LIVE_LABEL, SWEE
 ```
 
 ~~`GUARDIAN_LABEL` and `STREAMWATCH_LABEL` shipped afterwards (`launchd.ts:58` and `:61`) and are not
-in it, so **guardian and streamwatch can lose their jobs in silence** (2026-09-04; falsify: add
+in it, so **guardian and streamwatch can lose their jobs in silence** (2026-09-04; falsify: add <!-- claim: defect -->
 either constant to that array and a seat-with-no-job note appears for it).~~ **FIXED 2026-09-04,
 lane 01M1Q9D90X**: `PLATFORM_SERVICE_LABELS` is deleted and the job-gone set is derived from the
 roster — every `kind: service` seat whose `roles` include `platform` (falsify: `censusNotes({ jobs:
@@ -66,15 +66,15 @@ and group by member kind).
 
 ## Why the charter could not stay in the seat file
 
-`charter` is in `RoleFileSchema` and **not** in `SeatFileSchema` (2026-08-24; falsify: read `packages/protocol/src/seatfile.ts` — `charter: z.string().optional()` sits at line 80 inside `RoleFileSchema`, and is absent from the object at line 45). Zod's default `.strip()` therefore discards it on parse, so:
+`charter` is in `RoleFileSchema` and **not** in `SeatFileSchema` (2026-08-24; falsify: read `packages/protocol/src/seatfile.ts` — `charter: z.string().optional()` sits at line 80 inside `RoleFileSchema`, and is absent from the object at line 45). Zod's default `.strip()` therefore discards it on parse, so: <!-- claim: defect -->
 
 - `musterd fmt` rewrites the file from the parsed value and **deletes the paragraph**;
 - the daemon's reconcile drops it and, since #988, says so in the log;
 - `fmt --check` names it as data loss rather than a tidy-up, since #985.
 
-Three mechanisms now *report* the drop. None of them preserve the prose — which is the point. It was 587 authored characters reaching no reader (2026-08-24; falsify: `OccupiedFrame.charter` is declared at `claim-handshake.ts:143` and populated by none of the five sites that build the frame — four in `http.ts`, one in `ws.ts`. If any site sets it, a seat charter does have a delivery path and the key belongs in `SeatFileSchema` after all). **The falsifier fired 2026-09-03** — every site sets it — but only halfway: what they deliver is the ROLE's charter (see below), so the seat charter's drop is unchanged and the `SeatFileSchema` conclusion stands.
+Three mechanisms now *report* the drop. None of them preserve the prose — which is the point. It was 587 authored characters reaching no reader (2026-08-24; falsify: `OccupiedFrame.charter` is declared at `claim-handshake.ts:143` and populated by none of the five sites that build the frame — four in `http.ts`, one in `ws.ts`. If any site sets it, a seat charter does have a delivery path and the key belongs in `SeatFileSchema` after all). **The falsifier fired 2026-09-03** — every site sets it — but only halfway: what they deliver is the ROLE's charter (see below), so the seat charter's drop is unchanged and the `SeatFileSchema` conclusion stands. <!-- claim: defect -->
 
-**Measured population, not a sample** (2026-08-24; falsify: `grep -hoE '^[a-z_]+ *=' .musterd/seats/*.toml | sort -u`): across all 15 seat files the only key outside the schema is `charter`, and it appears in exactly one file. This measurement exists because the claim it replaces was wrong for the opposite reason — see the correction below.
+**Measured population, not a sample** (2026-08-24; falsify: `grep -hoE '^[a-z_]+ *=' .musterd/seats/*.toml | sort -u`): across all 15 seat files the only key outside the schema is `charter`, and it appears in exactly one file. This measurement exists because the claim it replaces was wrong for the opposite reason — see the correction below. <!-- claim: other -->
 
 ## Do not fix this by adding `charter` to `SeatFileSchema`
 

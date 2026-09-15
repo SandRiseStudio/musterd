@@ -10,6 +10,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // Circular with wiki-coverage.ts (it reads this file's regexes) — safe: both sides only touch the
 // other's bindings inside functions, never during module evaluation.
+import { stripMarker } from './wiki-claim-marker.ts';
 import { coverageFailures, extractClaims, measureCoverage } from './wiki-coverage.ts';
 import { renderIndex, WIKI_DIR } from './wiki-index.ts';
 
@@ -68,11 +69,13 @@ export const HEADING_RE = /^#{1,6}\s/;
 const LINK_RE = /\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g;
 
 /** Headings of a page paired with the first non-blank line beneath each — fence-aware, so a
- *  `## <Section>` inside the README's template block is text, not structure. */
+ *  `## <Section>` inside the README's template block is text, not structure, and marker-blind, so
+ *  labeling a claim is not mistaken for retitling its section (see wiki-claim-marker.ts). */
 function sections(content: string): { heading: string; firstBody: string | null }[] {
   const out: { heading: string; firstBody: string | null }[] = [];
   let fenced = false;
-  for (const line of content.split('\n')) {
+  for (const raw of content.split('\n')) {
+    const line = stripMarker(raw);
     if (/^\s*```/.test(line)) {
       fenced = !fenced;
       if (out.length > 0 && out[out.length - 1]!.firstBody === null)
@@ -205,12 +208,10 @@ function pagesAtRef(ref: string): Map<string, string> | null {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const failures = checkWiki(WIKI_DIR);
 
-  // The coverage meter (wiki-coverage.ts): labels must stay complete — the NUMBER never gates.
-  const labels = JSON.parse(
-    readFileSync(new URL('./wiki-claim-labels.json', import.meta.url), 'utf8'),
-  );
-  failures.push(...coverageFailures(WIKI_DIR, labels));
-  const cov = measureCoverage(extractClaims(WIKI_DIR), labels);
+  // The coverage meter (wiki-coverage.ts): every claim line must carry its `<!-- claim: … -->`
+  // marker and no marker may be misplaced — the NUMBER never gates.
+  failures.push(...coverageFailures(WIKI_DIR));
+  const cov = measureCoverage(extractClaims(WIKI_DIR));
 
   // The diff-aware half. Its base ref must exist or the check is inert — and an instrument that
   // silently never fires is the defect class this whole gate was built against, so a missing base
