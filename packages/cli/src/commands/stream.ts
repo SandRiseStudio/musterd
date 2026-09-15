@@ -39,6 +39,7 @@ import {
   FLAP_MAX,
   FLAP_WINDOW_MS,
   decideEnsure,
+  standDownReport,
   readStreamState,
   writeStreamState,
 } from '../broadcast/streamState.js';
@@ -577,10 +578,15 @@ async function ensureVerb(
       writeStreamState(a.statePath, d.state);
       a.err(`${theme.err('⚠')} ${d.note}\n`);
       try {
+        // One sentence, composed once, from what was observed — the same one in the log line above.
+        // These used to be two strings that disagreed: the log said "3 restarts", the ask said "the
+        // broadcast crashed 3×", and the second is the only thing a human ever sees, because
+        // standing down means the supervisor stops trying (lane 01M2K6BWVR).
         await a.sendAsk(
-          `streamwatch: the broadcast crashed ${FLAP_MAX}× in ${FLAP_WINDOW_MS / 60_000}min and the ` +
-            `supervisor stood down — \`musterd stream doctor\` then \`musterd stream start\` to re-arm ` +
-            `(restarts: ${d.state.restarts.map((t) => new Date(t).toLocaleTimeString()).join(', ')})`,
+          `streamwatch: ${standDownReport(d.state, a.now())} — \`musterd stream doctor\` then ` +
+            `\`musterd stream start\` to re-arm (attempts: ${d.state.restarts
+              .map((t) => new Date(t).toLocaleTimeString())
+              .join(', ')})`,
         );
       } catch (e) {
         a.err(
@@ -596,10 +602,17 @@ async function ensureVerb(
       a.out(`${theme.warn('↻')} ${d.note}\n`);
       const { digest, addr } = launchPreconditions(a);
       const team = d.state.team ?? process.env['MUSTERD_TEAM'] ?? 'revive';
-      const { code } = await a.launch(launchArgs({ app: a.app, digest, addr, team }));
-      if (code !== 0)
+      const { code, output } = await a.launch(launchArgs({ app: a.app, digest, addr, team }));
+      if (code !== 0) {
         a.err(`${theme.err('✗')} relaunch failed (fly exit ${code}) — next tick retries\n`);
-      else a.out(`${theme.ok('◉ live again')} ${theme.meta(`machine relaunched · ${a.app}`)}\n`);
+        // Keep WHY, not just that it happened. `output` was already on LaunchResult and already
+        // printed here; throwing it away is what left the stand-down ask with nothing to report but
+        // a guess. Recorded against the attempt it belongs to, and pruned with it.
+        writeStreamState(a.statePath, {
+          ...d.state,
+          failures: [...(d.state.failures ?? []), { at: a.now(), code, error: output }],
+        });
+      } else a.out(`${theme.ok('◉ live again')} ${theme.meta(`machine relaunched · ${a.app}`)}\n`);
       return 0;
     }
   }

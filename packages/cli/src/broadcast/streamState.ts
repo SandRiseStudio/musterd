@@ -26,6 +26,17 @@ export interface StreamState {
   image?: string;
   /** Supervisor restart stamps (epoch ms), pruned to the flap window. */
   restarts: number[];
+  /**
+   * The relaunches that never produced a machine, pruned alongside `restarts` — what `fly` exited
+   * with and what it said. Parallel to the ledger rather than folded into it, because the ledger's
+   * job (spend a budget, converge on asking a human) is correct and must not change shape.
+   *
+   * It exists because the supervisor used to throw this away: `LaunchResult` already carried
+   * `output`, `ensure` destructured `{ code }`, and the stand-down ask then told a human "the
+   * broadcast crashed" — the one thing it had not observed. Absent on state written before this
+   * field existed, which `standDownReport` degrades for honestly rather than guessing.
+   */
+  failures?: { at: number; code: number; error: string }[];
   /** Set when the flap guard tripped; only a human start/stop clears it — one ask, not one per tick. */
   standDownAt?: number;
 }
@@ -70,20 +81,24 @@ export function decideEnsure(args: {
     return { action: 'noop', state, note: 'stood down — awaiting a human `stream start`/`stop`' };
   }
   const restarts = state.restarts.filter((t) => now - t < FLAP_WINDOW_MS);
-  if (liveCount > 0) return { action: 'noop', state: { ...state, restarts }, note: 'live' };
+  // Pruned with the ledger, not separately: a cause outliving the attempt it explains is how a
+  // stale error ends up quoted in a report about a newer failure.
+  const failures = (state.failures ?? []).filter((f) => now - f.at < FLAP_WINDOW_MS);
+  if (liveCount > 0)
+    return { action: 'noop', state: { ...state, restarts, failures }, note: 'live' };
   // A missing `image` (legacy state) is never a free pass — only an observed change is a deploy.
   if (recordedDigest && state.image && state.image !== recordedDigest) {
     return {
       action: 'restart',
-      state: { ...state, restarts, image: recordedDigest },
+      state: { ...state, restarts, failures, image: recordedDigest },
       note: `deploy detected: machine gone and the recorded image changed (${state.image.slice(7, 15)} → ${recordedDigest.slice(7, 15)}) — replacing, not charged to the flap window`,
     };
   }
   if (restarts.length >= FLAP_MAX) {
     return {
       action: 'stand_down',
-      state: { ...state, restarts, standDownAt: now },
-      note: `${restarts.length} restarts in ${FLAP_WINDOW_MS / 60_000}min — standing down and asking`,
+      state: { ...state, restarts, failures, standDownAt: now },
+      note: `standing down and asking — ${standDownReport({ ...state, restarts, failures }, now)}`,
     };
   }
   return {
@@ -91,6 +106,7 @@ export function decideEnsure(args: {
     state: {
       ...state,
       restarts: [...restarts, now],
+      failures,
       ...(recordedDigest ? { image: recordedDigest } : {}),
     },
     note: `crash detected: machine gone, no stop record — restarting (${restarts.length + 1}/${FLAP_MAX} in window)`,
@@ -113,4 +129,75 @@ export function writeStreamState(path: string, state: StreamState): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, JSON.stringify(state, null, 2) + '\n', 'utf8');
   renameSync(tmp, path);
+}
+
+/**
+ * The one sentence a human gets when the supervisor gives up — and the supervisor's own log line,
+ * so the two can never say different things. It used to be two strings: the log said "3 restarts in
+ * 30min", the ask said "the broadcast crashed 3× in 30min", and only one of them was ever true.
+ *
+ * It reports what was OBSERVED and nothing else. The supervisor cannot see why a machine is gone —
+ * `decideEnsure` branches on a machine count — but it can see perfectly well whether its own
+ * relaunch got one off the ground, and that distinction is the whole difference between "the stream
+ * is unstable" and "this laptop cannot reach fly.io". Measured 2026-09-15: every one of the 15
+ * relaunch failures on nick's laptop was the second kind, and both stand-downs reported the first.
+ */
+export function standDownReport(state: StreamState, now: number): string {
+  const restarts = state.restarts.filter((t) => now - t < FLAP_WINDOW_MS);
+  const failures = (state.failures ?? []).filter((f) => now - f.at < FLAP_WINDOW_MS);
+  const mins = FLAP_WINDOW_MS / 60_000;
+  const n = restarts.length;
+  // `fly` errors run to several lines and an ask is read in a notification: take the line that
+  // names the fault, not the GraphQL query body it is wrapped in.
+  const last = failures.at(-1);
+  const cause = last ? ` — last error (fly exit ${last.code}): ${oneLine(last.error)}` : '';
+
+  if (failures.length === 0) {
+    // No launch ever failed, so machines really were coming up and going away. This is the only
+    // case the old wording fitted, and even here "stopped" is what was seen — "crashed" is a guess
+    // about a machine whose exit this process never looked at.
+    return state.failures === undefined
+      ? `the broadcast stopped ${n}× in ${mins}min and the supervisor stood down (this state predates launch-failure recording, so there is no cause to report)`
+      : `the broadcast stopped ${n}× in ${mins}min and the supervisor stood down`;
+  }
+  if (failures.length >= n) {
+    // Every attempt failed to launch: the stream is not the subject at all. Naming `doctor` here
+    // because it is the verb that checks exactly this family of precondition.
+    return `${failures.length} launch attempts failed in ${mins}min and the supervisor stood down — no machine ever came up, so this is the environment, not the stream${cause}. \`musterd stream doctor\` checks each precondition`;
+  }
+  return `the broadcast stopped ${n}× in ${mins}min and the supervisor stood down — ${failures.length} of them never got a machine up${cause}`;
+}
+
+/**
+ * Collapse to a single line and cap it: an ask is read in a notification, not a terminal.
+ *
+ * Prefers the line that declares the fault over the last line printed. flyctl emits a metrics
+ * warning next to the real error and — on a DNS outage — that warning is itself about DNS, so
+ * "whatever came last" reads plausibly while naming the wrong subsystem. That is the same mistake
+ * one layer up that this whole function exists to stop making.
+ */
+function oneLine(text: string, cap = 180): string {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const raw = lines.filter((l) => /^error\b/i.test(l)).at(-1) ?? lines.at(-1) ?? text.trim();
+  // Collapse embedded payloads. flyctl quotes the entire GraphQL query it was running — ~300
+  // characters of braces — in front of the six words that say what went wrong. Squeezing braced
+  // blocks keeps the sentence and drops the document, without knowing anything about GraphQL.
+  let line = raw;
+  for (let i = 0; i < 8; i++) {
+    // The placeholder must contain NO braces of its own, or it blocks the next round: a `{…}`
+    // standing in for an inner block makes its parent unmatchable by this same pattern, and the
+    // squeeze stalls one level in. (It did exactly that on the first attempt.)
+    const squeezed = line.replace(/\{[^{}]*\}/g, '…');
+    if (squeezed === line) break;
+    line = squeezed;
+  }
+  line = line.replace(/…[\s,…]*…/g, '…').replace(/\s+…/g, ' …');
+  // Keep the TAIL, not the head. Error causes nest rightward — "failed to run query <300 chars of
+  // GraphQL>: Post https://…: dial tcp: lookup api.fly.io: no such host" — so trimming from the end
+  // throws away the only part an operator can act on and keeps the boilerplate. Measured on the real
+  // fly output from 2026-09-04: a head-trim at 180 chars cut off `no such host` and kept the query body.
+  return line.length > cap ? `…${line.slice(line.length - (cap - 1))}` : line;
 }
