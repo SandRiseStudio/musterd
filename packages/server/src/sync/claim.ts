@@ -449,6 +449,14 @@ export interface ArbitratedLanePatch {
  * (delta, measured from the VM on 01M2GBGA03) while the hub's CAS refused the next write as
  * "now owned by delta (done)". The transition IS the record (lane-replication spec §Hole 3): the
  * row and its `lane.closed` land in one transaction, as the local path's do.
+ *
+ * A SUBMIT is the same hole one verb over (lane 01M2HNSVA79). Entering awaiting_acceptance is
+ * `lane.ready_for_review`, owned by the origin handler because the picker and the ask live where
+ * the seat lives (ADR 361 §2). `updateLane` therefore skips `lane.state_changed` on the local
+ * path. On the hub that skip left nothing foldable: the hub row moved, the joiner stayed
+ * `claimed`, and a retry CAS'd as "now owned by <seat> (awaiting_acceptance)". A hub-arbitrated
+ * write carries `audit.node`, and that is when `updateLane` records `lane.state_changed` so the
+ * fold can apply the state. The origin still writes `lane.ready_for_review` once.
  */
 export function arbitrateLanePatch(
   ctx: Ctx,

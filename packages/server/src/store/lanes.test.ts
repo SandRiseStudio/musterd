@@ -632,6 +632,33 @@ describe('lane.* rows are written by the store, inside the write', () => {
     ]);
   });
 
+  it('a local submit does not write lane.state_changed; a hub-arbitrated one does, so a joiner can fold it', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 't', claim: true });
+    updateLane(db, team.id, lane.id, 'bravo', { state: 'awaiting_acceptance' }, 2, undefined, {
+      actor: 'June',
+    });
+    expect(rows(db, lane.id).filter((r) => r.action === 'lane.state_changed')).toEqual([]);
+
+    const other = openLane(db, team.id, 'bravo', 'June', { title: 'u', claim: true });
+    updateLane(db, team.id, other.id, 'bravo', { state: 'awaiting_acceptance' }, 3, undefined, {
+      actor: 'June',
+      node: 'joiner-node',
+    });
+    expect(rows(db, other.id).filter((r) => r.action === 'lane.state_changed')).toEqual([
+      {
+        actor: 'June',
+        action: 'lane.state_changed',
+        detail: {
+          lane: other.id,
+          from: 'claimed',
+          to: 'awaiting_acceptance',
+          node: 'joiner-node',
+        },
+      },
+    ]);
+  });
+
   it('a transition whose record cannot be written does not happen', () => {
     const { db, team } = seed();
     const lane = openLane(db, team.id, 'bravo', 'June', { title: 't', branch: 'before' });
