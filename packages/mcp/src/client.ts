@@ -284,6 +284,17 @@ export class MusterdClient {
   get build(): string | undefined {
     return this.config.build;
   }
+  /**
+   * This seat's workspace root — where `.musterd/` lives (ADR 408 inc 4).
+   *
+   * The seat's folder, NOT `process.cwd()`: a shared worktree-family MCP entry (ADR 165) is started
+   * from the family's primary checkout, so the process's cwd and the seat's workspace are routinely
+   * different folders, and reading provisioning state from the wrong one would report a stranger's
+   * drift as this seat's.
+   */
+  get workspaceDir(): string | undefined {
+    return this.config.bindingDir;
+  }
   get claimCode(): string {
     return this.config.claimCode;
   }

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
@@ -119,13 +119,16 @@ async function seed(n: number) {
 
 type Warning = { kind: string; text: string; [k: string]: unknown };
 
-async function checkInbox(config: McpConfig): Promise<{
+async function checkInbox(
+  config: McpConfig,
+  unread = 3,
+): Promise<{
   structured: Record<string, unknown>;
   text: string;
 }> {
   const client = new MusterdClient(config);
   await client.join();
-  await seed(3);
+  if (unread > 0) await seed(unread);
   const mcp = buildMcpServer(client, config, {});
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const harness = new Client({ name: 'warn-harness', version: '0.0.0' });
@@ -178,5 +181,81 @@ describe('a stale adapter tells a structuredContent-only client about itself', (
     const warnings = (structured['warnings'] as Warning[] | undefined) ?? [];
     expect(warnings.find((w) => w.kind === 'build_skew')).toBeUndefined();
     expect(text).not.toMatch(/stale tools/);
+  }, 30_000);
+});
+
+/**
+ * The same seam, one warning further along (ADR 408 increment 4).
+ *
+ * Increment 3 made a stale workspace repair itself at session start and print one line. That line is
+ * read once, before the first turn, and says nothing about what it could NOT repair — the permission
+ * floor, a hook every seat shares, a folder carrying the tombstone. This is where the rest of it has
+ * to arrive, and it arrives as a third member of the array build skew already rides, not as a key of
+ * its own: a client that does not know a new key drops it silently, which is the defect above.
+ */
+describe('a drifted workspace tells a structuredContent-only client about itself', () => {
+  const writeCache = (over: Record<string, unknown> = {}): void => {
+    mkdirSync(join(seatDir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(seatDir, '.musterd', 'drift.json'),
+      JSON.stringify({
+        inspected_at: 1700,
+        build: DAEMON_BUILD,
+        guidance: 2,
+        hooks: 1,
+        permissions: 0,
+        declined: false,
+        ...over,
+      }),
+    );
+  };
+
+  it('carries provisioning drift in structuredContent, beside the build skew', async () => {
+    writeCache();
+    const { structured } = await checkInbox(adaConfig(ADAPTER_BUILD));
+    const warnings = (structured['warnings'] as Warning[] | undefined) ?? [];
+    const drift = warnings.find((w) => w.kind === 'provisioning_drift');
+    expect(drift, `no provisioning_drift in ${JSON.stringify(warnings)}`).toBeDefined();
+    expect(drift!['guidance']).toBe(2);
+    expect(drift!['hooks']).toBe(1);
+    expect(drift!['repairable_at']).toBe('session-start');
+    expect(drift!['inspected_at']).toBe(1700);
+    // Both warnings on ONE array — the point of the shape. A client branches on `kind`; it does not
+    // learn a second place to look every time something new can be wrong.
+    expect(warnings.find((w) => w.kind === 'build_skew')).toBeDefined();
+  }, 30_000);
+
+  it('says it in the prose too — a text-rendering client must see the same finding', async () => {
+    writeCache();
+    const { text } = await checkInbox(adaConfig(ADAPTER_BUILD));
+    expect(text).toMatch(/behind on 2 guidance files and 1 hook/);
+  }, 30_000);
+
+  it('stays silent when the cache says the workspace is clean', async () => {
+    writeCache({ guidance: 0, hooks: 0, permissions: 0 });
+    const { structured, text } = await checkInbox(adaConfig(DAEMON_BUILD));
+    const warnings = (structured['warnings'] as Warning[] | undefined) ?? [];
+    expect(warnings.find((w) => w.kind === 'provisioning_drift')).toBeUndefined();
+    expect(text).not.toMatch(/this workspace is behind/);
+  }, 30_000);
+
+  // A seat that has never run a probe has no cache. That is NOT clean and it is not drift either;
+  // until the `unknown` case exists, the honest behaviour is the same as every other warning here —
+  // say nothing rather than invent a state.
+  // The empty inbox is the one path that returns no structuredContent at all, so prose is the ONLY
+  // channel there — and it is also the seat with the most room to actually run the repair. A
+  // warning that only fires on a busy inbox reaches the drifted seat least often.
+  it('says it on an EMPTY inbox too, where prose is the only channel', async () => {
+    writeCache();
+    const { text } = await checkInbox(adaConfig(DAEMON_BUILD), 0);
+    expect(text).toMatch(/no new messages/);
+    expect(text).toMatch(/behind on 2 guidance files and 1 hook/);
+  }, 30_000);
+
+  it('stays silent when no probe has ever written a cache', async () => {
+    rmSync(join(seatDir, '.musterd', 'drift.json'), { force: true });
+    const { structured } = await checkInbox(adaConfig(DAEMON_BUILD));
+    const warnings = (structured['warnings'] as Warning[] | undefined) ?? [];
+    expect(warnings.find((w) => w.kind === 'provisioning_drift')).toBeUndefined();
   }, 30_000);
 });

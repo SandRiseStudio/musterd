@@ -6,6 +6,8 @@ import { linkReceived } from '../otel.js';
 import {
   buildSkewOf,
   buildSkewWarning,
+  provisioningDriftLine,
+  provisioningDriftOf,
   formatMessage,
   syncWedgeOfClient,
   syncWedgeWarningFor,
@@ -405,7 +407,12 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
             'no new messages — nothing waiting on you; check again at your next task boundary' +
               recall +
               (await syncWedgeWarningFor(client)) +
-              (await buildSkewWarning(client)),
+              (await buildSkewWarning(client)) +
+              // ADR 408 inc 4: the same reasoning as the skew line above. A drifted workspace that
+              // only ever gets told about itself on a BUSY inbox is told least often on the seat
+              // that has the least going on — and an empty inbox is exactly the moment a seat has
+              // room to run the repair.
+              provisioningDriftLine(client.workspaceDir),
           );
         }
         // ADR 378: a turn carries no huddle meta of its own, so a threaded act is the ONLY hint that
@@ -505,9 +512,15 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         // Before lane 01M2NRYJEQ only the prose existed, so on this path — the non-empty one, the
         // only one a busy seat ever takes — a structuredContent-rendering harness was shown no
         // warning at all, and a session running stale tools looked identical to a fresh one.
-        const warnings = [await syncWedgeOfClient(client), await buildSkewOf(client)].filter(
-          (w): w is ToolWarning => w !== null,
-        );
+        // The third member (ADR 408 inc 4) rides the SAME array rather than a key of its own: one
+        // discriminator, one place a client looks. `provisioningDriftOf` only READS the cache the
+        // CLI left in `.musterd/drift.json` — it never inspects the workspace on this seam, which a
+        // busy seat takes many times a minute.
+        const warnings = [
+          await syncWedgeOfClient(client),
+          await buildSkewOf(client),
+          provisioningDriftOf(client.workspaceDir),
+        ].filter((w): w is ToolWarning => w !== null);
         const text =
           notice +
           messages.map(line).join('\n') +
