@@ -274,4 +274,64 @@ describe('musterd huddle', () => {
       );
     });
   });
+
+  /*
+   * Lane 01M2KSDKVZ. docs/wiki/cross-machine-huddle-bell.md, 2026-09-04: "nothing refuses a turn
+   * against a root the local daemon has never seen" — `say` took `thread` straight from argv and
+   * nothing resolved it. Its falsifier names this verb. I relied on the hole myself to force receipt
+   * order for the delta re-measurement (#1446), so it is confirmed first-hand, not inferred.
+   *
+   * A turn against an id no root backs is not an error anyone sees: it persists as an ordinary
+   * message, is never folded into the room, and can never ring the bell — the failure is silence.
+   *
+   * The guard belongs HERE and not in the daemon. A turn legitimately arrives before its root on a
+   * joiner (that is #1442's whole subject), `fold.ts` must never refuse, and `thread` is not
+   * huddle-specific — every threaded act carries one — so a server-side refusal would reach far past
+   * huddles and wedge legitimate replies (ADR 145: degrade, never wedge).
+   */
+  describe('a turn names a room this daemon can see (lane 01M2KSDKVZ)', () => {
+    it('refuses a turn against an id no huddle backs, and says both reasons it can be', async () => {
+      await expect(huddleCommand(parseArgs(['say', '01NOPE', 'hello']))).rejects.toThrow(
+        /no huddle 01NOPE/,
+      );
+      // The two real causes, because a joiner's operator needs to know waiting is an option.
+      await expect(huddleCommand(parseArgs(['say', '01NOPE', 'hello']))).rejects.toThrow(
+        /not folded here yet|sync tick/,
+      );
+    });
+
+    it('refuses a close against an id no huddle backs', async () => {
+      await expect(
+        huddleCommand(parseArgs(['close', '01NOPE', '--anchor-ref', 'none', 'done'])),
+      ).rejects.toThrow(/no huddle 01NOPE/);
+    });
+
+    it('resolves a PREFIX to the whole id, so a turn never threads against a fragment', async () => {
+      // `show` already accepted a prefix while `say` did not resolve at all, so a prefix became the
+      // `thread` verbatim — an orphan against a root that cannot exist. Same resolution, both verbs.
+      const root = await open();
+      const id = String(root['huddle_id']);
+      const res = await capture(() =>
+        huddleCommand(parseArgs(['say', id.slice(0, 8), 'a turn', '--json'])),
+      );
+      expect(res.code).toBe(0);
+      expect((JSON.parse(res.out) as { thread?: string }).thread).toBe(id);
+    });
+
+    it('an unreachable daemon fails as unreachable, never as "no such room"', async () => {
+      const root = await open();
+      const id = String(root['huddle_id']);
+      // My first version of this test asserted the turn still SENDS with the daemon down. It does
+      // not, and never did — `sendOrEcho` rethrows a connection error. The property that actually
+      // matters is narrower: a timeline that cannot be READ is not evidence the room is absent, so
+      // the guard must not convert an outage into a verdict about the id.
+      await server.close();
+      await expect(huddleCommand(parseArgs(['say', id, 'a turn']))).rejects.toThrow(
+        /can't reach team server/,
+      );
+      await expect(huddleCommand(parseArgs(['say', id, 'a turn']))).rejects.not.toThrow(
+        /no huddle/,
+      );
+    });
+  });
 });
