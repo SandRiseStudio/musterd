@@ -1,0 +1,44 @@
+<!doctype html>
+<!--
+  The musterd share card — og:image / twitter:image for musterd.io and the README unfurl.
+  THIS FILE IS THE SOURCE. docs/design/assets/social-card.png is a build artifact; render it with
+  the command in README.md here and never hand-edit the PNG. Until 2026-09-16 the card existed
+  only as a PNG from a Figma export (docs/design/figma-brief-brand.md), which is the same trap the
+  one-slide fell into: copy three weeks behind the positioning decision with nobody able to fix it.
+  Copy is derived, not invented: the one-liner is brand.md §1 verbatim; the accent line is the
+  ADR 320 §5a compression (2026-09-16) — a name on every act, a human on the same roster — with
+  README Principle 1 kept as its second half. Voice: brand.md §4. Palette: brand.md §2 (zinc-900
+  ground, mustard-500 accent). 1200×630. Self-contained: no network, no font files, no build step.
+-->
+<html lang="en">
+<meta charset="utf-8" />
+<title>musterd — share card</title>
+<style>
+  @page { size: 1200px 630px; margin: 0; }
+  :root {
+    --bg: #18181b;          /* zinc-900 */
+    --stripe: #1f1f23;
+    --ink: #fafafa;         /* zinc-50 */
+    --muted: #a1a1aa;       /* zinc-400 */
+    --accent: #e1ad01;      /* mustard-500 */
+    --mono: 'JetBrains Mono', 'SF Mono', Menlo, 'Courier New', monospace;
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); }
+  .card {
+    position: relative; width: 1200px; height: 630px; overflow: hidden; box-sizing: border-box;
+    padding: 72px 72px 64px;
+    background: repeating-linear-gradient(90deg, var(--bg) 0 14px, var(--stripe) 14px 15px);
+    font-family: var(--mono); color: var(--ink);
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .word { font-size: 64px; font-weight: 700; letter-spacing: 0; line-height: 1; }
+  .word b { color: var(--accent); font-weight: 700; }
+  .line { font-size: 30px; line-height: 1.45; color: var(--muted); max-width: 640px; margin: 0; }
+  .accent { font-size: 18px; line-height: 1.5; color: var(--accent); margin: 0; max-width: 760px; }
+</style>
+<div class="card">
+  <div class="word">muster<b>d</b></div>
+  <p class="line">Named, persistent teams of<br />agents and humans —<br />across any harness,<br />with a shared protocol.</p>
+  <p class="accent">every act has a name on it, and a human is on the same roster.<br />humans are members, not approvers.</p>
+</div>
+</html>

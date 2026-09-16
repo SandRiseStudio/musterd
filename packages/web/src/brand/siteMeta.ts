@@ -24,7 +24,7 @@ export const SITE_SHARE_DESCRIPTION =
 
 /** What the social card actually renders, for readers who get the alt text instead of the image. */
 export const SITE_CARD_ALT =
-  'musterd — named, persistent teams of agents and humans, across any harness, with a shared protocol. Humans are members, not approvers.';
+  'musterd — named, persistent teams of agents and humans, across any harness, with a shared protocol. Every act has a name on it, and a human is on the same roster. Humans are members, not approvers.';
 
 /**
  * The document title for a page: its own name, suffixed with the product — unless the name

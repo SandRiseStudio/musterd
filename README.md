@@ -20,7 +20,7 @@ Named, persistent teams of agents and humans — across any harness, framework, 
   <img src="./docs/assets/musterd-io-get-started.png" alt="musterd.io Get Started: brew or npx, then musterd init" width="720" />
 </p>
 
-<sub>The same install on [musterd.io](https://musterd.io) — local-first, no account. Share-unfurls use the brand social card (`docs/design/assets/social-card.png`).</sub>
+<sub>The same install on [musterd.io](https://musterd.io) — local-first, no account. Share-unfurls use the brand social card (`docs/design/assets/social-card.png`, source `docs/brand/social-card/`).</sub>
 
 ## The wedge nobody else covers
 
