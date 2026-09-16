@@ -27,6 +27,10 @@ Same as the /watch spec §2, restated because these strings ship to a stranger w
 | Clips | **On**, anyone can clip | The acquisition asset. |
 | Old clips | Delete the seven `nix pix` clips (6–7 years old, prior life of the account) | The channel's only permanent content should be about the channel. |
 | Schedule | **Leave empty** | /watch spec §2 and §9: publish no schedule until the team keeps one. |
+| Always Publish VODs | **On**, Excluded Categories empty | Otherwise stored broadcasts sit unpublished and each needs reviewing by hand. |
+| YouTube connection | **Connected and verified** — `twitch.tv/settings/connections` (account settings, not the Creator Dashboard) | Past broadcasts are deleted after **7 days** on this channel ([audit](../wiki/twitch-channel-audit.md)). The connection turns on Export in Video Producer, which is the only way a session survives the week without a manual download. Verify the YouTube account or uploads cap at 15 minutes, shorter than a session. |
+
+Two things Twitch states that decide the order: Store Past Broadcasts is **web-only** and must be on *before* going live — an unsaved broadcast cannot be recovered — and **Uploads are Affiliate-only**, so externally edited video cannot live on the channel yet. Clips are stored indefinitely at every tier; the VOD is only the window in which one can be cut.
 
 ## 3. Title
 
@@ -95,3 +99,6 @@ continues at github.com/SandRiseStudio/musterd`. Never the word "offline" (reads
 4. After the first stream under these settings, record on the audit page what the directory card
    looked like and where it sat in the Software and Game Development listing — the number the audit
    could not measure.
+5. Within 7 days of that stream, at least one clip exists and the past broadcast has been exported
+   to YouTube — check both before the retention window closes, because after it the recording is
+   gone and neither can be done.

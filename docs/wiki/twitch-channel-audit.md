@@ -30,12 +30,43 @@ Twitch's published Affiliate criteria are all four of: **50 followers**, **500 t
 
 Cheapest and highest-leverage first. The first two are dashboard toggles; the rest are copy, and the copy is specified in [the channel copy spec](../design/twitch-channel-copy-spec.md).
 
-1. **Turn on VOD storage, and clips.** Every session produces nothing that outlives it (2026-09-16; falsify: the public `/videos` page lists a past broadcast). Live concurrents for a niche engineering stream will stay small whatever the category; the asymmetric return is each session becoming a durable artifact that can be clipped, linked from a post, and found later. Do this before the next stream, not after — a broadcast that was not recorded cannot be clipped from. <!-- claim: defect -->
+1. **Turn on VOD storage, and clips.** Every session produces nothing that outlives it (2026-09-16; falsify: the public `/videos` page lists a past broadcast). Live concurrents for a niche engineering stream will stay small whatever the category; the return is that a session can be clipped at all. Do this before the next stream, not after — a broadcast that was not recorded cannot be clipped from. ~~"the asymmetric return is each session becoming a durable artifact that can be clipped, linked from a post, and found later" (2026-09-16)~~ CORRECTED the same day — a stored past broadcast is **not** durable on this channel; see [retention](#a-stored-vod-is-not-a-durable-artifact-it-is-deleted-after-7-days-on-this-channel-2026-09-16-falsify-twitchs-on-demand-content-help-article-states-the-retention-tier-for-each-account-type) below, and turn the two settings on together with the export path or the recording is gone in a week. <!-- claim: defect -->
 2. **Move the category to Software and Game Development.** One dropdown. It changes which directory the card appears in and how deep. The ratio between the two categories' live-channel counts was not measured tonight (the directory pages render nothing readable to a logged-out fetch); the direction is not in doubt, the magnitude is unrecorded — measure it before quoting a number.
 3. **Set all 10 tags.** Unset tags are a discovery input left at zero.
 4. **Retitle so the first four words work on a stranger.** The card is read left to right and truncated; lead with the searchable claim.
 5. **Fill three About panels.** What this is, where the code is, where to start.
 6. **Decide the schedule question honestly.** Twitch rewards long, frequent, predictable streams; the team works in sessions. Either commit to recurring blocks that will actually be kept, or accept the point below and let the schedule stay empty rather than invented.
+
+## A stored VOD is not a durable artifact — it is deleted after 7 days on this channel (2026-09-16; falsify: Twitch's On-Demand Content help article states the retention tier for each account type) <!-- claim: defect -->
+
+This corrects the leverage-order item above, written earlier the same day. Turning Store Past Broadcasts on does not make a session permanent; it buys a retention window, and this channel is on the shortest one.
+
+| Account type | Past broadcasts kept |
+| --- | --- |
+| Partner, Prime, Turbo | 60 days |
+| Affiliate | 14 days |
+| **Everyone else — including this channel** | **7 days** |
+
+The channel has no Subscribe button, so it is neither Affiliate nor Partner ([above](#subscribers-are-not-possible-yet-2026-09-16-falsify-the-achievements-card-in-the-creator-dashboard-lists-the-affiliate-criteria-and-how-many-are-met)) — 7 days. Two consequences the first draft missed:
+
+- **Clips, not VODs, are the durable asset.** Clips are stored indefinitely at every tier. A VOD is the week-long window in which a clip can still be cut. That strengthens rather than weakens the reading below — the clip was already named the acquisition asset; what is new is that the VOD it comes from expires.
+- **Permanence off Twitch needs the export.** A Twitch account can be connected to YouTube, after which Video Producer offers **Export** on each video and uploads it without a local download. Without that connection, or a manual download, the recording is gone in a week whatever the toggle says.
+
+Also load-bearing and easy to get wrong: **Uploads are Affiliate-only** (2026-09-16; falsify: the upload button appears above the video list in Video Producer). Externally edited video cannot be put on the channel at all until Affiliate, so YouTube is the home for anything cut outside Twitch until then. <!-- claim: other -->
+
+## Where these settings actually live (2026-09-16; falsify: open each path — a moved menu is what would disprove it) <!-- claim: other -->
+
+Recorded because all four were re-derived by hand once and none of them is where a first guess puts it.
+
+| Thing | Path |
+| --- | --- |
+| Store Past Broadcasts, Always Publish VODs, Excluded Categories | Creator Dashboard → Settings → **Stream** (`dashboard.twitch.tv/u/<channel>/settings/stream`) |
+| Clip Settings | the same page, **Clip Settings** section (`link.twitch.tv/ClipSettings`) |
+| Clips Manager — where the old clips get deleted | Creator Dashboard → **Content → Clips** |
+| Video Producer — download, Export to YouTube, publish/unpublish | Creator Dashboard → **Content → Video Producer** |
+| YouTube connection | **account** settings, not the Creator Dashboard: `twitch.tv/settings/connections`, under Recommended Connections |
+
+Two traps stated by Twitch and worth repeating (2026-09-16; falsify: the On-Demand Content help article drops either warning): Store Past Broadcasts is **web-only**, absent from the mobile app, and a broadcast that was not saved **cannot be recovered by Twitch Support** — the setting must be on before going live, not after. <!-- claim: other -->
 
 ## The part that is not a Twitch setting (2026-09-16; falsify: after the settings above land, compare the referrer mix on the /watch page and the channel's own analytics — if Twitch directory browse is a majority source, this reading is wrong) <!-- claim: other -->
 
@@ -48,3 +79,4 @@ The owned half of that path is the [/watch page](../design/watch-page-copy-spec.
 - Live-channel counts per category (see item 2).
 - Anything dashboard-only: tags as set, VOD/clip toggles as set, the Achievements card, past stream analytics. The rows above infer those from the public result; the dashboard is where the inference gets confirmed or corrected.
 - Where the 5 followers came from.
+- Whether a YouTube account is already connected, and whether it is verified (YouTube caps unverified uploads at 15 minutes, which is shorter than a typical session).
