@@ -601,6 +601,26 @@ export type HandoffLaneBasis = 'handed_to_recipient' | 'held';
  * false ambiguity, and a handed one must never be outvoted by lanes that have nothing to do with
  * this recipient.
  */
+/**
+ * Is there anything left to hand over in a lane in this state?
+ *
+ * Terminal is the obvious half. `awaiting_acceptance` is the half this used to miss (lane
+ * 01M2KTBDNP, observed 2026-09-15): the work has LANDED there — the branch is merged, its remote is
+ * deleted, and the only act still owed is somebody else's accept — so a handoff cannot be about it.
+ * The old filter asked only "not terminal", so a submitted lane stayed a candidate and, for a seat
+ * holding exactly one, was attached with confidence rather than reaching the deliberate
+ * warn-and-attach-nothing path. That is not a display wart: on `attach` the route rewrites the
+ * envelope's `meta.lane_handoff`, so the delivered act permanently names finished work, and ADR 243
+ * exists so the orientation `why` can read that field and tell the recipient which work this is.
+ *
+ * Read through `isAwaitingAcceptance`, never by comparing against a name: `ready_for_review` is the
+ * ADR 169 spelling still dual-accepted on the wire, and matching only the canonical one would leave
+ * a skewed daemon's lanes derivable (lanes.wire.ts says exactly this).
+ */
+function hasWorkLeftToHandOver(state: LaneState): boolean {
+  return !LANE_TERMINAL_STATES.has(state) && !isAwaitingAcceptance(state);
+}
+
 export function deriveHandoffLane(
   db: Database,
   teamId: string,
@@ -615,8 +635,8 @@ export function deriveHandoffLane(
     if (handed.length === 1) return { kind: 'attach', lane: handed[0]!, basis };
     if (handed.length > 1) return { kind: 'ambiguous', candidates: handed, basis };
   }
-  const held = listLanes(db, teamId, teamSlug, { owner: seat }).filter(
-    (l) => !LANE_TERMINAL_STATES.has(l.state),
+  const held = listLanes(db, teamId, teamSlug, { owner: seat }).filter((l) =>
+    hasWorkLeftToHandOver(l.state),
   );
   if (held.length === 0) return { kind: 'none' };
   if (held.length === 1) return { kind: 'attach', lane: held[0]!, basis: 'held' };
@@ -667,7 +687,7 @@ function lanesHandedTo(
   }
   if (handedIds.size === 0) return [];
   return listLanes(db, teamId, teamSlug, { owner: recipient }).filter(
-    (l) => handedIds.has(l.id) && !LANE_TERMINAL_STATES.has(l.state),
+    (l) => handedIds.has(l.id) && hasWorkLeftToHandOver(l.state),
   );
 }
 
