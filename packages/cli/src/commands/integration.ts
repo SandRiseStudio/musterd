@@ -19,6 +19,11 @@ import {
   renderAperturePolicy,
   resolveGovernedPolicy,
 } from '../integrations/governed-models.js';
+import {
+  loadGovernedTransportManifest,
+  renderTailscaleTransport,
+  TAILSCALE_GENERATED_DIR,
+} from '../integrations/governed-transport.js';
 import { composeIntegrationReport, renderIntegrationReport } from '../integrations/report.js';
 import {
   inspectTailscaleTransport,
@@ -108,6 +113,46 @@ function generateAperture(parsed: Parsed, deps: IntegrationCommandDeps): number 
   return 0;
 }
 
+function generateTailscale(parsed: Parsed, deps: IntegrationCommandDeps): number {
+  if (parsed.positionals.length !== 2 || parsed.positionals[1] !== 'tailscale') {
+    throw new CliError('musterd integration generate tailscale [--write | --check]', 2);
+  }
+  const write = parsed.flags['write'] === true;
+  const check = parsed.flags['check'] === true;
+  if (write && check) throw new CliError('--write and --check are mutually exclusive', 2);
+  const rootDir = (deps.cwd ?? process.cwd)();
+  const manifest = loadGovernedTransportManifest(rootDir);
+  if (!manifest) throw new CliError('missing .musterd/governed-transport.json', 2);
+  const rendered = renderTailscaleTransport(rootDir, manifest);
+  const dir = join(rootDir, TAILSCALE_GENERATED_DIR);
+  const policy = join(dir, 'policy.hujson');
+  const workloads = join(dir, 'workloads.json');
+  const isCurrent = current(policy, rendered.policy) && current(workloads, rendered.workloads);
+  const out = deps.out ?? ((text: string) => process.stdout.write(text));
+  if (check) {
+    out(
+      isCurrent
+        ? 'Tailscale transport policy is current\n'
+        : 'Tailscale transport policy is stale; run musterd integration generate tailscale --write\n',
+    );
+    return isCurrent ? 0 : 1;
+  }
+  if (write) {
+    if (!isCurrent) {
+      atomicWrite(policy, rendered.policy);
+      atomicWrite(workloads, rendered.workloads);
+    }
+    out('Tailscale transport policy is current\n');
+    return 0;
+  }
+  out(
+    isCurrent
+      ? 'Tailscale transport policy is current\n'
+      : `--- ${TAILSCALE_GENERATED_DIR}/policy.hujson\n+++ generated policy.hujson\n${rendered.policy}--- ${TAILSCALE_GENERATED_DIR}/workloads.json\n+++ generated workloads.json\n${rendered.workloads}`,
+  );
+  return 0;
+}
+
 const APERTURE_KEYS = [
   ['aperture-config-api', 'Aperture config API'],
   ['aperture-retention', 'body retention'],
@@ -188,7 +233,11 @@ export async function integrationCommand(
   parsed: Parsed,
   deps: IntegrationCommandDeps = {},
 ): Promise<number> {
-  if (parsed.positionals[0] === 'generate') return generateAperture(parsed, deps);
+  if (parsed.positionals[0] === 'generate') {
+    return parsed.positionals[1] === 'tailscale'
+      ? generateTailscale(parsed, deps)
+      : generateAperture(parsed, deps);
+  }
   if (parsed.positionals.length !== 1 || parsed.positionals[0] !== 'doctor') {
     throw new CliError(
       'musterd integration doctor [--tailscale] [--aperture <https-url>] [--json]',

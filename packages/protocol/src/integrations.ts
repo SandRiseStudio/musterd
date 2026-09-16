@@ -104,6 +104,71 @@ export const GovernedModelsManifestSchema = z
   });
 export type GovernedModelsManifest = z.infer<typeof GovernedModelsManifestSchema>;
 
+const TailscaleTagSchema = z.string().regex(/^tag:[a-z0-9][a-z0-9-]*$/);
+const TransportNodeKeySchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/);
+const TransportMemberSchema = z.string().min(1);
+const CREDENTIAL_LIKE = /(?:mskey_|msgr_|mscr_|msac_|msls_|token|secret|api[_-]?key|password)/i;
+
+export const GovernedTransportManifestSchema = z
+  .object({
+    version: z.literal(1),
+    aperture_tag: TailscaleTagSchema,
+    tag_owners: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .refine(
+            (owner) => !/[?*]/.test(owner) && !owner.startsWith('autogroup:'),
+            'tag owner must be an explicit, non-wildcard principal',
+          ),
+      )
+      .min(1),
+    nodes: z
+      .array(
+        z.object({
+          node_key: TransportNodeKeySchema,
+          members: z.array(TransportMemberSchema).min(1),
+        }),
+      )
+      .min(1),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const keys = new Set<string>();
+    for (const [index, node] of value.nodes.entries()) {
+      if (keys.has(node.node_key))
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['nodes', index],
+          message: 'node_key must be unique',
+        });
+      keys.add(node.node_key);
+      const members = new Set<string>();
+      for (const [memberIndex, member] of node.members.entries()) {
+        if (members.has(member))
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['nodes', index, 'members', memberIndex],
+            message: 'a Member may appear once per transport node',
+          });
+        members.add(member);
+      }
+    }
+    const values = [
+      value.aperture_tag,
+      ...value.tag_owners,
+      ...value.nodes.flatMap((node) => [node.node_key, ...node.members]),
+    ];
+    if (values.some((entry) => CREDENTIAL_LIKE.test(entry))) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'transport manifest must not contain credential-like text',
+      });
+    }
+  });
+export type GovernedTransportManifest = z.infer<typeof GovernedTransportManifestSchema>;
+
 /** Vendor-owned Tailscale status JSON. The inspector reads only Self's identity and reachability facts. */
 export const TailscaleStatusSchema = z
   .object({

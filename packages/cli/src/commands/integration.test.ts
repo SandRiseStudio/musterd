@@ -241,3 +241,61 @@ describe('musterd integration generate aperture (ADR 400)', () => {
     ).rejects.toMatchObject({ exitCode: 2 });
   });
 });
+
+describe('musterd integration generate tailscale (ADR 402)', () => {
+  function workspace() {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-tailscale-'));
+    mkdirSync(join(root, '.musterd', 'seats'), { recursive: true });
+    mkdirSync(join(root, '.musterd', 'roles'));
+    writeFileSync(join(root, '.musterd', 'team.toml'), 'slug = "test"\n');
+    writeFileSync(join(root, '.musterd', 'seats', 'agent.toml'), 'kind = "agent"\n');
+    writeFileSync(join(root, '.musterd', 'seats', 'human.toml'), 'kind = "human"\n');
+    writeFileSync(
+      join(root, '.musterd', 'governed-models.json'),
+      JSON.stringify({
+        version: 1,
+        team: {
+          models: ['anthropic/claude-sonnet-4-6'],
+          quota: { capacity: '$20', rate: '$10/day' },
+          default_tier: 'standard',
+        },
+        quota_tiers: [{ id: 'standard', quota: { capacity: '$10', rate: '$5/day' } }],
+        roles: {},
+        workloads: { agent: { workload_id: 'a7f3c2' } },
+      }),
+    );
+    writeFileSync(
+      join(root, '.musterd', 'governed-transport.json'),
+      JSON.stringify({
+        version: 1,
+        aperture_tag: 'tag:aperture',
+        tag_owners: ['group:operators'],
+        nodes: [{ node_key: 'studio-a', members: ['agent'] }],
+      }),
+    );
+    return root;
+  }
+
+  it('previews, atomically writes, and byte-checks the two managed artifacts', async () => {
+    const root = workspace();
+    const preview = await run(['generate', 'tailscale'], { cwd: () => root });
+    expect(preview.code).toBe(0);
+    expect(preview.text).toContain('generated/tailscale/policy.hujson');
+    const write = await run(['generate', 'tailscale', '--write'], { cwd: () => root });
+    expect(write.text).toBe('Tailscale transport policy is current\n');
+    const workloads = join(root, '.musterd', 'generated', 'tailscale', 'workloads.json');
+    expect(readFileSync(workloads, 'utf8')).toContain('tag:musterd-member-a7f3c2');
+    expect((await run(['generate', 'tailscale', '--check'], { cwd: () => root })).code).toBe(0);
+    writeFileSync(workloads, 'stale\n');
+    expect((await run(['generate', 'tailscale', '--check'], { cwd: () => root })).code).toBe(1);
+  });
+
+  it.each([
+    [['generate', 'tailscale', '--write', '--check'], 'mutually exclusive generator modes'],
+    [['generate', 'tailscale', 'extra'], 'unknown tailscale generator arguments'],
+  ])('rejects %s', async (argv) => {
+    await expect(
+      integrationCommand(parseArgs(argv), { ...harness().deps, cwd: workspace }),
+    ).rejects.toMatchObject({ exitCode: 2 });
+  });
+});
