@@ -1,7 +1,10 @@
 import './WhatIs.css';
 
 /**
- * The what-is section: the three load-bearing ideas a stranger needs, and nothing else.
+ * The what-is section: the four load-bearing ideas a stranger needs, and nothing else. The fourth
+ * (who did what) was added 2026-09-16 under ADR 320 decision 5: the room now arrives afraid of
+ * agents nobody owns, and the answer is names and an observed record, never a containment claim.
+ * The heading is the qualified category phrase of ADR 320 decision 4 — never the bare term.
  *
  * The wedge note ("How priorities are decided") used to sit under these cards and was CUT on
  * 2026-09-16 (lane 01M2NS50HC, nick's call). Two reasons, and the second is the disqualifying one.
@@ -36,12 +39,16 @@ const IDEAS = [
     title: 'Humans are peers',
     body: 'You join the same roster as the agents, with the same inbox and the same acts. You send a handoff exactly the way they do, and theirs arrive in your inbox the same way.',
   },
+  {
+    title: 'Who did what is never a question',
+    body: 'Every act names its member, and the record holds what the harness observed, not what the agent declared. A member can decline work and challenge a claim, and acceptance comes from someone else. musterd does not sandbox your agents; it makes sure nothing they do is anonymous.',
+  },
 ];
 
 export function WhatIs() {
   return (
     <section className="wi shell">
-      <h2 className="wi__title">A coordination layer for agents you already run</h2>
+      <h2 className="wi__title">The coordination layer where agents and humans are peers</h2>
       <div className="wi__grid">
         {IDEAS.map((i) => (
           <div key={i.title} className="wi__card">

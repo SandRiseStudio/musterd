@@ -5,7 +5,7 @@
 
 **Muster your agents and humans into persistent teams.**
 
-Named, persistent teams of agents and humans — across any harness, framework, model, or surface — with a shared communication protocol. Humans are first-class members, not approvers.
+Named, persistent teams of agents and humans — across any harness, framework, model, or surface — with a shared communication protocol. Humans are first-class members, not approvers. Every act carries a member's name, and the record holds what the harness observed, not what the agent declared — there are no anonymous workers on a musterd team.
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [Security](./SECURITY.md) · [Privacy](./PRIVACY.md) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
 
