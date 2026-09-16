@@ -22,11 +22,23 @@ export interface Ref {
 const REPO = 'https://github.com/SandRiseStudio/musterd/blob/main';
 const doc = (path: string, label: string): Ref => ({ label, href: `${REPO}/${path}` });
 
-/** The prioritisation note under the hero. Also rendered into ROADMAP.md by `pnpm roadmap:gen`. */
+/**
+ * The prioritisation note, rendered into ROADMAP.md by `pnpm roadmap:gen`.
+ *
+ * NO LONGER ON THE HOMEPAGE (cut 2026-09-16, lane 01M2NS50HC — see WhatIs.tsx for why). Its reader
+ * is a contributor deciding what to work on, not a stranger deciding whether to install. Kept here
+ * rather than moved because `gen-roadmap` imports it and this package is the one that is picky
+ * about bytes; it costs the bundle nothing now that no component references it.
+ *
+ * The 79% names MAST and links it. It did not, and on a public page that made a third party's
+ * failure taxonomy read as our own measurement — the move ADR 320's "what this is not" forbids.
+ * A borrowed number carries its source wherever it is rendered, including in our own repo.
+ */
 export const WEDGE = {
   heading: 'How priorities are decided',
-  body: 'The wedge is persistent teams with identity, presence, and humans as peers — the coordination layer where about 79% of multi-agent failures actually happen. Work is weighed by whether it strengthens that layer, not by adding more agents or more orchestration. Human partnership ranks first, on evidence: collaborative agents beat fully autonomous ones on real-user preference, and removing the notification protocol more than halves the win rate.',
+  body: 'The wedge is persistent teams with identity, presence, and humans as peers — the coordination layer where MAST (arXiv 2503.13657) attributes about 79% of multi-agent failures, across other teams\u2019 systems rather than ours. Work is weighed by whether it strengthens that layer, not by adding more agents or more orchestration. Human partnership ranks first, on evidence: collaborative agents beat fully autonomous ones on real-user preference, and removing the notification protocol more than halves the win rate.',
   refs: [
+    { label: 'MAST (arXiv 2503.13657)', href: 'https://arxiv.org/abs/2503.13657' },
     doc('ROADMAP.md', 'ROADMAP.md'),
     doc('docs/design/research-foundation.md', 'research-foundation.md'),
     doc('docs/design/landscape.md', 'landscape.md'),
