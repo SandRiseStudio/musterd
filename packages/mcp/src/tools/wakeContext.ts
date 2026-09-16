@@ -29,8 +29,10 @@ export function registerWakeContext(server: McpServer, client: MusterdClient): v
     {
       description: DESCRIPTION,
       inputSchema: {
-        act_id: z.string().min(1).optional().describe('directed Act id'),
-        lane_id: z.string().min(1).optional().describe('owned Lane id'),
+        // The hint is short on purpose: the tools list has a byte budget (context:check) and the
+        // wake line itself now spells the call — `team_wake_context {act_id: "…"}` (lane 01M2P698NJ).
+        act_id: z.string().min(1).optional().describe('Act id from your wake line'),
+        lane_id: z.string().min(1).optional().describe('Lane id from your wake line'),
       },
     },
     async (args) => {

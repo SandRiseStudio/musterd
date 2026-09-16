@@ -695,14 +695,33 @@ function isExhausted(db: Database, teamId: string, actId: string): boolean {
 
 /**
  * The daemon-composed spawn line (ADR 088 §4 injection bar): structured fields only — act enum,
- * delimited sender/seat names, one instruction to read the inbox through the governed tools. The
- * triggering act's **body never appears here** (nor anywhere in a lease response, ADR 128).
+ * delimited sender/seat names, the act's id, one instruction to read the inbox through the
+ * governed tools. The triggering act's **body never appears here** (nor anywhere in a lease
+ * response, ADR 128).
+ *
+ * **The line hands over the act id verbatim** (lane 01M2P698NJ). `team_wake_context` authorizes
+ * the act path by RECIPIENT and takes the id as its argument; a line that only said "a message is
+ * waiting" left the woken model to invent one. Measured 2026-09-16 on a native wake of seat compo:
+ * the loop's first call was `team_wake_context {act_id: "latest"}` → `forbidden wake context
+ * target` (audit `residency.context_read target=latest reason=forbidden`), so the packet the primer
+ * says to read first was unreadable on the very wake that composed this line. The review line got
+ * the same treatment on 2026-09-04 (`composeWorkOrderLine`); an id is a structured field, not
+ * body text, so the injection bar is unchanged.
  */
-function composeWakeLine(seat: string, teamSlug: string, act: string, sender: string): string {
+function composeWakeLine(
+  seat: string,
+  teamSlug: string,
+  act: string,
+  sender: string,
+  actId?: string,
+): string {
+  const orient =
+    actId !== undefined
+      ? `Orient via team_wake_context {act_id: "${actId}"}`
+      : 'Orient via team_wake_context';
   return (
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": a ${act} from "${sender}" is ` +
-    `waiting. Orient via team_wake_context, read it via team_inbox_check (or 'musterd inbox'), ` +
-    `and respond.`
+    `waiting. ${orient}, read it via team_inbox_check (or 'musterd inbox'), and respond.`
   );
 }
 
@@ -735,9 +754,10 @@ function composeWorkOrderLine(
       : `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
           `review. Orient via team_next and begin.`;
   }
+  // The owner is authorized on the lane path; spell its argument the same way the act path is.
   return (
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} is yours — ` +
-    `orient via team_wake_context (then team_next) and begin.`
+    `orient via team_wake_context {lane_id: "${laneId}"} (then team_next) and begin.`
   );
 }
 
@@ -1447,6 +1467,7 @@ export function claimWakeLeases(
                 teamSlug,
                 candidate.act ?? 'message',
                 candidate.sender ?? '?',
+                candidate.act_id,
               ),
           expires_at: lease.expires_at,
           tool_policy: isWorkOrder ? 'seat-policy' : policy.tool_policy,

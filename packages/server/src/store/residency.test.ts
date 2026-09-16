@@ -245,7 +245,11 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
     expect(order.composed_line).toContain('"nick"');
     expect(order.composed_line).toContain('"Ada"');
     expect(order.composed_line).not.toContain(' x ');
-    expect(order.composed_line).toContain('team_wake_context');
+    // The line hands over the act id verbatim (lane 01M2P698NJ): `team_wake_context` authorizes
+    // the act path by RECIPIENT and takes the id, and a line that only says "a message is waiting"
+    // left the woken model to guess one — measured 2026-09-16, a native wake's first call was
+    // `team_wake_context {act_id: "latest"}` → `forbidden wake context target`.
+    expect(order.composed_line).toContain('team_wake_context {act_id: "u1"}');
     expect(order.expires_at).toBeGreaterThan(Date.now());
 
     // The lease decision is audited (actor null — a machine decision).
@@ -1185,7 +1189,8 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     expect(orders[0]!.composed_line).toContain(lane.id);
     expect(orders[0]!.composed_line).toContain('is yours');
     expect(orders[0]!.composed_line).not.toContain('secret title');
-    expect(orders[0]!.composed_line).toContain('team_wake_context');
+    // The dispatch line spells the lane path's argument too — the owner is authorized on lane_id.
+    expect(orders[0]!.composed_line).toContain(`team_wake_context {lane_id: "${lane.id}"}`);
   });
 
   it('does not promote handoff to work_order when loops.dispatch is off (reply doorbell remains)', async () => {
