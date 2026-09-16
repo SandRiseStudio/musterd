@@ -3,6 +3,7 @@ import {
   ApertureConfigResponseSchema,
   ApertureConfigSchema,
   GovernedModelsManifestSchema,
+  GovernedTransportManifestSchema,
   IntegrationDoctorReportSchema,
   TailscaleServeStatusSchema,
   TailscaleStatusSchema,
@@ -192,5 +193,32 @@ describe('GovernedModelsManifestSchema (ADR 400)', () => {
     ],
   ])('rejects %s', (_name, value) => {
     expect(GovernedModelsManifestSchema.safeParse(value).success).toBe(false);
+  });
+});
+
+describe('GovernedTransportManifestSchema (ADR 402)', () => {
+  const manifest = {
+    version: 1,
+    aperture_tag: 'tag:aperture',
+    tag_owners: ['group:musterd-operators'],
+    nodes: [{ node_key: 'studio-a', members: ['ada'] }],
+  };
+
+  it('accepts exact tags, explicit owners, and opaque transport node keys', () => {
+    expect(GovernedTransportManifestSchema.parse(manifest)).toEqual(manifest);
+  });
+
+  it.each([
+    ['a wildcard aperture tag', { ...manifest, aperture_tag: 'tag:*' }],
+    ['a wildcard tag owner', { ...manifest, tag_owners: ['group:*'] }],
+    ['an automatic broad tag owner', { ...manifest, tag_owners: ['autogroup:admin'] }],
+    ['a duplicate node key', { ...manifest, nodes: [...manifest.nodes, ...manifest.nodes] }],
+    [
+      'a duplicated Member on one node',
+      { ...manifest, nodes: [{ node_key: 'studio-a', members: ['ada', 'ada'] }] },
+    ],
+    ['credential-like text', { ...manifest, nodes: [{ node_key: 'mskey_abc', members: ['ada'] }] }],
+  ])('rejects %s', (_name, value) => {
+    expect(GovernedTransportManifestSchema.safeParse(value).success).toBe(false);
   });
 });

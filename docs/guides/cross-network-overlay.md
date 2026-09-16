@@ -126,6 +126,19 @@ This creates no network connection and never applies configuration; an operator 
 two generated files into Aperture. The doctor then compares only that musterd-managed portion and
 still reports configuration readiness rather than active enforcement.
 
+The paired transport artifact is generated independently. It records explicit Tailscale tag owners,
+the exact workload-tag-to-Aperture HTTPS ACLs, and opaque declared node keys without contacting
+Tailscale or identifying any machine:
+
+```bash
+musterd integration generate tailscale --write
+musterd integration generate tailscale --check
+```
+
+Review and apply this artifact manually alongside the tailnet policy. A declared node key is Team
+policy only; it becomes a live-machine identity only through Increment 3's separate authorization
+protocol. The existing doctor remains the read-only check for the actual overlay posture.
+
 Run this checklist before you trust the team:
 
 1. **Reachability** — from a member's machine, confirm the daemon's `host:port` is reachable over the
