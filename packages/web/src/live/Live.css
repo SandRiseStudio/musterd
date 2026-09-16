@@ -5355,7 +5355,34 @@
 .lc-asks__quick,
 .lc-asks__meta,
 .lc-asks__link,
-.lc-asks__rail .lc-ask__clock {
+.lc-asks__rail /* The consequence line, where the tier token used to sit.
+   NOT the old `.lc-ask__tier` pill: that was 9.5px uppercase in a rounded border, which is right
+   for a one-word token and wrong for a sentence — uppercase costs a reader real speed at sentence
+   length, and a pill round a clause reads as a shouted label. This keeps the tier's COLOUR, which
+   is the part doing work (red means the asker stopped), and drops the shouting. */
+.lc-ask__hold {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--lc-dim);
+  min-width: 0;
+}
+/* Blocking keeps the danger ink: the one state where nothing proceeds until a person acts. */
+.lc-ask__hold--blocking {
+  color: var(--lc-danger-ink);
+}
+.lc-ask__hold--standard,
+.lc-ask__hold--advisory {
+  color: var(--lc-accent-ink);
+}
+/* In the lead row the line shares a flex row with the clock and the answer buttons; let it shrink
+   and ellipsize rather than push them off, since the full sentence is in `title` either way. */
+.lc-asks__hold {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-ask__clock {
   flex: none;
 }
 /* Name + verb + a gist of the body, all on one line: the rail says what it is without opening. */

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { holdStateLine } from './holdState';
 import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
 import { askTierHolds } from '@musterd/protocol/wire';
 import {
@@ -275,9 +276,7 @@ export function AsksStrip({
               )}
               {lead.env.body && <span className="lc-asks__gist">{lead.env.body}</span>}
             </button>
-            <span className={`lc-ask__tier lc-asks__tier lc-ask__tier--${lead.tier}`}>
-              {lead.tier}
-            </span>
+            <AskHold ask={lead} now={now} className="lc-asks__hold" />
             <AskClock ask={lead} now={now} />
             {askIsLoud(lead.state) && canAnswer && leadIsOurs && (
               <span className="lc-asks__quick">
@@ -506,7 +505,7 @@ function AskCard({
             <b>{from}</b> {audience === 'you' ? SPECIES_VERB_YOU[ask.species] : SPECIES_VERB[ask.species]}
             {!ours && ask.to && <span className="lc-asks__routed"> → {ask.to}</span>}
           </span>
-          <span className={`lc-ask__tier lc-ask__tier--${ask.tier}`}>{ask.tier}</span>
+          <AskHold ask={ask} now={now} />
         </div>
         {ask.env.body && (
           <button
@@ -638,5 +637,36 @@ function ChevronIcon() {
     <svg className="lc-asks__chev" viewBox="0 0 12 12" aria-hidden="true">
       <path d="M3.4 4.7 6 7.3l2.6-2.6" />
     </svg>
+  );
+}
+
+/**
+ * The consequence line where the tier token used to be.
+ *
+ * Keeps the tier in `title=` and the tier class on the element, so the colour rule the strip
+ * already encodes (red on a blocking ask) still fires — a stranger reads the words, a member who
+ * knows the contract still gets the token on hover, and neither loses the colour.
+ *
+ * Renders nothing for a settled verdict: `holdStateLine` returns null there and the card's own
+ * outcome rendering is already saying it.
+ */
+function AskHold({
+  ask,
+  now,
+  className,
+}: {
+  ask: AskView;
+  now: number;
+  className?: string;
+}) {
+  const hold = holdStateLine(ask, now);
+  if (!hold) return null;
+  return (
+    <span
+      className={`lc-ask__hold ${className ?? ''} lc-ask__hold--${ask.tier}`.trim()}
+      title={hold.title}
+    >
+      {hold.line}
+    </span>
   );
 }
