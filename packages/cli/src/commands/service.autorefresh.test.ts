@@ -127,6 +127,7 @@ describe('service refresh --auto (the tick)', () => {
     autoState?: { read: () => string | null; write: (sha: string) => void };
     outageState?: { read: () => string | null; write: (s: string) => void };
     touch?: (ok: (s: string) => void) => Promise<void>;
+    refreshSharedHooks?: (dir: string) => string[];
   }) =>
     capture(() =>
       serviceCommand(parseArgs(over.argv ?? ['refresh', '--auto', '--mode', 'notice']), {
@@ -142,6 +143,9 @@ describe('service refresh --auto (the tick)', () => {
         // ADR 230: the outage run/escalation marker — a SEPARATE store from the build debounce, so
         // an outage can never clobber the broken-`main` marker (and vice versa).
         outageState: over.outageState ?? memState(),
+        // ADR 408 inc 5: default to a no-op so no test ever writes this machine's real shared
+        // Codex hooks file — the production default reaches a path outside the temp dir.
+        refreshSharedHooks: over.refreshSharedHooks ?? (() => []),
       }),
     );
 
@@ -432,6 +436,71 @@ describe('service refresh --auto (the tick)', () => {
     expect(
       notify.mock.calls.some((c) => String((c[0] as { title: string }).title).includes('failed')),
     ).toBe(false);
+  });
+
+  /**
+   * ADR 408 increment 5 — the one hook file no seat may write.
+   *
+   * `withinWorktreeOnly` (increment 3) makes a seat's SessionStart skip Codex's git-common-dir
+   * `hooks.json`, because that file is one copy shared by every workspace in the family and a hook
+   * running in one seat's session must not rewrite it. Correct, and it leaves the file permanently
+   * unrepaired: every seat skips it, names it, and moves on. The auto-refresher is the only thing
+   * on this machine that runs outside any seat and already touches the shared checkout, so the
+   * shared copy is its property. Nothing else will ever do it.
+   */
+  describe("the shared Codex hooks are the auto-refresher's (ADR 408 inc 5)", () => {
+    it('refreshes them once after a bounce that landed', async () => {
+      const refreshSharedHooks = vi.fn(() => ['/repo/.git/hooks.json']);
+      const { code, out } = await tick({
+        ctx: ctx(autoRunner({ behind: 2 })),
+        health: async () => ({ connections: 0, build: 'oldsha0' }),
+        refreshSharedHooks,
+      });
+      expect(code).toBe(0);
+      expect(refreshSharedHooks).toHaveBeenCalledTimes(1);
+      // The shared checkout, never a seat's workspace — writing one seat's folder from the
+      // refresher would be the same cross-seat write increment 3 refuses.
+      expect(refreshSharedHooks.mock.calls[0]![0]).toBe('/repo');
+      expect(out).toContain('shared Codex hooks');
+    });
+
+    // A bounce that did not land leaves the daemon on the old build. Refreshing the hooks then
+    // would write this build's hook text for a daemon that is not running this build — the exact
+    // split-generation state `installCodexHooks`' own epoch preflight exists to prevent.
+    it('does not touch them when the build failed', async () => {
+      const refreshSharedHooks = vi.fn(() => ['/repo/.git/hooks.json']);
+      await tick({
+        ctx: ctx(autoRunner({ behind: 2, buildStatus: 1 })),
+        health: async () => ({ connections: 0, build: 'oldsha0' }),
+        refreshSharedHooks,
+      }).catch(() => undefined);
+      expect(refreshSharedHooks).not.toHaveBeenCalled();
+    });
+
+    // Nothing written means nothing to say. The bounce line is read by a human asking what the
+    // machine just did, and a clause that appears every time stops carrying information.
+    it('stays quiet in the bounce line when the hooks were already current', async () => {
+      const { out } = await tick({
+        ctx: ctx(autoRunner({ behind: 2 })),
+        health: async () => ({ connections: 0, build: 'oldsha0' }),
+        refreshSharedHooks: () => [],
+      });
+      expect(out).not.toContain('shared Codex hooks');
+    });
+
+    // The refresher's contract is that a tick never fails on something that is not the refresh.
+    // A thrown hook install must not pin the daemon or debounce the tip.
+    it('a throwing hook install never fails the tick', async () => {
+      const { code, out } = await tick({
+        ctx: ctx(autoRunner({ behind: 2 })),
+        health: async () => ({ connections: 0, build: 'oldsha0' }),
+        refreshSharedHooks: () => {
+          throw new Error('EACCES');
+        },
+      });
+      expect(code).toBe(0);
+      expect(out).toContain('EACCES');
+    });
   });
 
   it('does NOT notify a failure when the tick succeeds', async () => {
