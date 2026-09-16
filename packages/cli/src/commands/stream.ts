@@ -378,9 +378,74 @@ async function startVerb(
     `${theme.accent('stream')} ${theme.meta(`${team} · via ${addr} · ${VM_SIZE} ${REGION}`)}\n`,
   );
   const args = launchArgs({ app: a.app, digest, addr, team, extra });
+
+  /**
+   * Did this attempt leave a machine behind, and did it come up?
+   *
+   * A MANIFEST_UNKNOWN exit does NOT mean no machine was created. `fly machine run` creates the
+   * machine and THEN the VM fails to pull a digest the registry has not published yet; the machine
+   * keeps trying and comes up on its own once the registry catches up (observed live 2026-09-15:
+   * the "failed" first attempt's machine went live 52s later, unaided). Relaunching over the top of
+   * it puts a second performance-4x beside a healthy one, both publishing to the same key — the
+   * 2026-09-03 duplicate-launch, reached through `start`'s own retry.
+   *
+   * But "a machine exists" is NOT "a machine works", and conflating them is how this guard would
+   * lie. `isUnpropagatedImage` matches every MANIFEST_UNKNOWN, including a digest that is
+   * permanently unresolvable (registry GC, a stale `.image-digest`, wrong registry auth). That
+   * machine sits in `created` forever — and `created` is an OCCUPYING state, so returning 0 here
+   * would report `◉ live`, and `ensure`'s `liveCount > 0` would then read `noop — live` on every
+   * tick from now on. `start` would exit 0, the supervisor would never fire, and nobody would
+   * stream. Before this guard existed that input failed loudly on the first try, which was right.
+   *
+   * So: wait for the machine to actually reach `started`, for the budget the retry loop would have
+   * spent anyway. Come up → success. Still not up when the budget is gone → fail, loudly, with the
+   * machine named so the operator can look at it.
+   */
+  async function settleLeftoverMachine(): Promise<'none' | 'started' | 'stuck'> {
+    const left = occupiedMachines(machineListJson(a.exec, a.app));
+    if (left.length === 0) return 'none';
+    if (left.length > 1) {
+      // Two machines here means something else launched in the window between the state write and
+      // this read — the supervisor's own tick is the candidate. Say it rather than picking one:
+      // this is the duplicate this command exists to avoid, and a silent `◉ live` would hide it.
+      a.err(
+        `${theme.warn('⚠')} ${theme.meta(
+          `${left.length} machines are occupying ${a.app} (${left.join(', ')}) — ` +
+            'that is a duplicate launch; stop all but one with `musterd stream stop`',
+        )}\n`,
+      );
+    }
+    a.out(
+      `${theme.meta(
+        `◇ machine ${left[0]} exists but is not up yet — the registry has not published ` +
+          `${digest.slice(7, 15)}. Waiting for it instead of launching a second.`,
+      )}\n`,
+    );
+    for (let tick = 0; tick < LAUNCH_RETRIES; tick++) {
+      await a.sleep(LAUNCH_RETRY_DELAY_MS);
+      if (startedMachines(machineListJson(a.exec, a.app)).length > 0) return 'started';
+    }
+    return 'stuck';
+  }
+
   let result = await a.launch(args);
   for (let attempt = 1; attempt <= LAUNCH_RETRIES && result.code !== 0; attempt++) {
     if (!isUnpropagatedImage(result.output)) break;
+    const settled = await settleLeftoverMachine();
+    if (settled === 'started') {
+      a.out(
+        `${theme.ok('◉ live')} ${theme.meta(`watch: fly logs -a ${a.app} · end: musterd stream stop`)}\n`,
+      );
+      return 0;
+    }
+    if (settled === 'stuck') {
+      throw new CliError(
+        `a machine was created but never started — ${digest.slice(7, 15)} is not resolvable from ` +
+          `the registry. This is not publish lag. Check \`fly logs -a ${a.app}\` and the recorded ` +
+          'digest, then `musterd stream stop` the stuck machine.',
+        1,
+      );
+    }
     a.out(
       `${theme.warn('↻')} ${theme.meta(
         `the registry has not published ${digest.slice(7, 15)} yet — retrying in ` +
@@ -389,6 +454,26 @@ async function startVerb(
     );
     await a.sleep(LAUNCH_RETRY_DELAY_MS);
     result = await a.launch(args);
+  }
+  // The LAST attempt's leftovers need the same question asked. Without this, an exhausted loop
+  // throws while a machine is booting, and the operator's next `stream start` is refused
+  // "already live (machine …)" — exit 1 over a machine that was about to work.
+  if (result.code !== 0 && isUnpropagatedImage(result.output)) {
+    const settled = await settleLeftoverMachine();
+    if (settled === 'started') {
+      a.out(
+        `${theme.ok('◉ live')} ${theme.meta(`watch: fly logs -a ${a.app} · end: musterd stream stop`)}\n`,
+      );
+      return 0;
+    }
+    if (settled === 'stuck') {
+      throw new CliError(
+        `a machine was created but never started — ${digest.slice(7, 15)} is not resolvable from ` +
+          `the registry. This is not publish lag. Check \`fly logs -a ${a.app}\` and the recorded ` +
+          'digest, then `musterd stream stop` the stuck machine.',
+        1,
+      );
+    }
   }
   if (result.code !== 0) throw new CliError('fly machine run failed — see the output above', 1);
   a.out(
