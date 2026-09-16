@@ -9,9 +9,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FEATURE_EPOCH } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { declineSurface, isDeclined } from './declined.js';
-import { SURFACE_STATUSLINE } from './harnesses/claudeCode.js';
+import { checkoutBehindHooks, hookEpochOf, SURFACE_STATUSLINE } from './harnesses/claudeCode.js';
 import { runRefreshHooks } from './init.js';
 
 /**
@@ -357,5 +358,37 @@ describe('withinWorktreeOnly (spec 2026-09-16, workspace self-heal)', () => {
     expect(res.code).toBe(0);
     expect(existsSync(globalSettings())).toBe(true);
     expect(res.skipped).toEqual([]);
+  });
+});
+
+describe('checkoutBehindHooks — ADR 168 downgrade refusal as a predicate (spec 2026-09-16)', () => {
+  it('is true when an installed marker hook carries a newer epoch than this build', () => {
+    const newer = `d="x"; echo hi # musterd-interrupt-hook e${String(FEATURE_EPOCH + 1)}`;
+    expect(hookEpochOf(newer)).toBe(FEATURE_EPOCH + 1);
+    seedProvisioned({ PostToolUse: [{ hooks: [{ type: 'command', command: newer }] }] });
+    expect(checkoutBehindHooks(cwd)).toBe(true);
+  });
+
+  it('is true when only the MACHINE-WIDE settings carry the newer epoch', () => {
+    seedProvisioned({});
+    const newer = `echo hi # musterd-sessionstart-hook e${String(FEATURE_EPOCH + 1)}`;
+    writeFileSync(
+      globalSettings(),
+      JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: newer }] }] } }),
+    );
+    expect(checkoutBehindHooks(cwd)).toBe(true);
+  });
+
+  it('is false with no settings file, and false at the current epoch', () => {
+    expect(checkoutBehindHooks(cwd)).toBe(false);
+    const current = `echo hi # musterd-interrupt-hook e${String(FEATURE_EPOCH)}`;
+    seedProvisioned({ PostToolUse: [{ hooks: [{ type: 'command', command: current }] }] });
+    expect(checkoutBehindHooks(cwd)).toBe(false);
+  });
+
+  it('is false on an unparseable settings file — never invented drift', () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(localSettings(), '{not json');
+    expect(checkoutBehindHooks(cwd)).toBe(false);
   });
 });

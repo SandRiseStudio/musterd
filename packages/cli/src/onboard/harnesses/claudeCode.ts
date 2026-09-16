@@ -783,6 +783,28 @@ export function inspectClaudeStatuslineDrift(cwd: string): string[] {
  * or when the hook is present. The global self-gating SessionStart is machine-shared, so it is not
  * checked per-folder.
  */
+/**
+ * ADR 168's checkout-behind verdict as a predicate (spec 2026-09-16, workspace self-heal): some
+ * installed marker-owned Claude Code hook — in this folder's local settings or the machine-wide
+ * file — was written by a NEWER musterd than this checkout. Self-heal must not run in that state:
+ * it would downgrade what a newer build wrote, the exact refusal `musterd init` makes. Absent or
+ * unparseable settings → false; this never invents drift from a file it cannot read.
+ */
+export function checkoutBehindHooks(cwd: string): boolean {
+  for (const path of [settingsLocalPath(cwd), globalSettingsPath()]) {
+    const settings = readSettingsSafe(path);
+    if (!settings) continue;
+    for (const matchers of Object.values(settings.hooks ?? {})) {
+      for (const m of matchers) {
+        for (const h of m.hooks) {
+          if (h.command.includes('musterd') && hookEpochOf(h.command) > FEATURE_EPOCH) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 export function inspectClaudeHookDrift(cwd: string): string[] {
   const path = join(cwd, '.claude', 'settings.local.json');
   if (!existsSync(path)) return []; // no local settings yet — the bare-folder drift already covers it
