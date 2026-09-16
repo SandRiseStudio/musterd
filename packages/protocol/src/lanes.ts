@@ -46,6 +46,7 @@ export {
   EMPTY_POOL_LIVE_EXCLUSIONS,
   emptyPoolFromCandidates,
   isAwaitingAcceptance,
+  laneVerdictAck,
   type EmptyPool,
   type EmptyPoolKind,
   type EmptyPoolLiveExclusion,
@@ -53,6 +54,7 @@ export {
   type LaneStakes,
   type LaneStakesProvenance,
   type LaneState,
+  type LaneVerdictAck,
   type MergeVerification,
 } from './lanes.wire.js';
 

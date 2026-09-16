@@ -46,7 +46,12 @@ export type HandoffLaneAck =
 
 /** ADR 202 on the ack (lane 01M2GQFJXG): the lane an accept/decline moved by answering a
  *  `lane_review` ask — `done` on accept, `active` on decline. Absent when the act moved nothing. */
-export interface LaneVerdictAck {
+/**
+ * The daemon's RAW verdict field — the fact, with no rendered sentence. Distinct from protocol's
+ * `LaneVerdictAck`, which is this plus the `guidance` every surface shows; `laneVerdictAck()`
+ * is the one that turns this into that (lane 01M2KYF888).
+ */
+export interface LaneVerdictWire {
   lane: string;
   state: 'done' | 'active';
 }
@@ -454,13 +459,13 @@ export class MusterdClient {
     ask_contract?: AskContract;
     delivery_hint?: DeliveryHint;
     handoff_lane?: HandoffLaneAck;
-    lane_verdict?: LaneVerdictAck;
+    lane_verdict?: LaneVerdictWire;
   }> {
     return this.request('POST', `/teams/${this.config.team}/messages`, { envelope }) as Promise<{
       ask_contract?: AskContract;
       delivery_hint?: DeliveryHint;
       handoff_lane?: HandoffLaneAck;
-      lane_verdict?: LaneVerdictAck;
+      lane_verdict?: LaneVerdictWire;
     }>;
   }
 
