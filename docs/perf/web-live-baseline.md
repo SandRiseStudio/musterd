@@ -842,3 +842,39 @@ the 2026-09-04 re-baseline's CI slack.
 - Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on this PR — total must read under
   234.4 KB (240,000 B). A CLI-only checkout that still fails this number means the raise was short
   of the CI gzip delta, not that the doctor grew the bundle.
+
+## 2026-09-16 — /watch lands: initial 137000 → 139500, total 240000 → 245000, siteCss 2900 → 4000
+
+The stream's front door (copy spec `docs/design/watch-page-copy-spec.md`, lane `01M2M75BQH`) is a
+new public prerendered route. Main @ `1db0152a` measured **133.3 KB initial / 233.4 KB total /
+2,601 B site CSS** locally — **0.5 KB, 1.0 KB and 299 B free**. No whole page fits in that, so all
+three ceilings move. Measured on the branch: **133.9 KB / 235.9 KB / 3,700 B**.
+
+**Most of the eager cost was my defect, not the page's, and trimming came first.** `watch.tsx`'s
+`head:` imported `WATCH_COPY` from `WatchPage.tsx`. A `head:` is evaluated for every route in the
+tree, so that one import dragged the component module *and its stylesheet* into the eager graph and
+made **/live pay +1.9 KB for a page it never renders** — TanStack's own route-splitting was working
+and the import defeated it. Moving the four head strings into `watchCopy.ts` took the eager delta to
+**+0.6 KB**. The generalisable finding: **what a route's `head:` imports is a budget decision, not a
+filing decision**, and it is invisible in every other gate — the page rendered identically both ways.
+
+Per ADR 183 the total moved the *other* way as predicted: +2.5 KB at 36 → 38 chunks, roughly 1 KB of
+that per-chunk overhead from the very split that bought the eager win. That trade is the right one —
+initial is the number a viewer feels — and it is the same shape as the 2026-09-02 BoardOverlay entry.
+
+CSS was consolidated as well (three near-identical CTA rules → one `.watch-btn`), which recovered
+0.1 KB. The remaining **1,099 B is the page's stylesheet** and is the feature. The `watch` bundle is
+classified `site` in `budgets.cssBundles`; the unlisted-bundle gate (ADR 313) caught it before the
+budget did, which is exactly the design.
+
+Re-baseline checked first and **unavailable on all three**: measured + 15% loosens every one of
+them, and a re-baseline may only tighten. JS raises are measured + the known ~0.7 KB CI gzip delta +
+~1.2%, per 2026-08-24/25/31 and 09-02/03/14. `siteCssGzipBytes` is deliberately measured + ~8%
+rather than + 1.2%, leaving ~300 B instead of ~45 B: the 2026-08-24 entry in this file records a
+site budget shipped with **6 bytes free** and what the next change cost, and repeating that on the
+one surface that is now growing page by page would be choosing the same failure knowingly.
+
+- Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on this branch — initial must read
+  under 136.2 KB, total under 239.3 KB, site CSS under 3.9 KB. If initial reads nearer 135 KB than
+  134 KB, the `watchCopy.ts` split has been undone and the `head:` is importing the component
+  module again.

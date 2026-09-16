@@ -49,6 +49,9 @@ export function StreamSection() {
         <a className="ss__link mono" href={TWITCH_URL} target="_blank" rel="noreferrer">
           twitch.tv/{TWITCH_CHANNEL}
         </a>
+        <a className="ss__watch" href="/watch">
+          What you are watching &rarr;
+        </a>
       </div>
       <div className="ss__player" ref={hostRef}>
         {visible ? (

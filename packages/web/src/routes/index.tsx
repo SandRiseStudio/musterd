@@ -18,7 +18,10 @@ import { WhatIs } from '../components/site/WhatIs';
 export const Route = createFileRoute('/')({
   head: () =>
     pageHead({
-      title: SITE_TITLE,
+      // The tagline, not the bare wordmark. `musterd` alone is a 7-character title that throws
+      // away the one line of search result we get to write — and `pageTitle` suppresses the
+      // suffix here because the name is already inside the tagline.
+      title: `${SITE_TITLE} — ${SITE_TAGLINE}`,
       description: SITE_TAGLINE,
       path: '/',
       // The landing page is where the product's entity is declared; every other route's graph

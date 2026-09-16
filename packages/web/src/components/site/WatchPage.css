@@ -1,0 +1,250 @@
+/*
+ * /watch — the stream's front door. Semantic tokens only (tokens.css), never raw hex.
+ *
+ * Shape of the page: the player is the argument, so it sits wide and early, and everything below
+ * it is a short read that explains what a stranger is looking at. The hero is deliberately
+ * narrower than the player — the eye should land on the picture, not on the paragraph above it.
+ */
+
+.watch-hero {
+  padding-top: var(--section-y);
+  padding-bottom: 0.4rem;
+}
+
+.watch-hero__eyebrow {
+  color: var(--accent-ink);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* The pulse is the one animated thing on the page: a channel that might be live deserves a sign of
+   life, and a static dot beside "between sessions" reads as a status light stuck on. Reduced-motion
+   readers get the dot with no pulse — the text already carries the state. */
+.watch-hero__eyebrow::before {
+  content: '';
+  inline-size: 0.44rem;
+  block-size: 0.44rem;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 var(--glow-mustard);
+  animation: watch-pulse 2.8s var(--ease-out) infinite;
+}
+
+@keyframes watch-pulse {
+  0% { box-shadow: 0 0 0 0 var(--glow-mustard); }
+  70% { box-shadow: 0 0 0 0.5rem transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watch-hero__eyebrow::before { animation: none; }
+}
+
+.watch-hero__title {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 4.2vw, 2.5rem);
+  line-height: 1.12;
+  color: var(--text);
+  margin: 0 0 0.7rem;
+  max-width: 20ch;
+}
+
+.watch-hero__lede {
+  color: var(--text-dim);
+  line-height: 1.55;
+  font-size: 0.98rem;
+  margin: 0 0 1rem;
+  max-width: 54ch;
+}
+
+.watch-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+/* One button rule for all three calls to action. They differ only in fill, and three near-copies
+   is how a site's buttons drift apart one hover state at a time. */
+.watch-btn {
+  font-family: var(--font-display);
+  text-decoration: none;
+  color: var(--text);
+  border: 1px solid var(--text-faint);
+  border-radius: 8px;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.92rem;
+  display: inline-block;
+}
+
+.watch-btn--primary {
+  background: var(--text);
+  color: var(--surface-solid);
+  border-color: var(--text);
+}
+
+.watch-btn:hover,
+.watch-btn:focus-visible {
+  text-decoration: underline;
+}
+
+/* ---- Player ---- */
+
+.watch-player {
+  padding-top: 0.6rem;
+  padding-bottom: 0;
+}
+
+.watch-player__frame {
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--mustard-100);
+  /* The mustard bloom is the page's one piece of warmth around an otherwise black rectangle —
+     without it the player reads as a hole cut in the page. */
+  box-shadow: 0 0 0 1px var(--glow-mustard-soft), 0 18px 48px -24px var(--glow-mustard);
+}
+
+.watch-player__iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+.watch-player__facade {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  background: radial-gradient(90% 90% at 30% 20%, var(--zinc-800) 0%, var(--zinc-950) 100%);
+}
+
+.watch-player__badge {
+  color: var(--accent);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+}
+
+.watch-player__play {
+  inline-size: 0;
+  block-size: 0;
+  border-top: 0.62rem solid transparent;
+  border-bottom: 0.62rem solid transparent;
+  border-left: 1rem solid var(--accent);
+}
+
+.watch-player__label {
+  color: var(--text-faint);
+  font-size: 0.74rem;
+}
+
+.watch-player__state {
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 0.7rem 0 0;
+  max-width: 62ch;
+}
+
+.watch-player__state a {
+  color: var(--accent-ink);
+}
+
+/* ---- What you are looking at ---- */
+
+.watch-terms {
+  padding-top: var(--section-y);
+  padding-bottom: 0;
+}
+
+.watch-terms__title,
+.watch-roster__title,
+.watch-product__title {
+  font-family: var(--font-display);
+  font-size: clamp(1.15rem, 2.4vw, 1.5rem);
+  color: var(--text);
+  margin: 0 0 0.85rem;
+}
+
+.watch-terms__list {
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+/* A hairline rule per term rather than a card each: five cards would out-weigh the player, and the
+   list is a glossary, not a feature grid. */
+.watch-terms__item {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) 1fr;
+  gap: 0.2rem 1.2rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--hairline);
+}
+
+.watch-terms__term {
+  font-family: var(--font-display);
+  color: var(--text);
+  font-size: 0.94rem;
+  margin: 0;
+}
+
+.watch-terms__copy {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  margin: 0;
+  max-width: 58ch;
+}
+
+/* ---- Roster + product handoff ---- */
+
+.watch-roster,
+.watch-product {
+  padding-top: var(--section-y);
+  padding-bottom: 0;
+}
+
+.watch-roster__copy,
+.watch-product__copy {
+  color: var(--text-dim);
+  font-size: 0.94rem;
+  line-height: 1.55;
+  margin: 0 0 0.9rem;
+  max-width: 58ch;
+}
+
+.watch-built {
+  padding-top: var(--section-y);
+  padding-bottom: 0;
+  /* margin-BLOCK, not margin: 0 — `.shell` centres itself with `margin-inline: auto`, and a
+     shorthand here silently overrode it, pinning this one line to the viewport edge while every
+     section above it sat on the gutter. */
+  margin-block: 0;
+  font-size: 0.86rem;
+}
+
+.watch-built a {
+  color: var(--text-faint);
+}
+
+.watch-built a:hover,
+.watch-built a:focus-visible {
+  color: var(--accent-ink);
+}
+
+@media (max-width: 640px) {
+  .watch-terms__item {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+}

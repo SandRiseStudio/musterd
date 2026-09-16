@@ -11,6 +11,7 @@ describe('site nav', () => {
     // whichever state content/blog happens to be in.
     expect(hrefs.filter((h) => h !== '/blog')).toEqual([
       '/docs',
+      '/watch',
       'https://github.com/SandRiseStudio/musterd',
     ]);
     for (const h of hrefs) expect(h).not.toMatch(/live|board|audit|approvals|broadcast/);
