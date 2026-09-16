@@ -23,8 +23,8 @@ Same as the /watch spec §2, restated because these strings ship to a stranger w
 | Setting | Value | Why |
 | --- | --- | --- |
 | Category | **Software and Game Development** | Audit §"leverage order" item 2. |
-| Store past broadcasts | **On** | Nothing survives a session today. Clips need a recording to be cut from. |
-| Clips | **On**, anyone can clip | The acquisition asset. |
+| Store past broadcasts | **On** — and it already was | ~~Nothing survives a session today.~~ WRONG (2026-09-16): 30 recordings existed the whole time ([audit](../wiki/twitch-channel-audit.md)). Keep it on; there was never anything to turn on. |
+| Clips | **On**, anyone can clip — and cut them | The acquisition asset, and the only genuinely empty surface the audit found. A recording expires in 7 days; a clip does not. |
 | Old clips | Delete the seven `nix pix` clips (6–7 years old, prior life of the account) | The channel's only permanent content should be about the channel. |
 | Schedule | **Leave empty** | /watch spec §2 and §9: publish no schedule until the team keeps one. |
 | Always Publish VODs | **On**, Excluded Categories empty | Otherwise stored broadcasts sit unpublished and each needs reviewing by hand. |
@@ -180,4 +180,5 @@ continues at github.com/SandRiseStudio/musterd`. Never the word "offline" (reads
    could not measure.
 5. Within 7 days of that stream, at least one clip exists and the past broadcast has been exported
    to YouTube — check both before the retention window closes, because after it the recording is
-   gone and neither can be done.
+   gone and neither can be done. This is the one criterion with a deadline, and as of 2026-09-16 the
+   Clips tab is empty while 30 recordings are aging out, so it is the binding one.
