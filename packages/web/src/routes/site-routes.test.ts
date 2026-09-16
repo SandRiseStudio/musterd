@@ -1,7 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { blogEntries, siteUrls } from '../../scripts/site-files';
+import { blogEntries, llmsTxt, siteUrls } from '../../scripts/site-files';
+import { DAEMON_ROUTES, PUBLIC_ALLOW } from '../../scripts/stage-allowlist.mjs';
 import { SITE_ORIGIN, absoluteUrl } from '../brand/siteMeta';
 
 const read = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
@@ -23,7 +24,15 @@ function routeFileFor(path: string): string {
   if (path === '/') return 'index.tsx';
   const [, section, slug] = path.split('/');
   if (!section) throw new Error(`unroutable public path ${path}`);
-  return slug ? `${section}.$slug.tsx` : `${section}.index.tsx`;
+  if (slug) return `${section}.$slug.tsx`;
+  // A section with children is `<section>.index.tsx`; a standalone page is `<section>.tsx`. Both
+  // spellings are TanStack's, and which one a route uses is a fact on disk rather than something
+  // this map can infer from the URL — /docs is a section, /watch is one page. Asking the
+  // filesystem keeps a new single-page route from reading as a missing section index.
+  const flat = `${section}.tsx`;
+  return existsSync(fileURLToPath(new URL(`./${flat}`, import.meta.url)))
+    ? flat
+    : `${section}.index.tsx`;
 }
 
 describe('public content routes', () => {
@@ -76,17 +85,52 @@ describe('structured data and canonical coverage', () => {
         'docs.$slug.tsx',
         'docs.index.tsx',
         'index.tsx',
+        'watch.tsx',
       ].sort(),
     );
   });
 
-  for (const f of ['index.tsx', ...CONTENT_ROUTES]) {
+  for (const f of ['index.tsx', 'watch.tsx', ...CONTENT_ROUTES]) {
     it(`${f} emits a canonical and a structured-data graph`, () => {
       const src = read(`./${f}`);
       expect(src, 'pageHead is what emits <link rel="canonical">').toContain('pageHead(');
       expect(src, 'every public page declares an entity, not just prose').toMatch(/graph:\s*\[/);
     });
   }
+});
+
+/*
+ * /watch IS PUBLIC AND /broadcast IS NOT, AND NEITHER FACT MAY DRIFT.
+ *
+ * These two routes are the same subject seen from opposite sides — /watch is prose ABOUT the office
+ * and /broadcast IS the office — so they are exactly the pair most likely to be confused by a later
+ * edit. The failure modes are asymmetric and both silent:
+ *
+ *   - /watch dropping out of PUBLIC_ALLOW: the page still builds and still prerenders, the sitemap
+ *     and llms.txt still advertise it, and musterd.io serves a 404 to every crawler we sent there.
+ *   - /broadcast getting INTO it: a daemon-connected surface ships to an origin with no daemon,
+ *     where it renders dead UI (ADR 132, ADR 156). That is the line the allowlist exists to hold.
+ *
+ * Required by the copy spec's acceptance criteria (docs/design/watch-page-copy-spec.md §8.3).
+ */
+describe('/watch is public, /broadcast is not', () => {
+  it('stages /watch and advertises it to crawlers', () => {
+    expect(PUBLIC_ALLOW).toContain('watch');
+    expect(siteUrls().map((u) => u.path)).toContain('/watch');
+    expect(llmsTxt()).toContain(`${SITE_ORIGIN}/watch`);
+  });
+
+  it('keeps /broadcast — and every other daemon surface — off the public origin', () => {
+    expect(DAEMON_ROUTES).toContain('broadcast');
+    for (const r of DAEMON_ROUTES) expect(PUBLIC_ALLOW).not.toContain(r);
+  });
+
+  it('serves /watch from a route that needs no daemon', () => {
+    const src = read('./watch.tsx');
+    expect(src, 'a public route must not import daemon modules').not.toMatch(/from '\.\.\/live\//);
+    expect(src).toContain('SiteNav');
+    expect(src).toContain('SiteFooter');
+  });
 });
 
 /*

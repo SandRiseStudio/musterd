@@ -61,6 +61,7 @@ export function siteUrls(
   return [
     { path: '/' },
     { path: '/docs' },
+    { path: '/watch' },
     ...docs.map((d) => ({ path: `/docs/${d.slug}` })),
     // The blog section exists only while it has something in it. An index advertising nothing is
     // worse than no index: it is a public promise of content, indexed as an empty page and unfurled
@@ -194,6 +195,7 @@ Local-first, and no account.
 
 ## Pages
 
+- [Watch](${SITE_ORIGIN}/watch): the team that builds musterd, live on Twitch, and what the office view shows.
 ${[...docLines, ...(posts.length > 0 ? [`- ${SITE_ORIGIN}/blog`, ...postLines] : [])].join('\n')}
 
 ## For agents
