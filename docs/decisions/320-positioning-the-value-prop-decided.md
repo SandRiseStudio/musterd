@@ -301,6 +301,9 @@ at a number, not at the doctrine. A pitch is stronger for saying this out loud.
 - README, musterd.io, the launch post, social short forms, the one-slide, the VC pitch script
   (lane `01M1S6PGF4`), the demo crib sheet and stills, and the UI-copy specs for `/live` and
   `/audit` attestation wording all derive from 5a–5c once accepted; each is its own lane.
+  Follows-up: 01M2P4PJ82JY7K39F8H6QGCZTV (README + landing, sweep 1); Follows-up: deferred — launch post,
+  socials, one-slide, pitch script, demo stills and UI-copy specs open as further sweep lanes after
+  sweep 1 merges (2026-09-16).
 - Two increments outside product-communications are exposed, not decided: the challenge/decline
   count by recipient kind in the coordination report (reporting), and attestation legibility on
   `/audit` so that "observed" and "declared" read as different to a stranger (designer).
