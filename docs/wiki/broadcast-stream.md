@@ -111,7 +111,7 @@ that hid the original incident — the watchdog fired at 5.0 s both times, the p
 half minutes the same class of failure ran unreported in the morning. The local arms prove the
 predicate; only this one proves the entrypoint actually reruns on 75.
 
-### Every capture leaves its tailnet node behind, and the auth key is the drift (2026-09-16; falsify: `musterd stream doctor` — it counts capture nodes and offline ones) <!-- claim: defect -->
+### ~~Every capture leaves its tailnet node behind, and the auth key is the drift (2026-09-16)~~ FIXED the same day — verified on the box (2026-09-16; falsify: `musterd stream doctor` — it counts capture nodes and offline ones) <!-- claim: defect -->
 
 22 capture nodes on the tailnet, 21 offline, and the entrypoint's own `▸ tailnet node:
 musterd-broadcast-N` line climbing once per launch (17 → 19 → 20 across one afternoon) because
@@ -140,6 +140,37 @@ that to tidy a device record trades a real behaviour for a cosmetic one. `rc` is
 re-raised because the entrypoint keys the machine's whole lifetime off 75-vs-anything-else, so a
 trap whose own commands set the status would turn every restart into a teardown. Verified with a
 stubbed `tailscale` that 0, 1 and 75 all survive the trap unchanged and the logout runs on each.
+
+**CLOSED 2026-09-16 23:0xZ, and the close is measured rather than assumed.** nick minted an
+ephemeral + reusable key and cleared the stale devices; the rotation is `fly secrets set TS_AUTHKEY=…
+-a musterd-broadcast --stage`. **`--stage` is not optional here:** `secrets set` deploys by default,
+and this app has no Fly Launch machines and no release — every capture is `fly machine run` against a
+digest we build — so the default path fails with "could not find image to use for deployment; app has
+no current release". The secret is stored before that error, so a run without `--stage` looks like a
+failure and is not; check the digest in `fly secrets list` rather than trusting the exit.
+
+The lifecycle, measured on one capture from birth to reap:
+
+| | |
+| --- | --- |
+| 23:04:44Z | fresh node registers, online, and takes the BASE name `musterd-broadcast` — no `-N` suffix, because the names are free again after the cleanup |
+| stop | node still present and still reading `online=True` **25s** after the machine was gone |
+| 23:06:04Z | reaped — gone about **80s** after the stop |
+
+Only the 2026-09-15 leftover remains, which predates the rotation.
+
+**Two near-misreadings, both worth more than the result.** The first check used "the node count did
+not grow across a stop" as the pass condition, and it passed — but the live machine's record had
+already been deleted by hand during the cleanup, so a stop *could not* have added one. **A pass
+condition that a confound also satisfies is not a pass**; the answer came from running a fresh node
+through its own whole lifecycle instead. The second: at 25s the node was still there and still read
+online, which looks exactly like a failure. Tailscale's online flag lags and ephemeral reaping is not
+instant, so a verdict at 25 seconds would have been wrong in one direction or the other.
+
+**Not separately proven, and not claimed:** whether the removal came from the `EXIT` trap's
+`tailscale logout` or from the key's ephemeral property. Both were live on that machine, and an 80s
+delay looks more like server-side reaping than a logout. They are belt and braces — the trap's value
+is the `fly machine destroy` and SIGKILL paths, where the key still reaps but only on its own clock.
 
 ### The ack was the one CDP call nobody awaited, and both of its failures were fixed by the same line — in opposite directions (2026-09-16; falsify: stringify the ack's `sessionId`, run to `--out`, and the log must carry one refusal line and zero stack traces) <!-- claim: defect -->
 
