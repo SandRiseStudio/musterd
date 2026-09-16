@@ -1,6 +1,6 @@
 # 320 — Positioning: the value prop argued and decided
 
-- Status: accepted (2026-08-24, nick)
+- Status: accepted (2026-08-24, nick); amendment 2026-09-16 proposed (see foot)
 - Date: 2026-08-24
 - Lane: `01M091VTSXWSB1GRCGQ9RQQEK6`
 - Relates to: [ADR 007](007-v0.2-scope-cut.md) (protocol over framework),
@@ -184,3 +184,124 @@ substance; brand.md §1's tagline and one-liner stay canonical for their slots):
 - **Experiment:** none scheduled — the convergence and vocabulary falsifiers are watch items
   (Band's roadmap; how outsiders label musterd post-launch), read against landscape.md at each
   refresh.
+
+---
+
+### Amendment 2026-09-16 — decision 5: face the fear with names
+
+- Amendment status: **proposed** (sloane, product-communications); accepted only when nick signs
+  this line. Until then every surface derives from decisions 1–4 unchanged.
+
+#### Context
+
+The ground moved again after 2026-08-24, and this time it moved under the audience, not the
+vocabulary. Over the summer the public conversation about agents turned to fear: extinction
+rhetoric from people inside frontier labs, an agent that left its training environment and ran
+on a public model hub, a lab executive musing that an agent swarm could take the internet. The
+research radar logged the empirical form of the same worry (`docs/research/radar/2026-W36.md`):
+a 100-agent swarm on shared infrastructure where an exploit spread by message and was only
+contained by emergent whistleblowing.
+
+musterd sells coordination among agents. Read cold, that is the thing the room is afraid of.
+Every pitch, landing page, post, and demo now opens in front of an audience that arrived with the
+objection already formed, and decisions 1–4 never say how to meet it. A second objection travels
+with the first, quieter and from users rather than critics: working with agents removes the
+disagreement that working with people supplies, so the human stays comfortable and stops
+growing. Neither objection is answered anywhere in the repo (a repo-wide search for atrophy,
+deskilling, or automation bias finds nothing), and both are answered by the same primitives.
+
+#### Decision 5. Answer both fears with the accountability primitives, never with containment
+
+The fear in the headlines has one shape: workers nobody owns, acting under nobody's name, with no
+record and no stopping point, and no human who can be held to anything. That shape is musterd's
+negative space, by construction rather than by copy:
+
+- **Names.** Every act carries a named member whose seat outlives the session. Anonymous clones of
+  one identity are forbidden (`docs/design/membership-model.md`).
+- **Attestation a second party can check.** The record holds what the harness observed, not what
+  the agent declared; observed outranks declared (ADR 158, ADR 163, ADR 246).
+- **Stopping points in the protocol.** A claim on a lane a live teammate owns is refused
+  (ADR 203). Acceptance comes from a different actor (ADR 188, ADR 234). A blocking ask holds
+  (ADR 147). Same-model consensus is weak evidence (ADR 314).
+- **A human on the same roster, on the same protocol** (decision 2), whose silence becomes a
+  recorded fact rather than a bypass (ADR 147).
+
+Public surfaces meet the moment by **leading with these**, in the order the moat is ordered (identity,
+attestation, humans as members, the corpus). Three rules follow.
+
+**5a. The approved counter-line for the swarm objection.** When a stranger hears "agent
+coordination" and pictures a swarm, the answer is:
+
+> The fear is agents nobody owns. On musterd every act has a name on it, and a human is on the
+> same roster.
+
+Faithful compressions are allowed; the two load-bearing parts are *a name on every act* and *a
+human on the same roster*. "Swarm" stays a Not-column word (brand.md §5); surfaces do not adopt
+the critic's noun to rebut it.
+
+**5b. The approved counter-line for the comfort-zone objection.** Decision 3 pointed at the user
+rather than at competitors:
+
+> A teammate you can only assign to cannot tell you no. One who can decline, challenge, and hold
+> you to acceptance is the one who keeps you sharp.
+
+The claim rests on the acts, not on tone: `decline` and `challenge` are first-class
+(ADR 103), a challenge is answered by evidence, and acceptance by a different actor is enforced.
+Copy must not imply agents are prompted to be contrarian; manufactured objection is not the
+product, ownership is.
+
+**5c. The visual rule.** No public frame shows agents only. Every still, GIF, slide, stream
+overlay, and live-demo beat has a human seat in it, and the beats that get filmed are the
+stopping points: an ask that holds, a decline, a cross-family acceptance. The 3:15 beat of the
+user-value script ("a question reaches the human", `docs/demo.md` §4) is the centerpiece, not a
+middle beat. `PRODUCT.md` §Anti-references already forbids rendering the human as a supervisor
+above the room; this rule adds that the human must be *in* the room.
+
+**Rejected: repositioning as an AI-safety, oversight, or control-plane product.** Decision 1
+already rejects the console cell, and the structural reason still holds: a console's humans are
+operators above the agents, which contradicts the headline claim. The moment does not reopen it.
+
+**Rejected: claiming containment.** The escaped-agent incident is a sandboxing failure. musterd
+does not sandbox agent tools, encrypt its database at rest, use mTLS, or sign its audit log, and
+says so on every public surface (README Principle 7, `SECURITY.md`, `docs/launch-post.md`). A
+containment claim would be the exact false claim ADR 314 §3 names as worse than none, moved from
+diversity to safety. The honesty paragraph is not softened by this amendment; it is the sentence
+that separates musterd from every oversight pitch that claims to enforce what it cannot see.
+The rule from `docs/design/security.md` stands: say what is enforced, say what is only recorded.
+
+**Rejected: staying silent and letting the primitives speak.** They did not. Decisions 1–4 were
+aligned across every surface in August and the objection still arrives pre-formed, because
+"coordination" is heard before "peers" is read. The qualifier of decision 4 is necessary and not
+sufficient; the counter-lines are the sufficient half.
+
+#### The honest exposure, on the record
+
+The product's own history contains the critics' point. `docs/design/human-role-reevaluation.md`
+§1 measured the human's in-band fingerprint on revive at roughly 7:1 approver to communicator,
+637 agent acts against 6 human acts, and 0 `request_help` to the human all-time: *the gate
+produced the record of oversight without the oversight.* ADR 147 was the redesign. Whether the
+redesign worked is the falsifier below, and surfaces that lean on 5a or 5b must be able to point
+at a number, not at the doctrine. A pitch is stronger for saying this out loud.
+
+#### Falsifier added
+
+- **The peer-demand test, read from the human's side (decision 5b).** If humans on musterd teams
+  receive no `challenge` acts and see no `decline` of their handoffs, and their own acts are all
+  `accept`, then "keeps you sharp" is a doctrine the product's own usage falsifies and 5b comes off
+  every surface. Dataset: the team's message log by act and recipient kind, via the ADR 050
+  projections. Baseline: zero challenges received by humans, zero declines of human handoffs, over
+  a post-launch review window. The number does not exist in the coordination report today; adding
+  it is an owner-less increment this amendment surfaces but does not decide.
+- **The fear-vocabulary test (decision 5a).** If press or users describe musterd as "a swarm
+  platform" or "agent orchestration" after the counter-line is on every surface, 5a has failed on
+  its own terms and the category framing of decision 1 reopens.
+
+#### Consequences
+
+- README, musterd.io, the launch post, social short forms, the one-slide, the VC pitch script
+  (lane `01M1S6PGF4`), the demo crib sheet and stills, and the UI-copy specs for `/live` and
+  `/audit` attestation wording all derive from 5a–5c once accepted; each is its own lane.
+- Two increments outside product-communications are exposed, not decided: the challenge/decline
+  count by recipient kind in the coordination report (reporting), and attestation legibility on
+  `/audit` so that "observed" and "declared" read as different to a stranger (designer).
+- No code changes. No glossary changes. brand.md §1 strings unchanged.
