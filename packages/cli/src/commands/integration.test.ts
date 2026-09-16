@@ -242,7 +242,7 @@ describe('musterd integration generate aperture (ADR 400)', () => {
   });
 });
 
-describe('musterd integration generate tailscale (ADR 401)', () => {
+describe('musterd integration generate tailscale (ADR 402)', () => {
   function workspace() {
     const root = mkdtempSync(join(tmpdir(), 'musterd-tailscale-'));
     mkdirSync(join(root, '.musterd', 'seats'), { recursive: true });

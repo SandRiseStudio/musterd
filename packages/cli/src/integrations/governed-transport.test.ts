@@ -29,7 +29,7 @@ function workspace(): string {
   return root;
 }
 
-describe('Tailscale governed-transport renderer (ADR 401)', () => {
+describe('Tailscale governed-transport renderer (ADR 402)', () => {
   const manifest: GovernedTransportManifest = {
     version: 1,
     aperture_tag: 'tag:aperture',

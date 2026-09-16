@@ -196,7 +196,7 @@ describe('GovernedModelsManifestSchema (ADR 400)', () => {
   });
 });
 
-describe('GovernedTransportManifestSchema (ADR 401)', () => {
+describe('GovernedTransportManifestSchema (ADR 402)', () => {
   const manifest = {
     version: 1,
     aperture_tag: 'tag:aperture',

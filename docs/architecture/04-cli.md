@@ -42,7 +42,7 @@ src/
   integrations/       // optional external integration inspectors and generated-policy support (ADR 385/400)
     aperture.ts        // HuJSON config parsing + secret-safe Aperture retention/provider/grant/quota/identity posture checks
     governed-models.ts // committed roster + provider-neutral policy resolver and deterministic Aperture artifact renderer
-    governed-transport.ts // committed transport manifest loader + deterministic Tailscale tag/ACL and workload mapping renderer (ADR 401)
+    governed-transport.ts // committed transport manifest loader + deterministic Tailscale tag/ACL and workload mapping renderer (ADR 402)
     report.ts          // stable report composition + exact terminal rendering for independent optional postures
     tailscale.ts       // typed Tailscale status/Serve parsing + bounded Host-gate upgrade probe; no mutation commands
   help/               // the structured command catalog behind `musterd help` (ADR 113)
@@ -324,7 +324,7 @@ check exits 1, invalid usage exits 2, and JSON stdout parses as `IntegrationDoct
 ### `musterd integration generate tailscale [--write | --check]`
 
 Reads the committed roster, `.musterd/governed-models.json`, and strict
-`.musterd/governed-transport.json` to derive a reviewed transport fragment (ADR 401). Default mode
+`.musterd/governed-transport.json` to derive a reviewed transport fragment (ADR 402). Default mode
 prints the deterministic `policy.hujson` and `workloads.json` without writing; `--write` atomically
 replaces exactly `.musterd/generated/tailscale/{policy.hujson,workloads.json}`; `--check` exits 1 when
 either file is missing or stale. The manifest maps each active agent Member's existing opaque workload
