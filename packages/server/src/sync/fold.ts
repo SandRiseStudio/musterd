@@ -102,6 +102,7 @@ const LANE_VERBS = new Set([
   // Review verbs carry no state; they are held in `audit` for the readers that want them.
   'lane.review_sent_back',
   'lane.review_peer_confirmed',
+  'lane.review_acknowledged',
   'lane.review_rerouted',
 ]);
 

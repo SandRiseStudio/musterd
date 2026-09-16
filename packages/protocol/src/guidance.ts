@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 23;
+export const GUIDANCE_CONTENT_VERSION = 24;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -529,8 +529,12 @@ export function renderNudgeRelayFrontmatter(): string {
  * `accept` is the acceptance verdict itself (ADR 202): the lane closes on that send. The clause
  * used to say "an acceptance or review request" and stanley followed it — ryder's lane went to
  * done on the announcement, before the diff was read. There is nobody to stand down on a review
- * ask, so there is nothing to announce with an accept; a seat that wants to say "on it" says it
- * with a status_update, and sends accept/decline when it has judged.
+ * ask, so there is nothing to announce with an accept.
+ *
+ * The "on it" reply is now a real move rather than a free-text aside (lane 01M2P2E2H6): `wait` on
+ * the ask is the acknowledge, audited as `lane.review_acknowledged` against the lane. It was a
+ * status_update here until 2026-09-16, which said the right thing to humans and nothing to the
+ * board — and left `accept` the only reply the rail actually recorded.
  */
 export function renderOrientSkill(): string {
   return [
@@ -547,8 +551,9 @@ export function renderOrientSkill(): string {
     '   demands). An acceptance or review request routed to you: DO the review — it is yours by',
     '   address, never ask the human whether to take it. A `lane_review` ask (meta.lane_review)',
     '   goes to ONE seat and its accept IS the verdict (ADR 202): the lane closes on that send, so',
-    '   send accept/decline only once you have judged the landed outcome; say "on it" with a',
-    '   status_update if you want to. **Announce before you start** — for a request_help or ask',
+    '   send accept/decline only once you have judged the landed outcome; to say "on it" WITHOUT',
+    '   deciding, reply `wait` on that ask — it is recorded against the lane and leaves the verdict',
+    '   yours. **Announce before you start** — for a request_help or ask',
     '   that carries an eligible set (2-4 names) —',
     "   `team_send {act:'accept', reply_to:<the request act id>}`, because only that act",
     '   discharges it for your co-addressees; skip it and two seats review the same thing. Open',

@@ -57,6 +57,51 @@ export interface LaneVerdictAck {
   guidance: string;
 }
 
+/** An acknowledged acceptance ask: the fact it was taken, and the sentence explaining what is
+ *  still owed. Distinct from {@link LaneVerdictAck} because nothing moved — that is the point. */
+export interface LaneAckAck {
+  lane: string;
+  guidance: string;
+}
+
+/**
+ * The two moves an acceptance ask admits, said in the ASK, where the acceptor reads it (lane
+ * 01M2P2E2H6).
+ *
+ * Every other obligation on this rail has an "I have this" reply that does not discharge it — a
+ * `request_help` is taken with `accept` and discharged by doing the work. A `lane_review` ask was
+ * the one act where that learned reflex is also the irreversible close, and the daemon only said so
+ * AFTER the write, in the verdict ack. Three seats sent "taking this" announcements as `accept` in
+ * one month; the first one aimed at a real acceptance ask closed a teammate's lane unreviewed, with
+ * `verified: true` and the acceptor's name on the audit row (2026-09-16 14:31, lane 01M2NR7N9V).
+ *
+ * So the ask now names both moves before either is made. This is a sentence two composers must
+ * agree on — the peer ask in `http.ts` and the gated human ask in `route.ts` — which makes it
+ * protocol, the same argument {@link laneVerdictAck} settles.
+ */
+export const ACCEPTANCE_MOVES_NOTICE =
+  ' TWO MOVES, and only one of them decides: `accept`/`decline` on this ask IS the verdict and ' +
+  'moves the lane on that send (ADR 202) — there is no separate close, and `decline` does not undo ' +
+  'an `accept`. To say you are taking this WITHOUT deciding yet, reply `wait` on this ask: it is ' +
+  'recorded against the lane and leaves the verdict yours to give.';
+
+/**
+ * Compose an acknowledged ask's ack — the other half of {@link laneVerdictAck}.
+ *
+ * It states the negative outcome explicitly ("no lane moved"), because the failure this whole lane
+ * exists to fix is a seat believing it announced something when it had in fact decided. An
+ * acknowledge that stayed silent would be the same ambiguity with the sign flipped.
+ */
+export function laneAckAck(ack: { lane: string }): LaneAckAck {
+  return {
+    lane: ack.lane,
+    guidance:
+      `Lane ${ack.lane}: acknowledged — no lane moved and the verdict is still yours. ` +
+      `Recorded so the board and your teammates can see this review is taken. ` +
+      `When you have judged it, reply \`accept\` or \`decline\` on the same ask.`,
+  };
+}
+
 /**
  * Compose an acceptance verdict's ack — one text, every surface (lane 01M2KYF888).
  *

@@ -9,6 +9,7 @@ import {
   chooseAutoTarget,
   ELIGIBLE_ACTS,
   eligibleSetRefusal,
+  laneAckAck,
   laneVerdictAck,
   type Envelope,
   makeEnvelope,
@@ -270,6 +271,11 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           ? laneVerdictAck(ackBody.lane_verdict)
           : undefined;
         const verdictGuidance = laneVerdict ? ` ${laneVerdict.guidance}` : '';
+        // Lane 01M2P2E2H6: the other half — a `wait` that TOOK an acceptance ask without deciding
+        // it. Said on the spot for the mirror-image reason: the sender must learn that this one did
+        // NOT move the lane, or "acknowledged" and "accepted" stay indistinguishable from outside.
+        const laneAck = ackBody?.lane_ack ? laneAckAck(ackBody.lane_ack) : undefined;
+        const ackGuidance = laneAck ? ` ${laneAck.guidance}` : '';
         // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
         const text =
@@ -278,7 +284,8 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
             : `sent ${args.act} to ${toLabel} (id=${envelope.id})`) +
           hintGuidance +
           handoffGuidance +
-          verdictGuidance;
+          verdictGuidance +
+          ackGuidance;
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {
@@ -295,6 +302,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
             ...(hint ? { delivery_hint: hint } : {}),
             ...(handoffLane ? { handoff_lane: handoffLane } : {}),
             ...(laneVerdict ? { lane_verdict: laneVerdict } : {}),
+            ...(laneAck ? { lane_ack: laneAck } : {}),
           },
         };
       } catch (err) {

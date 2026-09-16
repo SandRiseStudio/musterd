@@ -146,6 +146,7 @@ describe('version-bump discipline (ADR 085)', () => {
     20: '199e0096a14dec89', // orient tier 1 = everything ADDRESSED to the seat: a routed acceptance/review request is done, not asked about, and announced with accept+reply_to so it discharges for co-addressees (ADR 326 amendment 2026-08-27 UTC)
     22: '70084e92e29476ed', // the skill catches up with four surfaces that moved under it (lane 01M1VD1CQV): `done` records submit-vs-unconfirmed and says which; `--wait` (blocks) vs `--waiting` (returns) named as the twins they are; team_availability + the goal tools get their tool form; and a "when you were woken" playbook for team_wake_context, which had a name in the reference and no prose in the body
     23: '414d3a6cbc654871', // orient step 3 scopes the announce clause to eligible-set acts and says a lane_review ask's accept IS the verdict (ADR 202) — announcing with accept closed ryder's lane before review (lane 01M2GQFJXG, 2026-09-14)
+    24: 'e483f3745643ee00', // orient step 3 names the ACKNOWLEDGE: `wait` on a lane_review ask takes it without deciding, audited as lane.review_acknowledged (lane 01M2P2E2H6) — the old "say 'on it' with a status_update" told humans and not the board
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

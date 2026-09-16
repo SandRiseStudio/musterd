@@ -46,6 +46,7 @@ import {
   eligibleOf,
   emptyPoolFromCandidates,
   LANE_TERMINAL_STATES,
+  ACCEPTANCE_MOVES_NOTICE,
   isAwaitingAcceptance,
   makeEnvelope,
   type Envelope,
@@ -1235,7 +1236,10 @@ function acceptanceAskBody(
     '(2) Principles — project/musterd hard rules? ' +
     '(3) Usable — exercise the path enough to say it works? ' +
     '(4) Feel — only if UI/copy/brand is in surface, else N/A. ' +
-    'Accept → move the lane to done; reject → send it back to active with a concrete note.';
+    'Accept → move the lane to done; reject → send it back to active with a concrete note.' +
+    // Lane 01M2P2E2H6: the acceptor learns what `accept` DOES before they send one, not from the
+    // ack afterwards. Appended to the checklist so both the peer and human bodies below carry it.
+    ACCEPTANCE_MOVES_NOTICE;
   const overlap = (opts.overlapNotice ?? '') + (opts.noGoalNotice ?? '');
   if (opts.human && opts.peerFindings !== undefined) {
     return (
@@ -3803,6 +3807,7 @@ export async function handleHttp(
           ...(hint ? { delivery_hint: hint } : {}),
           ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
           ...(result.lane_verdict ? { lane_verdict: result.lane_verdict } : {}),
+          ...(result.lane_ack ? { lane_ack: result.lane_ack } : {}),
         });
       }
 
