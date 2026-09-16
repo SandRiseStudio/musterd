@@ -775,6 +775,31 @@ describe('redactSink (stream-key never reaches the logs)', () => {
     const keyless = { kind: 'rtmp' as const, target: 'rtmp://x' };
     expect(redactSink('publishing to rtmp://x now', keyless)).toBe('publishing to rtmp://x now');
   });
+
+  // Found in review, and it was a LEAK in the redactor itself: a trailing slash made the URL mask
+  // a no-op, and the function then early-returned the raw text, skipping the bare-key pass too.
+  // An unknown URL shape must fail CLOSED. `rtmps://…/KEY/` is an ordinary copy-paste artifact.
+  it('redacts a target with a TRAILING SLASH — the shape that used to print the key in full', () => {
+    const slashed = {
+      kind: 'rtmp' as const,
+      target: 'rtmps://live.twitch.tv/app/live_123456789abc_secretKEY/',
+    };
+    const out = redactSink(`[flv] Error opening output ${slashed.target}: refused`, slashed);
+    expect(out).not.toContain('live_123456789abc_secretKEY');
+    expect(out).toContain('<redacted>');
+  });
+
+  // librtmp prints the playpath alone (`Publishing 'live_…' failed`), so the bare key must be
+  // recognised even when the target carries a query string the key itself does not.
+  it('redacts the bare key when the target has a query string', () => {
+    const q = {
+      kind: 'rtmp' as const,
+      target: 'rtmps://host/app/live_123456789abc_secretKEY?token=abc',
+    };
+    const out = redactSink("Publishing 'live_123456789abc_secretKEY' failed", q);
+    expect(out).not.toContain('live_123456789abc_secretKEY');
+    expect(out).toContain('<redacted>');
+  });
 });
 
 describe('makeSecretScrubber (chunk-boundary safe)', () => {
@@ -802,8 +827,13 @@ describe('makeSecretScrubber (chunk-boundary safe)', () => {
     expect(flushed).toContain('<redacted>');
   });
 
-  it('streams complete progress lines (CR-terminated) as they arrive', () => {
+  it('streams complete progress lines (CR-terminated) as they arrive, still scrubbed', () => {
     const scrub = makeSecretScrubber(twitch);
     expect(scrub('frame= 10 fps=30\r')).toBe('frame= 10 fps=30\r');
+    // The same CR path must still redact — asserting only the passthrough above would pass even
+    // if redactSink were the identity function.
+    const out = scrub(`to ${twitch.target} failed\r`);
+    expect(out).not.toContain('live_123456789abc_secretKEY');
+    expect(out).toContain('<redacted>');
   });
 });

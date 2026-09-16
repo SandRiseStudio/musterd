@@ -8,9 +8,11 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { z } from 'zod';
 import type { Parsed } from '../args.js';
 import { configPath } from '../config.js';
@@ -194,14 +196,34 @@ export async function resolveSink(
  */
 export function redactSink(text: string, sink: { kind: 'file' | 'rtmp'; target: string }): string {
   if (sink.kind !== 'rtmp') return text;
+  const key = streamKeyOf(sink.target);
   const masked = maskRtmpUrl(sink.target);
-  if (masked === sink.target) return text; // no key segment to hide (e.g. a keyless test URL)
-  let out = text.split(sink.target).join(masked);
-  const key = sink.target.slice(sink.target.lastIndexOf('/') + 1);
-  // Only redact the bare key on its own when it is long enough to be the secret and not an
-  // incidental substring — real Twitch/RTMP keys are far longer than this floor.
-  if (key.length >= 12) out = out.split(key).join('<redacted>');
+  // NOTE the two conditions are separate on purpose. "this URL has no key segment" justifies
+  // passing text through; "I could not compute a mask" does NOT — and collapsing them was a real
+  // leak: a target with a TRAILING SLASH made `maskRtmpUrl` a no-op, the function early-returned,
+  // and the full key printed. In a redactor, an unknown shape must fail CLOSED.
+  let out = text;
+  if (masked !== sink.target) out = out.split(sink.target).join(masked);
+  // The bare key alone, which librtmp prints as the playpath (`Publishing 'live_…' failed`).
+  // Only when it is long enough to be the secret rather than an incidental substring.
+  if (key && key.length >= 12) out = out.split(key).join('<redacted>');
   return out;
+}
+
+/**
+ * The stream key inside an rtmp(s) target: the last non-empty path segment, with any query or
+ * fragment stripped. `rtmps://h/app/KEY`, `rtmps://h/app/KEY/` and `rtmps://h/app/KEY?t=1` all
+ * yield `KEY` — the trailing-slash and query forms are ordinary copy-paste shapes, and both used
+ * to defeat redaction.
+ */
+function streamKeyOf(url: string): string {
+  const schemeEnd = url.indexOf('://');
+  if (schemeEnd < 0) return '';
+  const pathStart = url.indexOf('/', schemeEnd + 3);
+  if (pathStart < 0) return ''; // host only — nothing after it to be a key
+  const path = url.slice(pathStart).split(/[?#]/)[0] ?? '';
+  const segments = path.split('/').filter((seg) => seg !== '');
+  return segments.length > 1 ? (segments[segments.length - 1] ?? '') : '';
 }
 
 /**
@@ -209,13 +231,11 @@ export function redactSink(text: string, sink: { kind: 'file' | 'rtmp'; target: 
  * with only a host and no path (e.g. `rtmp://x`) carries no key segment, so it is left as-is.
  */
 function maskRtmpUrl(url: string): string {
-  const schemeEnd = url.indexOf('://');
-  if (schemeEnd < 0) return url;
-  const pathStart = url.indexOf('/', schemeEnd + 3);
-  if (pathStart < 0) return url; // host only — nothing after it to be a key
-  const lastSlash = url.lastIndexOf('/');
-  if (lastSlash === url.length - 1) return url; // trailing slash — empty final segment
-  return `${url.slice(0, lastSlash + 1)}<redacted>`;
+  const key = streamKeyOf(url);
+  if (!key) return url; // host only, or no path segment that could be a key
+  // Replace the key segment wherever it sits, so a trailing slash or a `?query` after it keeps the
+  // rest of the URL readable and still hides the secret.
+  return url.split(key).join('<redacted>');
 }
 
 /**
@@ -1072,9 +1092,17 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   let checking = false; // one health poll at a time
   /** The daemon's build as we found it — the reference the watch compares against. */
   let baselineBuild: string | undefined;
+  /**
+   * Flushes the stderr scrubber's buffered tail synchronously. Assigned once ffmpeg is spawned;
+   * a no-op before that. `process.exit()` truncates pending ASYNC writes and `process.stderr` is
+   * async when stderr is a pipe, so without this every forced stop drops ffmpeg's final lines —
+   * a regression against `inherit`, which never queued them in this process at all.
+   */
+  let flushScrubbedStderr: () => void = () => {};
   const forceStop = (code: number): never => {
     killGroup(ffmpeg, 'SIGKILL');
     killGroup(chrome, 'SIGKILL');
+    flushScrubbedStderr(); // before exit: the last lines say why the stream died
     process.exit(code);
   };
   const gracefulStop = () => {
@@ -1141,14 +1169,36 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     detached: true,
   });
   const scrubStderr = makeSecretScrubber(sink);
+  // A StringDecoder, not `d.toString()`: ffmpeg emits UTF-8, and a codepoint straddling a read
+  // boundary would decode as U+FFFD — which also destroys the two halves for the string matcher.
+  const stderrDecoder = new StringDecoder('utf8');
   ffmpeg.stderr?.on('data', (d: Buffer) => {
-    const clean = scrubStderr(d.toString());
+    const clean = scrubStderr(stderrDecoder.write(d));
     if (clean) process.stderr.write(clean);
   });
+  // `close` is the ordinary path. It does NOT run when the process is torn down with
+  // `process.exit()`, which is why `flushScrubbedStderr` below is called on every forced path —
+  // piping stderr made this process responsible for bytes `inherit` used to deliver for free.
   ffmpeg.stderr?.on('close', () => {
     const rest = scrubStderr.flush();
     if (rest) process.stderr.write(rest);
   });
+  /**
+   * Flush the scrubber's buffered tail SYNCHRONOUSLY. `process.exit()` truncates pending async
+   * writes, and `process.stderr` is async when stderr is a pipe — exactly the `fly logs` case this
+   * redaction exists for. Without this, a forced stop drops ffmpeg's last lines, which are the ones
+   * that say why the stream died.
+   */
+  flushScrubbedStderr = () => {
+    const rest = scrubStderr.flush();
+    if (rest) {
+      try {
+        writeSync(2, rest);
+      } catch {
+        /* stderr already gone — nothing useful left to do */
+      }
+    }
+  };
   // ffmpeg closes its stdin the moment `-t <duration>` is satisfied (or its sink dies) — a pump tick
   // racing that close is an EPIPE, which on a Socket is an *emitted* error that would crash the
   // process. It's the normal end-of-stream handshake here, not a failure: swallow it and let the
