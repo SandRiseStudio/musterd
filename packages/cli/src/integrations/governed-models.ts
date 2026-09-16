@@ -11,7 +11,7 @@ import {
   type SeatFile,
 } from '@musterd/protocol';
 
-const SECRET_LIKE = /(?:mskey_|msgr_|mscr_|msac_|msls_|api[_-]?key|secret|token|password)/i;
+const MUSTERD_CREDENTIAL_PREFIX = /^(?:mskey_|msgr_|mscr_|msac_|msls_)/i;
 const MANIFEST_PATH = '.musterd/governed-models.json';
 
 export interface GovernedSeat {
@@ -45,8 +45,17 @@ function fail(message: string): never {
   throw new Error(`invalid governed-model policy: ${message}`);
 }
 
+function stringValues(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(stringValues);
+  if (value !== null && typeof value === 'object')
+    return Object.entries(value).flatMap(([key, child]) => [key, ...stringValues(child)]);
+  return [];
+}
+
 function assertSecretFree(value: unknown, label: string): void {
-  if (SECRET_LIKE.test(JSON.stringify(value))) fail(`${label} resembles a credential`);
+  if (stringValues(value).some((entry) => MUSTERD_CREDENTIAL_PREFIX.test(entry)))
+    fail(`${label} resembles a credential`);
 }
 
 /** Read only the committed roster inputs needed by generation; the CLI never imports the server. */
@@ -203,7 +212,10 @@ export function renderAperturePolicy(policy: EffectivePolicy): { policy: string;
   ].sort((a, b) => a.member.localeCompare(b.member));
   const policyText = `${JSON.stringify(rendered, null, 2)}\n`;
   const membersText = `${JSON.stringify({ version: 1, members }, null, 2)}\n`;
-  assertSecretFree({ policyText, membersText }, 'generated output');
+  assertSecretFree(
+    { policy: JSON.parse(policyText), members: JSON.parse(membersText) },
+    'generated output',
+  );
   if (/[?*]|\badmin\b/.test(policyText)) fail('generated output is broad or administrative');
   return { policy: policyText, members: membersText };
 }
