@@ -273,9 +273,9 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'integration',
     signature:
-      'doctor [--tailscale] [--aperture <https-url>] [--json] | generate aperture [--write | --check]',
+      'doctor [--tailscale] [--aperture <https-url>] [--json] | generate <aperture|tailscale> [--write | --check]',
     summary:
-      'read-only verify optional integrations or deterministically generate an Aperture policy fragment',
+      'read-only verify optional integrations or deterministically generate reviewed policy fragments',
     group: 'setup',
     primary: false,
     detail:
@@ -288,7 +288,10 @@ export const CATALOG: readonly CommandEntry[] = [
       'devices, sandbox Members, or cover unrelated harnesses. With neither flag, both sections are healthy off. ' +
       '`generate aperture` derives the secret-free, musterd-managed Aperture fragment from the committed ' +
       'roster and `.musterd/governed-models.json`; preview writes nothing, `--write` atomically updates ' +
-      'the two generated files, and `--check` fails when either is stale. It never contacts or configures Aperture.',
+      'the two generated files, and `--check` fails when either is stale. It never contacts or configures Aperture. ' +
+      '`generate tailscale` derives secret-free workload-tag ownership, exact HTTPS ACLs, and a complete ' +
+      'Member-to-opaque-node-key mapping from that policy plus `.musterd/governed-transport.json`; it writes ' +
+      'only `.musterd/generated/tailscale/`, never calls Tailscale or binds a runtime node.',
     examples: [
       'musterd integration doctor',
       'musterd integration doctor --tailscale',
@@ -296,6 +299,8 @@ export const CATALOG: readonly CommandEntry[] = [
       'musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net',
       'musterd integration generate aperture --write',
       'musterd integration generate aperture --check',
+      'musterd integration generate tailscale --write',
+      'musterd integration generate tailscale --check',
     ],
   },
   {
