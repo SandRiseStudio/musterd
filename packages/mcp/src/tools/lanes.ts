@@ -1,6 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
   closeReasonCopy,
+  emptyPoolCopy,
+  emptyPoolHint,
   incidentBannerLines,
   LaneStateSchema,
   shortDuration,
@@ -366,7 +368,7 @@ export function registerLanes(
                 `ADR 234): lane_resolve when ready.`
               : // Nothing was ever routed (the original submit found no candidate). The sanction was
                 // and remains honest here — nobody was asked, so no verdict is coming.
-                `\n\nno acceptor was ever routed — self-close sanctioned: ` +
+                `\n\nno acceptor was ever routed (${emptyPoolHint(review.empty_pool)}) — self-close sanctioned: ` +
                 `lane_resolve when ready (recorded unconfirmed).`
           : !review
             ? // No routing decision AND no standing report (a pre-fix daemon, or a patch that never
@@ -381,8 +383,9 @@ export function registerLanes(
               : !review.reviewer
                 ? // A fresh submit that found nobody. Nobody was asked, so no verdict is coming and
                   // waiting out a grace would be pure delay. This branch keeps its sanction whether or
-                  // not a sweep is armed.
-                  `\n\nno eligible acceptor is live — self-close sanctioned: ` +
+                  // not a sweep is armed. ADR 404: name empty-room vs live-ineligible when the
+                  // daemon sent `empty_pool`; older daemons keep the historical sentence.
+                  `\n\n${emptyPoolHint(review.empty_pool)} — self-close sanctioned: ` +
                   `lane_resolve when ready (recorded unconfirmed).`
                 : review.backstop?.armed
                   ? `\n\nacceptance asked of ${review.reviewer} (${review.route}) — you are done; leave it ` +
@@ -606,7 +609,9 @@ export function fmtNext(b: NextBrief): string {
         `  ${r.id} "${r.title}"${r.owner ? ` — owner=${r.owner}` : ''} — waiting ${Math.floor(r.waited_ms / 3_600_000)}h` +
           // Not "nobody has answered" — nobody was ASKED. The distinction is the whole point:
           // waiting on a slow reviewer and waiting on no reviewer look identical here otherwise.
-          (r.no_candidate ? ' — NO REVIEWER WAS ASKED (no eligible counterpart at submit)' : '') +
+          (r.no_candidate
+            ? ` — NO REVIEWER WAS ASKED (${r.empty_pool ? emptyPoolCopy(r.empty_pool) : 'no eligible counterpart at submit'})`
+            : '') +
           // Merge-verified submit: no SHA on the attestation means nothing landed — the wait
           // is on the author's merge button, and holding for it wastes an acceptor's cycle.
           (r.unlanded

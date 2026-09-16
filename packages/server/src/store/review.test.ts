@@ -549,7 +549,7 @@ describe('selectReviewCounterpart — decision-time audit snapshot (ADR 303)', (
   });
 });
 
-describe('pickReviewCounterpart — drops busy live agents (quiet-set inc 1)', () => {
+describe('pickReviewCounterpart — busy is a preference (ADR 404)', () => {
   const acted = (
     db: ReturnType<typeof seed>['db'],
     team: { id: string },
@@ -586,12 +586,34 @@ describe('pickReviewCounterpart — drops busy live agents (quiet-set inc 1)', (
     expect(p).toMatchObject({ reviewer: 'dolly', grade: 'cross_model' });
   });
 
-  it('a team of only-busy live agents finds no live candidate (wake / no_candidate is the caller)', async () => {
+  it('a team of only-busy live agents still asks the busy cross-family seat (ADR 404)', async () => {
     const p = await pick(({ db, team }) => {
       agent(db, team, 'gptbot', 'gpt-5.6-sol');
       acted(db, team, 'gptbot', 5_000);
     });
-    expect(p).toBeNull();
+    expect(p).toMatchObject({ reviewer: 'gptbot', grade: 'cross_family' });
+  });
+
+  it('an only-busy winner is eligible, not left marked busy', async () => {
+    const { openLane } = await import('./lanes.js');
+    const { selectReviewCounterpart } = await import('./review.js');
+    const h = seed();
+    agent(h.db, h.team, 'worker', 'claude-opus-5');
+    agent(h.db, h.team, 'gptbot', 'gpt-5.6-sol');
+    acted(h.db, h.team, 'gptbot', 5_000);
+    const lane = openLane(h.db, h.team.id, 'dawn', 'worker', {
+      title: 'a change',
+      claim: true,
+    });
+    const sel = selectReviewCounterpart(h.db, h.team.id, lane, 'worker', TIMEOUT);
+    expect(sel.snapshot.candidates).toEqual(
+      expect.arrayContaining([
+        { member: 'gptbot', family: 'gpt', eligible: true, grade: 'cross_family' },
+      ]),
+    );
+    expect(sel.snapshot.candidates.find((c) => c.member === 'gptbot')).not.toHaveProperty(
+      'exclusion',
+    );
   });
 
   it('unknown (no work audit) stays eligible — occupancy attestation is not work', async () => {

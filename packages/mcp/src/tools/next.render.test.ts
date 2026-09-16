@@ -128,6 +128,39 @@ describe('fmtNext — an unconfirmed close says WHY (ADR 283)', () => {
   });
 });
 
+describe('fmtNext — review_debt empty_pool (ADR 404)', () => {
+  it('names why nobody was asked when the daemon sent empty_pool', () => {
+    const b = brief(null);
+    b.review_debt = [
+      {
+        id: 'L1',
+        title: 'stuck',
+        owner: 'dolly',
+        waited_ms: 60_000,
+        no_candidate: true,
+        empty_pool: { kind: 'no_live_member' },
+        unlanded: false,
+      },
+    ];
+    expect(fmtNext(b)).toContain('NO REVIEWER WAS ASKED (no other member is live)');
+  });
+
+  it('keeps the historical parenthetical when the daemon omitted the field', () => {
+    const b = brief(null);
+    b.review_debt = [
+      {
+        id: 'L2',
+        title: 'legacy',
+        owner: 'dolly',
+        waited_ms: 60_000,
+        no_candidate: true,
+        unlanded: false,
+      },
+    ];
+    expect(fmtNext(b)).toContain('NO REVIEWER WAS ASKED (no eligible counterpart at submit)');
+  });
+});
+
 describe('fmtNext — review_debt unlanded badge (merge-verified submit)', () => {
   it('badges an unlanded entry so an acceptor never holds for an unmerged lane', () => {
     const b = brief(null);

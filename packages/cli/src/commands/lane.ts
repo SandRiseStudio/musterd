@@ -1,4 +1,5 @@
 import {
+  emptyPoolHint,
   LaneStakesSchema,
   LaneStateSchema,
   type Lane,
@@ -346,7 +347,7 @@ export function renderSubmitReport(res: Awaited<ReturnType<HttpClient['updateLan
           : res.review.acceptance_exempt
             ? 'already awaiting close — this submit was acceptance-exempt (declared low ' +
               'stakes, ADR 234): `musterd lane resolve` when ready'
-            : 'no acceptor was ever routed — self-close sanctioned: ' +
+            : `no acceptor was ever routed (${emptyPoolHint(res.review.empty_pool)}) — self-close sanctioned: ` +
               '`musterd lane resolve` when ready (recorded unconfirmed)',
       ) + '\n',
     );
@@ -387,7 +388,7 @@ export function renderSubmitReport(res: Awaited<ReturnType<HttpClient['updateLan
   } else {
     process.stdout.write(
       theme.meta(
-        'no eligible acceptor is live — self-close sanctioned: ' +
+        `${emptyPoolHint(res.review.empty_pool)} — self-close sanctioned: ` +
           '`musterd lane resolve` when ready (recorded unconfirmed)',
       ) + '\n',
     );
