@@ -158,9 +158,10 @@ export interface AddMemberInput {
   workingHours?: WorkingHours | null;
   slackUserId?: string | null;
   /** The seat's colour (ADR 374). Three statements, not two: a number is stored (refused if it
-   *  collides with a live teammate); `null` is "the file has no hue" and is stored as null —
-   *  reconcile's word, never argued with; `undefined` is "nobody said" and the daemon assigns,
-   *  which is right only on a DB-only team, where the daemon is the source. */
+   *  collides with a live roster member — observers do not occupy that floor, ADR 409); `null`
+   *  is "the file has no hue" and is stored as null — reconcile's word, never argued with;
+   *  `undefined` is "nobody said" and the daemon assigns, which is right only on a DB-only team,
+   *  where the daemon is the source. */
   hue?: number | null;
   /** Provision a read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. */
   observer?: boolean;
@@ -251,12 +252,14 @@ export function addMember(
   return { row, token };
 }
 
-/** The hues the LIVE members of a team hold — the set a new colour must clear. A departed seat's
- *  hue is not held against anyone; `except` leaves the member being recoloured out of its own way. */
+/** The hues the LIVE roster members of a team hold — the set a new colour must clear.
+ *  A departed seat's hue is not held against anyone; neither is an observer's (ADR 409): a
+ *  watcher is a session, hidden from the roster, and must not fill the uniqueness floor
+ *  `team add` has to walk. `except` leaves the member being recoloured out of its own way. */
 export function takenHues(db: Database, teamId: string, except?: string): number[] {
   return db
     .prepare<[string], { id: string; hue: number | null }>(
-      'SELECT id, hue FROM members WHERE team_id = ? AND left_at IS NULL AND hue IS NOT NULL',
+      'SELECT id, hue FROM members WHERE team_id = ? AND left_at IS NULL AND observer = 0 AND hue IS NOT NULL',
     )
     .all(teamId)
     .filter((r) => r.id !== except)
@@ -265,7 +268,7 @@ export function takenHues(db: Database, teamId: string, except?: string): number
 
 /**
  * The hue a member ends up with (ADR 374), from what the caller said:
- *   - a number — kept, once it clears every live teammate; a collision names the neighbour;
+ *   - a number — kept, once it clears every live roster member; a collision names the neighbour;
  *   - `null` — kept as null: the seat file has no hue and the daemon never invents one;
  *   - `undefined` — nobody said: keep what the seat already had (a revive), else assign the nearest
  *     clear hue to the name's default. Only a DB-only caller says nothing; reconcile always says.
@@ -290,7 +293,7 @@ function resolveHue(
   return assignHue(defaultHue(name), takenHues(db, teamId, except));
 }
 
-/** Refuse a hue within `HUE_MIN_SEPARATION` of a live teammate's, naming them. */
+/** Refuse a hue within `HUE_MIN_SEPARATION` of a live roster member's, naming them. */
 export function assertHueClear(db: Database, teamId: string, hue: number, except?: string): void {
   if (!Number.isInteger(hue) || hue < 0 || hue > 359)
     throw new MusterdError('bad_request', `hue must be an integer 0–359, got ${hue}`);
@@ -300,7 +303,7 @@ export function assertHueClear(db: Database, teamId: string, hue: number, except
     .prepare<
       [string, number],
       { name: string }
-    >('SELECT name FROM members WHERE team_id = ? AND left_at IS NULL AND hue = ?')
+    >('SELECT name FROM members WHERE team_id = ? AND left_at IS NULL AND observer = 0 AND hue = ?')
     .get(teamId, near);
   throw new MusterdError(
     'conflict',

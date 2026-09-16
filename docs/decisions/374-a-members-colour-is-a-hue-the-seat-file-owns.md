@@ -73,6 +73,11 @@ Two facts shaped the answer:
   and a new replicated audit kind is the seam ADR 371 settled. The CLI warning carries the fact.
 - Follow-ups: the office surfaces that wear the colour (lane 01M1MM1Y5H); a colour swatch in the
   terminal roster.
+- 2026-09-16 — uniqueness is among live *roster* members, not every `left_at IS NULL` row.
+  Observer seats (`web-*` watchers) filled the 12° floor on revive (32 hues, 9 of them observers)
+  and made file-backed `team add` 409 against a session that is hidden from the roster. The
+  narrowing is [ADR 409](409-observers-do-not-occupy-the-hue-floor.md); Decision 3's "live
+  teammate" is read as roster member. The 12° floor and the never-refuse walk are unchanged.
 
 ## Observability & Evaluation
 
