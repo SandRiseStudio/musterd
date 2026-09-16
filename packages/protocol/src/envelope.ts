@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ActSchema } from './acts.js';
+import { ActSchema, type Act } from './acts.js';
 import { AskSpeciesSchema, AskTierSchema, AskOutcomeSchema } from './ask.js';
 import {
   ELIGIBLE_ACTS,
@@ -21,6 +21,29 @@ export {
   type EnvelopeInput,
   type Recipient,
 } from './envelope.wire.js';
+
+/**
+ * Why this act cannot carry `meta.eligible`. One home so MCP `normalizeTo` and the envelope
+ * guard cannot disagree (lane 01M2HM0K2C).
+ *
+ * `ask` is refused because quiet-set fan-out is an unshipped increment (ADR 260 increment 2 /
+ * ADR 401), not because an ask has "one owner". Handoff and the single-target acts keep the
+ * structural line.
+ */
+export function eligibleSetRefusal(act: Act): string {
+  const allowed = [...ELIGIBLE_ACTS].join(', ');
+  if (act === 'ask') {
+    return (
+      `act "ask" cannot carry meta.eligible (only ${allowed}) — ` +
+      'quiet-set addressing is an unshipped increment (ADR 260), not a refused design; ' +
+      'name one seat in `to`'
+    );
+  }
+  return (
+    `act "${act}" cannot carry meta.eligible (only ${allowed}) — ` +
+    'an act with one owner cannot have several'
+  );
+}
 
 /** Recipient of an envelope: a specific member, the whole team, or broadcast. The type is in
  *  `envelope.wire.js`; this is its validator. */
@@ -212,10 +235,7 @@ export function actMetaRules(
     if (!names) {
       issue('meta.eligible must be an array of seat names');
     } else if (!ELIGIBLE_ACTS.has(env.act)) {
-      issue(
-        `act "${env.act}" cannot carry meta.eligible (only ${[...ELIGIBLE_ACTS].join(', ')}) — ` +
-          'an act with one owner cannot have several',
-      );
+      issue(eligibleSetRefusal(env.act));
     } else if (names.some((n) => n.trim().length === 0)) {
       issue('meta.eligible must not contain an empty name');
     } else if (names.length < 2) {

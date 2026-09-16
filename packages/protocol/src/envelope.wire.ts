@@ -24,6 +24,8 @@ export const MAX_ELIGIBLE = 4;
  * Acts that may carry an eligible set. Deliberately narrow: a `handoff` to two seats is incoherent
  * (two owners is zero owners), and accept/decline/defer/steer are structurally single-target. That
  * restriction is what earns a single global "first answer wins" rule instead of a per-act table.
+ * `ask` is also refused, but because quiet-set fan-out is an unshipped increment (ADR 260
+ * increment 2 / ADR 401), not because an ask has one owner.
  */
 export const ELIGIBLE_ACTS: ReadonlySet<Act> = new Set<Act>([
   'message',
