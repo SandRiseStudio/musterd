@@ -107,7 +107,7 @@ export type GovernedModelsManifest = z.infer<typeof GovernedModelsManifestSchema
 const TailscaleTagSchema = z.string().regex(/^tag:[a-z0-9][a-z0-9-]*$/);
 const TransportNodeKeySchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/);
 const TransportMemberSchema = z.string().min(1);
-const CREDENTIAL_LIKE = /(?:mskey_|msgr_|mscr_|msac_|msls_|token|secret|api[_-]?key|password)/i;
+const MUSTERD_CREDENTIAL_PREFIX = /^(?:mskey_|msgr_|mscr_|msac_|msls_)/i;
 
 export const GovernedTransportManifestSchema = z
   .object({
@@ -160,10 +160,10 @@ export const GovernedTransportManifestSchema = z
       ...value.tag_owners,
       ...value.nodes.flatMap((node) => [node.node_key, ...node.members]),
     ];
-    if (values.some((entry) => CREDENTIAL_LIKE.test(entry))) {
+    if (values.some((entry) => MUSTERD_CREDENTIAL_PREFIX.test(entry))) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'transport manifest must not contain credential-like text',
+        message: 'transport manifest must not contain a musterd credential',
       });
     }
   });

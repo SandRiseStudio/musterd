@@ -8,15 +8,12 @@ import {
 } from './governed-models.js';
 
 const PATH = '.musterd/governed-transport.json';
-const SECRET = /(?:mskey_|msgr_|mscr_|token|secret|api[_-]?key)/i;
 export const TAILSCALE_GENERATED_DIR = '.musterd/generated/tailscale';
 
 export function loadGovernedTransportManifest(root: string): GovernedTransportManifest | null {
   const path = join(root, PATH);
   if (!existsSync(path)) return null;
   const text = readFileSync(path, 'utf8');
-  if (SECRET.test(text))
-    throw new Error('invalid governed-transport policy: source resembles a credential');
   return GovernedTransportManifestSchema.parse(JSON.parse(text));
 }
 
@@ -75,7 +72,5 @@ export function renderTailscaleTransport(
     policy: `${JSON.stringify(result, null, 2)}\n`,
     workloads: `${JSON.stringify(workloads, null, 2)}\n`,
   };
-  if (SECRET.test(JSON.stringify(output)))
-    throw new Error('invalid governed-transport policy: output resembles a credential');
   return output;
 }
