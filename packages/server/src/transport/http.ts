@@ -115,7 +115,7 @@ import {
 } from '../store/audit.js';
 import { applyCursorAdvance, getCursor } from '../store/cursors.js';
 import { deferralFold } from '../store/deferralFold.js';
-import { actDelivery, crossedBySeen } from '../store/delivery.js';
+import { actDelivery, crossedBySeen, handoffNamedLaneOutOfPlay } from '../store/delivery.js';
 import { latestFootprint } from '../store/footprint.js';
 import { listGoals } from '../store/goals.js';
 import {
@@ -5825,6 +5825,39 @@ export async function handleHttp(
           }
         }
 
+        // (v) A handoff whose named lane has LEFT PLAY. A handoff is discharged by DOING THE WORK,
+        // never by a reply — `laneHandoffDischarged` has said so in the delivery ledger since #745,
+        // and `handoffNamedLaneOutOfPlay` is the shared predicate the wake path and the orientation
+        // `why` both ask. This surface was the fourth reader and asked nothing, so a settled handoff
+        // stayed owed forever: `isPinnedNeed` pins every directed non-`message` act minus the closed
+        // set, so it re-entered EVERY bounded check and the cursor held behind it. Measured
+        // 2026-09-16 on the laptop daemon — a lane reached `abandoned` with its new owner holding
+        // it, and the handoff kept presenting until answered by hand.
+        //
+        // Reuses the predicate rather than re-deriving it, which is the whole lesson of #745: a
+        // second opinion about "is this handoff still live" is how the `why` kept serving finished
+        // work. That buys its deliberate narrowness for free — only a handoff that NAMES a lane
+        // (structured meta, or a resolvable id in prose), and only when every lane it names exists
+        // and is out of play. A bare handoff keeps ringing, because a handoff that stops asking is
+        // work dropped on the floor and only one of those is recoverable.
+        //
+        // `lane_closed` is the same reason (ii) carries and means the same thing here — the lane
+        // settled and no seat answered — so the stand-down trace renders it with no answerer
+        // invented. Deriving it, never storing it, keeps the ADR 090 property: if the lane returns
+        // to an active state the handoff is owed again on the next read, with nothing to un-set.
+        const handoffSettled = messages
+          .filter(
+            (m) =>
+              m.act === 'handoff' &&
+              handoffNamedLaneOutOfPlay(
+                ctx.db,
+                team.id,
+                m.meta === null || m.meta === undefined ? null : JSON.stringify(m.meta),
+                m.body,
+              ),
+          )
+          .map((m) => ({ id: m.id, reason: 'lane_closed' as const }));
+
         // (iv) A steer or urgent act this seat had already been SHOWN before this read — the set
         // `shownBeforeThisRead` captured above, so the first read counts the act and every read
         // after it discharges it.
@@ -5837,7 +5870,7 @@ export async function handleHttp(
           total: countInbox(ctx.db, member),
           deferred,
           answered,
-          discharged: [...discharged, ...laneClosed, ...readAlready],
+          discharged: [...discharged, ...laneClosed, ...handoffSettled, ...readAlready],
           ...(truncated ? { truncated: true } : {}),
           ...(unreadRemaining > 0 ? { unread_remaining: unreadRemaining } : {}),
         });
