@@ -36,29 +36,52 @@ Two things Twitch states that decide the order: Store Past Broadcasts is **web-o
 
 ## 3. Title
 
-**Formula:** `<what a stranger can see happening>, live — musterd`. The first four words carry
-the claim; the product name is the suffix, as on every musterd.io page (`pageTitle`). Under 60
-characters so the directory card does not clip it.
+**Shipped, and the decision is nick's (2026-09-16):**
 
-| State | Exact string | Chars |
-| --- | --- | --- |
-| Default, any session | `AI agents build their own coordination layer, live — musterd` | 60 |
-| A session with a countable roster | `Watch 9 AI agents review each other's code, live — musterd` | 58 |
-| A session with a specific beat | `AI agents claim their own work and turn it down, live — musterd` | 62 |
+    Coffee & musterd - watch musterd agents build the platform live
 
-Notes: the roster number is set by hand at stream start and must match the office at that moment
-(ADR 158 — attested, not declared); if it cannot be kept true, use the default. "Coffee &" is
-dropped: the two words a stranger reads first should be the claim, not the mood. "platform" is
-replaced with "coordination layer", the product's own name for itself (ADR 320). ~~"AI agents hand
-work off and accept merges" (2026-09-16)~~ REPLACED the same day: merges are this team's incidental
-instance of acceptance, not the claim. ADR 320 §3 makes the claim **peer, not contractor** — a
-member can claim work, decline it, and hold another to acceptance — and a title should carry that,
-not the git noun for it.
+He read the replacement below and kept this one. It stays; the spec records the channel rather
+than arguing with it. Two consequences worth knowing rather than re-raising: past broadcasts
+inherit the stream title, so the VOD archive carries it too, and "platform" is a brand.md §5
+Not-word for Harness — tolerated here as the owner's call on his own channel, not a precedent for
+musterd.io copy, where the gate still applies.
+
+~~The formula below was the spec (2026-09-16)~~ NOT TAKEN the same day. Kept visible because the
+reasoning is still the right reasoning for the next title, and because a spec that quietly deletes
+what was rejected teaches nobody:
+
+> **Formula:** `<what a stranger can see happening>, live — musterd`. The first four words carry
+> the claim; the product name is the suffix, as on every musterd.io page (`pageTitle`). Under 60
+> characters so the directory card does not clip it.
+>
+> | State | Exact string | Chars |
+> | --- | --- | --- |
+> | Default, any session | `AI agents build their own coordination layer, live — musterd` | 60 |
+> | A session with a countable roster | `Watch 9 AI agents review each other's code, live — musterd` | 58 |
+> | A session with a specific beat | `AI agents claim their own work and turn it down, live — musterd` | 62 |
+>
+> The roster number would be set by hand at stream start and must match the office at that moment
+> (ADR 158 — attested, not declared). ~~"AI agents hand work off and accept merges"~~ was replaced
+> before this section was: merges are this team's incidental instance of acceptance, not the claim.
+> ADR 320 §3 makes the claim **peer, not contractor** — a member can claim work, decline it, and
+> hold another to acceptance — and a title should carry that, not the git noun for it.
 
 ## 4. Tags (all 10)
 
 `Claude` · `AI` · `Coding` · `Programming` · `SoftwareDevelopment` ·
 `AIAgents` · `OpenSource` · `BuildInPublic` · `DevLog` · `musterd`
+
+**Partly shipped 2026-09-16.** Verified from outside by which tag directories the channel appears
+in — a positive sighting is reliable, so these four are set: `Claude`, `Coding`, `AIAgents`,
+`OpenSource`. `Coffee` is gone, confirming the old set was replaced rather than added to.
+
+**Not confirmed either way: `Programming`, `SoftwareDevelopment`, `BuildInPublic`.** The channel
+did not appear in those three directories, and that is **not** evidence they are unset — a channel
+at ~3 viewers sorts to the bottom of a busy directory and can fall off page 1 entirely, which is
+exactly what `Programming` looked like when it was measured at 30+ cards. Absence here is
+unreadable, not negative. The reliable check is the Edit Stream Info dialog, or Discovery
+Analytics once a few streams have run. Recorded this way rather than reported as a gap, because
+"the channel is missing three tags" would have been a finding built on a page-1 cutoff.
 
 Chosen against measured directories rather than intuition — the counts and the method are on the
 [audit page](../wiki/twitch-channel-audit.md). Two kinds of tag earn a slot and the set needs both:
@@ -90,24 +113,27 @@ on the set this replaces.
 
 Set at `twitch.tv/settings/profile` → **Bio** — account settings, not the Creator Dashboard.
 
+**Shipped 2026-09-16, and this is the spec:**
+
+> AI agents and humans on one team, building the thing that coordinates them - musterd.io.
+
+88 characters of the 300 available. It keeps the hook — the team is building the thing that runs
+the team, which is true and slightly strange, and that is what makes a stranger read the second
+line. It sends them to musterd.io rather than the repository, which is the right door for someone
+arriving cold.
+
+**What the short form gives up, recorded so the trade is deliberate rather than forgotten:** it
+does not carry ADR 320 §3's claim. "The agents are not assigned work — they claim it, hand it off,
+and decline it" is the sentence that separates musterd from every "AI teammates" product, and 212
+unused characters is room for it. Worth revisiting if the channel ever gets traffic that converts;
+not worth re-opening now.
+
+~~The 246-character version below was the spec (2026-09-16)~~ NOT TAKEN the same day, nick's call:
+
 > AI agents and humans on one roster, building the thing that coordinates them. The agents are not assigned work — they claim it, hand it off, and decline it. Peers, not a fleet someone runs. Dark between sessions. github.com/SandRiseStudio/musterd
 
-246 characters. Every clause is load-bearing:
-
-- **"not assigned … claim it … decline it"** is ADR 320 §3 in plain words. Declining is the
-  distinction the whole position rests on, and it is the most watchable thing on the stream.
-- **"Peers, not a fleet someone runs"** carries §1 (ownership is the test) and §2 (humans as
-  members, not approvers) without the jargon, and separates musterd from the console products.
-- **"Dark between sessions"** is the same honesty line as /watch §4.2 and panel 1 below, so all
-  three surfaces say it identically.
-
-No "coordination layer": ADR 320 §4 forbids the bare term, and 300 characters has no room to
-qualify it properly. The position survives without the contested label.
-
-**Alternative, only if a viewer dropping in has a real chance of seeing a decline or a challenge**
-(242 characters) — the last sentence is a promise the stream has to keep:
-
-> A team of AI agents and humans builds the tool that coordinates them. No one is assigned anything: they claim work, hand it off, ask each other for help, and say no. Watch what agents do when they can refuse. github.com/SandRiseStudio/musterd
+Neither version uses "coordination layer": ADR 320 §4 forbids the bare term and 300 characters has
+no room to qualify it properly. The position survives without the contested label.
 
 ### 5.2 About panels (three, in this order)
 
