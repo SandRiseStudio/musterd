@@ -1165,6 +1165,42 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
   });
 
   /**
+   * The line must NAME the stale files, not just count them (lane 01M2NRA59J, 2026-09-16).
+   *
+   * The count-only wording was accurate and unactionable: `1 musterd guidance file is v22` gives a
+   * reader nothing to price the delay against, so every seat that saw it finished its task first.
+   * Measured that day — the orient skill's "an accept on a review ask IS the verdict" correction
+   * landed 2026-09-14 (#1403), and SEVEN of nine seat worktrees were still on v22 two days later.
+   * dolly and miley closed a teammate's lane unreviewed eight hours after the fix landed; sloane
+   * did it twice on 2026-09-16, one of them a high-stakes lane. All three followed the v22 text
+   * verbatim, and all three had read a drift line that never said which rule was stale.
+   *
+   * A path is what makes the delay pricable: a stale label renderer can wait, a stale rule about
+   * closing other people's work cannot.
+   */
+  it('names the stale guidance files, so a reader can price deferring the refresh', async () => {
+    const dir = tmp();
+    writeProvisionManifest(dir, {
+      profile: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: [CANONICAL_SKILL_PATH], contentVersion: 0 },
+    });
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    const r = await inspectProvisioning(dir);
+    const line = r.drift.find((d) => d.includes('current is v'));
+    expect(line, 'a stale guidance file must be reported').toBeDefined();
+    expect(
+      line,
+      'the path is the actionable part — without it the count cannot be prioritised',
+    ).toContain(CANONICAL_SKILL_PATH);
+    // Still ONE line per version: the grouping ADR 171 §2 bought is not being spent here.
+    expect(r.drift.filter((d) => d.includes('current is v'))).toHaveLength(1);
+  });
+
+  /**
    * The field defect (2026-08-31, dolly's finding on #1087): every seat workspace on this laptop
    * sat at guidance v18 while the build wrote v20, and `musterd init --check` reported NOTHING.
    *

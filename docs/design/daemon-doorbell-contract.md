@@ -63,7 +63,7 @@ point, and the table is wrong without it.
 | claude-code | holds | `PostToolUse` stdout → `PostToolUse:<Tool> hook additional context`, after **native and MCP** calls alike | izzo native 2026-09-14; delta MCP (`team_join`, `team_inbox_check`, `lane_board`, `team_send`, `lane_update`) 2026-09-14 |
 | opencode | holds at native boundaries only | ADR 392 plugin `tool.execute.after` fence. Zero fences across ~15 MCP calls in the same window native fences arrived | ghost, 2026-09-14 |
 | codex | **holds in unit; live unmeasured** | `PostToolUse` runs `musterd codex-hook post-tool-use --stdin`, writes `model_observed`, then performs the lease-authenticated interrupt read. A raised line becomes exactly `hookSpecificOutput.additionalContext`; quiet/refused/error cases emit nothing. No Stop or idle rail. | ADR 397 focused hook tests, 2026-09-15. The authorized Codex 0.154.0 Surface was uncallable from a different adapter checkout, so live model delivery remains unmeasured. |
-| native | **holds** (shipped 2026-09-14, lane 01M2GNYGEY) | `bridgeTools` asks `MusterdClient.interruptCheck()` after every bridged tool call and `appendInterrupt` appends the daemon-composed line to that tool result. Delivery is provable from the daemon side: the line is in the turn's `wake_turns` capture row | ryder, 2026-09-14, `nativeBridge.ts` / `nativeInterrupt.test.ts`. **Not** the `onBeforeTurn` push this row originally proposed: `BetaToolRunner.pushMessages` sets the runner's private `#mutated`, and the iterator appends the assistant message only `if (!this.#mutated)` — injecting from inside the `for await` body drops the turn the model just took and no tool then runs (@anthropic-ai/sdk 0.116.0, pinned as a regression fixture) |
+| native | **holds in unit; live unmeasured** (seam shipped 2026-09-14, lane 01M2GNYGEY; live arm attempted 2026-09-16, lane 01M2GQG86D) | `bridgeTools` asks `MusterdClient.interruptCheck()` after every bridged tool call and `appendInterrupt` appends the daemon-composed line to that tool result. Delivery is provable from the daemon side: the line is in the turn's `wake_turns` capture row — **by accident of the capture path, not by design** (lane 01M2NH5WT9) | ryder, 2026-09-14, `nativeBridge.ts` / `nativeInterrupt.test.ts`. **Not** the `onBeforeTurn` push this row originally proposed: `BetaToolRunner.pushMessages` sets the runner's private `#mutated`, and the iterator appends the assistant message only `if (!this.#mutated)` — injecting from inside the `for await` body drops the turn the model just took and no tool then runs (@anthropic-ai/sdk 0.116.0, pinned as a regression fixture). **Live, izzo 2026-09-16:** the two halves of the daemon read hold on a real seat credential + session lease against the laptop daemon — silent `200 {"raised":false}` at 16:24:51Z on `fb283e5c`; raised line caught verbatim from ~18:24Z, `⚡ musterd: acceptance from sloane (ask) — run 'musterd inbox' to read it.`, the single-act branch of `composeInterruptLine`. That is the READ half only, and it was delivered by a claude-code hook, not a native loop. **No woken native seat has yet received a raised act through `appendInterrupt`, and none can on this machine:** the wake actuator (`studio.sandrise.musterd-host`, LaunchAgent) carries no `ANTHROPIC_API_KEY` in its `EnvironmentVariables` and its process env has none, so every actuator-driven native wake takes the keyless-host path (`classifyEngineFailure` → `auth`) by construction. Native is enrolled-capable and not wakeable here. The scratch seat to measure it by hand could not be minted either — `team add` is refused for every hue on revive (lane 01M2NR7N9V). The `wake_turns` proof is therefore still owed, and is the follow-on for whoever lands the hue fix |
 
 Six harnesses, four different seams, two with none. **"Every tool boundary" holds nowhere** and
 would pass two configurations that never reached a model (grok's 2026-09-02 PostToolUse hook;
@@ -239,9 +239,17 @@ working, and every boundary before that is guaranteed deaf (clause 3, delta).
   it must not imply an idle or reconnect rail.
 - ~~**Native's seam is one function away**~~ **Shipped** (ryder, lane 01M2GNYGEY, 2026-09-14) — in
   the bridge rather than on the engine seam, for the runner reason recorded in the clause-1 row.
-  Native is now the reference row: the only harness that can prove delivery from the daemon side.
+  ~~Native is now the reference row: the only harness that can prove delivery from the daemon side.
   Still owed: a live arm. Every claim above is from unit tests; no woken native seat has yet
-  received a raised act through it.
+  received a raised act through it.~~ **Downgraded 2026-09-16** (izzo, lane 01M2GQG86D): the
+  daemon read half is live-confirmed on a real seat (both branches, verbatim line in the clause-1
+  row); the append half and the `wake_turns` proof are **not**, and cannot be on this machine until
+  the actuator carries a model credential and `team add` can mint a seat again (lane
+  01M2NR7N9V). "Reference row" was true of the capture path, not of the evidence — the line lands
+  in `wake_turns` because `appendInterrupt` folds it into a tool result, not because delivery is
+  recorded anywhere (lane 01M2NH5WT9 proposes recording it for every rail). The measurement trap
+  that ate two attempts at this arm is written up once in
+  [the instrument discharges the act](../wiki/the-instrument-discharges-the-act.md).
 - **Opencode's idle rail is half-measured** (ghost, lane `01M2GP0QM3`, 2026-09-14, eval §9b):
   silent-with-live-lease confirmed live (no spurious prompt — the `if (!line) return` path);
   deaf-lease rings a deaf *notice as a synthetic turn* by code reading (the bug to fix, not the
