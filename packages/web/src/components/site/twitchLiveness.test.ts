@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { TWITCH_SDK_SRC, subscribeLiveness, type Liveness } from './twitchLiveness';
 import { WATCH_COPY } from './watchCopy';
 
