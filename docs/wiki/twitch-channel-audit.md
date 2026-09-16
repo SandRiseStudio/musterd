@@ -60,6 +60,8 @@ Recorded because all four were re-derived by hand once and none of them is where
 
 | Thing | Path |
 | --- | --- |
+| Title, **category** and tags — one dialog | Creator Dashboard → **Stream Manager** → Edit Stream Info (`dashboard.twitch.tv/u/<channel>/stream-manager`). Not under Settings, which is where everyone looks first. Sticky between streams; edits apply immediately mid-stream. |
+| Profile bio (the About description) | **account** settings: `twitch.tv/settings/profile` → Bio, 300 characters |
 | Store Past Broadcasts, Always Publish VODs, Excluded Categories | Creator Dashboard → Settings → **Stream** (`dashboard.twitch.tv/u/<channel>/settings/stream`) |
 | Clip Settings | the same page, **Clip Settings** section (`link.twitch.tv/ClipSettings`) |
 | Clips Manager — where the old clips get deleted | Creator Dashboard → **Content → Clips** |
@@ -67,6 +69,35 @@ Recorded because all four were re-derived by hand once and none of them is where
 | YouTube connection | **account** settings, not the Creator Dashboard: `twitch.tv/settings/connections`, under Recommended Connections |
 
 Two traps stated by Twitch and worth repeating (2026-09-16; falsify: the On-Demand Content help article drops either warning): Store Past Broadcasts is **web-only**, absent from the mobile app, and a broadcast that was not saved **cannot be recovered by Twitch Support** — the setting must be on before going live, not after. <!-- claim: other -->
+
+## The tags in use describe the medium, not the content — measured against the live directories (2026-09-16; falsify: open `twitch.tv/directory/all/tags/<tag>` and count the cards) <!-- claim: defect -->
+
+Each Twitch tag has its own public directory, so "is this tag worth a slot" is answerable rather than arguable. Live channels on page 1, read logged out:
+
+| Tag | Live channels | Top channel |
+| --- | --- | --- |
+| `coding` | 30+ (page full) | 506 viewers |
+| `programming` | 30+ (page full) | 109 |
+| `softwaredevelopment` | 15 | 45 |
+| `claude` | 7 | 19 |
+| `buildinpublic` | 7 | 2 |
+| `opensource` | 5 | 116 |
+| `aiagents` | 2 | 1 |
+| `agents` | **1 — this channel** | 2 |
+
+The channel's ten at the time of measuring were `Coffee`, `AI`, `agents`, `Chatting`, `Claude`, `musterd`, `building`, `Broadcast`, `product`, `live`. Five of them — `Coffee`, `Chatting`, `Broadcast`, `product`, `live` — describe the medium or the host's mood and cannot narrow who arrives; every stream on Twitch is `live` and a `Broadcast`, and `Chatting` pulls back toward the category the channel is leaving. `building` collides with Minecraft. `agents` is not ownable, it is **empty**: one live channel, this one, which is a directory nobody browses.
+
+What the numbers show that reasoning alone did not: the set has **no volume tag at all** (none of `coding`, `programming`, `softwaredevelopment`), and its one specific tag is `Claude` — which is the strongest slot on the board, seven channels deep and exactly the audience, and was already there by luck rather than choice. The replacement set is [copy spec §4](../design/twitch-channel-copy-spec.md).
+
+**A tag earns a slot only if a stranger might filter for it and it narrows who arrives.** Twitch applies the category tag automatically, so the category name is never worth a slot, and language is a separate directory control rather than a tag.
+
+**The measurement loop exists.** Twitch's Discovery Analytics reports which custom tag a viewer arrived through, so which of these ten actually carries the channel is measurable after a few streams rather than permanently a matter of taste.
+
+## A tag-count query that ignored its own filter read as clean data (2026-09-16; falsify: re-run the same GraphQL query across two obviously different tags and compare the totals) <!-- claim: defect -->
+
+The counts above were first taken from Twitch's GraphQL endpoint, one query per tag. It returned **identical channel counts and identical viewer totals for all sixteen tags** — the `tags:` argument was ignored and the same global top-30 came back every time. Had the tags been even roughly similar in size, that would have passed as a clean measurement and half this page would be wrong.
+
+The tell was that the numbers were identical to the digit, which is why the check that caught it was comparing across tags rather than sanity-checking one. Recorded because it is the [wiki README](README.md) rule-3 shape in a fresh disguise: an instrument that answers the same way whether or not the claim holds. The directory pages, read as rendered HTML, were the instrument that could fail.
 
 ## The part that is not a Twitch setting (2026-09-16; falsify: after the settings above land, compare the referrer mix on the /watch page and the channel's own analytics — if Twitch directory browse is a majority source, this reading is wrong) <!-- claim: other -->
 
