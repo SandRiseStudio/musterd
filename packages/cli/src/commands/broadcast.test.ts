@@ -33,6 +33,8 @@ import {
   ffmpegArgs,
   killGroup,
   makeFramePump,
+  makeFrameWatchdog,
+  FRAME_STALL_MS,
   parseOptions,
   PULSE_SINK,
   resolveSink,
@@ -303,6 +305,104 @@ describe('ffmpegArgs', () => {
   it('no -t when duration is 0 (run until stopped)', () => {
     const forever = parseOptions({ team: 't', out: 'p.mp4' }, 'darwin');
     expect(ffmpegArgs(forever, { kind: 'file', target: 'p.mp4' })).not.toContain('-t');
+  });
+});
+
+describe('makeFrameWatchdog (the freeze nothing else can see)', () => {
+  const setup = (thresholdMs = 5000) => {
+    let t = 0;
+    const stalls: number[] = [];
+    const w = makeFrameWatchdog(
+      (since) => stalls.push(since),
+      () => t,
+      thresholdMs,
+    );
+    return { w, stalls, tick: (ms: number) => (t += ms), at: () => t };
+  };
+
+  it('stays quiet while frames keep arriving', () => {
+    const { w, stalls, tick } = setup();
+    w.arm();
+    for (let i = 0; i < 200; i++) {
+      tick(66); // ~15/s, the rate the box actually delivers
+      w.arrived();
+      w.check();
+    }
+    expect(stalls).toEqual([]);
+  });
+
+  it('fires once past the threshold, reporting how long the picture has been frozen', () => {
+    const { w, stalls, tick } = setup();
+    w.arm();
+    tick(4999);
+    w.check();
+    expect(stalls, 'under the threshold is a gap the pump pads, not a freeze').toEqual([]);
+    tick(1);
+    w.check();
+    expect(stalls).toEqual([5000]);
+    // Keep checking: a wedged capture ticks many more times before the process goes down, and a
+    // watchdog that reports every tick buries the first line under its own repeats.
+    tick(60_000);
+    w.check();
+    expect(stalls, 'one stall per arming').toEqual([5000]);
+  });
+
+  it('is silent until armed — startup is not a freeze', () => {
+    const { w, stalls, tick } = setup();
+    tick(600_000); // Chrome launching, the page loading, the first paint
+    w.check();
+    expect(stalls).toEqual([]);
+    w.arm();
+    tick(5000);
+    w.check();
+    expect(stalls).toEqual([5000]);
+  });
+
+  it('disarms, so a deliberate stop is not reported as a stall', () => {
+    const { w, stalls, tick } = setup();
+    w.arm();
+    w.disarm();
+    tick(600_000);
+    w.check();
+    expect(stalls).toEqual([]);
+  });
+
+  it('re-arms clean after a restart', () => {
+    const { w, stalls, tick } = setup();
+    w.arm();
+    tick(5000);
+    w.check();
+    expect(stalls).toEqual([5000]);
+    w.arm();
+    tick(1000);
+    w.check();
+    expect(stalls, 'the new run gets its own threshold').toEqual([5000]);
+    tick(4000);
+    w.check();
+    expect(stalls).toEqual([5000, 5000]);
+  });
+
+  it('sets the threshold well clear of the slowest second ever measured', () => {
+    // 778s across two captures on the box (2026-09-16, quiet floor): worst SECOND delivered 7
+    // frames, and no second delivered none. A healthy capture never goes one second dark, so the
+    // threshold must sit far above one second and far below the six and a half minutes the
+    // unreported freeze actually ran. Pinned because lowering it toward the healthy range is how a
+    // watchdog turns a still room into a restart loop.
+    expect(FRAME_STALL_MS).toBeGreaterThanOrEqual(3000);
+    expect(FRAME_STALL_MS).toBeLessThanOrEqual(15_000);
+  });
+
+  it('measures from the last FRAME, not from the last check', () => {
+    // The bug this guards: timing the gap from the tick would restart the clock every sweep and
+    // the watchdog could never fire at all — which is exactly the shape of the defect it exists
+    // to catch (a counter that reads healthy while the picture is frozen).
+    const { w, stalls, tick } = setup();
+    w.arm();
+    for (let i = 0; i < 10; i++) {
+      tick(1000);
+      w.check(); // sweeping, but no frames arriving
+    }
+    expect(stalls).toEqual([5000]);
   });
 });
 
