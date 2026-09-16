@@ -59,6 +59,16 @@ export interface PageMeta {
    * with no alt is an image readers on screen readers and text clients simply lose.
    */
   image?: { url: string; alt: string; width?: number; height?: number };
+  /**
+   * The card's title, when it should differ from `<title>`.
+   *
+   * Defaults to the suffixed document title, which is right almost everywhere. `/watch` is the
+   * exception: its name already contains the product ("Watch AI agents build musterd, live"), so
+   * the card would read the word twice in eleven. A card title is read on its own, with the site
+   * name usually shown beside it by the client anyway — the suffix is there for a browser tab, not
+   * for a share preview.
+   */
+  ogTitle?: string;
 }
 
 /**
@@ -69,8 +79,9 @@ export interface PageMeta {
  * Prefer `pageHead` — the canonical link lives there, and a route that reaches past it for the
  * meta array alone ships a page with no canonical, which is the gap this pair closed.
  */
-export function pageMeta({ title, description, path, ogType, graph, image }: PageMeta) {
+export function pageMeta({ title, description, path, ogType, graph, image, ogTitle }: PageMeta) {
   const full = pageTitle(title);
+  const card = ogTitle ?? full;
   return [
     { title: full },
     { name: 'description', content: description },
@@ -78,7 +89,7 @@ export function pageMeta({ title, description, path, ogType, graph, image }: Pag
     // caps are NOT: without them an answer engine truncates a quotation at ~160 characters and
     // renders a thumbnail, which is the wrong shape for a product whose share card is a wide card.
     { name: 'robots', content: 'index, follow, max-image-preview:large, max-snippet:-1' },
-    { property: 'og:title', content: full },
+    { property: 'og:title', content: card },
     { property: 'og:description', content: description },
     { property: 'og:url', content: absoluteUrl(path) },
     { property: 'og:type', content: ogType ?? 'website' },
@@ -86,7 +97,7 @@ export function pageMeta({ title, description, path, ogType, graph, image }: Pag
     { property: 'og:locale', content: 'en_US' },
     // Twitter falls back to og:* only when the twitter:* pair is absent entirely; naming both
     // keeps the card readable in the clients that do not implement that fallback.
-    { name: 'twitter:title', content: full },
+    { name: 'twitter:title', content: card },
     { name: 'twitter:description', content: description },
     // A page's own card, when it has one. These repeat property names the root already set —
     // which is exactly how they win: TanStack merges route heads leaf-last, so the deeper route's
