@@ -70,6 +70,9 @@ describe('musterd stream', () => {
   const run = (argv: string[], over: Partial<StreamDeps> = {}) =>
     streamCommand(parseArgs(argv), { ...base, ...over });
 
+  const MANIFEST_UNKNOWN =
+    'failed to get manifest ...: request failed: not found [http 404]: ' +
+    '{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}';
   const digest = 'sha256:' + 'a'.repeat(64);
   const withImage = () =>
     writeFileSync(join(repo, 'scripts', 'broadcast', '.image-digest'), digest);
@@ -233,43 +236,106 @@ describe('musterd stream', () => {
     // creates the machine, then the VM fails to pull an unpublished digest and heals on its own.
     // The retry must NOT launch a second machine over the top of the one its "failed" attempt
     // already left — that is the 2026-09-03 duplicate-launch reached through start's own retry.
-    it('does NOT relaunch when the failed attempt already left an occupying machine', async () => {
+    // 2026-09-15: a MANIFEST_UNKNOWN exit is not proof no machine was created. `fly machine run`
+    // creates the machine, then the VM fails to pull an unpublished digest and heals on its own.
+    // The retry must NOT launch a second machine over the top of the one its "failed" attempt
+    // already left — that is the 2026-09-03 duplicate-launch reached through start's own retry.
+    it('does NOT relaunch when the failed attempt left a machine that then comes up', async () => {
       withImage();
       let listCalls = 0;
-      // First `fly machine list` is the top-of-function guard (empty → proceed). The second is the
-      // reap check inside the retry loop, after the MANIFEST_UNKNOWN launch left a machine behind.
-      const exec = greenExec({});
+      const inner = greenExec({});
+      // 1st list = the top-of-function guard (empty → proceed). 2nd = the reap check, which finds
+      // the machine `created`. 3rd+ = the settle poll, by which point it has reached `started`.
       const stateful: Exec = (cmd, args) => {
         const key = [cmd, ...args].join(' ');
         if (key.startsWith('fly machine list')) {
           listCalls += 1;
-          return listCalls === 1
-            ? ok('[]')
-            : ok(JSON.stringify([{ id: 'm-booting', state: 'created' }]));
+          if (listCalls === 1) return ok('[]');
+          const state = listCalls >= 3 ? 'started' : 'created';
+          return ok(JSON.stringify([{ id: 'm-booting', state }]));
         }
-        return exec(cmd, args);
+        return inner(cmd, args);
       };
       let n = 0;
       const code = await run(
         ['start'],
         sup({
           exec: stateful,
-          launch: () => {
-            n += 1;
-            return {
-              code: 1,
-              output:
-                'failed to get manifest ...: request failed: not found [http 404]: ' +
-                '{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}',
-            };
-          },
+          launch: () => ((n += 1), { code: 1, output: MANIFEST_UNKNOWN }),
           sleep: async () => {},
         }),
       );
       expect(code).toBe(0);
       expect(n).toBe(1); // launched once, then waited for the machine it had already created
       expect(out.join('')).toContain('m-booting');
-      expect(out.join('')).toContain('not launching a second');
+      expect(out.join('')).toContain('not up yet');
+    });
+
+    // The guard must not trade a duplicate launch for a silent lie. `isUnpropagatedImage` matches
+    // EVERY MANIFEST_UNKNOWN, including a digest that is permanently unresolvable — and `created`
+    // is an OCCUPYING state, so "a machine exists" would report `◉ live` and `ensure`'s
+    // `liveCount > 0` would then read `noop — live` forever. Nobody would stream, and nothing
+    // would say so. Waiting for `started` is what keeps the failure loud.
+    it('FAILS LOUDLY when the leftover machine never starts — a stuck machine is not a live one', async () => {
+      withImage();
+      let listCalls = 0;
+      const inner = greenExec({});
+      const stateful: Exec = (cmd, args) => {
+        const key = [cmd, ...args].join(' ');
+        if (key.startsWith('fly machine list')) {
+          listCalls += 1;
+          // Occupying forever, never `started`: the permanently-unresolvable-digest case.
+          return listCalls === 1
+            ? ok('[]')
+            : ok(JSON.stringify([{ id: 'm-stuck', state: 'created' }]));
+        }
+        return inner(cmd, args);
+      };
+      let n = 0;
+      await expect(
+        run(
+          ['start'],
+          sup({
+            exec: stateful,
+            launch: () => ((n += 1), { code: 1, output: MANIFEST_UNKNOWN }),
+            sleep: async () => {},
+          }),
+        ),
+      ).rejects.toThrow(/never started|not resolvable/);
+      expect(n).toBe(1); // still only one launch — it failed, it did not duplicate
+    });
+
+    // Two machines here is the duplicate this command exists to prevent; it must be said, not
+    // papered over by reporting the first id as live.
+    it('says so when it finds MORE than one occupying machine', async () => {
+      withImage();
+      let listCalls = 0;
+      const inner = greenExec({});
+      const stateful: Exec = (cmd, args) => {
+        const key = [cmd, ...args].join(' ');
+        if (key.startsWith('fly machine list')) {
+          listCalls += 1;
+          if (listCalls === 1) return ok('[]');
+          const state = listCalls >= 3 ? 'started' : 'created';
+          return ok(
+            JSON.stringify([
+              { id: 'm-one', state },
+              { id: 'm-two', state },
+            ]),
+          );
+        }
+        return inner(cmd, args);
+      };
+      await run(
+        ['start'],
+        sup({
+          exec: stateful,
+          launch: () => ({ code: 1, output: MANIFEST_UNKNOWN }),
+          sleep: async () => {},
+        }),
+      );
+      expect(out.join('')).toContain('duplicate launch');
+      expect(out.join('')).toContain('m-one, m-two');
     });
 
     // A retry loop over real errors is how you bill for nothing. Anything but the transient
