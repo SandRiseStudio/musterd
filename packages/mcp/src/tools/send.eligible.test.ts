@@ -31,10 +31,20 @@ describe('normalizeTo (ADR 254)', () => {
   });
 
   it('two names become a team act carrying the eligible set', () => {
-    expect(normalizeTo(['stanley', 'izzo'])).toEqual({
+    expect(normalizeTo(['stanley', 'izzo'], 'message')).toEqual({
       to: { kind: 'team' },
       eligible: ['stanley', 'izzo'],
     });
+  });
+
+  it('refuses to compose an eligible set on ask — quiet-set fan-out is unshipped, not a design ban', () => {
+    expect(() => normalizeTo(['stanley', 'izzo'], 'ask')).toThrow(/unshipped increment/);
+  });
+
+  it('refuses to compose an eligible set on handoff before the protocol guard', () => {
+    expect(() => normalizeTo(['stanley', 'izzo'], 'handoff')).toThrow(
+      /one owner cannot have several/,
+    );
   });
 
   it('accepts the cap exactly', () => {

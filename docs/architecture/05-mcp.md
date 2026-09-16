@@ -209,7 +209,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
 ```json
 {
   "name": "team_send",
-  "description": "Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires meta.species and meta.tier; 2–4 to names mean any may answer.",
+  "description": "Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires meta.species and meta.tier. 2–4 to names mean any may answer on message, request_help, or challenge — not ask (quiet-set fan-out is unshipped, ADR 260 / ADR 401).",
   "inputSchema": {
     "type": "object",
     "required": ["act", "body"],
