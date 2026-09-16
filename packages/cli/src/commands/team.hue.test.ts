@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultHue, legacyHue } from '@musterd/protocol/hue';
@@ -99,6 +99,13 @@ describe('team hue', () => {
         'kind = "agent"\nrole = "designer"\nhue = 212\n',
       );
       await expect(team(['hue', 'miley', '42'])).rejects.toThrow(/"nick" \(40\)/);
+    });
+
+    it('`team add --hue` that collides with a sibling seat file is refused BEFORE the file is written, naming a clear hue', async () => {
+      await expect(team(['add', 'lin', '--kind', 'agent', '--hue', '42'])).rejects.toThrow(
+        /"nick" \(40\).*\d+ is clear/,
+      );
+      expect(existsSync(seatPath('lin'))).toBe(false);
     });
 
     it('bare `team hue <name>` reads the file and says the file owns it', async () => {

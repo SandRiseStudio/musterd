@@ -78,6 +78,24 @@ Two facts shaped the answer:
   and made file-backed `team add` 409 against a session that is hidden from the roster. The
   narrowing is [ADR 409](409-observers-do-not-occupy-the-hue-floor.md); Decision 3's "live
   teammate" is read as roster member. The 12° floor and the never-refuse walk are unchanged.
+- 2026-09-16 (izzo, lane 01M2P43WQ7) — **past a full wheel.** Decision 3's refusal of an explicit
+  colliding hue had no hatch: on a saturated roster (the greedy walk seats a median 24 at 12°;
+  revive stood at 23) `assertHueClear` was a bare 409, and because reconcile creates a file-backed
+  seat through the same `addMember`, one seat file whose colour collided aborted the whole team's
+  reconcile. Three things now hold, none of them a change to Decisions 1–6:
+  (a) the seat file's word is never refused — reconcile passes `hueDeclared` and the daemon stores
+  what the file says, reporting the neighbour it shares with instead of throwing (ADR 058: the
+  daemon does not argue with the file);
+  (b) a CALLER's explicit hue is refused only while a clear hue exists, and the refusal names one
+  (`— 118 is clear`); past a full wheel it is kept and `hue_shared_with` rides the response, so
+  `team add` / `team hue` say `colour shared with <name> — the wheel is full` exactly as
+  Decision 4's walk does;
+  (c) on a file-backed team the CLI checks an explicit `--hue` against the sibling seat files
+  BEFORE writing the file, so a chosen collision is turned back with a clear hue named and never
+  reaches disk. `nearestClearHue` (protocol) is the primitive: the walk that returns null when
+  the wheel is full, which is the fact every hatch above keys on. Falsifier: a 25th roster seat
+  with an explicit colliding hue on a full wheel is created, shared, and said out loud; a colliding
+  seat file no longer fails `reconcileTeam`.
 
 ## Observability & Evaluation
 

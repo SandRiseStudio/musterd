@@ -6,6 +6,7 @@ import {
   hueConflict,
   hueSeparation,
   legacyHue,
+  nearestClearHue,
 } from './hue.js';
 
 /** Every hue on the wheel, the way the roster would hold it. */
@@ -104,5 +105,18 @@ describe('assignHue', () => {
     expect(crowded).toBeGreaterThan(0);
     // Never a duplicate, even when the separation cannot be honoured.
     expect(new Set(taken).size).toBe(taken.length);
+  });
+});
+
+describe('nearestClearHue (lane 01M2P43WQ7)', () => {
+  test('returns the seed when clear, the nearest clear hue when not, and null past a full wheel', () => {
+    expect(nearestClearHue(100, [])).toBe(100);
+    const near = nearestClearHue(100, [100]);
+    expect(near).not.toBeNull();
+    expect(hueConflict(near!, [100])).toBeNull();
+    // Fill the wheel the way a roster does, then no hue is clear anywhere.
+    const taken: number[] = [];
+    for (let i = 0; i < 40; i++) taken.push(assignHue(defaultHue(`seat-${i}`), taken));
+    expect(nearestClearHue(100, taken)).toBeNull();
   });
 });
