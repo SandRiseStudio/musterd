@@ -26,8 +26,35 @@ export const HEARTBEAT_INTERVAL_MS = 24 * 3_600_000;
 
 export type GuardianPolicySource =
   | 'team_policy'
+  /**
+   * The read SUCCEEDED and the team has set no tier overrides — the expected state of a fresh
+   * install. Its own value because `team_policy` claimed a dial nobody had turned (ADR 173: absent
+   * is not unknown), which made "nothing configured" unreadable from both the stamp and status.
+   */
+  | 'team_policy_unset'
   | 'shipped_default_unprovisioned'
   | 'shipped_default_degraded';
+
+/**
+ * Why a policy read failed, as coarse as it can be while still separating the causes that call for
+ * DIFFERENT repairs: start the daemon / re-provision the guardian seat / fix the policy body.
+ * `unknown` is deliberate and load-bearing — a reason we cannot name must not be filed under one we
+ * can (wiki: cannot-separate-two-causes).
+ */
+export type GuardianPolicyErrorReason =
+  | 'unreachable'
+  | 'unauthorized'
+  | 'forbidden'
+  | 'malformed'
+  | 'unknown';
+
+/** The bound error, kept verbatim-ish so the stamp answers "why" without a log archaeology trip. */
+export interface GuardianPolicyError {
+  reason: GuardianPolicyErrorReason;
+  /** The error's own message, truncated. Never the credential — no error path here carries one. */
+  detail: string;
+  at: number;
+}
 
 /**
  * What was last said about a class, so the same sentence is not said twice.
@@ -65,6 +92,18 @@ export interface GuardianStamp {
   policySource: GuardianPolicySource;
   lastPolicyReadAt: number | null;
   lastPolicyErrorAt: number | null;
+  /**
+   * The last policy failure WITH its cause. `lastPolicyErrorAt` above is kept beside it (and stays
+   * the field status reads for the timestamp) so stamps written before this existed still render.
+   * Absent from those older stamps — treated as null.
+   */
+  lastPolicyError?: GuardianPolicyError | null;
+  /**
+   * When the CURRENT run of degraded ticks began — not the last failure. A single tick that fails
+   * and recovers is a blip; the same read failing for a day is a condition, and only this field can
+   * tell them apart. Cleared by any successful read. Absent from older stamps — treated as null.
+   */
+  policyDegradedSince?: number | null;
 }
 
 export function emptyStamp(): GuardianStamp {
@@ -79,6 +118,8 @@ export function emptyStamp(): GuardianStamp {
     policySource: 'shipped_default_unprovisioned',
     lastPolicyReadAt: null,
     lastPolicyErrorAt: null,
+    lastPolicyError: null,
+    policyDegradedSince: null,
   };
 }
 

@@ -2,9 +2,15 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { CliError } from '../errors.js';
 import { DEFAULT_TIERS } from '../guardian/classify.js';
 import { emptyStamp, loadStamp, saveStamp } from '../guardian/damp.js';
-import { guardianStatusLine, guardianTick, type GuardianTickDeps } from './guardian.js';
+import {
+  classifyPolicyError,
+  guardianStatusLine,
+  guardianTick,
+  type GuardianTickDeps,
+} from './guardian.js';
 
 const NOW = 9_000_000;
 
@@ -106,6 +112,84 @@ describe('guardianTick', () => {
     expect(stamp.policySource).toBe('team_policy');
     expect(stamp.lastPolicyReadAt).toBe(NOW);
     expect(stamp.lastPolicyErrorAt).toBeNull();
+  });
+
+  /**
+   * Lane 01M2NZDXPD. The falsifier the lane names: make the read fail for two genuinely different
+   * reasons and read the log. Before the fix both ticks produced the same bytes.
+   */
+  it('a failed policy read names its cause — two different failures are two different lines', async () => {
+    const seen: string[] = [];
+    for (const thrown of [
+      new CliError('unauthorized: seat token is not provisioned', 4, 'unauthorized'),
+      new CliError("can't reach team server at http://127.0.0.1:4849 — is the daemon running?", 7),
+    ]) {
+      const { d, lines } = tickDeps({
+        getTiers: async () => {
+          throw thrown;
+        },
+      });
+      await guardianTick(d);
+      const line = lines.find((l) => l.startsWith('guardian.policy_unreadable'));
+      expect(line).toBeDefined();
+      seen.push(line!);
+    }
+    expect(seen[0]).toContain('"reason":"unauthorized"');
+    expect(seen[1]).toContain('"reason":"unreachable"');
+    expect(seen[0]).not.toBe(seen[1]);
+  });
+
+  it('the stamp carries the bound cause, and a degrade run is dated from its FIRST tick', async () => {
+    const { d } = tickDeps({
+      getTiers: async () => {
+        throw new CliError('bad guardian_tiers', 3, 'validation');
+      },
+    });
+    saveStamp(d.stampPath, {
+      ...emptyStamp(),
+      policySource: 'shipped_default_degraded',
+      policyDegradedSince: NOW - 300_000,
+      lastPolicyErrorAt: NOW - 120_000,
+    });
+
+    await guardianTick(d);
+
+    const stamp = loadStamp(d.stampPath);
+    expect(stamp.lastPolicyError?.reason).toBe('malformed');
+    expect(stamp.lastPolicyError?.detail).toContain('bad guardian_tiers');
+    // The run started five minutes ago; this tick is a continuation, not a new degradation.
+    expect(stamp.policyDegradedSince).toBe(NOW - 300_000);
+    expect(stamp.lastPolicyErrorAt).toBe(NOW);
+  });
+
+  it('a successful read clears the degrade run, not just its timestamp', async () => {
+    const { d } = tickDeps({
+      getTiers: async () => ({ tiers: DEFAULT_TIERS, source: 'team_policy' }),
+    });
+    saveStamp(d.stampPath, {
+      ...emptyStamp(),
+      policySource: 'shipped_default_degraded',
+      policyDegradedSince: NOW - 300_000,
+      lastPolicyError: { reason: 'unreachable', detail: 'gone', at: NOW - 120_000 },
+    });
+
+    await guardianTick(d);
+
+    const stamp = loadStamp(d.stampPath);
+    expect(stamp.policyDegradedSince).toBeNull();
+    expect(stamp.lastPolicyError).toBeNull();
+  });
+
+  it('an unset team policy is a successful read, not a degradation', async () => {
+    const { d, lines } = tickDeps({
+      getTiers: async () => ({ tiers: DEFAULT_TIERS, source: 'team_policy_unset' }),
+    });
+    await guardianTick(d);
+    const stamp = loadStamp(d.stampPath);
+    expect(stamp.policySource).toBe('team_policy_unset');
+    expect(stamp.lastPolicyReadAt).toBe(NOW);
+    expect(stamp.lastPolicyErrorAt).toBeNull();
+    expect(lines.some((l) => l.startsWith('guardian.policy_unreadable'))).toBe(false);
   });
 
   it('defers a confirmed outage during a current refresh handover', async () => {
@@ -308,7 +392,22 @@ describe('guardianStatusLine (instrument-silence: guardian dead ≠ quiet)', () 
     expect(guardianStatusLine(join(dir, 'none.json'), NOW)).toContain('never ticked');
   });
 
-  it('names a degraded policy read and when it first failed', () => {
+  it('names a degraded policy read, when it first failed, and WHY', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guardian-status-'));
+    const p = join(dir, 'stamp.json');
+    saveStamp(p, {
+      ...emptyStamp(),
+      lastTickAt: NOW - 40_000,
+      policySource: 'shipped_default_degraded',
+      policyDegradedSince: NOW - 120_000,
+      lastPolicyError: { reason: 'unauthorized', detail: 'seat token revoked', at: NOW - 60_000 },
+    });
+    const line = guardianStatusLine(p, NOW);
+    expect(line).toContain('policy defaults — degraded since');
+    expect(line).toContain('unauthorized: seat token revoked');
+  });
+
+  it('a stamp written before the cause was bound says so rather than inventing one', () => {
     const dir = mkdtempSync(join(tmpdir(), 'guardian-status-'));
     const p = join(dir, 'stamp.json');
     saveStamp(p, {
@@ -317,6 +416,55 @@ describe('guardianStatusLine (instrument-silence: guardian dead ≠ quiet)', () 
       policySource: 'shipped_default_degraded',
       lastPolicyErrorAt: NOW - 120_000,
     });
-    expect(guardianStatusLine(p, NOW)).toContain('policy defaults — degraded since');
+    expect(guardianStatusLine(p, NOW)).toContain('cause not recorded');
+  });
+
+  it('an unset team policy reads as configured-nothing, not as a fallback', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guardian-status-'));
+    const p = join(dir, 'stamp.json');
+    saveStamp(p, { ...emptyStamp(), lastTickAt: NOW - 40_000, policySource: 'team_policy_unset' });
+    expect(guardianStatusLine(p, NOW)).toContain('team has set no tiers');
+  });
+});
+
+describe('classifyPolicyError (cannot-separate-two-causes: name the cause or say you cannot)', () => {
+  it('maps each protocol refusal to the repair it implies', () => {
+    const at = NOW;
+    expect(classifyPolicyError(new CliError('no', 4, 'unauthorized'), at).reason).toBe(
+      'unauthorized',
+    );
+    expect(classifyPolicyError(new CliError('no', 5, 'expired_grant'), at).reason).toBe(
+      'unauthorized',
+    );
+    expect(classifyPolicyError(new CliError('no', 5, 'forbidden'), at).reason).toBe('forbidden');
+    expect(classifyPolicyError(new CliError('no', 3, 'validation'), at).reason).toBe('malformed');
+    expect(classifyPolicyError(new CliError('no', 12, 'hub_unreachable'), at).reason).toBe(
+      'unreachable',
+    );
+  });
+
+  it('recognises the transport failures that all mean "the daemon is not answering"', () => {
+    expect(classifyPolicyError(new CliError("can't reach team server", 7), NOW).reason).toBe(
+      'unreachable',
+    );
+    expect(classifyPolicyError(new Error('fetch failed'), NOW).reason).toBe('unreachable');
+    expect(
+      classifyPolicyError(new Error('The operation was aborted due to timeout'), NOW).reason,
+    ).toBe('unreachable');
+    expect(classifyPolicyError(new SyntaxError('Unexpected token < in JSON'), NOW).reason).toBe(
+      'malformed',
+    );
+  });
+
+  it('an unrecognised failure is `unknown` and keeps its message — never filed under a known one', () => {
+    const out = classifyPolicyError(new CliError('server error (500)', 1), NOW);
+    expect(out.reason).toBe('unknown');
+    expect(out.detail).toBe('server error (500)');
+  });
+
+  it('truncates a pathological message so one error cannot own the log file', () => {
+    const out = classifyPolicyError(new Error('x'.repeat(5_000)), NOW);
+    expect(out.detail.length).toBeLessThanOrEqual(201);
+    expect(out.detail.endsWith('…')).toBe(true);
   });
 });

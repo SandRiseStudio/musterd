@@ -2134,7 +2134,14 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
       // why the first armed build fell back to defaults on every tick.
       if (!auth) return { tiers: DEFAULT_TIERS, source: 'shipped_default_unprovisioned' };
       const { guardian_tiers } = await auth.http.getGuardianTiers(auth.team);
-      return { tiers: resolveGuardianTiers(guardian_tiers), source: 'team_policy' };
+      // A team that has set no tiers answers 200 with nothing in it. That is the expected state of
+      // a fresh install, not a failure — and calling it `team_policy` claimed a dial nobody had
+      // turned, which is how "nobody configured this" and "the read is broken" became one line.
+      const unset = guardian_tiers === undefined || Object.keys(guardian_tiers).length === 0;
+      return {
+        tiers: resolveGuardianTiers(guardian_tiers),
+        source: unset ? 'team_policy_unset' : 'team_policy',
+      };
     },
     healthBuild: async () => (await rawHealth()).build ?? null,
     act: async (incidents, actStamp, tiers) => {
