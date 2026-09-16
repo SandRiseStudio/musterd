@@ -6,7 +6,8 @@ import { errorResult, notReadyMessage, textResult } from './format.js';
 
 const DESCRIPTION =
   'Read a bounded, recipient-scoped wake context packet for one directed Act or owned Lane. ' +
-  'It contains IDs, state, delivery intent, and named explicit reads only; it never loads message or memory bodies.';
+  'It contains IDs, state, delivery intent, and named explicit reads only; it never loads message or memory bodies. ' +
+  'Pass the id your wake line names — `team_wake_context {act_id: "…"}` or `{lane_id: "…"}` — never a placeholder such as "latest".';
 
 function render(context: WakeContextPacket): string {
   const target = context.wake.act_id ?? context.wake.lane_id;
@@ -29,8 +30,18 @@ export function registerWakeContext(server: McpServer, client: MusterdClient): v
     {
       description: DESCRIPTION,
       inputSchema: {
-        act_id: z.string().min(1).optional().describe('directed Act id'),
-        lane_id: z.string().min(1).optional().describe('owned Lane id'),
+        act_id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            'the directed Act id from your wake line (a 26-character id, not a placeholder)',
+          ),
+        lane_id: z
+          .string()
+          .min(1)
+          .optional()
+          .describe('the owned Lane id from your wake line (a 26-character id, not a placeholder)'),
       },
     },
     async (args) => {

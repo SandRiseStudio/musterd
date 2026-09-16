@@ -139,6 +139,14 @@ this ADR and `SPEC.md` carry the accepted, not-yet-shipped contract.
   `transcript_required` classification. The shipped increment implements the portable/fresh path
   only; the daemon marks eligibility and the host proves an exact local match. The rollout result
   this section calls for is recorded once that fresh path has run against a dogfood cohort.
+- 2026-09-16 (izzo, lane 01M2P698NJ): the composed wake line now carries the packet's argument
+  verbatim — `team_wake_context {act_id: "…"}` for a directed act, `{lane_id: "…"}` for a
+  dispatched lane — the treatment the review line received on 2026-09-04. Measured on a native
+  wake of seat compo the same day: the loop's first call was `team_wake_context {act_id:
+  "latest"}` and §4 refused it (`forbidden wake context target`), so the packet the primer says to
+  read first was unreadable on every wake whose line named the act only in prose. An id is a
+  structured field under ADR 088 §4; no body text enters the line. Falsifier: wake any enrolled
+  seat and read the first tool call in its `wake_turns` row — it must carry the id from the line.
 
 ## Observability & Evaluation
 
