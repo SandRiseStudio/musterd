@@ -810,15 +810,19 @@ describe('HTTP API', () => {
       expect(inbox.json.discharged).toContainEqual({ id: 'el-b', by: 'cy', reason: 'answered' });
     });
 
-    it('the discharging act is invisible to bo in the timeline — this is why it needs its own read', async () => {
+    it('the discharging act is on the timeline bo can read — and the trace is still the inbox saying so', async () => {
       const t = await teamOfFour();
       await ask(t['nick'], 'el-c', ['bo', 'cy']);
       await answer(t['cy'], 'cy', 'ans-c', 'el-c');
 
-      // cy→nick is a DM: bo is not a party, so need-to-know scoping hides it. Without the trace, bo
-      // could not derive who answered at any price.
+      // Under ADR 128 this asserted `not.toContain('ans-c')`: cy→nick was a DM, bo was not a party,
+      // and need-to-know scoping hid it — "without the trace, bo could not derive who answered at
+      // any price". ADR 407 inverts the premise: bo READS every act on its team, so the answer is
+      // on the timeline. The trace does not retire with the premise. The inbox is a DELIVERY
+      // surface, and a seat mid-draft on an act it no longer owes must be told so where it is
+      // looking, not sent to go and correlate a timeline it was never handed (ADR 254 stand-down).
       const timeline = await get('/teams/dawn/messages', t['bo']);
-      expect(timeline.json.messages.map((m: { id: string }) => m.id)).not.toContain('ans-c');
+      expect(timeline.json.messages.map((m: { id: string }) => m.id)).toContain('ans-c');
       const inbox = await get('/teams/dawn/inbox', t['bo']);
       expect(inbox.json.discharged).toContainEqual({ id: 'el-c', by: 'cy', reason: 'answered' });
     });
@@ -1265,7 +1269,7 @@ describe('WebSocket', () => {
     l.close();
   });
 
-  it('firehose (subscribe team-all): a regular member sees team/broadcast, not others’ DMs (recipient-scoping)', async () => {
+  it('firehose (subscribe team-all): a regular member is pushed a DM between two others — visibility is team-wide (ADR 407)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
@@ -1299,7 +1303,8 @@ describe('WebSocket', () => {
     );
 
     // Lin is the recipient AND a firehose subscriber (tests dedup); Obs is a regular (non-party,
-    // non-observer, non-admin) member watching the firehose — recipient-scoping must apply to it.
+    // non-observer, non-admin) member watching the firehose. Under ADR 128 recipient-scoping applied
+    // to it; under ADR 407 it reads the same stream the history read serves.
     const linSub = await l.subscribe('team-all');
     const obsSub = await o.subscribe('team-all');
     expect((linSub as any).scope).toBe('team-all');
@@ -1322,12 +1327,18 @@ describe('WebSocket', () => {
 
     // The recipient gets the DM exactly once, despite also being on the firehose (dedup via skip set).
     await l.waitFor('deliver');
+    // ADR 128 asserted `o.countFrames('deliver')` was 0 here: a regular member must NOT see a DM it
+    // is not party to. ADR 407 inverts that on purpose — a claimed seat reads every act on its team,
+    // and the firehose applies the same grade the history read does. The old assertion stays in
+    // this comment so the flip is a recorded decision, not a silent one. (Waited for, not slept
+    // for: a zero can be asserted after a nap, a one cannot.)
+    const obsDm = await o.waitFor('deliver');
+    expect((obsDm as any).envelope.id).toBe('fh1');
     await new Promise((r) => setTimeout(r, 40));
     expect(l.countFrames('deliver')).toBe(1);
-    // Recipient-scoping: the regular member must NOT see a DM it is not party to.
-    expect(o.countFrames('deliver')).toBe(0);
+    expect(o.countFrames('deliver')).toBe(1);
 
-    // But a team broadcast is public — the observer does receive it.
+    // A team broadcast is public and arrives as the second frame.
     a.send({
       type: 'send',
       envelope: {
@@ -1342,8 +1353,13 @@ describe('WebSocket', () => {
       },
     });
     await a.waitFor('ack');
-    const obsBroadcast = await o.waitFor('deliver');
-    expect((obsBroadcast as any).envelope.body).toBe('team ping');
+    const deadline = Date.now() + 1000;
+    while (o.countFrames('deliver') < 2 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const obsDelivers = o.frames.filter((f) => f.type === 'deliver');
+    expect(obsDelivers).toHaveLength(2);
+    expect((obsDelivers[1] as any).envelope.body).toBe('team ping');
 
     a.close();
     l.close();
@@ -1392,7 +1408,7 @@ describe('WebSocket', () => {
     expect(limited.json.messages[0].id).toBe('t2');
   });
 
-  it('GET /messages recipient-scopes for a non-admin: only envelopes the caller is party to', async () => {
+  it('GET /messages: a regular member reads every act on its team, including a DM between two others (ADR 407)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
@@ -1427,13 +1443,156 @@ describe('WebSocket', () => {
       { key, seat: 'Lin' },
     );
 
-    // Bo (non-admin) sees only its own DM (m2) + the public broadcast (m3) — never the Ada→Lin DM.
+    // ADR 128 asserted Bo saw exactly ['m2', 'm3'] here — its own DM and the broadcast, never
+    // Ada→Lin. ADR 407 inverts it: a claimed seat reads every act on its team. The old assertion is
+    // kept in this comment so the flip is visible in the record rather than silent.
     const boView = await get('/teams/dawn/messages', { key, seat: 'Bo' });
-    expect(boView.json.messages.map((m: any) => m.id)).toEqual(['m2', 'm3']);
+    expect(boView.json.messages.map((m: any) => m.id)).toEqual(['m1', 'm2', 'm3']);
 
-    // The admin (nick) still sees everything, incl. the DM Bo cannot.
+    // The admin sees the same timeline — there is no longer a wider one.
     const adminView = await get('/teams/dawn/messages', tok);
     expect(adminView.json.messages.map((m: any) => m.id)).toEqual(['m1', 'm2', 'm3']);
+  });
+
+  // ADR 407 §2–§3. Visibility widened; DELIVERY did not, and one act stays hidden. These are the
+  // assertions the ADR's Observability section names, written before the enforcement so each one
+  // was watched fail.
+  describe('the hidden class and the untouched inbox (ADR 407)', () => {
+    async function team() {
+      const t = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const tok = t.json.human_credential as string;
+      const key = t.json.agent_key as string;
+      for (const name of ['Ada', 'Lin', 'Bo']) {
+        await post('/teams/dawn/members', { name, kind: 'agent' }, tok);
+      }
+      // A human who is NOT the admin, so "the addressee sees it" is tested apart from "admins do".
+      const dee = await post('/teams/dawn/members', { name: 'Dee', kind: 'human' }, tok);
+      return { tok, key, deeTok: dee.json.human_credential as string };
+    }
+    const confidential = (id: string, ts: number) => ({
+      id,
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'member', name: 'Dee' },
+      act: 'ask',
+      body: 'Bo keeps forging submits',
+      meta: { species: 'escalate', tier: 'standard', about: 'Bo' },
+      ts,
+    });
+
+    it('an ask carrying meta.about is read by sender, addressee and admin — and by nobody else', async () => {
+      const { tok, key, deeTok } = await team();
+      await post(
+        '/teams/dawn/messages',
+        { envelope: confidential('c1', 1000) },
+        { key, seat: 'Ada' },
+      );
+      // A plain act after it, so every negative below asserts on a non-empty timeline.
+      await post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id: 'p1',
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from: 'Lin',
+            to: { kind: 'team' },
+            act: 'status_update',
+            body: 'public',
+            ts: 2000,
+          },
+        },
+        { key, seat: 'Lin' },
+      );
+      const ids = async (auth: unknown) =>
+        (await get('/teams/dawn/messages', auth)).json.messages.map((m: any) => m.id);
+
+      // The subject cannot read what is said about it; an uninvolved seat cannot either.
+      expect(await ids({ key, seat: 'Bo' })).toEqual(['p1']);
+      expect(await ids({ key, seat: 'Lin' })).toEqual(['p1']);
+      // Sender, human addressee, admin.
+      expect(await ids({ key, seat: 'Ada' })).toEqual(['c1', 'p1']);
+      expect(await ids(deeTok)).toEqual(['c1', 'p1']);
+      expect(await ids(tok)).toEqual(['c1', 'p1']);
+    });
+
+    it('the firehose applies the same rule: a regular subscriber is not pushed it, a full observer is', async () => {
+      const { tok, key } = await team();
+      const wall = await post(
+        '/teams/dawn/members',
+        { name: 'wall', kind: 'human', observer: true },
+        tok,
+      );
+      expect(wall.status).toBe(201);
+
+      const a = new TestWs();
+      const o = new TestWs();
+      const w = new TestWs();
+      await Promise.all([a.open(), o.open(), w.open()]);
+      await a.claim('dawn', key, 'Ada', 'claude-code', await standingGrant(tok, 'Ada'));
+      await o.claim('dawn', key, 'Lin', 'codex', await standingGrant(tok, 'Lin'));
+      await w.claim('dawn', key, 'wall', 'web', await standingGrant(tok, 'wall'));
+      await o.subscribe('team-all');
+      await w.subscribe('team-all');
+
+      a.send({ type: 'send', envelope: confidential('c2', Date.now()) });
+      await a.waitFor('ack');
+      // The public act AFTER it is what makes the negative real: if the confidential ask leaked to
+      // Lin it would be Lin's first deliver frame, and 'public' would not be.
+      a.send({
+        type: 'send',
+        envelope: {
+          id: 'p2',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'team' },
+          act: 'status_update',
+          body: 'public',
+          ts: Date.now() + 1,
+        },
+      });
+      await a.waitFor('ack');
+
+      const linFirst = await o.waitFor('deliver');
+      expect((linFirst as any).envelope.id).toBe('p2');
+      const wallFirst = await w.waitFor('deliver');
+      expect((wallFirst as any).envelope.id).toBe('c2');
+
+      a.close();
+      o.close();
+      w.close();
+    });
+
+    it('a DM between two others is READ by a third seat but never DELIVERED to it — inbox and cursor untouched', async () => {
+      const { key } = await team();
+      await post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id: 'dm-1',
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from: 'Ada',
+            to: { kind: 'member', name: 'Lin' },
+            act: 'request_help',
+            body: 'ada→lin',
+            ts: 1000,
+          },
+        },
+        { key, seat: 'Ada' },
+      );
+      // Visible on the timeline …
+      const timeline = await get('/teams/dawn/messages', { key, seat: 'Bo' });
+      expect(timeline.json.messages.map((m: any) => m.id)).toContain('dm-1');
+      // … and absent from the inbox, which is a delivery surface. A request_help is exactly the act
+      // the inbox would pin if it were delivered, so an empty inbox here is the assertion that
+      // reading did not become receiving.
+      const inbox = await get('/teams/dawn/inbox', { key, seat: 'Bo' });
+      expect(inbox.json.messages.map((m: any) => m.id)).not.toContain('dm-1');
+      expect(inbox.json.total).toBe(0);
+    });
   });
 
   it('observer seat: watches the firehose but is hidden from roster/count and cannot send (ADR 063)', async () => {

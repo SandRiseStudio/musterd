@@ -1,6 +1,6 @@
 # 407 — Visibility is team-wide; delivery is addressed
 
-- Status: proposed — 2026-09-16
+- Status: accepted — 2026-09-16 (increment 1, #1483); increment 2 enforced 2026-09-16 (lane `01M2P0EVMEWN93NJ0MNVQ1CCEQ`)
 - Date: 2026-09-16
 - Amends: [ADR 128](128-recipient-scoped-message-reads.md) (recipient-scoped message reads — the
   default flips; the mechanism and the observer allowance stay)
@@ -175,10 +175,18 @@ default should return.
 
 ## Increments
 
-1. **This ADR** — the decision. Doc only.
+1. **This ADR** — the decision. Doc only. _Landed #1483, accepted 2026-09-16._
 2. **Enforcement** — `hasFullMessageVisibility` widens; ADR 128 tests inverted; `meta.about` parsed
    and honoured at both enforcement points; `security.md` §Capabilities & visibility and principle 6
    amended; `membership-model.md` "Shipped (ADR 128/136)" note updated. One lane.
+   _Landed 2026-09-16, lane `01M2P0EVMEWN93NJ0MNVQ1CCEQ`. One refinement to §1's letter that keeps
+   its reason: the boolean became a three-value **grade** (`messageVisibilityOf`: `full` / `team` /
+   `public`) rather than a wider boolean, because §3's confidential act makes visibility a fact
+   about the (reader, envelope) pair and a boolean on the reader alone could not carry both §1 and
+   §3. It is still the single predicate behind both enforcement points; the envelope-side half is
+   `confidentialAskSubject` in the protocol, which the SQL read mirrors. `meta.about` gained three
+   shape refusals at the boundary — non-empty, member-directed, consult-or-escalate — because a
+   confidential ask to the whole team is not a thing. The falsifier's 60-day clock starts here._
 3. **Surfaces** — `musterd messages` / the board / `team_inbox_check` rooms stop hiding third-party
    turns; a `↳ not addressed to you` marker on a read-not-delivered act so a seat does not mistake
    sight for an obligation. One lane, after 2.

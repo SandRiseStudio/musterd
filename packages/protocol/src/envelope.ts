@@ -30,6 +30,24 @@ export {
  * ADR 401), not because an ask has "one owner". Handoff and the single-target acts keep the
  * structural line.
  */
+/**
+ * The seat a to-human `ask` is ABOUT, when it names one — ADR 407 §3's one confidential act.
+ *
+ * `null` for every other envelope, and for an `ask` that names no subject: absent is the common
+ * case and means public. The server hides a non-null result from every seat but the sender, the
+ * addressee, admins and full-grade observers; the SQL in `store/messages.ts` mirrors this exactly,
+ * and this function is what the live firehose asks, so the two surfaces cannot disagree about which
+ * act is the hidden one.
+ */
+export function confidentialAskSubject(env: {
+  act: string;
+  meta?: Record<string, unknown> | null | undefined;
+}): string | null {
+  if (env.act !== 'ask') return null;
+  const about = env.meta?.['about'];
+  return typeof about === 'string' && about.length > 0 ? about : null;
+}
+
 export function eligibleSetRefusal(act: Act): string {
   const allowed = [...ELIGIBLE_ACTS].join(', ');
   if (act === 'ask') {
@@ -108,6 +126,12 @@ export function actMetaRules(
     act: z.infer<typeof ActSchema>;
     thread?: string | null | undefined;
     meta?: Record<string, unknown> | null | undefined;
+    /**
+     * Present when the rules run on a whole envelope (the only caller today: `EnvelopeSchema`'s
+     * superRefine). ADR 407's `meta.about` is the one rule that reads it — a confidential ask must
+     * have exactly one addressee — so it is optional here and that rule abstains when it is absent.
+     */
+    to?: { kind: string } | undefined;
   },
   ctx: z.RefinementCtx,
 ): void {
@@ -183,6 +207,39 @@ export function actMetaRules(
         path: ['meta', 'tier'],
         message: 'act "ask" requires meta.tier (advisory | standard | blocking)',
       });
+    }
+    // ADR 407 §3: `meta.about` names the seat this ask is ABOUT, and the server then hides the act
+    // from every seat but sender, addressee, admins and full observers. The hiding is only as good
+    // as the shape, so three refusals live here rather than in the reader: (1) the subject must be
+    // a non-empty name — an empty one hides the act from everyone for no one; (2) it must be
+    // member-directed — a confidential ask to the whole team is "hidden from everybody who can see
+    // it", which is not a thing; (3) it is a consult or an escalate — an `approve` is about an
+    // action, and ADR 407 names only the two species that can be about a seat's conduct.
+    if (meta['about'] !== undefined) {
+      const about = meta['about'];
+      if (typeof about !== 'string' || about.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['meta', 'about'],
+          message: 'act "ask" meta.about must name a seat (non-empty string)',
+        });
+      }
+      if (env.to !== undefined && env.to.kind !== 'member') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['meta', 'about'],
+          message:
+            'act "ask" with meta.about must be directed at one member — a confidential ask has one addressee',
+        });
+      }
+      if (meta['species'] === 'approve') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['meta', 'about'],
+          message:
+            'act "ask" meta.about is for consult or escalate — an approve is about an action, not a seat',
+        });
+      }
     }
   }
   // `insight` (ADR 327) is the team-memory act: a finding saved so the whole team can find it. It

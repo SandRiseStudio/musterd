@@ -433,3 +433,55 @@ describe('insight act meta rules (ADR 327)', () => {
     expect(insight({ headline: 'h', repo: 'musterd' }).success).toBe(true);
   });
 });
+
+// ADR 407 §3: the one confidential act. A to-human `ask` MAY name a seat as its subject with
+// `meta.about`; the server then hides it from every seat but sender, addressee, admins and full
+// observers. The shape rules live here because the hiding is only as good as the shape: an `about`
+// on a team-directed ask would be "confidential to everyone", which is not a thing.
+describe('meta.about on ask (ADR 407)', () => {
+  const ask = { ...base, act: 'ask' as const, body: 'gptbot keeps forging submits' };
+
+  it('accepts a non-empty about on a member-directed consult or escalate', () => {
+    const consult = makeEnvelope({
+      ...ask,
+      meta: { species: 'consult', tier: 'standard', about: 'Bo' },
+    });
+    expect(consult.meta).toMatchObject({ about: 'Bo' });
+    const escalate = makeEnvelope({
+      ...ask,
+      meta: { species: 'escalate', tier: 'blocking', about: 'Bo' },
+    });
+    expect(escalate.meta).toMatchObject({ about: 'Bo' });
+  });
+
+  it('absent about is the common case and still validates', () => {
+    expect(() =>
+      makeEnvelope({ ...ask, meta: { species: 'consult', tier: 'standard' } }),
+    ).not.toThrow();
+  });
+
+  it('refuses about on a team-directed ask — confidential to everyone is not a thing', () => {
+    expect(() =>
+      makeEnvelope({
+        ...ask,
+        to: { kind: 'team' },
+        meta: { species: 'escalate', tier: 'standard', about: 'Bo' },
+      }),
+    ).toThrow(/about/);
+  });
+
+  it('refuses an empty or non-string about', () => {
+    expect(() =>
+      makeEnvelope({ ...ask, meta: { species: 'consult', tier: 'standard', about: '' } }),
+    ).toThrow(/about/);
+    expect(() =>
+      makeEnvelope({ ...ask, meta: { species: 'consult', tier: 'standard', about: 42 } }),
+    ).toThrow(/about/);
+  });
+
+  it('refuses about on an approve — an approval is about an action, not a seat', () => {
+    expect(() =>
+      makeEnvelope({ ...ask, meta: { species: 'approve', tier: 'standard', about: 'Bo' } }),
+    ).toThrow(/about/);
+  });
+});

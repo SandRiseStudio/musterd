@@ -41,7 +41,7 @@ import {
 import { createRequest } from '../store/requests.js';
 import { getRoleCharter } from '../store/roles.js';
 import {
-  hasFullMessageVisibility,
+  messageVisibilityOf,
   resolveAccountStatus,
   resolveCapabilities,
   toMember,
@@ -589,9 +589,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                   teamId: team.id,
                   presenceId,
                   observer: targetMember?.observer === 1,
-                  // Firehose visibility (ADR 136) — same predicate the history read uses, so the live
-                  // stream and `GET /messages` can never disagree about what this seat may see.
-                  fullVisibility: targetMember ? hasFullMessageVisibility(targetMember) : false,
+                  // Firehose visibility (ADR 136 / ADR 407) — same grade the history read uses, so the
+                  // live stream and `GET /messages` can never disagree about what this seat may see.
+                  visibility: targetMember ? messageVisibilityOf(targetMember) : 'public',
                   workspace: frame.workspace ?? null,
                   workspaceKey: frame.workspace_key ?? null,
                   send: (f) => send(ws, f),
@@ -780,9 +780,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             presenceId: presence.id,
             observer: targetMember.observer === 1,
             isAdmin: resolveCapabilities(targetMember).is_admin,
-            // Firehose visibility (ADR 136) — same predicate the history read uses, so the live stream
-            // and `GET /messages` can never disagree about what this seat may see.
-            fullVisibility: hasFullMessageVisibility(targetMember),
+            // Firehose visibility (ADR 136 / ADR 407) — same grade the history read uses, so the live
+            // stream and `GET /messages` can never disagree about what this seat may see.
+            visibility: messageVisibilityOf(targetMember),
             workspace: frame.workspace ?? null,
             workspaceKey: frame.workspace_key ?? null,
             send: (f) => send(ws, f),
