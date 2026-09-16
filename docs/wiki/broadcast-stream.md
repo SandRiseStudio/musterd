@@ -62,8 +62,16 @@ The viewer's 20 fps ambient cap is unchanged (60 Hz still draws every third tick
 What this does **not** fix: the rAF running at ~20 Hz means the box's per-frame cost (paint +
 composite + 1080p JPEG screencast) is ~50 ms with no headroom. Chrome sat at 220 % of a core with
 canvas draw rate making no difference to that figure (14/s and 16/s buckets both 219 %), so the
-cost is in the screencast/composite path, not the scene painting. Delivered ≥ 19 after this fix is
-the acceptance; if it lands short, that path is next.
+cost is in the screencast/composite path, not the scene painting.
+
+**After the fix (2026-09-16 03:45Z, same box, same recorder, 426 s):** delivered **26.9/s** (min 17,
+p5 19, median 26), encoded 20.0, repeats **0.6 %** (53 of 8524). Acceptance (≥ 19) met. Two things
+the after-run shows that the before-run could not: draws/s (median 18) is now *below* delivered/s,
+so roughly a third of composited frames come from something other than the canvas loop — DOM
+bubbles, CSS transitions — and Chrome rose to 253 % of a core because it now JPEG-encodes ~7
+screencast frames/s that the 20 fps pump discards. `screencastEveryNthFrame(20)` is 1 because
+`compositorHz` assumes 30 on Linux; the box composites nearer 27 here. That waste is the next cut
+if Chrome's CPU ever needs to come down; it does not affect what the viewer sees.
 
 ## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream) <!-- claim: defect -->
 
