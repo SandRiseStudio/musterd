@@ -105,9 +105,7 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
       return found.length > 0 ? 0 : 1;
     }
     if (found.length === 0) {
-      process.stderr.write(
-        `${theme.err('✗')} no act ${theme.accent(byId)} in this seat's inbox\n`,
-      );
+      process.stderr.write(`${theme.err('✗')} no act ${theme.accent(byId)} in this seat's inbox\n`);
       return 1;
     }
     process.stdout.write(`${theme.accent('act')} — ${theme.meta(byId)}\n`);

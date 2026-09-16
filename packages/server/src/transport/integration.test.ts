@@ -4252,7 +4252,11 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
     const bobTok = bob.json.human_credential;
 
-    await post('/teams/dawn/messages', { envelope: urgentEnv('nick', 'Bob', 'u-haystack') }, nickTok);
+    await post(
+      '/teams/dawn/messages',
+      { envelope: urgentEnv('nick', 'Bob', 'u-haystack') },
+      nickTok,
+    );
     const raised = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
       'x-musterd-no-touch': '1',
     });

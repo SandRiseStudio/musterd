@@ -191,7 +191,9 @@ describe('inbox command', () => {
   describe('--id (lane 01M2P69FHZ)', () => {
     it('reads exactly the named act, whatever the size of the inbox behind it', async () => {
       await seed(20);
-      const all = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+      const all = await capture(() =>
+        inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])),
+      );
       const msgs = JSON.parse(all.out) as Array<{ id: string; body: string }>;
       const target = msgs[3]!;
 
@@ -204,7 +206,9 @@ describe('inbox command', () => {
 
     it('moves no cursor — naming one act must not consume the unread window behind it', async () => {
       await seed(20);
-      const all = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+      const all = await capture(() =>
+        inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])),
+      );
       const target = (JSON.parse(all.out) as Array<{ id: string }>)[3]!;
       expect(await unreadCount()).toBe(20);
 
@@ -214,7 +218,7 @@ describe('inbox command', () => {
       expect(await unreadCount()).toBe(20);
     });
 
-    it('says so on stderr when the named act is not in this seat\'s inbox, rather than printing nothing', async () => {
+    it("says so on stderr when the named act is not in this seat's inbox, rather than printing nothing", async () => {
       await seed(3);
       const errs: string[] = [];
       const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: never) => {
@@ -235,7 +239,9 @@ describe('inbox command', () => {
 
     it('--json emits the named act so a script can read it back', async () => {
       await seed(5);
-      const all = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+      const all = await capture(() =>
+        inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])),
+      );
       const target = (JSON.parse(all.out) as Array<{ id: string }>)[1]!;
 
       const res = await capture(() => inboxCommand(parseArgs(['--id', target.id, '--json'])));

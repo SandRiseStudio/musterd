@@ -733,8 +733,8 @@ export const CATALOG: readonly CommandEntry[] = [
       'or `--until-reply` (someone answers on its thread); it comes back on its own then, even if the ' +
       'cursor has passed it. There is no time form: "later" is a state edge, never a clock (ADR 211). ' +
       '`--deferred` lists what you have postponed and which ones have since raised. ' +
-      '`--id <act_id>` reads exactly one named act whatever its read state and moves no cursor — the '  +
-      'bounded read the interrupt line points at, so a seat thousands of messages behind can fetch the '  +
+      '`--id <act_id>` reads exactly one named act whatever its read state and moves no cursor — the ' +
+      'bounded read the interrupt line points at, so a seat thousands of messages behind can fetch the ' +
       'act it was rung about in one call instead of paging its whole inbox.',
     examples: [
       'musterd inbox',
