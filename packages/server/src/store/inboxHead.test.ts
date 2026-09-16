@@ -177,3 +177,40 @@ describe('listInbox limit — pin action-needed unread into the newest tail', ()
     expect(ids).not.toContain('t000');
   });
 });
+
+/**
+ * Reading specific acts back by id (lane 01M2JZYTAH).
+ *
+ * `team_inbox_check` now clips a long body so one act cannot spend a whole reply's budget, and a
+ * clip is only honest if the rest is reachable. Nothing on this surface could fetch a message by
+ * id before: `/inbox` took unread_only, limit and since, and none of them names a row. So a seat
+ * handed "[+3.4k chars clipped]" had no call to make.
+ *
+ * The retrieval read is deliberately NOT a cursor read: it names rows the caller has already been
+ * shown, so it ignores the cursor entirely and moves nothing.
+ */
+describe('listInbox ids — read named acts back, without touching the cursor', () => {
+  it('returns exactly the named rows, in receipt order', () => {
+    const { db, ada } = seed();
+    const rows = listInbox(db, ada, { ids: ['m40', 'm02', 'm17'] });
+    expect(rows.map((r) => r.id)).toEqual(['m02', 'm17', 'm40']);
+  });
+
+  it('ignores the read cursor — an act already read is still retrievable', () => {
+    const { db, ada } = seed();
+    // Cursor past everything: unreadOnly would return nothing at all.
+    expect(listInbox(db, ada, { unreadOnly: true, cursorTs: 9_999 })).toHaveLength(0);
+    expect(listInbox(db, ada, { ids: ['m10'], unreadOnly: true, cursorTs: 9_999 })).toHaveLength(1);
+  });
+
+  it('silently omits an id in another team or not addressed to this member', () => {
+    const { db, ada } = seed();
+    const rows = listInbox(db, ada, { ids: ['m01', 'no-such-id'] });
+    expect(rows.map((r) => r.id)).toEqual(['m01']);
+  });
+
+  it('returns nothing for an empty id list rather than the whole inbox', () => {
+    const { db, ada } = seed();
+    expect(listInbox(db, ada, { ids: [] })).toEqual([]);
+  });
+});

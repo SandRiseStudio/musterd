@@ -4,10 +4,13 @@ import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { linkReceived } from '../otel.js';
 import {
+  buildSkewOf,
   buildSkewWarning,
-  syncWedgeWarningFor,
-  errorResult,
   formatMessage,
+  syncWedgeOfClient,
+  syncWedgeWarningFor,
+  type ToolWarning,
+  errorResult,
   notReadyMessage,
   textResult,
 } from './format.js';
@@ -19,7 +22,7 @@ import { renderRoom, roomStructured, roomsFor, type RoomContext } from './huddle
 const DESCRIPTION =
   'Check unread addressed to you or the team, marking them read. Call at task start, ' +
   'task end, and after heads-down work. Past `limit` nothing is marked read; the reply ' +
-  'says how many remain.';
+  'says how many remain. `ids` reads named acts back in full, clipped bodies included.';
 
 /**
  * How far back the room fold reads (ADR 378). Matches the CLI's room view deliberately: a huddle is
@@ -39,12 +42,58 @@ const HUDDLE_WINDOW = 1000;
  * and no seat ever took it. So the drain is made ordinary instead: the oldest unread, contiguous
  * from the cursor, are rendered compactly and the watermark walks over them. A row rendered as a
  * digest line was seen — the reader has its id, sender, act and the start of its body — which is
- * exactly what ADR 287's rule protects. The cap keeps one reply inside what a harness will actually
- * hand the model (the tool-result ceiling is ~70k chars; 50 full rows plus this many digest lines
- * stays well under), and it bounds the drain to a handful of ordinary checks rather than one giant
- * one: 1300 behind clears in six.
+ * exactly what ADR 287's rule protects.
+ *
+ * This is a ROW cap. It is not what keeps the reply inside the harness ceiling — `RESULT_BUDGET`
+ * is (lane 01M2JZYTAH). It stays because it also bounds the drain to a handful of ordinary checks
+ * rather than one giant one: 1300 behind clears in six.
  */
 const DIGEST_ROWS = 250;
+
+/**
+ * The size contract, in characters, for everything one reply renders (lane 01M2JZYTAH).
+ *
+ * WHY THIS EXISTS AT ALL. Every other bound in this file is a ROW count, and rows are not what the
+ * harness refuses. On 2026-09-15 miley started a session, ran one ordinary `team_inbox_check`, and
+ * got no inbox: the harness rejected the whole result ("exceeds maximum allowed tokens") and wrote
+ * it to a file, so the seat's first act of orientation returned a path. Measured on that payload —
+ * 90 rows, 93,222 chars of BODY alone, 114,079 chars of structured content, median body 592, max
+ * 4,593. No single monster act; the aggregate. Ten more such files sit in two seats' project dirs,
+ * 63KB to 130KB, going back three weeks: this had been failing quietly on every seat for weeks,
+ * and each time the seat either recovered by hand or oriented on a view it could not see.
+ *
+ * The header of this file used to assert the very thing it never enforced — "the tool-result
+ * ceiling is ~70k chars; 50 full rows plus this many digest lines stays well under". It was false
+ * at today's body sizes, and nothing measured it. A budget that is only a comment is not a budget.
+ *
+ * WHY THIS NUMBER. The real ceiling is token-based and differs by harness, so this is deliberately
+ * conservative rather than tuned to the edge: ~30k chars is roughly 8k tokens, a quarter of the
+ * smallest ceiling seen refusing a reply. Budget the SAFE side — the cost of being under is one
+ * more ordinary check, and the cost of being over is the whole inbox, which is what was happening.
+ * (falsify: `pnpm --filter @musterd/mcp exec vitest run src/tools/inboxCheck.budget.test.ts` —
+ * the worst-case cases build 1500 unread at 5k bodies and assert the rendered reply fits.)
+ */
+export const RESULT_BUDGET = 30_000;
+
+/**
+ * How much of the budget the full rows may take before the digest gets the rest.
+ *
+ * Without this split a backlog of large acts spends the entire budget on `shown` and digests
+ * nothing — which is the lane 01M2GT874Y treadmill returning by another door, this time for seats
+ * whose teammates write long. The drain must always get room to walk the cursor.
+ */
+const SHOWN_BUDGET = Math.round(RESULT_BUDGET * 0.7);
+
+/**
+ * The most body one act may spend of a shared reply.
+ *
+ * Median body on this team is ~592 chars, so this leaves the ordinary act untouched and clips only
+ * the long-form ones — the reviews and incident reports that are worth writing and are not worth
+ * twenty other acts going unseen. A capped row is still a RENDERED row for ADR 287: it carries the
+ * sender, act, id and the first ~1.2k of the body, strictly more than the digest line the rule
+ * already treats as seen.
+ */
+export const BODY_CAP = 1_200;
 
 /** What one `team_inbox_check` should display, and how far the read cursor may move (ADR 287). */
 export interface InboxCheckPlan {
@@ -90,6 +139,30 @@ export interface InboxCheckPlan {
  * costs the work. The caller names `limit` as the way out, so a backlog still drains in one call.
  */
 /**
+ * One act, clipped to `BODY_CAP` and told where the rest is.
+ *
+ * Truncation is only honest if the remainder is reachable, and before this lane it was not: nothing
+ * in the MCP surface or over HTTP could fetch a message by id (`GET /inbox` takes unread_only,
+ * limit and since — nothing else). So the clip names the call that returns the whole act, and that
+ * call is the `ids` input added alongside it.
+ */
+export function capBody(env: Envelope): Envelope {
+  if (env.body.length <= BODY_CAP) return env;
+  const dropped = env.body.length - BODY_CAP;
+  return {
+    ...env,
+    body:
+      `${env.body.slice(0, BODY_CAP)}…\n  [+${dropped} chars clipped — ` +
+      `team_inbox_check {ids: ["${env.id}"]} for the whole act]`,
+  };
+}
+
+/** What one rendered row costs the reply, as the tool will actually render it. */
+function rowCost(env: Envelope): number {
+  return formatMessage(env).length + 1;
+}
+
+/**
  * Waiting acts the newest-N slice must not bury. Matches the CLI banner's `isActionNeeded`, minus
  * directed `message` — those stay newest-N so a mailbox of DMs does not explode the bound.
  */
@@ -115,6 +188,24 @@ export function planInboxCheck(
    * every bounded check, or a closed acceptance occupies the view forever while the cursor holds.
    */
   closed: readonly string[] = [],
+  /**
+   * The OLDEST unread, contiguous from the cursor — the server's prefix read (`headLimit`), fetched
+   * alongside the tail. Empty when the caller could not get one, which degrades to the behaviour
+   * below and holds the cursor.
+   *
+   * WHY THIS PARAMETER EXISTS. Lane 01M2GT874Y made the drain ordinary and proved it — against
+   * arrays this function was handed whole. The tool never had one: `registerInboxCheck` always
+   * names a `limit`, and a named `limit` selects the newest TAIL on the server (`listInbox`,
+   * server/src/store/messages.ts:278), while the oldest-first prefix is served only to a caller
+   * that names none (server/src/transport/http.ts:5590). A tail does not begin at the cursor, so
+   * `unreachable` was non-zero on every check past the limit, the digest below never ran, and the
+   * treadmill lane 01M2GT874Y closed was still turning — at the DEFAULT of 50, not at some far
+   * backlog. Measured 2026-09-16 on this seat: two checks, zero rows walked (lane 01M2NGB60Q).
+   *
+   * The prefix is what makes the walk legal. `unreachable` still forbids inventing a prefix out of
+   * a tail; it no longer forbids walking one the caller actually holds.
+   */
+  head: readonly Envelope[] = [],
 ): InboxCheckPlan {
   const closedSet = new Set(closed);
   const pinned = ordered.filter((e) => isPinnedNeed(e) && !closedSet.has(e.id));
@@ -122,9 +213,25 @@ export function planInboxCheck(
   // Newest fill of the non-pinned tail, union the waiting acts. If the server already pinned, this
   // keeps the handoff when a second slice would otherwise drop it as the oldest of 51.
   const newest = rest.slice(Math.max(0, rest.length - limit));
+
+  // Rows are DERIVED FROM THE BUDGET, never the other way round (lane 01M2JZYTAH). `limit` and the
+  // pinned union above are both row counts, and neither bounds what the harness actually refuses:
+  // one call rendered 90 rows against a limit of 50, because the waiting-act set is unioned on top
+  // and has no cap of its own. Spend in priority order — waiting acts first (an ask nobody sees is
+  // the worst thing to drop), then newest-first — so what survives a tight budget is what a seat
+  // most needs. Every body is clipped as it is costed, so `shown` carries the clipped rows and the
+  // structured content shrinks with the text rather than doubling it.
+  const priority = [...pinned, ...[...newest].reverse()];
   const byId = new Map<string, Envelope>();
-  for (const e of newest) byId.set(e.id, e);
-  for (const e of pinned) byId.set(e.id, e);
+  let spent = 0;
+  for (const e of priority) {
+    if (byId.has(e.id)) continue;
+    const capped = capBody(e);
+    const cost = rowCost(capped);
+    if (spent + cost > SHOWN_BUDGET && byId.size > 0) continue;
+    byId.set(e.id, capped);
+    spent += cost;
+  }
   // Receipt order — the order the cursor walks — so `advanceTo` is the furthest row actually shown.
   const shown = [...byId.values()].sort(
     (a, b) => envelopePosition(a) - envelopePosition(b) || a.id.localeCompare(b.id),
@@ -136,19 +243,32 @@ export function planInboxCheck(
   // already shown, in digest form, up to the cap. A row that IS shown (a pinned need) counts as
   // rendered and the walk continues through it. Only when the fetch was complete: a bounded fetch's
   // `ordered` begins somewhere after the cursor, not at it.
+  //
+  // The digest is costed too. A row the budget cannot carry is NOT walked over — that is ADR 287
+  // exactly as it reads for `limit`, applied to the other kind of bound.
+  //
+  // WHICH rows the walk may cross: `head` when the caller fetched the prefix, because it begins at
+  // the cursor by construction whatever the fetch left behind; otherwise `ordered`, and only when
+  // the fetch was complete (`unreachable === 0`) — a bounded fetch's `ordered` begins somewhere
+  // after the cursor, and digesting its oldest rows would step over everything cut.
   const shownIds = new Set(shown.map((e) => e.id));
   const digested: Envelope[] = [];
   let prefixEnd = -1;
-  if (unreachable === 0) {
-    for (let i = 0; i < ordered.length; i++) {
-      const e = ordered[i]!;
-      if (!shownIds.has(e.id)) {
-        if (digested.length >= DIGEST_ROWS) break;
-        digested.push(e);
-      }
-      prefixEnd = i;
+  const walk = head.length > 0 ? head : unreachable === 0 ? ordered : [];
+  for (let i = 0; i < walk.length; i++) {
+    const e = walk[i]!;
+    if (!shownIds.has(e.id)) {
+      if (digested.length >= DIGEST_ROWS) break;
+      const cost = formatDigestLine(e).length + 1;
+      if (spent + cost > RESULT_BUDGET) break;
+      digested.push(e);
+      spent += cost;
     }
+    prefixEnd = i;
   }
+  // A digested row drawn from the prefix may not be in `ordered` at all — it is one of the rows the
+  // tail fetch left behind, and so is already counted inside `unreachable`. Either way it is now
+  // rendered, so subtracting it once from the total is right in both cases.
   const elided = ordered.length - shown.length - digested.length + unreachable;
   return {
     shown,
@@ -157,7 +277,7 @@ export function planInboxCheck(
     drainLimit: ordered.length + unreachable,
     // `null` on an empty inbox and on a bounded fetch — there is no contiguous rendered prefix to
     // advance over, and inventing one is exactly how a watermark passes something nobody read.
-    advanceTo: prefixEnd < 0 ? null : ordered[prefixEnd]!.id,
+    advanceTo: prefixEnd < 0 ? null : walk[prefixEnd]!.id,
   };
 }
 
@@ -182,6 +302,10 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
       inputSchema: {
         unread_only: z.boolean().default(true),
         limit: z.number().default(50),
+        // The retrieval path for a body the byte budget clipped (lane 01M2JZYTAH). Named rows only:
+        // no cursor floor, no bounds, and the cursor does not move — the caller is re-reading
+        // something it was already shown.
+        ids: z.array(z.string()).optional(),
       },
     },
     async (args) => {
@@ -189,6 +313,41 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         return textResult(notReadyMessage(client, 'check your inbox'));
       }
       try {
+        // `ids` is a re-read, not a check: the whole point is to un-clip a body this surface
+        // already rendered in part, so it renders those acts WHOLE, marks nothing read and moves
+        // no cursor. A clip that cannot be un-clipped is a loss rather than a deferral, which is
+        // why this exists at all.
+        if (args.ids !== undefined) {
+          const { found, missing } = await client.readMessages(args.ids);
+          const notFound =
+            missing.length > 0
+              ? `\n\n⚠ not found: ${missing.join(', ')} — either not addressed to you, or this ` +
+                `daemon predates \`ids\` (restart the daemon, or read it with unread_only: false)`
+              : '';
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text:
+                  (found.length > 0
+                    ? found.map((m) => formatMessage(m)).join('\n')
+                    : 'no such act in your inbox') + notFound,
+              },
+            ],
+            structuredContent: {
+              messages: found.map((m) => ({
+                id: m.id,
+                from: m.from,
+                act: m.act,
+                body: m.body,
+                ts: m.ts,
+                thread: m.thread ?? null,
+                meta: m.meta ?? null,
+              })),
+              ...(missing.length > 0 ? { not_found: missing } : {}),
+            },
+          };
+        }
         // Combine buffered live deliveries with the authoritative inbox fetch, dedup by id.
         const buffered = client.drainBuffer();
         const fetched = await client.fetchInbox(args.unread_only ?? true, args.limit ?? 50);
@@ -201,11 +360,28 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
           ...(fetched.answered ?? []),
           ...(fetched.discharged ?? []).map((d) => d.id),
         ];
+        // The fetch above is a TAIL — `limit` is always named, and a named limit means newest-N on
+        // the server. A tail does not begin at the cursor, so on its own it can never be walked: the
+        // drain lane 01M2GT874Y built ran on nothing for a seat past its limit, which is every seat
+        // with a real backlog (lane 01M2NGB60Q). So when rows were left behind, ask for the PREFIX
+        // as well — the same read with no `limit`, which the daemon answers oldest-first from the
+        // cursor — and let the digest walk that. One extra request, and only when actually behind.
+        //
+        // A failure degrades to the tail alone: the cursor holds, which is exactly the behaviour
+        // this call had before. An inbox that fits in the tail never pays for the round trip.
+        const head =
+          (fetched.unread_remaining ?? 0) > 0
+            ? await client
+                .fetchInbox(args.unread_only ?? true)
+                .then((r) => r.messages)
+                .catch(() => [] as Envelope[])
+            : [];
         const plan = planInboxCheck(
           ordered,
           args.limit ?? 50,
           fetched.unread_remaining ?? 0,
           closed,
+          head,
         );
         const messages = plan.shown;
 
@@ -291,9 +467,13 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         // after the last message is exactly the seat this line exists for. Since lane 01M2GT874Y
         // the line also says what the cursor DID pass — the digest below — so the reader knows the
         // remainder is one more ordinary check away, not a magic number away.
+        // Name the bound that actually cut, not the one the caller passed. A reader told "limit 50"
+        // when the BYTE budget did the cutting will raise the limit and get the same reply — the
+        // advice has to match the mechanism or it sends them in a circle.
+        const byBudget = plan.shown.length < Math.min(ordered.length, args.limit ?? 50);
         const notice =
           plan.elided > 0
-            ? `⚠ ${plan.elided} older unread not shown (limit ${args.limit ?? 50}). ` +
+            ? `⚠ ${plan.elided} older unread not shown (${byBudget ? `reply size — a bigger limit will not help; use ids: [...] to read named acts` : `limit ${args.limit ?? 50}`}). ` +
               (plan.digested.length > 0
                 ? `The ${plan.digested.length} oldest are digested below and marked read; the rest ` +
                   `are still waiting — check again to keep draining, or pass limit: ` +
@@ -320,16 +500,24 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
               context.rooms.map((h) => renderRoom(h, client.member ?? '')).join('\n\n') +
               '\n'
             : '';
+        // Built once and rendered twice: the prose keeps its exact wording for text-rendering
+        // clients, and the same facts go into `structuredContent` for the ones that drop text.
+        // Before lane 01M2NRYJEQ only the prose existed, so on this path — the non-empty one, the
+        // only one a busy seat ever takes — a structuredContent-rendering harness was shown no
+        // warning at all, and a session running stale tools looked identical to a fresh one.
+        const warnings = [await syncWedgeOfClient(client), await buildSkewOf(client)].filter(
+          (w): w is ToolWarning => w !== null,
+        );
         const text =
           notice +
           messages.map(line).join('\n') +
           digest +
           rooms +
-          (await syncWedgeWarningFor(client)) +
-          (await buildSkewWarning(client));
+          warnings.map((w) => `\n${w.text}`).join('');
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {
+            ...(warnings.length > 0 ? { warnings } : {}),
             // Structured readers get the elision as data, not only as prose in `text`.
             elided_unread: plan.elided,
             // The rows the cursor walked over in digest form — ids only; the lines are in `text`.

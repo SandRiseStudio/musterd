@@ -124,6 +124,30 @@ branches disagree about who was picked, never about whether the team armed a swe
   worse than one that defers to it.
 - Teams without `loops.sweep` see no behavioural change at all. This ADR is inert until a team arms
   the backstop, which is the same opt-in posture ADR 229 shipped with.
+
+- **2026-09-15 — the primer was still teaching the pre-backstop rule, and it is the text that travels
+  furthest (lane `01M2KMM3RF`, PR #1451).** This decision moved the authority into the `lane_submit`
+  response, and `guidance.ts` and the musterd skill followed it exactly: an acceptor asked and a
+  backstop armed means you are done, silence included. Two other texts did not. `AGENTS.md` said only
+  "prefer a counterpart accept" — a preference with no condition — and `primer.ts` said "after merge
+  `lane_submit`, then accept or `lane_resolve`", presenting the two as equal alternatives.
+
+  The primer is the one that matters, because of where it lands: it is generated into every seat's
+  managed `AGENTS.md` block **and** served as the musterd MCP server instructions, so it sits in every
+  agent's system prompt for the whole session, while the strict guidance is read once if at all. The
+  text an agent re-reads at every turn was the text that made self-closing look like a peer option.
+  Asked the rule directly that day, izzo answered with the loose framing rather than this ADR's.
+
+  The primer now says to **do what the submit reply says**, which is this ADR's own shape rather than
+  a paraphrase of it — the reply already states the contract in each branch ("You are done; leave it
+  with X", "Leave it with them", "self-close sanctioned", "`lane_resolve` when ready"). `AGENTS.md`,
+  which has no budget to respect, carries the full condition. No decision changed here; the texts that
+  contradicted this one were brought into line.
+
+  Worth recording for the next person editing the primer: **it has two budgets and they bind from
+  opposite directions.** `guidance.test.ts` caps it under 35 lines and `context:check` caps it at
+  2665 bytes, so satisfying the line cap by lengthening lines blows the byte budget — which is exactly
+  what happened, +107 B, caught by CI. The wording above is the one that fits both, at 2659 B.
 - `backstop` is additive and optional on `LaneResultSchema`; older clients ignore it, older daemons
   omit it.
 - A consequence worth stating plainly: lanes will now sit in `awaiting_acceptance` **longer**. That

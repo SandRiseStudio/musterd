@@ -4,6 +4,7 @@ import { hostname } from 'node:os';
 import { extname, join, resolve, sep } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import {
+  WorkspaceRepairBodySchema,
   isWireAttestationSource,
   type Act,
   MemberKindSchema,
@@ -43,6 +44,7 @@ import {
   type AskTier,
   askContract,
   eligibleOf,
+  emptyPoolFromCandidates,
   LANE_TERMINAL_STATES,
   isAwaitingAcceptance,
   makeEnvelope,
@@ -137,6 +139,7 @@ import {
   lanesForGoal,
   noGoalWarning,
   listLanes,
+  emptyPoolFromSubmitAudit,
   openLane,
   updateLane,
 } from '../store/lanes.js';
@@ -5223,8 +5226,13 @@ export async function handleHttp(
             // The sanction carries the posture so the degradation is legible at the point it is
             // read: not just "nobody was eligible" but what the team looked like and who could be
             // woken to change it (ADR 172). One bounded line — this lands in the worker's context.
+            const empty_pool = emptyPoolFromCandidates(
+              peerSelection.snapshot.selected,
+              peerSelection.snapshot.candidates,
+            );
             review = {
               self_close_sanctioned: true,
+              ...(empty_pool ? { empty_pool } : {}),
               ...(breakerTripped ? { breaker_tripped: true } : {}),
               ...(posture
                 ? { family_posture: posture, posture_hint: describeFamilyPosture(posture) }
@@ -5354,11 +5362,16 @@ export async function handleHttp(
           // it: what the ready edge actually recorded, marked `standing` so no consumer mistakes a
           // report of the existing state for a fresh routing decision.
           const standing = standingAcceptance(ctx.db, team.id, lane.id);
+          const empty_pool = emptyPoolFromSubmitAudit(ctx.db, team.id, lane.id);
           review = standing
             ? { standing: true, ...standing }
             : // Nothing standing to report — the original submit found no candidate (or predates
               // recording). The sanction was and remains honest here: nobody was ever asked.
-              { standing: true, self_close_sanctioned: true };
+              {
+                standing: true,
+                self_close_sanctioned: true,
+                ...(empty_pool ? { empty_pool } : {}),
+              };
         }
         // Lane 01M1QYHJFY, the durable half. `acceptor` was named, validated, and the lane is
         // awaiting acceptance — so exactly one of the arms above must have minted (or found
@@ -5471,6 +5484,29 @@ export async function handleHttp(
       // predicate, and (only when raised) a deduped audit row. Never advances the read cursor: reading
       // is the agent's explicit follow-up (`musterd inbox`). The line is **daemon-composed** from the
       // envelope's structured fields (sender, act, count) — never `env.body` (§4 injection surface).
+      if (method === 'POST' && rest === '/workspace/repair') {
+        // Spec 2026-09-16 (workspace self-heal), ADR 408: the one place a hook-driven repair becomes
+        // attributable. Seat credential ALONE — no session lease and no presence touch — because the
+        // SessionStart hook posts this BEFORE the session has joined (the ADR 164 window in which
+        // every lease-gated route is refused), and the repair is local: the credential hash proves
+        // whose workspace it was, a lease would add nothing. The single leaseless agent route.
+        // Best-effort on the client; here it is an ordinary audited write. Counts and classes only:
+        // the body schema has no field for a file's contents, so a workspace cannot leak through
+        // its own repair record.
+        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req), undefined, {
+          leaseless: true,
+        });
+        const body = parseOrBadRequest(WorkspaceRepairBodySchema, await readJson(req));
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'workspace.repaired',
+          target: member.name,
+          result: 'allow',
+          detail: body,
+        });
+        return sendJson(res, 200, { ok: true });
+      }
+
       if (method === 'GET' && rest === '/inbox/interrupt-check') {
         let auth: { team: TeamRow; member: MemberRow };
         try {
@@ -5547,6 +5583,18 @@ export async function handleHttp(
       if (method === 'GET' && rest === '/inbox') {
         const { team, member } = authTouch(ctx, slug, req);
         assertSeatCanRead(member);
+        // `?ids=a,b,c` reads named acts back and nothing else — the retrieval path for a body
+        // `team_inbox_check` clipped to stay inside its byte budget (lane 01M2JZYTAH). No cursor
+        // floor, no window, no `truncated`: the caller named the rows, so there is no remainder.
+        const idsRaw = url.searchParams.get('ids');
+        if (idsRaw !== null) {
+          const ids = idsRaw.split(',').filter((id) => id.length > 0);
+          const named = listInbox(ctx.db, member, { ids });
+          return sendJson(res, 200, {
+            messages: rowsToEnvelopes(ctx.db, team.slug, named),
+            cursor: getCursor(ctx.db, member.id),
+          });
+        }
         const unread = url.searchParams.get('unread') === '1';
         const since = url.searchParams.get('since');
         const limitRaw = Number(url.searchParams.get('limit') ?? '');

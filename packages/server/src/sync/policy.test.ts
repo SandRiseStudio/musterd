@@ -9,7 +9,7 @@ import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { getMemberByName } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
-import { getPolicy, getStoredPolicy, getTeamBySlug } from '../store/teams.js';
+import { getPolicy, getStoredPolicy, getTeamBySlug, setPolicy } from '../store/teams.js';
 import { Hub } from '../transport/hub.js';
 import { foldBatch } from './fold.js';
 import { pullTeam } from './pull.js';
@@ -161,6 +161,30 @@ afterEach(async () => {
 });
 
 describe('policy replication (ADR 367)', () => {
+  it('a hub whose policy was written before the kind existed restates it once a joiner is enrolled (ADR 398)', async () => {
+    // The live pair's hole: loops were armed on the hub via an unstamped write (pre-ADR-367, or
+    // silent `setPolicy`), so the joiner's `teams.policy` stayed null and every wake derived as a
+    // 5-minute reply doorbell. A stamped `policy.change` would already have crossed; this is the
+    // case with none.
+    setPolicy(hub.db, hubTeam().id, { loops: { dispatch: true, review: true, sweep: true } });
+    expect(
+      hub.db
+        .prepare<
+          [],
+          { n: number }
+        >("SELECT COUNT(*) AS n FROM audit WHERE action = 'policy.change' AND origin_seq > 0")
+        .get(),
+    ).toEqual({ n: 0 });
+    expect(getPolicy(joiner.db, joinerTeam().id).loops.dispatch).toBe(false);
+
+    await roundTrip();
+
+    expect(getPolicy(joiner.db, joinerTeam().id).loops.dispatch).toBe(true);
+    expect(getStoredPolicy(joiner.db, joinerTeam().id)).toEqual({
+      loops: { dispatch: true, review: true, sweep: true },
+    });
+  });
+
   it('the hub sets a wake cap and the joiner runs it after one round trip', async () => {
     const set = await post(
       hubBase,

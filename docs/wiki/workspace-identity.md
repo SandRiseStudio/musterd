@@ -2,7 +2,7 @@
 
 The workspace *label* on the roster and the workspace *identity* displacement compares are two different things, and a seat evicts itself for two months whenever they are the same field.
 
-## The label is branch-qualified, so it changes under the session holding it (2026-09-02, lane 01M1JQYYAC; falsify: `resolveWorkspace` in `packages/mcp/src/workspace.ts` — check whether its qualifier can change without the process restarting)
+## The label is branch-qualified, so it changes under the session holding it (2026-09-02, lane 01M1JQYYAC; falsify: `resolveWorkspace` in `packages/mcp/src/workspace.ts` — check whether its qualifier can change without the process restarting) <!-- claim: defect -->
 
 `resolveWorkspace` (adapter) and `resolveClaimWorkspace` (CLI) build the same ladder: declared `MUSTERD_WORKSPACE`, else the cwd folder qualified with the git branch **when the branch is informative**, else the cwd subpath, else the bare folder. A detached HEAD is explicitly "not informative", so the qualifier disappears:
 
@@ -11,7 +11,7 @@ The workspace *label* on the roster and the workspace *identity* displacement co
 
 That is one session, one folder, two labels — and nothing about the session changed.
 
-## Comparing that label with `===` made a seat's own re-attach look foreign (2026-09-02; falsify: the audit query below across a HEAD detach)
+## Comparing that label with `===` made a seat's own re-attach look foreign (2026-09-02; falsify: the audit query below across a HEAD detach) <!-- claim: defect -->
 
 `ws.ts` scoped ADR 068/092 displacement on `old.workspace === frame.workspace`. Unequal meant "another machine or branch", which takes the cross-workspace branch: evict, and do **not** set `same_workspace`, so the displaced adapter stays dormant instead of exiting. The seat lost its live session and left the orphan ADR 092 exists to reap.
 
@@ -33,7 +33,7 @@ Fixed by [ADR 368](../decisions/368-a-workspace-is-identified-by-its-work-tree-n
 
 The shared shape: the evicting attach and the label change arrive in the same second, so whichever attribute you happen to be looking at is perfectly correlated with the eviction. Both stories fit every row. What separated them was asking which attribute could change *without the session changing* — only the branch could.
 
-## The two git invariants point opposite ways, on purpose (2026-09-03; falsify: read `repoProject` and `resolveWorkspaceKey` in `packages/protocol/src/project.ts` — one resolves `--git-common-dir`, the other `--show-toplevel`)
+## The two git invariants point opposite ways, on purpose (2026-09-03; falsify: read `repoProject` and `resolveWorkspaceKey` in `packages/protocol/src/project.ts` — one resolves `--git-common-dir`, the other `--show-toplevel`) <!-- claim: other -->
 
 - **Project** identity (ADR 177, `repoProject`) uses `--git-common-dir` so N seats' worktrees on one repo resolve to **one** project — otherwise surface-overlap detection switches itself off for the whole team.
 - **Workspace** identity uses `--show-toplevel` so two seats on one repo are **two** workspaces — otherwise one seat's claim would read as same-workspace with another's.

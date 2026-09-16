@@ -49,6 +49,16 @@ export interface PageMeta {
    * the list, so a route that wants a preconnect cannot drop its own canonical to get one.
    */
   links?: Record<string, string>[];
+  /**
+   * A card image for THIS page, overriding the site-wide one in `__root.tsx`.
+   *
+   * Almost no page needs this: one card for the product is the right default, and a page that
+   * invents its own dilutes it. `/watch` is the exception its spec names — the page is about a
+   * picture (the office, with members at desks), and unfurling it with the generic wordmark card
+   * would show a stranger the one thing the page is not about. Pass the alt text with it; a card
+   * with no alt is an image readers on screen readers and text clients simply lose.
+   */
+  image?: { url: string; alt: string; width?: number; height?: number };
 }
 
 /**
@@ -59,7 +69,7 @@ export interface PageMeta {
  * Prefer `pageHead` — the canonical link lives there, and a route that reaches past it for the
  * meta array alone ships a page with no canonical, which is the gap this pair closed.
  */
-export function pageMeta({ title, description, path, ogType, graph }: PageMeta) {
+export function pageMeta({ title, description, path, ogType, graph, image }: PageMeta) {
   const full = pageTitle(title);
   return [
     { title: full },
@@ -78,6 +88,21 @@ export function pageMeta({ title, description, path, ogType, graph }: PageMeta) 
     // keeps the card readable in the clients that do not implement that fallback.
     { name: 'twitter:title', content: full },
     { name: 'twitter:description', content: description },
+    // A page's own card, when it has one. These repeat property names the root already set —
+    // which is exactly how they win: TanStack merges route heads leaf-last, so the deeper route's
+    // entry replaces the root's rather than appending a second og:image. Both og: and twitter:
+    // are named, because a client that reads only one of the pairs must not fall back to the
+    // site-wide card for a page that deliberately overrode it.
+    ...(image
+      ? [
+          { property: 'og:image', content: absoluteUrl(image.url) },
+          { property: 'og:image:alt', content: image.alt },
+          { property: 'og:image:width', content: String(image.width ?? 1200) },
+          { property: 'og:image:height', content: String(image.height ?? 630) },
+          { name: 'twitter:image', content: absoluteUrl(image.url) },
+          { name: 'twitter:image:alt', content: image.alt },
+        ]
+      : []),
     // TanStack renders this entry as <script type="application/ld+json"> (headContentUtils).
     ...(graph ? [{ 'script:ld+json': jsonLd(graph) }] : []),
   ];
@@ -233,4 +258,43 @@ export function itemListNode(items: { name: string; path?: string }[]): JsonLdNo
 /** Wrap page nodes as one `@graph`, which is what a route hands to `pageHead`. */
 export function jsonLd(nodes: JsonLdNode[]) {
   return { '@context': 'https://schema.org', '@graph': nodes };
+}
+
+/** The channel the stream goes out on. One constant so the graph and the page cannot disagree. */
+export const TWITCH_CHANNEL_URL = 'https://twitch.tv/sandrise_ai';
+
+/**
+ * The live broadcast, as an entity.
+ *
+ * Deliberately missing `startDate` and `endDate`, and that omission is the honest part: the team
+ * works in sessions and keeps no schedule, so any date here would be invented. Google treats a
+ * `BroadcastEvent` without them as an ongoing live channel, which is exactly what this is — and a
+ * fabricated schedule is a structured-data violation, not a shortcut to a richer result.
+ *
+ * No `VideoObject` beside it for the same reason: that type wants an `uploadDate` and a thumbnail
+ * of one specific video, and a live channel is not a video.
+ */
+export function broadcastEventNode(): JsonLdNode {
+  return {
+    '@type': 'BroadcastEvent',
+    name: 'musterd, built live',
+    isLiveBroadcast: true,
+    videoFormat: 'HD',
+    publishedOn: {
+      '@type': 'BroadcastService',
+      name: 'Twitch',
+      url: TWITCH_CHANNEL_URL,
+    },
+  };
+}
+
+/** An ordinary page of the site, pointed at the website entity declared on the landing page. */
+export function webPageNode({ name, description, path }: { name: string; description: string; path: string }): JsonLdNode {
+  return {
+    '@type': 'WebPage',
+    name,
+    description,
+    url: absoluteUrl(path),
+    isPartOf: { '@id': GRAPH_ID.website },
+  };
 }

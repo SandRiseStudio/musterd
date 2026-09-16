@@ -1,6 +1,14 @@
 import { z } from 'zod';
 import { GoalSchema } from './goals.js';
-import { LANE_STAKES, LANE_STAKES_PROVENANCE, LANE_STATES, type LaneState } from './lanes.wire.js';
+import {
+  EMPTY_POOL_KINDS,
+  EMPTY_POOL_LIVE_EXCLUSIONS,
+  LANE_STAKES,
+  LANE_STAKES_PROVENANCE,
+  LANE_STATES,
+  type EmptyPool,
+  type LaneState,
+} from './lanes.wire.js';
 import { SEED_SOURCES } from './seeds.wire.js';
 
 /**
@@ -34,10 +42,19 @@ export {
   LANE_STAKES_PROVENANCE,
   LANE_STATES,
   MERGE_VERIFICATION_TIERS,
+  EMPTY_POOL_KINDS,
+  EMPTY_POOL_LIVE_EXCLUSIONS,
+  emptyPoolFromCandidates,
   isAwaitingAcceptance,
+  laneVerdictAck,
+  type EmptyPool,
+  type EmptyPoolKind,
+  type EmptyPoolLiveExclusion,
+  type EmptyPoolLiveSeat,
   type LaneStakes,
   type LaneStakesProvenance,
   type LaneState,
+  type LaneVerdictAck,
   type MergeVerification,
 } from './lanes.wire.js';
 
@@ -177,6 +194,41 @@ export function closeReasonCopy(reason: CloseReason): string | null {
     case 'review_swept':
       return 'swept by the 24h clock, not by a seat';
   }
+}
+
+export const EmptyPoolLiveSeatSchema = z.object({
+  member: z.string().min(1),
+  exclusion: z.enum(EMPTY_POOL_LIVE_EXCLUSIONS),
+});
+export const EmptyPoolSchema = z.object({
+  kind: z.enum(EMPTY_POOL_KINDS),
+  live: z.array(EmptyPoolLiveSeatSchema).optional(),
+});
+
+/**
+ * Worker-facing distinction for a submit that asked nobody (ADR 404). The sanction sentence is
+ * the caller's; this is only why the pool was empty.
+ */
+export function emptyPoolCopy(pool: EmptyPool): string {
+  if (pool.kind === 'no_live_member') return 'no other member is live';
+  const groups = new Map<string, string[]>();
+  for (const row of pool.live ?? []) {
+    const names = groups.get(row.exclusion) ?? [];
+    names.push(row.member);
+    groups.set(row.exclusion, names);
+  }
+  const bits = [...groups.entries()].map(([ex, names]) => `${ex}: ${names.join(', ')}`);
+  return bits.length > 0
+    ? `live seats were ineligible (${bits.join('; ')})`
+    : 'live seats were ineligible';
+}
+
+/**
+ * Client copy for a no-ask submit. Older daemons omit `empty_pool`; keep the historical sentence
+ * rather than inventing a kind we did not observe.
+ */
+export function emptyPoolHint(pool: EmptyPool | undefined | null): string {
+  return pool ? emptyPoolCopy(pool) : 'no eligible acceptor is live';
 }
 
 /** True when the lane is in the post-merge outcome-acceptance stage (ADR 192), either spelling. */
@@ -497,6 +549,11 @@ export const LaneResultSchema = z.object({
       route: z.enum(['human_admin', 'cross_family', 'named']).optional(),
       self_close_sanctioned: z.boolean().optional(),
       /**
+       * ADR 404: why the picker asked nobody. Present only on a no-ask submit (fresh or standing).
+       * Absent on older daemons — clients keep the historical "no eligible acceptor is live" line.
+       */
+      empty_pool: EmptyPoolSchema.optional(),
+      /**
        * The lane was ALREADY awaiting acceptance: this is a report of the standing state (who was
        * asked at the original submit), not a fresh routing decision. Set on repeat submits — e.g.
        * recording the merge SHA after the PR lands, which is the normal flow. Consumers must never
@@ -681,6 +738,8 @@ export const NextBriefSchema = z.object({
          * `.default(false)` keeps a brief from an older daemon parseable.
          */
         no_candidate: z.boolean().default(false),
+        /** ADR 404: why nobody was asked, when `no_candidate` is true. */
+        empty_pool: EmptyPoolSchema.optional(),
         /**
          * True when the lane's merge attestation carries no SHA — under merge-verified
          * submit nothing has landed, so there is NOTHING TO ACCEPT YET: the wait is on the

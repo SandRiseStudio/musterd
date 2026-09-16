@@ -115,6 +115,11 @@ export type AuditAction =
   | 'record.tool_calls'
   | 'record.seed_thread'
   | 'record.incident_report'
+  // ADR 399: a relay capture crossing to every node. `detail` carries
+  // `{ relay_id, source, body, captured_at, slack_user_id, by, linked_lane_id, promotion_kind }`,
+  // keyed by `relay_id` for the same reason `seed_thread` is. HUB-minted only — the relay is polled
+  // in one place per team — and the seed's LIFECYCLE never rides along (ADR 371 §3 stands).
+  | 'seed.captured'
   // ADR 101: a harness attested (or re-attested) the model on an occupancy. `detail` carries
   // `{ occupancy, old, new, source: 'claim'|'heartbeat'|'ambient' }` — this append-only trail IS the
   // occupancy's model-switch history (the ADR keeps no history column). `ambient` is ADR 119: a
@@ -410,7 +415,9 @@ export type AuditAction =
   // ADR 358: a human seat's set of nodes widened by the explicit trust act from a node already in
   // it (detail: { node, by_node, by_label }). A refused trust is `seat.bound_elsewhere` with
   // detail.act = 'trust' — one row shape for every probe from a machine outside the set.
-  | 'seat.node_trusted';
+  | 'seat.node_trusted'
+  // Spec 2026-09-16 (workspace self-heal), ADR 408: what a SessionStart repair wrote, skipped, left.
+  | 'workspace.repaired';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

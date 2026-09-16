@@ -8,7 +8,7 @@ A gate on a test (an env flag, an owner opt-in, a spend authorization, a real-bi
 
 This is [instrument silence](instrument-silence.md) wearing a test runner: the suite's green is a quiet instrument, and a skipped test's green is the claim least likely to be checked. It is also a setup for [correct by coincidence](correct-by-coincidence.md) in reverse — the fixture doesn't drift into accidental agreement, it drifts into guaranteed disagreement, and the skip hides it.
 
-## The measured instance (2026-08-24; falsify: `git show 1790bc6d:tests/codex-cli.acceptance.test.ts` boots against a strict-v2 daemon)
+## The measured instance (2026-08-24; falsify: `git show 1790bc6d:tests/codex-cli.acceptance.test.ts` boots against a strict-v2 daemon) <!-- claim: other -->
 
 The owner-gated real-Codex acceptance test (`tests/codex-cli.acceptance.test.ts`) landed 2026-08-03 in #621 behind two gates: `MUSTERD_REAL_CODEX=1` *and* `MUSTERD_REAL_CODEX_CONFIRM=1` (a spend authorization — it drives the real Codex CLI). Excluded from CI by design. Between landing and 2026-08-24 it was **never executed once**, and for that whole window it could not have passed:
 

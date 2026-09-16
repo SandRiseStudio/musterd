@@ -6,20 +6,20 @@ The stream rents one Fly machine per stream (its lifetime IS the stream's) reach
 
 `musterd stream start` rents one Fly machine (app `musterd-broadcast`, performance-4x, auto-destroy) that reaches the laptop's loopback-bound daemon via Tailscale (`MUSTERD_AIR_ADDR` is a tailnet name; the ADR 040 allow-list accepts that Host). Stop with `musterd stream stop`, never by killing the machine. Nothing stream-related runs locally unless you run `musterd broadcast` yourself — except the ADR 293 supervisor below.
 
-## Crash vs deliberate stop (2026-08-19, ADR 293; falsify: induce a crash with a raw `fly machine stop` and watch `stream ensure` heal it)
+## Crash vs deliberate stop (2026-08-19, ADR 293; falsify: induce a crash with a raw `fly machine stop` and watch `stream ensure` heal it) <!-- claim: other -->
 
 The verbs record intent in `~/.musterd/stream/state.json`: `start` says live (before launching), `stop` says stopped with **who and why** (`--reason`, shown by `stream status`) — so a machine gone while the file says live is a crash by definition. `musterd service install --stream` installs a 60s LaunchAgent running `stream ensure`: crash → relaunch (≤3 per 30min, then it stands down and asks the team as the `streamwatch` service seat until a human `stream start` re-arms). Consequences to know: killing the machine any way other than `stream stop` now gets healed within ~60s, and `stream start --once` is the opt-out for deliberately unsupervised (e.g. `--duration`) runs. The 2026-08-18 Chrome death ("Chrome DevTools socket closed", dead until a human noticed) is the incident this closes; ADR 292 keeps the restarted page's bundle current from there.
 
 ## Two claims the evidence killed (measured 2026-07-29; falsify: read entrypoint.sh + re-measure bitrate)
 
-1. ~~"The hosted stream runs 1080p30 and delivers 10 fps"~~ — wrong: `scripts/broadcast/entrypoint.sh` pins 720p25; the 1080p30 row in docs/perf/broadcast-baseline.md is the REJECTED arm. Read the entrypoint, not just the bench.
-2. ~~"Lower the bitrate to halve egress"~~ — wrong: the flat-color iso scene encodes at ~780 kbit/s against a 4500k cap that never binds; a 10 h stream is ~3 GB of egress, cents. The cost is compute, and at ~2.7 cores of pipeline performance-4x cannot step down to 2x.
+1. ~~"The hosted stream runs 1080p30 and delivers 10 fps"~~ — wrong: `scripts/broadcast/entrypoint.sh` pins 720p25; the 1080p30 row in docs/perf/broadcast-baseline.md is the REJECTED arm. Read the entrypoint, not just the bench. ~~720p25 (2026-07-29)~~ SUPERSEDED 2026-09-15: the entrypoint now pins **1080p20**, measured at speed 0.998x on the same box (1080p15 sustains a clean 1.00x and is the fallback rung) — 1080p30 stays rejected, but 1080p was never the problem at a lower frame rate and nobody had checked.
+2. ~~"Lower the bitrate to halve egress"~~ — wrong: a 10 h stream is ~3 GB of egress, cents. The cost is compute, and at ~2.7 cores of pipeline performance-4x cannot step down to 2x. ~~"the flat-color iso scene encodes at ~780 kbit/s against a 4500k cap that never binds" (2026-07-29)~~ INVALIDATED 2026-09-15 (falsify: read ffmpeg's `-stats` summary off any capture): measured **~2900 kbit/s at 720p25**, **~3334 at 1080p15** and **~3517 at 1080p20**, against the same 4500k cap. The room has gained props, lighting, a night veil and more members since July; the scene is no longer "flat colour" in the sense that figure assumed. The conclusion above still holds — egress is still cents, compute is still the cost — but the cap is much nearer binding than recorded, and a bitrate decision made on the 780 figure would be made on a number that is four times off. <!-- claim: other -->
 
 ## The local VideoToolbox arm (measured 2026-07-29, 45 s probe — promising, UNPROVEN)
 
 Hardware encode is essentially free (ffmpeg on `h264_videotoolbox`: 4.3–8.6 % of one core); the bottleneck is Chrome's render. Mid-run speed dipped to 0.57x before recovering — marginal, not comfortable. nick's decision 2026-07-29: leave the stream infra exactly as is; do not migrate to the laptop on the strength of a 45 s probe. A 10–15 min soak (guarded per [nicks-laptop](nicks-laptop.md)) remains queued.
 
-## The supervisor used to duplicate a healthy start (2026-09-03; falsify: `fly machine list --json` during a boot, then run `stream ensure`)
+## The supervisor used to duplicate a healthy start (2026-09-03; falsify: `fly machine list --json` during a boot, then run `stream ensure`) <!-- claim: defect -->
 
 `startedMachines()` filters `state === 'started'`, and every "is a machine already there" decision
 asked it: the ADR 293 crash predicate, `start`'s own double-launch guard, and `stop`. But Fly reports
@@ -41,7 +41,107 @@ same bug made `stream stop` during a boot print "nothing live" and walk away fro
 then came up and billed unattended; that path is fixed with it. `status` deliberately still reports
 `started`, because there "live" means *streaming* and a booting machine is not yet.
 
-## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream)
+## ffmpeg's `fps=20 speed=1.00x` was padding — the page delivered 15 (2026-09-16; falsify: `MUSTERD_BROADCAST_PERF` on the live box, compare `deliveredFps` to `encodedFps`) <!-- claim: defect -->
+
+nick saw a "tiny bit choppy" on member walks and act bubbles at 1080p20 while every throughput
+number said healthy. The perf recorder on the live performance-4x (407 s) said why: Chrome
+delivered **14.9 distinct frames/s** (min 12, p95 16) while the pump emitted **20.0**, so ~26 % of
+encoded frames were the previous frame re-sent, unevenly spaced. `speed=` and `fps=` are the
+encoder's view and do not carry this; the pump re-emits the latest frame on a wall clock by design.
+The instrument that could — `deliveredFps` vs `encodedFps` in the JSONL — existed since July and had
+not been run on the hosted box.
+
+Cause: the office's broadcast draw coalescer skipped any rAF tick that arrived under the 50 ms
+budget (`acc < budget → skip`). That is exact when rAF runs far faster than the budget (a 60 Hz
+viewer), but on the box at 1080p the rAF itself ran **~19-20 Hz** — a period equal to the budget —
+so every tick a hair early was dropped and the next drew at ~100 ms. `draws/s ≈ delivered/s ≈ 15`,
+`ticks/s ≈ 19`. Fixed by `coalesceStep`: draw on the tick nearest the budget (`phase + raf/2 ≥
+budget`) and carry the remainder, clamped to ±half a budget so a stall cannot bank catch-up draws.
+The viewer's 20 fps ambient cap is unchanged (60 Hz still draws every third tick).
+
+What this does **not** fix: the rAF running at ~20 Hz means the box's per-frame cost (paint +
+composite + 1080p JPEG screencast) is ~50 ms with no headroom. Chrome sat at 220 % of a core with
+canvas draw rate making no difference to that figure (14/s and 16/s buckets both 219 %), so the
+cost is in the screencast/composite path, not the scene painting.
+
+**After the fix (2026-09-16 03:45Z, same box, same recorder, 426 s):** delivered **26.9/s** (min 17,
+p5 19, median 26), encoded 20.0, repeats **0.6 %** (53 of 8524). Acceptance (≥ 19) met. Two things
+the after-run shows that the before-run could not: draws/s (median 18) is now *below* delivered/s,
+so roughly a third of composited frames come from something other than the canvas loop — DOM
+bubbles, CSS transitions — and Chrome rose to 253 % of a core because it now JPEG-encodes ~7
+screencast frames/s that the 20 fps pump discards. `screencastEveryNthFrame(20)` is 1 because
+`compositorHz` assumes 30 on Linux; the box composites nearer 27 here. That waste is the next cut
+if Chrome's CPU ever needs to come down; it does not affect what the viewer sees.
+
+## Every health signal the capture had measured the encoder, and the encoder is downstream of the freeze (2026-09-16; falsify: `Page.stopScreencast` mid-run and watch ffmpeg keep reporting a healthy rate) <!-- claim: defect -->
+
+A frozen source keeps ffmpeg perfectly fed, because the pump re-emits `latest` by design. So every
+counter the capture owned read healthy while the picture was stuck: `fps=` and `speed=` clean, and
+the ADR 159 queue watchdog satisfied **because the queue was being drained exactly as it should
+be**. The only counter that knew was `deliveredFps`, which is opt-in behind
+`MUSTERD_BROADCAST_PERF` and therefore off on an ordinary run. One frozen frame went out for six
+and a half minutes (2026-09-16, machine `84e694b2424e38`) and nothing said so.
+
+`makeFrameWatchdog` asks the one question none of those did: **when did a frame last ARRIVE.** Armed
+when the pump starts (Chrome launching and the page loading take a minute and none of it is a
+freeze), swept on the pump's own timer — the tick IS the moment a frozen source is being papered
+over — and disarmed on every deliberate stop.
+
+**The threshold is measured, not chosen.** Two captures on the performance-4x box that day (778 s
+total, a quiet Saturday floor) delivered a worst SECOND of 7 frames and **zero** seconds with no
+frame at all: the office's ambient motion means a healthy capture never goes one second dark. 5 s is
+~5x the coarsest healthy bucket and ~75x the healthy inter-frame gap. Lowering it toward the healthy
+range is how this turns a still room into a restart loop, so a test pins it inside a range.
+
+A freeze borrows `socketLossExitCode`'s judgement rather than the encoder stall's, and the
+distinction is the point: an encoder that stops draining is *this run's* problem and relaunching
+re-runs it, while a screencast that stops arriving is the class a relaunch genuinely fixes.
+
+**Verified locally against `--out`, both arms and the control** (no Fly machine, no Twitch): silent
+wedge at 10 s → watchdog fired at 5.0 s, ffmpeg still printing `fps=19 speed=0.955x`, exit **1**
+("Ending the stream") because the run was under `RESTARTABLE_AFTER_MS`; wedge at 70 s under
+`MUSTERD_BROADCAST_SUPERVISED=1` → exit **75** ("Asking the supervisor for a relaunch"); and a clean
+90 s run exited 0 with the watchdog silent.
+
+**And verified ON THE BOX** (machine `873ed1b0549138`, 2026-09-16 19:38–19:41Z, image
+`d4abbeafc7a0` built with the wedge, destroyed after): two complete freeze-and-recover cycles.
+ffmpeg reported `fps=20 speed=0.988x` up to the instant of each freeze — the healthy-looking number
+that hid the original incident — the watchdog fired at 5.0 s both times, the process exited 75, and
+`entrypoint.sh` relaunched it. **Wedge to live again was about nine seconds**, against the six and a
+half minutes the same class of failure ran unreported in the morning. The local arms prove the
+predicate; only this one proves the entrypoint actually reruns on 75.
+
+### Every relaunch claimed a deploy it could not know about (2026-09-16; falsify: wedge the screencast on the box and read the entrypoint's line under the watchdog's) <!-- claim: defect -->
+
+`entrypoint.sh` printed `▸ restarting the stream on the rebuilt daemon code` for **every**
+`RESTART_EXIT_CODE`, and 75 has three causes: a daemon rebuild, a lost DevTools socket
+(`socketLossExitCode`), and now a frozen picture. Two of the three were being reported as the
+first. Read on the hosted falsifier above: a deliberately wedged screencast relaunched twice, and
+both relaunches logged as the rebuilt daemon code — which tells an operator scanning the log that a
+deploy landed and there is nothing to investigate.
+
+It predates the watchdog (the socket case was already misreported); the watchdog adds a third cause
+and is what surfaced it. The line now says `▸ relaunching the stream (ran Ns) — reason on the line
+above`, because the stream prints its own reason on stderr immediately before exiting and the
+supervisor genuinely does not know which one fired. **A restart reason the supervisor cannot know is
+one it must not assert** — the same failure as a counter that reads healthy while the picture is
+frozen, one layer up.
+
+### The 6.5-minute freeze is not reachable on `main`, and that surprised me (2026-09-16; falsify: stringify the ack's `sessionId` on main and watch it die on an unhandled rejection instead of freezing) <!-- claim: other -->
+
+The first falsifier I wrote reproduced the original bug — a stringified `sessionId` — and it did
+**not** freeze the stream. It crashed the process. On `main` the ack is `void page.send(...)` with
+no `.catch()`, so Chrome's "Invalid parameters" becomes an unhandled rejection and Node exits. The
+six-and-a-half-minute silent freeze was a property of the closed #1466 branch, whose gate added a
+`.catch()` that swallowed exactly that rejection.
+
+Two things follow. The watchdog is still right, because a refused ack is only ONE way frames stop
+arriving and the others (a wedged compositor, a renderer hang, a silently stopped screencast) raise
+nothing at all — which is why the real falsifier had to be `Page.stopScreencast`, not a bad ack.
+And, noted but **not fixed here**: that unhandled rejection exits 1, so a supervised stream will not
+restart from a recoverable ack failure that `socketLossExitCode` would otherwise call restartable.
+
+## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream) <!-- claim: defect -->
 
 Within a second of going live, ffmpeg reported against **both** inputs: `Thread message queue
 blocking; consider raising the thread_queue_size option (current value: 8)`. Eight packets is a third
@@ -56,7 +156,7 @@ load average **5.50 / 4.54 / 2.49 on 4 cores**, chromium ~2.2 cores across four 
 0.83 — Chrome's render is still the bottleneck this page has recorded since 2026-07-29, and
 `performance-4x` still cannot step down. If `speed=` sits below 1.0x, no queue size fixes that.
 
-## `Page.navigate` ran on a deadline sized for local calls (2026-09-03; falsify: cold-boot a machine and time `streaming (rtmps)` → `◉ live`)
+## `Page.navigate` ran on a deadline sized for local calls (2026-09-03; falsify: cold-boot a machine and time `streaming (rtmps)` → `◉ live`) <!-- claim: defect -->
 
 `CDP_TIMEOUT_MS` is 15s and applied to **every** CDP call, but the startup calls are not alike.
 `Page.enable`, `Runtime.enable` and `Emulation.setDeviceMetricsOverride` are local bookkeeping that
@@ -78,7 +178,7 @@ detectable, and raising it everywhere would trade a startup flake for a hang not
 Note `waitBroadcastReady` already had its own 30s budget for exactly this reason — navigate is the
 same kind of wait and had simply never been given one.
 
-## A digest the registry has not published yet is not a failed start (2026-09-03; falsify: `stream build` then `stream start` immediately)
+## A digest the registry has not published yet is not a failed start (2026-09-03; falsify: `stream build` then `stream start` immediately) <!-- claim: defect -->
 
 `stream start` failed **twice** with `MANIFEST_UNKNOWN ... manifest unknown [http 404]` against a
 digest `stream build` had just pushed — while flyctl's own `image found: img_…` line said it had
@@ -96,3 +196,17 @@ failure — no capacity, bad secrets, a broken entrypoint — stays fatal on the
 retry loop over real errors is how you bill for machines that were never going to run. Same reasoning
 as the prerender crawl's `retryCount: 3`, which exists because one transient fetch failure used to
 fail an entire build.
+
+**The retry reaps before it relaunches (added 2026-09-15).** A `MANIFEST_UNKNOWN` exit is not proof
+that no machine was created — and that is the other half of the sentence the 2026-09-03 note left
+off. `fly machine run` creates the machine and *then* the VM fails to pull the not-yet-published
+digest; the machine keeps trying and comes up on its own once the registry catches up. So the attempt
+being retried may already have produced the very thing being retried for. Observed live 2026-09-15
+starting the hosted broadcast: the "failed" first attempt's machine went `◉ live` 52s later unaided,
+and 3s before that the retry had launched a **second** performance-4x against the same stream key —
+both published, and only Twitch refusing the second publisher kept it to one machine. That is luck
+standing in for a guard, and it is the exact 2026-09-03 duplicate-launch (`supervisor` §above),
+reached through `start`'s own retry rather than the supervisor's crash predicate. `start` now asks
+the same `occupiedMachines` question its top-of-function guard asks *before each relaunch*: if the
+last attempt left an occupying machine, it waits for that machine instead of racing it. The 45s sleep
+was always the right wait; only the second `fly machine run` was wrong.

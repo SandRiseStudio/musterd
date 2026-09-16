@@ -9,7 +9,9 @@
   verb-list correction, first warn→deliberate-proceed measurement recorded below —
   docs/superpowers/specs/2026-08-06-adr-227-closeout-design.md); second measurement recorded
   2026-08-19 (zero `roster.role_query` rows ever — the increment-1 pass criterion fails by its own
-  words, and the role-addressed-send reopening trigger has vacuously never fired)
+  words, and the role-addressed-send reopening trigger has vacuously never fired); third
+  measurement recorded 2026-09-16 (2 `roster.role_query` rows, both 2026-08-21; the
+  discovery→send join has not fired as specified, so ADR 272 §5 stays deferred)
 - **Date:** 2026-08-04
 - **Owner:** izzo (design session with nick, 2026-08-04)
 - **Supersedes / relates to:** ADR 069/070 (the capability substrate this extends), ADR 112 (steward — the first worked role), ADR 145 (admins are human-only), ADR 150 (structural inducement — the gate pattern increment 2 reuses), ADR 191/219/131 (the liveness trio discovery composes with), ADR 026–030 (provisioning templates — the per-harness rendering half), landscape.md §9 (the AgentField survey that widened the scope)
@@ -226,6 +228,22 @@ increment-1 window elapsed; the window closes 2026-08-20).**
   2026-08-14) reopens the deferred role-addressed send citing the broader re-evaluation session,
   not this measured trigger. Whatever ADR 272's fate, that reopening now stands as a recorded
   override of a pre-registered gate, not as the gate firing.
+
+**Third measurement (run 2026-09-16 against the live team DB, by wanderer — `~/.musterd/musterd.db`,
+139,579 audit rows).** The 2026-08-19 snapshot above is kept; this row is what a live
+`SELECT count(*) FROM audit WHERE action='roster.role_query'` returns now.
+
+- `roster.role_query`: **2** (was 0). Both 2026-08-21, none since: gptbot →
+  `product-communications` (holders: sloane); wanderer → `admin` (holders: nick).
+- `infra.touch.warned`: **n=4** — the original three plus stanley `agent` at 2026-08-21 18:08:02
+  (holders by then included guardian and streamwatch). Still no warn that redirected unsanctioned
+  work.
+- The reopening join (query, then a directed send from the same seat within 120s) produces
+  **one** row: wanderer's `admin` query followed 54s later by `accept` to stanley. Holders were
+  nick; the send was not to them. gptbot sent nothing directed after theirs. "Repeatedly" and
+  "to the discovered holders" have not happened, so ADR 272 §5 stays deferred.
+- Falsifier: the count query disagreeing with 2, or the join producing two or more sends to the
+  queried role's holders.
 
 **Experiment.** None pre-registered for increment 1 (a roster query needs no A/B). The hardening
 ramp is the standing experiment for increment 2: each step (warn → `--force` → refuse) is a

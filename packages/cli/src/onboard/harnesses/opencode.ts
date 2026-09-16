@@ -209,7 +209,7 @@ export const opencode: Harness = {
     applies: (dir) => existsSync(projectConfigPath(dir)) || opencodePluginPresent(dir),
     run: (dir) => {
       const warnings = installMusterdOpencodePlugin(dir);
-      return { files: [join(dir, '.opencode', 'plugins', 'musterd.js')], warnings };
+      return { files: [join(dir, '.opencode', 'plugins', 'musterd.js')], warnings, skipped: [] };
     },
     surfaces: () => [OPENCODE_PLUGIN_SURFACE],
   },

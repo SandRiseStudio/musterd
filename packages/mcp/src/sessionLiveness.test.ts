@@ -268,3 +268,54 @@ describe('shouldReleaseOnVerdict — a session that just acted is not dead', () 
     expect(shouldReleaseOnVerdict('ppid', NOW - 1, NOW)).toBe(true);
   });
 });
+
+/**
+ * Lane 01M2KCG5Z8, measured on seat `izzo` 2026-09-15. The binding named session `d70f6953`, whose
+ * transcript stopped at 19:06Z; the harness had meanwhile moved to `4952e917`, which was writing
+ * continuously, and nothing rewrote `binding.session`. The adapter had legitimately ADOPTED
+ * d70f6953 while it was alive, so no re-adoption guard applies — the id in the binding never
+ * changed. At 20:06Z that transcript crossed SESSION_STALE_MS and rung 4 began firing `stale`
+ * every 15s.
+ *
+ * The activity guard could not save it: it asks only whether a tool call landed in the last
+ * HEARTBEAT_MS, and a session is idle far longer than 15s while a human reads or a model thinks.
+ * So the seat was released on nearly every heartbeat, its presence reaped at PRESENCE_TIMEOUT_MS,
+ * and re-minted by the next tool call — 17 mints and 11 reaps in half an hour, against 3-6 mints
+ * for every other seat. The interrupt line was refused the whole time, and `team_join` could not
+ * stick because the rejoin died by the same rule.
+ *
+ * The contradiction is the evidence, and it is available right here: this process was DRIVEN more
+ * recently than the transcript it is judging was WRITTEN. A tool call is the harness speaking
+ * first-hand, and a harness that is driving us is not writing to a transcript that has been quiet
+ * for an hour. That means the binding names somebody else's session — so the `stale` rung is
+ * evidence about them, not about us, and the ladder's own rule applies: fail open.
+ *
+ * A genuinely dormant harness is untouched, because the tool call that would contradict the
+ * transcript is exactly the thing that stops arriving: activity and transcript go quiet together.
+ */
+describe('shouldReleaseOnVerdict — a stale transcript we are visibly newer than is not ours', () => {
+  const NOW = 1_000_000;
+  const HOUR = 3_600_000;
+
+  it('refuses to release when a tool call landed after the transcript it is judging went quiet', () => {
+    // The measured shape: transcript silent for an hour, this adapter served a tool call 3 minutes
+    // ago. Both cannot be the same session.
+    expect(shouldReleaseOnVerdict('stale', NOW - 180_000, NOW, HEARTBEAT_MS, HOUR)).toBe(false);
+  });
+
+  it('still releases when this adapter has been quiet at least as long as the transcript', () => {
+    // The real orphan: nothing has driven us since that transcript stopped, so there is no
+    // contradiction and the crash backstop must still fire.
+    expect(shouldReleaseOnVerdict('stale', NOW - HOUR, NOW, HEARTBEAT_MS, HOUR)).toBe(true);
+    // Never acted at all — the pre-activity default must not read as "driven recently".
+    expect(shouldReleaseOnVerdict('stale', 0, NOW, HEARTBEAT_MS, HOUR)).toBe(true);
+  });
+
+  it('leaves ppid and the age-less rungs exactly as they were', () => {
+    // `ended` carries no transcript age, so it keeps the plain heartbeat window.
+    expect(shouldReleaseOnVerdict('ended', NOW - HOUR, NOW, HEARTBEAT_MS, undefined)).toBe(true);
+    expect(shouldReleaseOnVerdict('ended', NOW - 1_000, NOW, HEARTBEAT_MS, undefined)).toBe(false);
+    // An orphaned process is fact: no amount of recent activity keeps the seat.
+    expect(shouldReleaseOnVerdict('ppid', NOW, NOW, HEARTBEAT_MS, HOUR)).toBe(true);
+  });
+});

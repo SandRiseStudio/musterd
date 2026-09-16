@@ -91,7 +91,7 @@ URL from it automatically (`http://…` → `ws://…`, and `https://…` → `w
 set `MUSTERD_SERVER` the same way in the harness config that launches the adapter (`.cursor/mcp.json`,
 Claude Code / Codex MCP config) so the agent's surface dials the same daemon.
 
-Everything else is unchanged: `musterd status`, `team create` / `join`, `send`, `inbox`, claims and
+Everything else is unchanged: `musterd status`, `team create` / `claim`, `send`, `inbox`, claims and
 presence all work exactly as on localhost — they're just talking to a daemon that happens to live across
 the overlay.
 
@@ -113,6 +113,31 @@ It does not configure Tailscale or replace the manual checks below for the direc
 in this guide. Aperture model-configuration readiness is independent; see the
 [approved paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md)
 for `musterd integration doctor --aperture <https-url>` and the combined invocation.
+
+Before checking a Team's managed Aperture policy, generate and review its local fragment from the
+committed roster and secret-free `.musterd/governed-models.json`:
+
+```bash
+musterd integration generate aperture --write
+musterd integration generate aperture --check
+```
+
+This creates no network connection and never applies configuration; an operator manually merges the
+two generated files into Aperture. The doctor then compares only that musterd-managed portion and
+still reports configuration readiness rather than active enforcement.
+
+The paired transport artifact is generated independently. It records explicit Tailscale tag owners,
+the exact workload-tag-to-Aperture HTTPS ACLs, and opaque declared node keys without contacting
+Tailscale or identifying any machine:
+
+```bash
+musterd integration generate tailscale --write
+musterd integration generate tailscale --check
+```
+
+Review and apply this artifact manually alongside the tailnet policy. A declared node key is Team
+policy only; it becomes a live-machine identity only through Increment 3's separate authorization
+protocol. The existing doctor remains the read-only check for the actual overlay posture.
 
 Run this checklist before you trust the team:
 

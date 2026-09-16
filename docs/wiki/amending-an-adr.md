@@ -2,7 +2,7 @@
 
 Only an accepted ADR's `## Decision` is frozen — a dated follow-up note in `## Consequences` is the PRESCRIBED amendment mechanism, and a superseding ADR is for reversing a decision, not recording what happened next.
 
-## The rule and its bad summary (2026-08-05, #738; falsify: read rule 3 in scripts/check-change-adr.ts)
+## The rule and its bad summary (2026-08-05, #738; falsify: read rule 3 in scripts/check-change-adr.ts) <!-- claim: other -->
 
 AGENTS.md used to summarize this as a blanket "never edit a decision; supersede it", which caused a wrong review before #738 reworded it. Context, Consequences, and Observability stay editable on any ADR.
 
@@ -10,7 +10,7 @@ AGENTS.md used to summarize this as a blanket "never edit a decision; supersede 
 
 The old `isAccepted` regex demanded a bare `Status: accepted`, but house style annotates the line — so exactly the long-arc "accepted — design frozen" ADRs people amend were unprotected. Gate silence is not compliance: for weeks, edits that should have failed did not. #743 added the restoration escape — a Decision edit whose result equals a form the file previously held passes, because #739 froze the violations it revealed and removing them was itself a Decision edit.
 
-## The convention the gate made unwritable (2026-08-31, #1087; falsify: write the marker onto ADR 326 Decision 2 with #1117 reverted and run `pnpm change-adr:check`)
+## The convention the gate made unwritable (2026-08-31, #1087; falsify: write the marker onto ADR 326 Decision 2 with #1117 reverted and run `pnpm change-adr:check`) <!-- claim: defect -->
 
 There are two audiences for an amendment and the prescribed mechanism only serves one. A dated `## Consequences` note is a complete record — and it is invisible to the reader who opens `## Decision`, reads item 2, and stops, which is what a reader looking up "what does orientation do with a review request" actually does. The repo already answered that with an inline dated marker: [ADR 160](../decisions/160-seat-session-labels.md):48 and :90, ADR 250:67, and ADR 056 on the Status line.
 

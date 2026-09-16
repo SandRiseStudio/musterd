@@ -271,6 +271,17 @@ export interface OfficeStats {
   ticks: number;
   /** Frames actually painted (`ticks` minus the ones coalesced away by the ambient FPS budget). */
   draws: number;
+  /**
+   * Drift-heartbeat frames painted since the scene mounted — the SLOW breath a parked room keeps,
+   * which `ticks`/`draws` cannot see because it never enters the rAF loop.
+   *
+   * It is here because for the whole of #1430 nobody could watch the drift tier fire: `?quiet` parks
+   * the room exactly as intended, and a parked room then reports ticks 0 / draws 0 whether the
+   * heartbeat is beating or dead. An instrument that reads the same for working and broken is not an
+   * instrument. Expect ~1000/DRIFT_FRAME_MS per second while parked and visible, and a flat line
+   * while collapsed or hidden.
+   */
+  beats: number;
   /** `performance.now()` when the scene mounted — the denominator for a rate. */
   since: number;
 }

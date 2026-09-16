@@ -2,7 +2,7 @@
 
 `pnpm perf:check` measures a dist it did not build, and a PR that reads exactly at budget on its own gates will read over on main — both cost the team a red main and three PRs' worth of gates on 2026-09-01, and neither is a bug in the gate.
 
-## Blind spot 1 — `perf:check` does not build (2026-09-02; falsify: run `pnpm perf:check` twice around a web change without rebuilding and watch the number not move)
+## Blind spot 1 — `perf:check` does not build (2026-09-02; falsify: run `pnpm perf:check` twice around a web change without rebuilding and watch the number not move) <!-- claim: defect -->
 
 `scripts/perf/check-budgets.ts` reads `packages/web/dist/client` and nothing else. It never invokes
 the web build. A reading taken without `pnpm --filter @musterd/web build` first is the *previous*
@@ -22,7 +22,7 @@ reports.
 **Rule:** a hand measurement is `pnpm --filter @musterd/web build && pnpm perf:check`, always as
 one command. A number quoted without the build in front of it is not a measurement.
 
-## Blind spot 2 — a PR at exactly N KB / N KB on its own gates reads over on main (2026-09-01; falsify: the `gates` run on `db1099de` is green)
+## Blind spot 2 — a PR at exactly N KB / N KB on its own gates reads over on main (2026-09-01; falsify: the `gates` run on `db1099de` is green) <!-- claim: defect -->
 
 CI's gzip output is not the laptop's. The `$comment` in `docs/perf/budgets.json` has recorded the
 delta since 2026-08-24 as "~0.7 KB higher on CI" — but it is a different *build output*, not a

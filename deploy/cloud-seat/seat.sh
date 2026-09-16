@@ -10,7 +10,13 @@ set -euo pipefail
 [ "$(id -u)" -ne 0 ] || { echo "seat.sh must not run as root — entrypoint.sh drops privileges first" >&2; exit 1; }
 MUSTERD_HUB_URL="http://${HUB_IP}:${MUSTERD_HUB_PORT:-4849}"
 
-log() { printf '%s cloud-seat: %s\n' "$(date -u +%FT%TZ)" "$*"; }
+# Same file entrypoint.sh narrates into — one boot, one log, readable after Fly's retention rolls.
+# `|| true` because narration must never be able to kill a boot: if the file is somehow unwritable
+# (a volume in a state the chown before the drop did not reach), a seat that boots without a
+# persisted log beats a seat that does not boot. stdout still carries every line.
+log() {
+  printf '%s cloud-seat: %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG_DIR/entrypoint.log" || true
+}
 
 # ── 2. the daemon (this machine's own; a replica — ADR 325) ───────────────────────────────────────
 # Loopback-bound: nothing on this machine is reached from outside; it dials the hub. SQLite lives
@@ -52,11 +58,9 @@ node -e '
   }' TEAM_HOME="$TEAM_HOME"
 kill -HUP "$DAEMON_PID"
 sleep 3
-# Team policy does NOT replicate to a joiner (finding 16, docs/perf/cloud-seat.md): the hub's
-# `loops.dispatch` is on, this daemon's is null, and THIS daemon derives the wake — so without this
-# line every wake a seat here can receive is a reply doorbell under the 5-minute reply budget, and a
-# lane handoff can never arrive as a work order. Arm it locally to agree with the hub. Idempotent;
-# blast radius is the seats enrolled on this daemon. Remove once lane 01M1T6DJ7J replicates policy.
+# Floor until the hub's first sync tick after ADR 398 restates unstamped policy (finding 16).
+# Idempotent; a joiner that has already folded the hub's loops is a no-op. Keep until a redeploy
+# has pulled once on a build that includes ADR 398.
 ( cd "$TEAM_HOME" && musterd team policy --dispatch-loop on --as nick >/dev/null ) \
   || log "team policy --dispatch-loop on refused — handoffs to this seat will run as 5 m doorbells (finding 16)"
 
@@ -130,6 +134,46 @@ node -e '
 # converter that writes the marker (first boot 2026-09-04 — this is what actually fixed the wake).
 ( cd "$WORKSPACE" && musterd harness configure --select claude-code --yes ) \
   || log "harness configure failed — the wake will spawn a session with no team_* tools and fail verification"
+# VERIFY, do not trust the exit code. A zero above was taken as success and nothing re-read the
+# state — so an unwired seat came up DEAF AND SILENT, and on 2026-09-04 that cost the whole
+# investigation: delta had no team_* tools and no PostToolUse hook, and whether configure had
+# failed or had succeeded-then-been-invalidated was unrecoverable (cross-machine-huddle-bell.md §2
+# prescribes exactly this read). `harness status --json` is the read.
+#
+# Its EXIT CODE is not sufficient on its own: statusExitCode treats an UNAVAILABLE harness as
+# healthy (harness.ts:190 — "the selection survives; there is nothing to repair here"), which is
+# true on a laptop without Claude Code installed and is precisely the deaf-seat failure here. So
+# assert the three things that must hold on this machine: claude-code is selected, it is available,
+# and every fragment is settled. Never fatal — a seat that boots and says it is deaf beats a seat
+# that refuses to boot — but it is now a named line in a log that outlives Fly's retention.
+harness_json="$( cd "$WORKSPACE" && musterd harness status --json 2>/dev/null )" || true
+if [ -z "$harness_json" ]; then
+  log "HARNESS UNVERIFIED: \`harness status --json\` produced nothing — cannot confirm the seat is wired"
+else
+  verdict="$(printf '%s' "$harness_json" | node -e '
+    let raw = ""; process.stdin.on("data", (d) => (raw += d)).on("end", () => {
+      let doc; try { doc = JSON.parse(raw); } catch { return console.log("unparseable harness status"); }
+      const h = (doc.harnesses ?? []).find((x) => x.harness === "claude-code");
+      if (!h) return console.log("claude-code absent from harness status");
+      if (!h.desired) return console.log("claude-code is NOT selected");
+      if (!h.available) return console.log("claude-code is NOT available here" + (h.detail ? ` (${h.detail})` : ""));
+      if (!h.fragments?.length) return console.log("claude-code has no fragments — nothing was wired");
+      const settled = (f) =>
+        f.journal === "none" && f.lock !== "invalid" && f.lock !== "held" &&
+        (f.desired ? f.planned === "unchanged" || f.planned === "satisfied-unmanaged"
+                   : f.planned === "unchanged" && !f.ownedHere);
+      const bad = h.fragments.filter((f) => !settled(f));
+      console.log(bad.length ? bad.map((f) => `${f.fragmentKey}=${f.planned}`).join(", ") : "");
+    });
+  ')"
+  if [ -z "$verdict" ]; then
+    log "harness verified: claude-code selected, available, every fragment in place"
+  else
+    log "HARNESS NOT WIRED: $verdict"
+    log "  → this seat will wake with no team_* tools and/or no PostToolUse doorbell, and will say nothing about it"
+    log "  → repair: cd $WORKSPACE && musterd harness configure --select claude-code --yes && musterd harness status"
+  fi
+fi
 # Rebind the actuator's credential EVERY boot, not just the first (finding 14). `musterd agent`
 # above and every seat claim write `binding.agent_key`, and the wake-lease endpoint takes only the
 # team agent key or a host-scoped credential — so a binding left holding a claim_seat credential

@@ -2,11 +2,13 @@ import {
   ACCEPTANCE_STALE_MS,
   compareGoals,
   DEFAULT_PROJECT,
+  emptyPoolFromCandidates,
   globToRegExp,
   isAwaitingAcceptance,
   LANE_CONTENDING_STATES,
   LANE_TERMINAL_STATES,
   resolveStakesDefault,
+  type EmptyPool,
   type Goal,
   type Lane,
   type LaneState,
@@ -135,7 +137,9 @@ function laneAuditRow(
 /**
  * The four edges the store records, with the same exclusivity the PATCH handler used to apply —
  * moved here, not duplicated, so the predicates cannot drift (ryder, #1071 acceptance). Terminal
- * edges belong to `recordLaneClose`; entering awaiting_acceptance belongs to `lane.ready_for_review`.
+ * edges belong to `recordLaneClose`. Entering awaiting_acceptance belongs to `lane.ready_for_review`
+ * on the origin; a hub-arbitrated submit also records `lane.state_changed` so the fold can apply
+ * the state (lane 01M2HNSVA79).
  */
 function recordLaneEdges(
   db: Database,
@@ -173,11 +177,17 @@ function recordLaneEdges(
       owner_before: before.owner_seat,
     });
   }
+  const enteringAcceptance =
+    isAwaitingAcceptance(after.state) && !isAwaitingAcceptance(before.state);
   if (
     after.state !== before.state &&
     !LANE_TERMINAL_STATES.has(after.state) &&
     !released &&
-    !(isAwaitingAcceptance(after.state) && !isAwaitingAcceptance(before.state)) &&
+    // Local path: the origin PATCH handler owns `lane.ready_for_review` (routing + ask).
+    // Hub-arbitrated path: that handler runs on the joiner AFTER the write, so nothing
+    // foldable lands in the hub log unless we record the state move here (lane 01M2HNSVA79).
+    // `audit.node` is the residence TRACE of a hub write (ADR 361) — absent on a local one.
+    !(enteringAcceptance && audit.node === undefined) &&
     !claimed
   ) {
     laneAuditRow(db, teamId, audit, 'lane.state_changed', after.id, {
@@ -601,6 +611,26 @@ export type HandoffLaneBasis = 'handed_to_recipient' | 'held';
  * false ambiguity, and a handed one must never be outvoted by lanes that have nothing to do with
  * this recipient.
  */
+/**
+ * Is there anything left to hand over in a lane in this state?
+ *
+ * Terminal is the obvious half. `awaiting_acceptance` is the half this used to miss (lane
+ * 01M2KTBDNP, observed 2026-09-15): the work has LANDED there — the branch is merged, its remote is
+ * deleted, and the only act still owed is somebody else's accept — so a handoff cannot be about it.
+ * The old filter asked only "not terminal", so a submitted lane stayed a candidate and, for a seat
+ * holding exactly one, was attached with confidence rather than reaching the deliberate
+ * warn-and-attach-nothing path. That is not a display wart: on `attach` the route rewrites the
+ * envelope's `meta.lane_handoff`, so the delivered act permanently names finished work, and ADR 243
+ * exists so the orientation `why` can read that field and tell the recipient which work this is.
+ *
+ * Read through `isAwaitingAcceptance`, never by comparing against a name: `ready_for_review` is the
+ * ADR 169 spelling still dual-accepted on the wire, and matching only the canonical one would leave
+ * a skewed daemon's lanes derivable (lanes.wire.ts says exactly this).
+ */
+function hasWorkLeftToHandOver(state: LaneState): boolean {
+  return !LANE_TERMINAL_STATES.has(state) && !isAwaitingAcceptance(state);
+}
+
 export function deriveHandoffLane(
   db: Database,
   teamId: string,
@@ -615,8 +645,8 @@ export function deriveHandoffLane(
     if (handed.length === 1) return { kind: 'attach', lane: handed[0]!, basis };
     if (handed.length > 1) return { kind: 'ambiguous', candidates: handed, basis };
   }
-  const held = listLanes(db, teamId, teamSlug, { owner: seat }).filter(
-    (l) => !LANE_TERMINAL_STATES.has(l.state),
+  const held = listLanes(db, teamId, teamSlug, { owner: seat }).filter((l) =>
+    hasWorkLeftToHandOver(l.state),
   );
   if (held.length === 0) return { kind: 'none' };
   if (held.length === 1) return { kind: 'attach', lane: held[0]!, basis: 'held' };
@@ -667,7 +697,7 @@ function lanesHandedTo(
   }
   if (handedIds.size === 0) return [];
   return listLanes(db, teamId, teamSlug, { owner: recipient }).filter(
-    (l) => handedIds.has(l.id) && !LANE_TERMINAL_STATES.has(l.state),
+    (l) => handedIds.has(l.id) && hasWorkLeftToHandOver(l.state),
   );
 }
 
@@ -791,7 +821,8 @@ export function acceptanceEnteredAt(db: Database, teamId: string, lane: Lane): n
  * Was this lane's acceptance stage entered with NOBODY asked to review it?
  *
  * `pickReviewCounterpart` returns null when the live roster offers no gradeable counterpart — on a
- * same-model monoculture, which ADR 188/253 refuse to route, that is every seat. The submit records
+ * same-model monoculture, which ADR 188/253 refuse to route, that is every seat. Busy live peers are
+ * not in that set (ADR 404): they are asked when no quiet peer exists. The submit records
  * `no_candidate: true` on its `lane.ready_for_review` row and the lane then waits exactly like one
  * whose reviewer is simply slow. Reading it back is what lets the brief say which it is.
  *
@@ -816,6 +847,40 @@ export function readyForReviewHadNoCandidate(
     return (JSON.parse(row.detail) as { no_candidate?: unknown }).no_candidate === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * ADR 404: why the submit asked nobody, derived from the ready-row snapshot so historical
+ * `no_candidate` rows still classify (busy vs empty room) without a new audit field.
+ */
+export function emptyPoolFromSubmitAudit(
+  db: Database,
+  teamId: string,
+  laneId: string,
+): EmptyPool | null {
+  const row = db
+    .prepare<[string, string], { detail: string | null }>(
+      `SELECT detail FROM audit
+        WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+        ORDER BY ts DESC LIMIT 1`,
+    )
+    .get(teamId, laneId);
+  if (!row?.detail) return null;
+  try {
+    const d = JSON.parse(row.detail) as {
+      no_candidate?: unknown;
+      review_selection?: {
+        selected?: { reviewer: string } | null;
+        candidates?: Array<{ member: string; exclusion?: string }>;
+      };
+    };
+    if (d.no_candidate !== true) return null;
+    const sel = d.review_selection;
+    if (!sel?.candidates) return null;
+    return emptyPoolFromCandidates(sel.selected ?? null, sel.candidates);
+  } catch {
+    return null;
   }
 }
 

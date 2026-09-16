@@ -35,12 +35,12 @@ import { type MemberRow } from './rows.js';
  *      substitute: with no live human the pick is null and the close records `human_review_missed`,
  *      loudly, rather than an agent review quietly standing in for the one that was required.
  *      (Never a wedge: the close itself is still possible — a record, not a lock.)
- *   2. otherwise a live **and not busy** seat (quiescence 120s, work-audit; `unknown` kept) whose
- *      **model family differs from the worker's** (ADR 056: correlated models make correlated
- *      mistakes, so a same-family review re-runs the worker's blind spots). Family comes from the
- *      occupancy's attested model (ADR 158 observed-over-declared); a seat attesting `unknown` is
- *      NOT eligible — it cannot prove diversity, and musterd would rather say nothing than something
- *      false. A human seat is always cross-family by construction.
+ *   2. otherwise a live seat whose **model family differs from the worker's** (ADR 056). Prefer a
+ *      quiet seat (quiescence 120s); if the only live gradeable peers are busy, still pick one
+ *      (ADR 404 — busy is a preference, not a hard miss). Family comes from the occupancy's
+ *      attested model (ADR 158 observed-over-declared); a seat attesting `unknown` is NOT eligible
+ *      — it cannot prove diversity. A human seat is always cross-family by construction but is not
+ *      on this ladder (ADR 253).
  *   3. nobody qualifies → `null`: the caller emits no ask and the verb response sanctions
  *      self-close (the ADR 145 degradation — never a wedge).
  */
@@ -592,6 +592,7 @@ export function selectReviewCounterpart(
   const workerUnattested = normalizeModelId(workerModel) === MODEL_UNKNOWN;
   const candidates: ReviewSelectionCandidate[] = [];
   const selectable: Array<{ index: number; member: MemberRow; grade: SnapshotGrade }> = [];
+  const busySelectable: Array<{ index: number; member: MemberRow; grade: SnapshotGrade }> = [];
 
   for (const member of listMembers(db, teamId)) {
     const candidate: ReviewSelectionCandidate = {
@@ -618,13 +619,19 @@ export function selectReviewCounterpart(
       continue;
     }
     const actedAt = lastWork.get(member.name);
-    if (
+    const isBusy =
       actedAt !== undefined &&
-      resolveQuiescence(actedAt, now, QUIESCENCE_DEFAULT_QUIET_AFTER_MS).state === 'busy'
-    ) {
-      candidate.exclusion = 'busy';
-      continue;
-    }
+      resolveQuiescence(actedAt, now, QUIESCENCE_DEFAULT_QUIET_AFTER_MS).state === 'busy';
+    const consider = (grade: SnapshotGrade) => {
+      if (isBusy) {
+        // ADR 404: remember them as busy, but keep the grade so a pool of only-busy live peers
+        // can still be asked. A quiet peer, if any exists, still wins below.
+        candidate.exclusion = 'busy';
+        busySelectable.push({ index: candidates.length - 1, member, grade });
+      } else {
+        selectable.push({ index: candidates.length - 1, member, grade });
+      }
+    };
     const candidateModel = latestAttestedModel(db, member.id);
     const grade = reviewGrade(workerModel, candidateModel);
     if (grade === null) {
@@ -634,7 +641,7 @@ export function selectReviewCounterpart(
       // fact (ADR 303's `worker_unattested`), and since ADR 351 it is routable at the rung below
       // the ladder: an ungraded review beats no review, and the record says exactly that much.
       if (workerUnattested && normalizeModelId(candidateModel) !== MODEL_UNKNOWN) {
-        selectable.push({ index: candidates.length - 1, member, grade: UNGRADED });
+        consider(UNGRADED);
       } else {
         candidate.exclusion = 'unknown_grade';
       }
@@ -644,7 +651,7 @@ export function selectReviewCounterpart(
       candidate.exclusion = 'same_model';
       continue;
     }
-    selectable.push({ index: candidates.length - 1, member, grade });
+    consider(grade);
   }
 
   // `ungraded` sits below both rungs (ADR 351). In practice a selection is all-graded or
@@ -655,24 +662,32 @@ export function selectReviewCounterpart(
   // stable, so a full tie still falls to roster order — the pre-ADR-303 policy — but now it is the
   // LAST resort, not the only one, and the snapshot says which rung decided.
   const tie = tieBreaker(openAcceptanceLoad(db, teamId), lastPickedAt(db, teamId));
-  selectable.sort(
+  // Quiet peers win when any exist. If the only live gradeable peers are busy, ask one of them
+  // anyway (ADR 404) — busy is a preference, not a hard miss.
+  const pool = selectable.length > 0 ? selectable : busySelectable;
+  pool.sort(
     (a, b) =>
       LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade) ||
       tie.compare(a.member.name, b.member.name),
   );
-  const best = selectable[0];
+  const best = pool[0];
   if (!best) return { pick: null, snapshot: { selected: null, worker_family, candidates } };
-  const runnerUp = selectable[1];
+  const runnerUp = pool[1];
   const tie_decided_by = tie.decidedBy(
     best.member.name,
     runnerUp && runnerUp.grade === best.grade ? runnerUp.member.name : undefined,
   );
 
-  for (const option of selectable) {
+  for (const option of pool) {
     const candidate = candidates[option.index]!;
     if (option === best) {
-      candidate.eligible = true;
-      candidate.grade = option.grade;
+      // Rebuild so a promoted busy winner is not left carrying `exclusion: 'busy'`.
+      candidates[option.index] = {
+        member: candidate.member,
+        family: candidate.family,
+        eligible: true,
+        grade: option.grade,
+      };
     } else {
       candidate.exclusion = option.grade === best.grade ? 'tie_break' : 'lower_grade';
     }

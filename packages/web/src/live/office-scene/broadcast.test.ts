@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ambientFrameBudgetMs,
+  coalesceStep,
   officeDpr,
   officeVisible,
   shouldCoalesceDraw,
@@ -98,6 +99,63 @@ describe('broadcast gates', () => {
     it('REGRESSION: a viewer only coalesces ambient-only stretches', () => {
       expect(shouldCoalesceDraw(false, true)).toBe(true);
       expect(shouldCoalesceDraw(false, false)).toBe(false);
+    });
+  });
+
+  describe('coalesceStep', () => {
+    /** Drive the scheduler with a fixed rAF period for `n` ticks; count draws. */
+    const run = (rafMs: number | (() => number), budgetMs: number, n: number) => {
+      let phase = 0;
+      let draws = 0;
+      for (let i = 0; i < n; i++) {
+        const r = coalesceStep(phase, typeof rafMs === 'number' ? rafMs : rafMs(), budgetMs);
+        phase = r.phase;
+        if (r.draw) draws++;
+      }
+      return draws;
+    };
+
+    it('MEASURED 2026-09-16: a rAF running AT the budget with jitter must never drop a draw', () => {
+      // On the performance-4x box at 1080p20 Chrome's rAF ran ~19-20Hz — a period equal to the 50ms
+      // budget. The old `acc < budget → skip` rule dropped every tick that landed a hair early, and
+      // delivered fps read 14.9 while ffmpeg said 20. That gap was padding, and it looked choppy.
+      let i = 0;
+      const jitter = () => (i++ % 2 === 0 ? 49 : 51);
+      expect(run(jitter, 50, 400)).toBe(400);
+    });
+
+    it('a rAF slower than the budget draws on every tick', () => {
+      expect(run(66.7, 50, 300)).toBe(300);
+    });
+
+    it('a 60Hz rAF on a 50ms budget still coalesces to 20/s (the viewer ambient cap, unchanged)', () => {
+      expect(run(1000 / 60, 50, 600)).toBe(200);
+    });
+
+    it('a 30Hz rAF on a 50ms budget draws 2 of 3 — neither 15/s (drop) nor 30/s (waste)', () => {
+      // Nearest-tick rounding alone would draw every tick here; carrying the remainder is what makes
+      // the long-run rate land on the budget.
+      expect(run(1000 / 30, 50, 300)).toBe(200);
+    });
+
+    it('a rAF a hair faster than the budget lands the long-run rate on the budget, not above it', () => {
+      // 20.5Hz rAF, 20fps budget: 1000 ticks ≈ 48.8s → 976 draws expected, ±1.
+      const draws = run(1000 / 20.5, 50, 1000);
+      expect(draws).toBeGreaterThanOrEqual(975);
+      expect(draws).toBeLessThanOrEqual(977);
+    });
+
+    it('a stall does not bank a burst of catch-up draws', () => {
+      // One 2s rAF gap (laptop lid, GC pause) then a steady 60Hz: the phase is clamped, so the next
+      // few ticks do not all draw to "repay" the gap.
+      let phase = coalesceStep(0, 2000, 50).phase;
+      let draws = 0;
+      for (let i = 0; i < 6; i++) {
+        const r = coalesceStep(phase, 1000 / 60, 50);
+        phase = r.phase;
+        if (r.draw) draws++;
+      }
+      expect(draws).toBeLessThanOrEqual(2);
     });
   });
 

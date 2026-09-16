@@ -148,6 +148,26 @@ RESTART_MIN_INTERVAL=10
 while :; do
   started=$SECONDS
   # The measured passing configuration — change it in the spec before changing it here.
+  #
+  # 1080p20, not 720p25. Measured 2026-09-15 on the LIVE performance-4x box — the real machine, the
+  # real room, libx264 (the local harness composites at 60Hz with VideoToolbox and does not transfer):
+  #
+  #   720p25   fps 25.0  speed 1.00x  over 14 min   ~2900 kbit/s  0.92M px/frame
+  #   1080p15  fps 15.0  speed 1.00x  over 45 min   ~3334 kbit/s  2.07M px/frame
+  #   1080p20  fps 20.0  speed 0.998x over 6.5 min  ~3517 kbit/s  2.07M px/frame   ← this
+  #
+  # docs/perf/broadcast-baseline.md had carried 1080p15 as a planned row of DASHES since July; the
+  # arm had never been run, so 720p was never a measured choice. The box holds 1080p comfortably.
+  #
+  # The spatial half is not a judgement call: this channel gets NO Twitch transcode (its quality menu
+  # carries one entry), so a 720p ingest was upscaled to a 1080p surface on every viewer's screen —
+  # we were paying for a blur nobody asked for. The frame rate IS a judgement call, and it was made
+  # by eye: 15 read crisper but choppy on a walk, 20 read right (nick, 2026-09-15).
+  #
+  # MIND THE MARGIN. 20 is the first arm that is not cleanly 1.00x. speed=0.998x is ~7s of lag per
+  # hour, which the drift-compensating pump absorbs by design — but it says this rung sits near the
+  # box's limit, not comfortably inside it. If viewers ever report buffering, re-measure this first;
+  # 1080p15 is the fallback with real headroom, and 1080p30 measured only 10.2 fps delivered in July.
   set +e
   # BROADCAST_ARGS is a flag STRING ("--duration 14400"), so the splitting is the point.
   # shellcheck disable=SC2086
@@ -155,8 +175,8 @@ while :; do
     --team "$TEAM" \
     --server "$SERVER" \
     --twitch \
-    --resolution 720p \
-    --fps 25 \
+    --resolution 1080p \
+    --fps 20 \
     --encoder libx264 \
     --audio \
     ${BROADCAST_ARGS:-}
@@ -169,5 +189,11 @@ while :; do
   if [ "$elapsed" -lt "$RESTART_MIN_INTERVAL" ]; then
     sleep $((RESTART_MIN_INTERVAL - elapsed))
   fi
-  echo "▸ restarting the stream on the rebuilt daemon code (ran ${elapsed}s)"
+  # Do NOT name a cause here. RESTART_EXIT_CODE has three of them now — a daemon rebuild, a lost
+  # DevTools socket, and a frozen picture (the frame-arrival watchdog) — and this line used to
+  # assert the first one for all three. Read on the hosted falsifier 2026-09-16: a deliberately
+  # wedged screencast relaunched twice, both times logged as "the rebuilt daemon code", which tells
+  # an operator a deploy landed and to stop looking. The stream prints its own reason on stderr
+  # immediately before exiting, so the honest line is the one that points at it.
+  echo "▸ relaunching the stream (ran ${elapsed}s) — reason on the line above"
 done

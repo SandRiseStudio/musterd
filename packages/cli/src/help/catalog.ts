@@ -272,8 +272,10 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'integration',
-    signature: 'doctor [--tailscale] [--aperture <https-url>] [--json]',
-    summary: 'read-only verification for optional Tailscale transport and Aperture configuration',
+    signature:
+      'doctor [--tailscale] [--aperture <https-url>] [--json] | generate <aperture|tailscale> [--write | --check]',
+    summary:
+      'read-only verify optional integrations or deterministically generate reviewed policy fragments',
     group: 'setup',
     primary: false,
     detail:
@@ -283,12 +285,22 @@ export const CATALOG: readonly CommandEntry[] = [
       'Member workload grants, rejecting quotas, and one exact Member tag with the standard user role. ' +
       'A ready Aperture result ' +
       'is configuration evidence only: this increment does not enforce model routing and does not manage ' +
-      'devices, sandbox Members, or cover unrelated harnesses. With neither flag, both sections are healthy off.',
+      'devices, sandbox Members, or cover unrelated harnesses. With neither flag, both sections are healthy off. ' +
+      '`generate aperture` derives the secret-free, musterd-managed Aperture fragment from the committed ' +
+      'roster and `.musterd/governed-models.json`; preview writes nothing, `--write` atomically updates ' +
+      'the two generated files, and `--check` fails when either is stale. It never contacts or configures Aperture. ' +
+      '`generate tailscale` derives secret-free workload-tag ownership, exact HTTPS ACLs, and a complete ' +
+      'Member-to-opaque-node-key mapping from that policy plus `.musterd/governed-transport.json`; it writes ' +
+      'only `.musterd/generated/tailscale/`, never calls Tailscale or binds a runtime node.',
     examples: [
       'musterd integration doctor',
       'musterd integration doctor --tailscale',
       'musterd integration doctor --aperture https://aperture.tailnet.ts.net',
       'musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net',
+      'musterd integration generate aperture --write',
+      'musterd integration generate aperture --check',
+      'musterd integration generate tailscale --write',
+      'musterd integration generate tailscale --check',
     ],
   },
   {
@@ -794,9 +806,9 @@ export const CATALOG: readonly CommandEntry[] = [
       'already live here); a name/role claims that seat; `--token` adopts a teammate’s seat; `--force` ' +
       'repoints a folder bound to a live member. A held seat opens a request and blocks until an admin ' +
       'approves, then occupies (ADR 087). In a fresh folder name the team and present the key: ' +
-      '`claim <name> --team <slug> --key <mskey_|mscr_>` (the former `musterd join`, folded in by ADR 377; ' +
-      'a key this machine has held before is found in the vault). `--detach` claims one-shot over HTTP and ' +
-      'exits with the seat still present (no session held; what `join` always did) — for fixtures and ' +
+      '`claim <name> --team <slug> --key <mskey_|mscr_>` (a key this machine has held before is found in ' +
+      'the vault). `--detach` claims one-shot over HTTP and exits with the seat still present (no session ' +
+      'held) — for fixtures and ' +
       'scripts that want the room to stay occupied. The MCP spelling is `team_join`.',
     examples: [
       'musterd claim',

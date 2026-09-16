@@ -6843,6 +6843,7 @@ describe('two-stage close (ADR 169)', () => {
 
     const ready = await soloPatch({ state: 'ready_for_review' });
     expect(ready.json.review.self_close_sanctioned).toBe(true); // nobody to ask
+    expect(ready.json.review.empty_pool).toEqual({ kind: 'no_live_member' });
     // ADR 172: the sanction says WHY nobody was eligible — the derived family posture. A team of
     // one human has zero attesting agents, so the honest state is `unknown`, never `monoculture`.
     expect(ready.json.review.family_posture.state).toBe('unknown');

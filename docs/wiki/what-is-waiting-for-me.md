@@ -24,7 +24,7 @@ Evidence: `~/.musterd/musterd.db` read with `sqlite3 -readonly`; nick's cursor w
 
 And one drift restored: ADR 053 §1 decided the approval-prompt hook "prints any unread directed acts"; the implementation had drifted to the banner alone, while the help text still said "print directed acts waiting for this seat". `nudge` now prints the acts under the banner (oldest first, five lines, then `+N more`).
 
-## The bell went quiet and the number beside it did not — clause 7 reached the model's surface, not the human's (2026-09-14; falsify: a `lane_review` ask whose lane is `done` must be absent from BOTH `musterd inbox --interrupt-check` and the `⚑ N acts waiting` count)
+## The bell went quiet and the number beside it did not — clause 7 reached the model's surface, not the human's (2026-09-14; falsify: a `lane_review` ask whose lane is `done` must be absent from BOTH `musterd inbox --interrupt-check` and the `⚑ N acts waiting` count) <!-- claim: defect -->
 
 The fix below taught `listInterruptCandidates` to discharge three shapes, and the interrupt line went quiet. The human-facing count did not. Measured the same day on the laptop daemon carrying `abc462cb`: acceptance ask `01M2GMN7V1` on lane `01M2GJFCQV`, lane `done` — `musterd inbox --interrupt-check` silent, `musterd inbox --waiting` still counting it, seat line still reading `⚑ 8`.
 
@@ -34,13 +34,23 @@ FIXED: `GET /inbox`'s `discharged` carries all three shapes, each with its own `
 
 The general lesson: a discharge rule that lives in one surface's query is a rule the other surfaces do not have. `interrupt-check` and the `⚑` count answer the same question — *what do I still owe?* — and they were two implementations of it.
 
-## Interrupt-check rang acts nothing this seat could do would discharge (2026-09-14; falsify: a `lane_review` ask whose lane is `done`, or a steer `musterd inbox` has already shown you, in `interrupt-check`'s `act`)
+## Interrupt-check rang acts nothing this seat could do would discharge (2026-09-14; falsify: a `lane_review` ask whose lane is `done`, or a steer `musterd inbox` has already shown you, in `interrupt-check`'s `act`) <!-- claim: defect -->
 
 The 2026-09-06 fix below discharged what THIS seat answered. Three shapes discharge from outside the seat's window and kept ringing: a routed acceptance whose lane closed without anyone answering the ask (ryder, eight days, two sessions); an eligible-set act a co-addressee accepted, the accept being a DM to the asker; and a steer — no accept/decline exists for it — read, acted on and replied to (delta, ~20 boundaries). Fixed in `listInterruptCandidates`: obligations are checked against lane state, co-addressee answers are fetched by `in_reply_to`, and a steer or urgent act is discharged once GET /inbox has rendered it to the addressee (one `inbox.rendered` audit row per recipient+act) or the addressee replied on it. The watermark cursor still holds on an incomplete view (ADR 287); the line no longer depends on it to stop. The paid wake rail reads the same set, so a wake is no longer leased for a closed lane's ask. ADR 088 amendment 3.
 
-## Interrupt-check rang closed acceptances while the unread pile blocked the cursor (2026-09-06; falsify: accept a directed `lane_review` ask, then `musterd inbox --interrupt-check` — it must be silent)
+## Interrupt-check rang closed acceptances while the unread pile blocked the cursor (2026-09-06; falsify: accept a directed `lane_review` ask, then `musterd inbox --interrupt-check` — it must be silent) <!-- claim: defect -->
 
 The ⚡ line reads only unread interrupt-class rows (`listInterruptCandidates` + `pendingInterrupts`). A watermark cursor (ADR 287) cannot mark the three shown asks without skipping the ~1900 older unread behind them, so those asks stayed unread — and the acceptor's own `accept` is a DM to the asker, dropped by `from_member != me`. The fold never saw the discharge. Fixed by fetching this seat's own `accept`/`decline`/`resolve` into the candidate window (same pattern as huddle "mine" turns) and by not pinning `answered`/`discharged` ids in `team_inbox_check`. The cursor still holds on an incomplete view; the line just stops lying about closed obligations.
+
+## The drain nobody ran: `team_inbox_check` walked ZERO rows at its own default (2026-09-16; falsify: on a seat with more unread than its `limit`, run a default `team_inbox_check` twice — the oldest row and `elided_unread` must not both stand still) <!-- claim: defect -->
+
+Lane 01M2GT874Y closed the ADR 287 treadmill in #1422: the oldest unread, contiguous from the cursor, are rendered as digest lines and the watermark walks over them. The unit tests passed and the treadmill kept turning, because **the tests modelled a fetch the tool never performs**. `planInboxCheck` was handed every unread row as one array; `registerInboxCheck` names a `limit` on every call (`args.limit ?? 50`), a named `limit` is the newest TAIL on the server (`listInbox`, `packages/server/src/store/messages.ts` — "take the NEWEST `limit` (DESC + LIMIT)"), and the oldest-first PREFIX read (`headLimit`) is served only to a caller that names none (`packages/server/src/transport/http.ts`). A tail does not begin at the cursor, so the fetch reported `unread_remaining > 0`, the digest block was skipped, and `advanceTo` was `null`. Every check, at the DEFAULT of 50 — not at some far backlog.
+
+Measured 2026-09-16, adapter `fb283e5c`: **stanley**, two consecutive checks (default, then `limit: 3`), both returned `01M2H1TP9D` as their oldest row with no digest lines, `elided_unread` 338 then 361 — zero rows walked, the count rising only because new acts landed. **sloane**, same build, 2090 behind: the default check moved the cursor zero; `limit: 2100` walked 56 and advanced. The escape hatch works for the one reason it looks like it should not — a tail that covers the whole backlog IS contiguous with the cursor.
+
+FIXED 2026-09-16 (lane 01M2NGB60Q): when the tail fetch leaves rows behind, the tool asks for the prefix too — the same read with no `limit` — and the digest walks that. One extra request, only when actually behind; a failed prefix fetch degrades to holding the cursor, which is the old behaviour. ADR 287 is untouched: the walk still stops at the first row the call did not render.
+
+**The trap worth keeping.** A green unit test over a pure function says nothing about the arguments the product passes it. #1422's suite built its own `ordered` array and never asked where one comes from — so it could not see that the answer was "a shape this code path never receives". The regression test for this is deliberately end-to-end (`packages/mcp/src/inboxDrain.e2e.test.ts`): a real daemon, a 220-act backlog, the real tool over `tools/call`, the cursor read back out of the daemon. Disable the prefix fetch and it fails with `expected 220 to be less than 220` — one default check, zero rows.
 
 ## Still open (2026-09-03)
 

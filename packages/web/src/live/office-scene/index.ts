@@ -18,6 +18,7 @@ import { solidHit, walkable } from './nav';
 import { helpWalks } from './mapping';
 import {
   ambientFrameBudgetMs,
+  coalesceStep,
   DEFAULT_CAPTURE_FPS,
   officeDpr,
   officeVisible,
@@ -48,7 +49,7 @@ import {
   type Cue,
   type ScenePalette,
 } from './render';
-import { GESTURE } from './skeleton';
+import { GESTURE, isIdleGesture } from './skeleton';
 import type { WallBoard } from './wallboard';
 import {
   enqueueSpeech,
@@ -109,6 +110,31 @@ const AFTERGLOW_MS = 2600;
  * this much wall time has built up. A coffee stroll is visually identical at 20fps and ~3× cheaper; real
  * acts keep 60fps because their motion is not `ambientOnly`. */
 const AMBIENT_FRAME_MS = 50;
+
+/**
+ * THE DRIFT TIER (nick, 2026-09-14). A parked room is a still photograph — correct, cheap, and the
+ * reason it never looked alive between beats. This wakes it just enough for the idle sway, at 4fps.
+ *
+ * MEASURED before it was built, on /office-preview (12 desks), headless, 30s windows, main-thread
+ * busy time via CDP Performance.getMetrics, as a delta over a genuinely parked room (4.26/4.47% of
+ * one core):
+ *
+ *   2fps  +1.4   ·   4fps  +2.1..2.6   ·   6fps  +3.2   ·   12fps  +4.4   ·   20fps (ambient) +8.9
+ *
+ * 4 because 2 reads as a slideshow for a sway and 6 buys smoothness nobody can see. The cost lands in
+ * the same order as the "~2% of one core" already recorded in packages/web/AGENTS.md for the ambient
+ * cap, which the team accepted as a product call.
+ *
+ * A TIMER, NOT THE RAF COALESCER, and that is the spike's other finding rather than a style choice.
+ * Every coalesced measurement showed ~1800 ticks in 30s — rAF keeps firing at 60Hz and early-returns,
+ * so about a third of the 4fps cost was wasted wakeups. Fitting the four points: ~0.35pt per draw/s
+ * of real drawing, ~0.8pt of pure loop overhead. A timer skips ~56 pointless wakes a second.
+ *
+ * It does NOT touch the loop's park predicate: the loop still parks exactly when it always did, and
+ * this is a separate, slower heartbeat that only runs WHILE it is parked. The AGENTS.md rule is
+ * "stop when UNSEEN" — a hidden tab, a collapsed panel — and those still park dead, below.
+ */
+const DRIFT_FRAME_MS = 250;
 
 /** How often the office re-reads the PST clock so the lighting tracks the real sun (the sun moves slowly —
  * once a minute is plenty, and a rebake only happens when the veil/lamp state actually crosses a step). */
@@ -1302,11 +1328,13 @@ export function mountOffice(
   let raf = 0;
   let last = 0;
   let acc = 0; // wall time accrued since the last drawn frame — coalesced under the ambient FPS cap
+  let phase = 0; // coalescer carry: where this tick sits against the budget (see coalesceStep)
   let wasActive = false;
   // Render counters for a capture harness (OfficeHandle.stats). Under broadcast, `draws` tracks the
   // capture fps while `ticks` tracks rAF — the gap is the waste the draw-rate cap removes.
   let ticks = 0;
   let draws = 0;
+  let beats = 0; // drift-heartbeat frames — the only counter that moves in a parked room
   const since = performance.now();
   function tick(now: number) {
     ticks++;
@@ -1317,11 +1345,20 @@ export function mountOffice(
     const noRealMotion = actors.ambientOnly() || !actors.active();
     const ambientOnly = noRealMotion && cues.length === 0 && !inAfterglow;
     const capped = shouldCoalesceDraw(broadcast, ambientOnly);
-    acc += last ? now - last : 1000 / 60;
+    const rafMs = last ? now - last : 1000 / 60;
+    acc += rafMs;
     last = now;
-    if (capped && acc < ambientFrameBudgetMs(broadcast, AMBIENT_FRAME_MS, captureFps)) {
-      raf = requestAnimationFrame(tick); // too soon for the next coalesced frame — keep the loop, skip the draw
-      return;
+    if (capped) {
+      // Nearest-tick with carry, not "first tick past the budget": on the capture box the rAF runs
+      // at about the budget itself, and the strict rule dropped a quarter of the frames (2026-09-16).
+      const step = coalesceStep(phase, rafMs, ambientFrameBudgetMs(broadcast, AMBIENT_FRAME_MS, captureFps));
+      phase = step.phase;
+      if (!step.draw) {
+        raf = requestAnimationFrame(tick); // too soon for the next coalesced frame — keep the loop, skip the draw
+        return;
+      }
+    } else {
+      phase = 0; // an uncapped stretch paints every rAF; the carry restarts when coalescing resumes
     }
     draws++;
     const dt = Math.min(0.05, acc / 1000);
@@ -1369,14 +1406,54 @@ export function mountOffice(
       // with `working: []` as the floor of the park invariant (E2 spec §2): a parked room must not
       // keep typing off its last live snapshot.
       pushOccupancy(now, true);
+      // …and hand the room over to the slow heartbeat, so a quiet office breathes instead of freezing.
+      ensureDrift();
     }
   }
+  /* The drift heartbeat. Armed whenever the rAF loop is NOT running and the room is genuinely on
+     screen; cleared the instant the loop takes over, so the two never draw the same frame twice. */
+  let driftTimer: ReturnType<typeof setInterval> | null = null;
+  function stopDrift() {
+    if (driftTimer) clearInterval(driftTimer);
+    driftTimer = null;
+  }
+  function ensureDrift() {
+    if (driftTimer || raf || reduced || STILL || suspended || disposed || !VISIBLE()) return;
+    driftTimer = setInterval(() => {
+      // Re-check every tick, not just at arm time: a tab can hide, a panel collapse or a real act
+      // wake the loop between two beats of a 250ms timer, and a drift frame drawn over a live rAF
+      // frame is a double paint nobody asked for.
+      if (raf || reduced || STILL || suspended || disposed || !VISIBLE()) {
+        stopDrift();
+        return;
+      }
+      clock += DRIFT_FRAME_MS / 1000;
+      beats++;
+      drawDynamic();
+    }, DRIFT_FRAME_MS);
+  }
+
   function ensureLoop() {
     if (!raf && !reduced && !suspended && VISIBLE()) {
+      stopDrift(); // the real loop supersedes the heartbeat
       last = 0;
       acc = 0;
       raf = requestAnimationFrame(tick);
     }
+  }
+
+  /** Is anything actually happening right now? One home — two doors used to spell this out separately. */
+  const alive = () => living() || actors.active() || cues.length > 0;
+  /*
+   * Coming back to a room that stopped being watched. There are two doors — the tab becoming visible
+   * again and the panel re-expanding — and they ask the SAME question: the loop if the room is alive,
+   * the slow breath if it is not. #1430 answered it twice and they disagreed; the collapse door
+   * painted one resting frame and left a quiet office frozen for the rest of the session while the
+   * visibility door resumed the breath. So neither door decides any more: they both come here.
+   */
+  function reengage() {
+    if (alive()) ensureLoop();
+    else ensureDrift();
   }
 
   // ── Ambient micro-choreography scheduler (ADR 086 Phase 2) ──────────────────────────────────────────
@@ -1606,6 +1683,19 @@ export function mountOffice(
       [14, () => actors.gestureBeat(who, GESTURE.scratch)],
       [lounging ? 18 : 14, () => actors.gestureBeat(who, GESTURE.chin)],
       [14, () => actors.gestureBeat(who, lounging ? GESTURE.settle : GESTURE.lean)],
+      /* The 2026-09-14 variation pass (nick). Four more solo beats, weighted BELOW the original five:
+       * the old set carries the room's baseline rhythm and these are the ones you notice, which only
+       * works while they stay the minority. `behindHead` and `pocketPhone` want a backrest and a lap,
+       * so they sit out the deskless leisure spots where the body is already reclined with its hands
+       * down — `shoulders` and `rubEyes` work anywhere a torso does. */
+      [11, () => actors.gestureBeat(who, GESTURE.shoulders)],
+      [10, () => actors.gestureBeat(who, GESTURE.rubEyes)],
+      ...(lounging
+        ? []
+        : ([
+            [10, () => actors.gestureBeat(who, GESTURE.behindHead)],
+            [9, () => actors.gestureBeat(who, GESTURE.pocketPhone)],
+          ] as Array<[number, () => boolean]>)),
       // The errands — real trips with a point to them, so they stay the occasional highlight:
       [15, () => coffeeStroll(who, slot)],
       [9, () => actors.errandPhone(who, slotRng(teamName, slot, 'phone'))], // gets up, takes a call, paces, comes back
@@ -1867,7 +1957,11 @@ export function mountOffice(
 
   const onVisibility = () => {
     // ensureLoop's own suspended/reduced guards apply — a collapsed office stays parked on tab-focus.
-    if (document.visibilityState === 'visible' && (living() || actors.active() || cues.length)) ensureLoop();
+    if (document.visibilityState !== 'visible') {
+      stopDrift(); // a hidden tab draws nothing at all, heartbeat included
+      return;
+    }
+    reengage(); // back on screen: the loop if anything is happening, the slow breath if not
   };
   document.addEventListener('visibilitychange', onVisibility);
 
@@ -1876,6 +1970,7 @@ export function mountOffice(
   bake();
   drawStatic();
   scheduleAmbient(); // start the idle coffee-stroll timer (no-op under reduced-motion)
+  ensureDrift(); // and the slow breath, for the stretches where the loop is parked
 
   // Track the real PST sun: re-read the clock every minute and rebake only when the veil/lamp state moves.
   const lightTimer = setInterval(() => {
@@ -1890,7 +1985,7 @@ export function mountOffice(
   return {
     update,
     emit,
-    stats: () => ({ ticks, draws, since }),
+    stats: () => ({ ticks, draws, beats, since }),
     ambientLog: () => [...ambientLog],
     floorSamples: () =>
       [...actors.poses()].map(([name, p]) => ({
@@ -1914,16 +2009,25 @@ export function mountOffice(
         raf = 0;
         last = 0;
         acc = 0;
+        stopDrift(); // no heartbeat behind a collapsed panel either — the rule is "stop when UNSEEN"
       } else {
         // One fresh frame immediately (light + poses may have moved while parked) → instant
         // re-expand; the loop only re-engages if the room is actually alive.
         refreshLightEnv();
         bake();
-        if (living() || actors.active() || cues.length) ensureLoop();
-        else paintResting();
+        // One fresh frame NOW so the re-expand is instant — the heartbeat's first tick is 250ms out,
+        // and a rAF frame is a frame away; neither is soon enough to hide behind.
+        paintResting();
+        reengage();
       }
     },
     pokeGesture: (kind = 1) => {
+      // The only door a gesture id comes through as a plain number — `/office-preview?beat=<n>` hands
+      // it straight from the URL. Everything inside is typed `IdleGesture`; this is where a number
+      // becomes one, or is refused. An errand overlay (browse/fill/eat/pour/call) has no scheduler
+      // window, and before this guard it reached `gestureBeat` with `dur: undefined` and froze that
+      // member for the rest of the session.
+      if (!isIdleGesture(kind)) return null;
       // Same path as the ambient scheduler's gesture beat, but on demand — try idle desk members until
       // one accepts (gestureBeat rejects a small/walking/already-gesturing member).
       for (const who of actors.idleDeskMembers()) {
@@ -1962,6 +2066,7 @@ export function mountOffice(
     dispose: () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      stopDrift(); // the heartbeat outlives nothing
       clearInterval(lightTimer); // stop the PST lighting clock
       if (railTimer) clearInterval(railTimer); // stop the caption rail
       options.onCaption?.(null);

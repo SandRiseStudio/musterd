@@ -1,15 +1,22 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { CCD_SEND_MESSAGE_TOOL, FEATURE_EPOCH } from '@musterd/protocol';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
+import { writeJsonAtomic } from '../atomicWrite.js';
 import { isDeclined } from '../declined.js';
 import { primaryCheckoutFor } from '../entryGuard.js';
 import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
-import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
+import type {
+  Harness,
+  RefreshHooksOptions,
+  ProvisionPermissions,
+  ProvisionPlan,
+  UnprovisionPlan,
+} from '../harness.js';
 import { loadProvisioning } from '../manifest.js';
 import {
   launchEntryEnv,
@@ -87,7 +94,7 @@ function mergePermissions(perms: ProvisionPermissions): ProvisionPermissions {
   }
   if (changed) {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+    writeJsonAtomic(path, settings);
   }
   return added;
 }
@@ -111,7 +118,7 @@ function removePermissions(perms: ProvisionPermissions): void {
       else delete settings.permissions[list];
     }
   }
-  if (changed) writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  if (changed) writeJsonAtomic(path, settings);
 }
 
 /**
@@ -458,7 +465,7 @@ function upsertHook(
   existing.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] });
   settings.hooks[event] = existing;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, settings);
   return undefined;
 }
 
@@ -550,14 +557,17 @@ function dropHook(path: string, event: string, matches: (m: ClaudeHookMatcher) =
   if (kept.length > 0) settings.hooks![event] = kept;
   else delete settings.hooks![event];
   if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks;
-  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, settings);
 }
 
 /**
  * Install musterd's Claude Code hooks: the project-local `Notification` hook, and the global
  * self-gating `SessionStart` verify hook (absorbing any hand-pasted recipe). Best-effort per hook.
  */
-export function installMusterdHooks(dir: string = process.cwd()): string[] {
+export function installMusterdHooks(
+  dir: string = process.cwd(),
+  opts: RefreshHooksOptions = {},
+): string[] {
   const warnings: string[] = [];
   // Every project-local hook comes off the one table (ADR 168), so adding an entry there installs it
   // AND health-checks it. Each carries its own marker, so entries sharing an event coexist rather
@@ -576,12 +586,16 @@ export function installMusterdHooks(dir: string = process.cwd()): string[] {
   // The machine-wide hooks — the ones an older checkout could silently downgrade for every folder
   // at once, and so the ones carrying an epoch stamp and a refusal (ADR 168): the SessionStart
   // orientation, and the per-turn UserPromptSubmit boundary/label nudge it hands off to.
-  for (const [event, matches, command] of [
-    ['SessionStart', isMusterdSessionStart, sessionStartHookCommand()],
-    ['UserPromptSubmit', isMusterdPromptSubmit, promptSubmitHookCommand()],
-  ] as const) {
-    const globalWarning = upsertHook(globalSettingsPath(), event, matches, command);
-    if (globalWarning) warnings.push(globalWarning);
+  // Under `withinWorktreeOnly` (self-heal) they are skipped, not written: one seat's session start
+  // must not rewrite the file every folder on the machine reads.
+  if (!opts.withinWorktreeOnly) {
+    for (const [event, matches, command] of [
+      ['SessionStart', isMusterdSessionStart, sessionStartHookCommand()],
+      ['UserPromptSubmit', isMusterdPromptSubmit, promptSubmitHookCommand()],
+    ] as const) {
+      const globalWarning = upsertHook(globalSettingsPath(), event, matches, command);
+      if (globalWarning) warnings.push(globalWarning);
+    }
   }
   // The seat chip rides the same install: it is the human-facing half of what the SessionStart
   // orientation above does for the agent, and shipping one without the other is what left the
@@ -641,7 +655,7 @@ export function installMusterdStatusline(dir: string = process.cwd()): string | 
   }
   settings.statusLine = { type: 'command', command: statuslineCommandText() };
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, settings);
   return undefined;
 }
 
@@ -651,7 +665,7 @@ export function removeMusterdStatusline(dir: string = process.cwd()): void {
   const settings = readSettingsSafe(path);
   if (!settings || !isMusterdStatusline(settings)) return;
   delete settings.statusLine;
-  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, settings);
 }
 
 /**
@@ -775,6 +789,28 @@ export function inspectClaudeStatuslineDrift(cwd: string): string[] {
  * or when the hook is present. The global self-gating SessionStart is machine-shared, so it is not
  * checked per-folder.
  */
+/**
+ * ADR 168's checkout-behind verdict as a predicate (spec 2026-09-16, workspace self-heal): some
+ * installed marker-owned Claude Code hook — in this folder's local settings or the machine-wide
+ * file — was written by a NEWER musterd than this checkout. Self-heal must not run in that state:
+ * it would downgrade what a newer build wrote, the exact refusal `musterd init` makes. Absent or
+ * unparseable settings → false; this never invents drift from a file it cannot read.
+ */
+export function checkoutBehindHooks(cwd: string): boolean {
+  for (const path of [settingsLocalPath(cwd), globalSettingsPath()]) {
+    const settings = readSettingsSafe(path);
+    if (!settings) continue;
+    for (const matchers of Object.values(settings.hooks ?? {})) {
+      for (const m of matchers) {
+        for (const h of m.hooks) {
+          if (h.command.includes('musterd') && hookEpochOf(h.command) > FEATURE_EPOCH) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 export function inspectClaudeHookDrift(cwd: string): string[] {
   const path = join(cwd, '.claude', 'settings.local.json');
   if (!existsSync(path)) return []; // no local settings yet — the bare-folder drift already covers it
@@ -1046,9 +1082,10 @@ export const claudeCode: Harness = {
     // Already provisioned for Claude Code here? A refresh updates what exists; creating a first
     // install is `init`'s job. Same rule --refresh-guidance follows for a folder with no guidance.
     applies: (dir) => existsSync(settingsLocalPath(dir)),
-    run: (dir) => ({
-      files: [settingsLocalPath(dir), globalSettingsPath()],
-      warnings: installMusterdHooks(dir),
+    run: (dir, opts) => ({
+      files: [settingsLocalPath(dir), ...(opts?.withinWorktreeOnly ? [] : [globalSettingsPath()])],
+      warnings: installMusterdHooks(dir, opts),
+      skipped: opts?.withinWorktreeOnly ? [globalSettingsPath()] : [],
     }),
     // installMusterdHooks installs every one of these (the chip rides the same install), so a
     // cleared tombstone for any of them genuinely comes back on this path.

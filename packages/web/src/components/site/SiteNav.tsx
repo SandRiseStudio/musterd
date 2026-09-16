@@ -9,6 +9,7 @@ import './site.css';
  */
 export const NAV_LINKS = [
   { label: 'Docs', href: '/docs' },
+  { label: 'Watch', href: '/watch' },
   ...(hasBlog ? [{ label: 'Blog', href: '/blog' }] : []),
   { label: 'GitHub', href: 'https://github.com/SandRiseStudio/musterd' },
 ];

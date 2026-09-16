@@ -42,7 +42,11 @@ function CharacterSheet() {
 
     void (async () => {
       // Client-only: the scene modules reach for canvas/DOM at import time.
-      const [{ drawCharacter }, { solveSkeleton, seedOf, typingBurst }, { drawDog }] = await Promise.all([
+      const [
+        { drawCharacter },
+        { solveSkeleton, seedOf, typingBurst, handsInLap },
+        { drawDog, drawActor, deskStationItems, deskSeat, actorSortAnchor, actorDepth, seatedArmsDepth },
+      ] = await Promise.all([
         import('../live/office-scene/character'),
         import('../live/office-scene/skeleton'),
         import('../live/office-scene/render'),
@@ -50,7 +54,11 @@ function CharacterSheet() {
       if (stop) return;
 
       const CELL = 190;
-      const ROW = 210;
+      /* 250, not the 210 a lone body needed: the seated row draws a whole workstation now, and a desk
+         with a monitor standing on it is roughly twice a seated body's height. At 210 the monitor and
+         the desk's far edge were cropped off the top of the row — the sheet exists to show exactly
+         that kind of thing, so it cannot be the thing being cut off. */
+      const ROW = 250;
       const cols = 6;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       // 3 blocks (seated+typing / walking / standing) × 4 facings each is too wide; instead: for each name,
@@ -79,6 +87,24 @@ function CharacterSheet() {
        * /office-preview, which is one room or the other. Inert and null unless asked for, so the
        * sheet's empty-handed day job is unchanged.
        */
+      /*
+       * `?gesture=N` — PLAY A GESTURE ON THE WHOLE SHEET, looping.
+       *
+       * Same blind spot `?carry=` fixed, one layer along: this sheet exists to put every body at every
+       * facing under 4x scrutiny, and it hardcoded `gesture: 0`, so the one thing it could not show was
+       * a beat. Reviewing a new gesture meant hunting it in the room at 40px and hoping the scheduler
+       * picked the member you were watching (miley, 2026-09-14, adding four idle beats).
+       *
+       * `gestureT` is driven off the sheet clock so the beat plays over and over — a still frame of an
+       * arc tells you almost nothing, and the interesting failures (a hand through a skull, an arm
+       * inside the torso) happen mid-window.
+       */
+      const gesture = (() => {
+        const v = new URLSearchParams(window.location.search).get('gesture');
+        const n = v ? Number(v) : 0;
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      })();
+
       const carry = (() => {
         const v = new URLSearchParams(window.location.search).get('carry');
         const kinds = ['laptop', 'box', 'plate', 'bottle', 'mug', 'phone'];
@@ -95,18 +121,19 @@ function CharacterSheet() {
         // The carry as ONE sheet caption, not a per-cell label suffix: CELL is only wide enough for
         // `name · kind · dir · mode`, and appending to each cell ran the text into its neighbour's.
         // A screenshot of this sheet still has to say what it is showing, so it says it once.
-        if (carry) {
+        if (carry || gesture) {
           ctx.fillStyle = 'rgba(30,20,10,.72)';
           ctx.font = canvasFont(12, '--font-mono', 400);
           ctx.textAlign = 'left';
-          ctx.fillText(`carrying · ${carry}`, 10, 20);
+          const bits = [carry ? `carrying · ${carry}` : '', gesture ? `gesture · ${gesture}` : ''];
+          ctx.fillText(bits.filter(Boolean).join('   ·   '), 10, 20);
         }
 
         // A big "fit" so one logical unit is ~1.6px — the character reads at roughly 4× office size.
         const fit = { ox: 0, oy: 0, scale: 1.55 };
 
         const MODES = [
-          { label: 'seated · typing', sit: 1, stride: 0, dir: 'S' as const },
+          { label: 'seated', sit: 1, stride: 0, dir: 'S' as const }, // typing is visible in the cell; the label has to fit CELL
           { label: 'walking', sit: 0, stride: 1, dir: 'E' as const },
           { label: 'standing', sit: 0, stride: 0, dir: 'S' as const },
         ];
@@ -153,12 +180,82 @@ function CharacterSheet() {
               typing: mode.sit ? typingBurst(seed, t) : 0,
               carry,
               help: false,
-              gesture: 0,
-              gestureT: 0,
+              gesture,
+              gestureT: gesture ? (t * 0.45) % 1 : 0,
               seed,
             });
             // Draw at an explicit screen point by faking the projection origin.
             const f = { ...fit, ox: cx, oy: cy };
+
+            /*
+             * THE SEATED CELL DRAWS A WHOLE STATION, not a body in mid-air.
+             *
+             * A seated member in the room is SIX interleaved depth items — desk slab, the desk's
+             * room-side half again at the front edge, chair cushion, chair back, the body, and the
+             * forearms a second time on TOP of the slab. This sheet drew item five and called the row
+             * "seated · typing". Everything that makes a seated beat a seated beat was therefore
+             * unshowable on the one tool built to show it: the arms-over-desk overlay (#1397 was that
+             * pass disagreeing with the slab), `handsInLap` suppressing it for lean/roll, and the
+             * chair beats, which move a chair this cell did not have. #1394's regression — a desk
+             * burying a sitter's head and torso at N/W facings — reached nick on the live broadcast
+             * for exactly this reason (lane 01M2K1G140).
+             *
+             * It calls the ROOM'S OWN builder with a one-desk slot at this cell's fake origin, and
+             * sorts by the room's own keys. A fixture that draws its own approximation of a desk is
+             * worse than no fixture: it drifts, and then it is confidently wrong. Nothing about the
+             * paint order is decided here — `deskStationItems` decides it, once, for both surfaces.
+             */
+            if (mode.sit) {
+              /* The station sits 22px higher in its cell than a lone body did. At an N or W facing the
+                 chair is on the NEAR side, so the sitter and their chair extend toward the viewer past
+                 the desk's own origin — far enough at 4x to land on the caption. Raising the whole
+                 station keeps the desk clear of the top of the row and the sitter clear of the label. */
+              const sf = { ...f, oy: cy - 22 };
+              const slot = { id: i, lx: 0, ly: 0, dir, pod: -1, kind: 'pod' as const };
+              // The room says where this desk seats somebody; the sheet does not work it out.
+              const seat = deskSeat(slot);
+              const pose = {
+                lx: seat.lx,
+                ly: seat.ly,
+                dir,
+                small: false,
+                carry,
+                bubble: null,
+                alpha: 1,
+                moving: false,
+                run: false,
+                gesture,
+                gestureT: gesture ? (t * 0.45) % 1 : 0,
+                phase: 0,
+                stride: 0,
+                sit: 1,
+              };
+              const station = deskStationItems(ctx, sf, slot, node, {
+                ownerPose: pose,
+                teamName: 'revive',
+                t,
+              });
+              const anchor = actorSortAnchor(pose, slot, undefined);
+              const cellItems = [
+                ...station.items,
+                { d: actorDepth(anchor.lx, anchor.ly), fn: () => drawActor(ctx, sf, pose, node, t) },
+              ];
+              // The overlay, under the room's own gate: a beat that drops the hands into the lap must
+              // NOT paint them over the slab, and a sheet that always drew it would hide that bug.
+              if (!handsInLap(pose.gesture, pose.gestureT)) {
+                cellItems.push({
+                  d: seatedArmsDepth(slot),
+                  fn: () => drawActor(ctx, sf, pose, node, t, true),
+                });
+              }
+              for (const item of [...cellItems].sort((a, b) => a.d - b.d)) item.fn();
+              ctx.fillStyle = 'rgba(30,20,10,.72)';
+              ctx.font = canvasFont(11, '--font-mono', 400);
+              ctx.textAlign = 'center';
+              ctx.fillText(`${name} · ${kind[0]} · ${dir} · ${mode.label}`, cx, row * ROW + ROW - 6);
+              return;
+            }
+
             drawCharacter(ctx, f, {
               lx: 0,
               ly: 0,
@@ -168,6 +265,11 @@ function CharacterSheet() {
               size: 1,
               alpha: 1,
               carry,
+              // The painter reads these too, not just the skeleton — the sip mug sorts against the head
+              // by gesture, so a sheet that solved the pose but drew with gesture 0 would disagree with
+              // the room about where a hand is.
+              gesture,
+              gestureT: gesture ? (t * 0.45) % 1 : 0,
               t,
               seed,
             });

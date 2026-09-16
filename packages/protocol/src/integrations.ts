@@ -1,5 +1,174 @@
 import { z } from 'zod';
 
+const ExactModelSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/,
+    'model must be an exact lowercase provider/model identifier',
+  )
+  .refine((model) => !/(?:^|\/)(?:latest|default)$/i.test(model), {
+    message: 'floating model identifiers are not allowed',
+  });
+
+const DollarQuotaSchema = z.object({
+  capacity: z.string().regex(/^\$[1-9]\d*(?:\.\d+)?$/, 'capacity must be positive dollars'),
+  rate: z
+    .string()
+    .regex(/^\$[1-9]\d*(?:\.\d+)?\/[a-z]+$/, 'rate must be a positive dollar duration'),
+});
+
+const WorkloadIdSchema = z
+  .string()
+  .regex(/^[a-z0-9]{6,64}$/, 'workload_id must be lowercase opaque alphanumeric text');
+
+/**
+ * Secret-free, provider-neutral policy input for the governed-model generator (ADR 400).
+ * Provider syntax begins at the renderer boundary; these fields describe only Team intent.
+ */
+export const GovernedModelsManifestSchema = z
+  .object({
+    version: z.literal(1),
+    team: z.object({
+      models: z.array(ExactModelSchema).min(1),
+      quota: DollarQuotaSchema,
+      default_tier: z.string().min(1),
+    }),
+    quota_tiers: z
+      .array(
+        z.object({
+          id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/),
+          quota: DollarQuotaSchema,
+        }),
+      )
+      .min(1),
+    roles: z
+      .record(
+        z.object({
+          models: z.array(ExactModelSchema).min(1).optional(),
+          quota_tier: z.string().min(1).optional(),
+        }),
+      )
+      .default({}),
+    workloads: z.record(z.object({ workload_id: WorkloadIdSchema })).default({}),
+  })
+  .strict()
+  .superRefine((manifest, ctx) => {
+    const modelSet = new Set(manifest.team.models);
+    if (modelSet.size !== manifest.team.models.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['team', 'models'],
+        message: 'models must be unique',
+      });
+    }
+    const tierIds = new Set<string>();
+    let previous: { capacity: number; rate: number } | undefined;
+    for (const [index, tier] of manifest.quota_tiers.entries()) {
+      if (tierIds.has(tier.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['quota_tiers', index, 'id'],
+          message: 'quota tier ids must be unique',
+        });
+      }
+      tierIds.add(tier.id);
+      const capacity = Number(tier.quota.capacity.slice(1));
+      const rate = Number(tier.quota.rate.slice(1).split('/')[0]);
+      if (previous && (capacity >= previous.capacity || rate >= previous.rate)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['quota_tiers', index],
+          message: 'quota tiers must become strictly more restrictive',
+        });
+      }
+      previous = { capacity, rate };
+    }
+    if (!tierIds.has(manifest.team.default_tier)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['team', 'default_tier'],
+        message: 'default_tier must name a quota tier',
+      });
+    }
+    const workloadIds = new Set<string>();
+    for (const [member, mapping] of Object.entries(manifest.workloads)) {
+      if (workloadIds.has(mapping.workload_id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['workloads', member],
+          message: 'workload_id must be unique',
+        });
+      }
+      workloadIds.add(mapping.workload_id);
+    }
+  });
+export type GovernedModelsManifest = z.infer<typeof GovernedModelsManifestSchema>;
+
+const TailscaleTagSchema = z.string().regex(/^tag:[a-z0-9][a-z0-9-]*$/);
+const TransportNodeKeySchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/);
+const TransportMemberSchema = z.string().min(1);
+const MUSTERD_CREDENTIAL_PREFIX = /^(?:mskey_|msgr_|mscr_|msac_|msls_)/i;
+
+export const GovernedTransportManifestSchema = z
+  .object({
+    version: z.literal(1),
+    aperture_tag: TailscaleTagSchema,
+    tag_owners: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .refine(
+            (owner) => !/[?*]/.test(owner) && !owner.startsWith('autogroup:'),
+            'tag owner must be an explicit, non-wildcard principal',
+          ),
+      )
+      .min(1),
+    nodes: z
+      .array(
+        z.object({
+          node_key: TransportNodeKeySchema,
+          members: z.array(TransportMemberSchema).min(1),
+        }),
+      )
+      .min(1),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const keys = new Set<string>();
+    for (const [index, node] of value.nodes.entries()) {
+      if (keys.has(node.node_key))
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['nodes', index],
+          message: 'node_key must be unique',
+        });
+      keys.add(node.node_key);
+      const members = new Set<string>();
+      for (const [memberIndex, member] of node.members.entries()) {
+        if (members.has(member))
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['nodes', index, 'members', memberIndex],
+            message: 'a Member may appear once per transport node',
+          });
+        members.add(member);
+      }
+    }
+    const values = [
+      value.aperture_tag,
+      ...value.tag_owners,
+      ...value.nodes.flatMap((node) => [node.node_key, ...node.members]),
+    ];
+    if (values.some((entry) => MUSTERD_CREDENTIAL_PREFIX.test(entry))) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'transport manifest must not contain a musterd credential',
+      });
+    }
+  });
+export type GovernedTransportManifest = z.infer<typeof GovernedTransportManifestSchema>;
+
 /** Vendor-owned Tailscale status JSON. The inspector reads only Self's identity and reachability facts. */
 export const TailscaleStatusSchema = z
   .object({

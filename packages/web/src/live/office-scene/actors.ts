@@ -20,7 +20,7 @@ import { FLOOR } from './iso';
 import { CANVAS_EASE } from './motion';
 import { findPath, walkable, type P } from './nav';
 import { carriesLaptop, workingAtDesk, type Placement } from './seating';
-import { chairShift, chairYaw, GESTURE, STRIDE } from './skeleton';
+import { chairShift, chairYaw, GESTURE, type IdleGesture, STRIDE } from './skeleton';
 import type { Bubble, CarryKind, Dir, OfficeNode, Pose } from './types';
 
 /** A leisure-spot shape (couch cushion / armchair) an errand can sit at — see `layout.LEISURE_SPOTS`. */
@@ -66,9 +66,19 @@ function dirOfHeading(h: number): Dir {
 const STRIDE_EASE = 0.18; // seconds
 const SIT_EASE = 0.6; // seconds — unhurried; you can see them sit
 
-/** Each gesture beat's window, seconds. Arcs (stretch/scratch/swivel/roll) run their full curve once;
- * plateau beats (chin/lean) hold their pose for most of the window — a think reads longer than a rub. */
-const GESTURE_DUR: Record<number, number> = {
+/**
+ * Each gesture beat's window, seconds. Arcs (stretch/scratch/swivel/roll) run their full curve once;
+ * plateau beats (chin/lean/behindHead/rubEyes/pocketPhone) hold their pose for most of the window — a
+ * think reads longer than a rub. `holdEnv` ramps in and out over 18% each, so a held beat only has
+ * ~64% of its window as actual plateau; that is why they are the long entries here.
+ *
+ * Keyed by `IdleGesture`, NOT `Record<number, number>` (lane 01M2JYBGMQ, delta's finding 2). The old
+ * signature could not report that it was incomplete: #1430 shipped four new beats that were never
+ * added here, and every one of them took the `?? 2.4` fallback — the shortest window in the table —
+ * including two held poses where the duration *is* the beat. There is no fallback any more, because
+ * there can no longer be a miss: add a beat to `GESTURE` and this stops compiling until it has a window.
+ */
+export const GESTURE_DUR: Record<IdleGesture, number> = {
   [GESTURE.stretch]: 2.4,
   [GESTURE.glance]: 2.4,
   [GESTURE.scratch]: 2.8,
@@ -78,6 +88,10 @@ const GESTURE_DUR: Record<number, number> = {
   [GESTURE.swivel]: 3.5,
   [GESTURE.roll]: 3.0,
   [GESTURE.settle]: 5.0, // the longest of them: getting comfortable is not a quick motion
+  [GESTURE.shoulders]: 3.0, // an arc, but a full circuit — up, back, down; slower than a scratch
+  [GESTURE.behindHead]: 4.5, // held: laced hands and wide elbows need a plateau to read at all
+  [GESTURE.rubEyes]: 2.4, // held, but the doc says "a brief squeeze" — the one of the four 2.4 suited
+  [GESTURE.pocketPhone]: 3.6, // down, a readable look at the phone, back to the screen
 };
 /** Move `cur` toward `target` at a constant rate (the blend is shaped by `smooth()` where it's consumed). */
 function toward(cur: number, target: number, rate: number): number {
@@ -232,6 +246,37 @@ export function deskNeighbourPairs(
       out.push([a.name, b.name]);
     }
   }
+  /*
+   * LEISURE PAIRS (2026-09-14). The pair beat existed but could only ever fire between two desk
+   * row-mates, so the lounge, the meeting table and reception — the parts of the room that exist
+   * BECAUSE people talk in them — were the only places two people never turned to each other.
+   *
+   * Paired by ZONE rather than by distance. `deskChat` turns each toward the other and needs no
+   * facing agreement, so the desk rule's `a.dir === b.dir` (a proxy for "same pod row") has nothing
+   * to say here: two people on a couch and an armchair face each other by design. Zone equality is
+   * the honest predicate — "in the same place" — and unlike a distance threshold it cannot pair two
+   * members across the room because the numbers happened to land, and needs no tuning when the floor
+   * plan moves.
+   *
+   * Desk pairs above are untouched: their rule is tuned to the pod geometry and this must not
+   * silently widen it. A member seated ACROSS a pod faces their row-mate through a shared privacy
+   * screen and two monitors, which is not a conversation the room should draw.
+   */
+  const lounging: Array<{ name: string; zone: string }> = [];
+  for (const [name, pl] of placements) {
+    if (pl.kind !== 'leisure' || !byName.has(name)) continue;
+    const spot = LEISURE_SPOTS[pl.spot];
+    if (spot && spot.sit > 0) lounging.push({ name, zone: spot.zone });
+  }
+  lounging.sort((a, b) => (a.name < b.name ? -1 : 1));
+  for (let i = 0; i < lounging.length; i++) {
+    for (let j = i + 1; j < lounging.length; j++) {
+      const a = lounging[i]!;
+      const b = lounging[j]!;
+      if (a.zone !== b.zone) continue;
+      out.push([a.name, b.name]);
+    }
+  }
   return out;
 }
 
@@ -369,6 +414,15 @@ const CHAT_S: [number, number] = [5, 10];
 /** Distance between the two desks of one pod row — see `podDesks`. Row-mates are exactly this far apart. */
 const ROW_GAP = POD_ACROSS * 2;
 
+/** The gesture pairs a chat can be built from — one each, traded. `chin`/`lean` is the original and
+ *  stays first so the familiar exchange remains the most common shape at a glance; the other two lean
+ *  on beats that read at office scale without a hand (see the 2026-09-14 gesture pass). */
+const EXCHANGES: ReadonlyArray<readonly [number, number]> = [
+  [GESTURE.chin, GESTURE.lean],
+  [GESTURE.glance, GESTURE.chin],
+  [GESTURE.shoulders, GESTURE.lean],
+];
+
 export interface Actors {
   /** Reconcile to a new roster: seat everyone, and (when `animate`) walk arrivals in, departures out,
    * and away/return drifts between desk and nook. The first call just snaps (no entrance stampede). */
@@ -408,7 +462,7 @@ export interface Actors {
   /** Play an in-place ambient gesture (`1` stretch · `2` glance) on a seated desk member for a short
    * window. Stationary filler, not a real act; returns false if the member can't gesture (absent, small,
    * exiting, walking, or already busy). See ADR 086 Phase 2 tail. */
-  gestureBeat(from: string, kind: number): boolean;
+  gestureBeat(from: string, kind: IdleGesture): boolean;
   /** Seated desk members eligible to be sent on an ambient stroll right now (present, not small, idle). */
   idleDeskMembers(): string[];
   /** True when motion is in flight and *all* of it is ambient — drives the idle-FPS cap in the loop. */
@@ -453,6 +507,9 @@ export function createActors(): Actors {
   const anim = new Map<string, Anim>();
   const exiting = new Set<string>();
   let initialized = false;
+  /** The placements the homes were last built from — `deskNeighbours` needs them to ask the same
+   *  question `deskNeighbourPairs` answers, rather than re-deriving the rule from poses. */
+  let lastPlacements: Map<string, Placement> = new Map();
   let doorPulses = 0; // members that entered/left since the last takeDoorPulses()
   let arrivals = 0; // members that entered since the last takeArrivals() — the dog's cue to go and greet
 
@@ -775,6 +832,7 @@ export function createActors(): Actors {
 
   return {
     setHomes(placements, byName, animate) {
+      lastPlacements = placements;
       const newHomes = homePoses(placements, byName);
       const prevHomes = homes;
       const prevLive = live;
@@ -1003,28 +1061,26 @@ export function createActors(): Actors {
       return true;
     },
     deskNeighbours() {
-      // Derived from the home poses rather than from seat placements: two desk members are row-mates
-      // when they face the same way and sit exactly one desk apart across the pod. That is true by
-      // construction of `podDesks`, and reading it off positions means this needs no extra state and
-      // cannot drift out of sync with the seating.
-      const seated = [...homes.entries()].filter(([n]) => chatReady(n));
-      const out: Array<[string, string]> = [];
-      for (let i = 0; i < seated.length; i++) {
-        for (let j = i + 1; j < seated.length; j++) {
-          const [na, a] = seated[i]!;
-          const [nb, b] = seated[j]!;
-          if (a.dir !== b.dir) continue;
-          if (Math.abs(Math.hypot(a.lx - b.lx, a.ly - b.ly) - ROW_GAP) > 12) continue;
-          out.push(na < nb ? [na, nb] : [nb, na]);
-        }
-      }
-      return out;
+      /*
+       * The SAME pool as `deskNeighbourPairs`, with the eligibility filter applied — delegated
+       * rather than re-derived.
+       *
+       * This used to be a second hand-written copy of the row-mate rule, read off the home poses
+       * instead of the placements. The header above says the two are "the same geometry ... with no
+       * eligibility filter", and that was true only for as long as nobody edited one of them: adding
+       * the leisure-zone pairs to the exported function on 2026-09-14 made them disagree the moment a
+       * member sits somewhere other than a desk, and the invariant test did not catch it because a
+       * twelve-desk fixture has no leisure sitters. One rule, one home — the drift is not possible to
+       * reintroduce by editing a single place.
+       */
+      return deskNeighbourPairs(lastPlacements, live).filter(([a, b]) => chatReady(a) && chatReady(b));
     },
     deskChat(a, b, rng = Math.random) {
       const ha = homes.get(a);
       const hb = homes.get(b);
       if (!ha || !hb || !chatReady(a) || !chatReady(b)) return false;
       const dur = CHAT_S[0] + rng() * (CHAT_S[1] - CHAT_S[0]);
+      const pick = rng();
       // Each turns toward the other and stays seated. `sitAt` is what holds the sit blend at 1 through a
       // walk that never goes anywhere; the facing comes from the leg's `dir`, which the actor system
       // eases into rather than snapping — so this reads as two people swivelling to talk.
@@ -1037,10 +1093,19 @@ export function createActors(): Actors {
           fx: self.lx, fy: self.ly, tx: self.lx, ty: self.ly,
           dir: face, dur: d, carry: null, bubble: null, ease: 'inOut', overlay, sitAt: seat,
         });
-        // Alternating beats so it reads as turn-taking rather than two people gesturing in unison.
+        /* Alternating beats so it reads as turn-taking rather than two people gesturing in unison.
+         *
+         * Three exchanges rather than one (2026-09-14). Every chat this room had ever drawn was the
+         * same chin/lean swap, which is fine once and a tell the third time you notice it. The pair
+         * is picked ONCE per chat from the caller's seeded rng and both members are built from the
+         * same pick, so the two halves always belong to the same conversation — a `lead` that thinks
+         * it is in exchange 0 while the follower is in exchange 2 would be two people talking past
+         * each other, which is exactly what this beat exists not to look like. */
+        const exchange = EXCHANGES[Math.floor(pick * EXCHANGES.length)] ?? EXCHANGES[0]!;
+        const [first, second] = exchange;
         return lead
-          ? [beat(dur * 0.45, GESTURE.chin), beat(dur * 0.55, GESTURE.lean)]
-          : [beat(dur * 0.45, GESTURE.lean), beat(dur * 0.55, GESTURE.chin)];
+          ? [beat(dur * 0.45, first), beat(dur * 0.55, second)]
+          : [beat(dur * 0.45, second), beat(dur * 0.55, first)];
       };
       walks.set(a, { legs: turn(ha, hb, true), i: 0, t: 0, small: false, ambient: true });
       walks.set(b, { legs: turn(hb, ha, false), i: 0, t: 0, small: false, ambient: true });
@@ -1059,7 +1124,7 @@ export function createActors(): Actors {
       ) {
         return false;
       }
-      gestures.set(from, { kind, t: 0, dur: GESTURE_DUR[kind] ?? 2.4 }); // one full beat window, then clear
+      gestures.set(from, { kind, t: 0, dur: GESTURE_DUR[kind] }); // one full beat window, then clear
       return true;
     },
     idleDeskMembers() {

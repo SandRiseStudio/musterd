@@ -238,6 +238,64 @@ export function notReadyMessage(
 }
 
 /**
+ * A warning as a fact, not only a sentence (lane 01M2NRYJEQ).
+ *
+ * Every warning on a result that also carries `structuredContent` must appear here as well: prose
+ * appended to `content[].text` reaches only the clients that render text, and the ones that do not
+ * were shown nothing at all. `kind` is the discriminator a client can branch on, `text` is the one
+ * agreed wording (never a second one — a warning that reads differently in two places is two
+ * warnings), and the remaining fields are the facts behind it.
+ */
+export type BuildSkewWarning = {
+  kind: 'build_skew';
+  text: string;
+  /** The commit this running adapter's dist was built from. */
+  adapter: string;
+  /** The commit the daemon booted from — the reference, never "behind". */
+  daemon: string;
+};
+
+export type SyncWedgeWarningFact = {
+  kind: 'sync_wedge';
+  text: string;
+  seat: string;
+  bound_to: string;
+  node_id: string;
+  since: number;
+};
+
+export type ToolWarning = BuildSkewWarning | SyncWedgeWarningFact;
+
+/** The wedge as a fact beside its sentence — same source, same wording, same silence. */
+export function syncWedgeOf(
+  roster: { sync?: { wedged: SyncWedge | null } } | undefined,
+  now: number = Date.now(),
+): SyncWedgeWarningFact | null {
+  const w = roster?.sync?.wedged;
+  if (!w) return null;
+  return {
+    kind: 'sync_wedge',
+    text: describeSyncWedge(w, now),
+    seat: w.seat,
+    bound_to: w.bound_to,
+    node_id: w.node_id,
+    since: w.since,
+  };
+}
+
+/** The wedge fact for a client — best-effort, like its prose twin: any failure reads as silence. */
+export async function syncWedgeOfClient(client: {
+  roster?: () => Promise<{ sync?: { wedged: SyncWedge | null } }>;
+}): Promise<SyncWedgeWarningFact | null> {
+  try {
+    if (typeof client.roster !== 'function') return null;
+    return syncWedgeOf(await client.roster());
+  } catch {
+    return null;
+  }
+}
+
+/**
  * One warning line when this adapter's dist differs from the daemon's build (ADR 135) — the
  * "money surface": the running process reports the stamp it *booted* with, so a stale dist on disk
  * AND a rebuilt-but-not-reloaded session both self-incriminate. Silence unless BOTH sides are known
@@ -248,14 +306,40 @@ export async function buildSkewWarning(client: {
   build: string | undefined;
   daemonBuild: () => Promise<string | undefined>;
 }): Promise<string> {
+  const w = await buildSkewOf(client);
+  return w ? `\n${w.text}` : '';
+}
+
+/**
+ * The same finding as a structured fact (lane 01M2NRYJEQ).
+ *
+ * `buildSkewWarning` was correct, was called on the minute-0 surface, and reached nobody: it is
+ * appended to `content[].text`, and the non-empty inbox path returns `structuredContent` beside it.
+ * A client that renders the structured half and drops the prose showed the seat nothing — so a
+ * session running stale tools looked exactly like a fresh one. Measured 2026-09-16: a seat ran a
+ * 14-hour-old adapter against a current daemon, saw no line, and nearly reported a correct fix as
+ * failing on the strength of it.
+ *
+ * Both refs ride along rather than only the sentence, so a client can render its own line or act on
+ * the fact; `text` is carried too, so a client that only prints stays useful. Same silence rules as
+ * before — an unknown side is never reported as skew.
+ */
+export async function buildSkewOf(client: {
+  build: string | undefined;
+  daemonBuild: () => Promise<string | undefined>;
+}): Promise<BuildSkewWarning | null> {
   const mine = client.build;
-  if (!mine) return '';
+  if (!mine) return null;
   const daemon = await client.daemonBuild();
-  if (!daemon || daemon === mine) return '';
-  return (
-    `\n⚠ your musterd adapter (${mine.slice(0, 7)}) differs from the daemon (${daemon.slice(0, 7)})` +
-    ` — this session runs stale tools. Rebuild this worktree (pnpm build) and /mcp reload to pick it up.`
-  );
+  if (!daemon || daemon === mine) return null;
+  return {
+    kind: 'build_skew',
+    adapter: mine,
+    daemon,
+    text:
+      `⚠ your musterd adapter (${mine.slice(0, 7)}) differs from the daemon (${daemon.slice(0, 7)})` +
+      ` — this session runs stale tools. Rebuild this worktree (pnpm build) and /mcp reload to pick it up.`,
+  };
 }
 
 /**

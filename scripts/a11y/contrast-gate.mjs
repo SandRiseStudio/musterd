@@ -100,6 +100,11 @@ const ROUTES = arg('routes', '')
       '/docs/spec',
       '/blog',
       '/blog/launch',
+      // /watch has its own stylesheet (WatchPage.css), not Prose.css, so no other listed route
+      // paints its colours — the eyebrow on the accent ink, the definition list on the hairline
+      // rule, the player's state line. "One representative per template" is exactly why it must be
+      // listed: it IS its own template (2026-09-16, miley).
+      '/watch',
       '/office-preview',
       '/character-sheet',
       '/board',

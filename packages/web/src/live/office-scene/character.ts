@@ -53,13 +53,31 @@ interface Proj {
  * Project one joint. Character space (x right, y up, z forward) is rotated onto the floor by the facing,
  * added to the member's floor point, projected, then lifted by the joint's height.
  */
-function projector(lx: number, ly: number, dir: Dir, fit: Fit, s: number, heading?: number): (j: V3) => Proj {
+function projector(
+  lx: number,
+  ly: number,
+  dir: Dir,
+  fit: Fit,
+  s: number,
+  heading?: number,
+  /**
+   * Idle sway, in character-space x per unit of joint height (see `drawCharacter`).
+   *
+   * Folded in HERE rather than applied to the joints, for two reasons. It is free: one multiply-add
+   * per joint, against the ~3.5 points of one core that rebuilding a Skel per character per frame
+   * measured at 19 members and 19fps (2026-09-14). And scaling it by `j.y` makes the body pivot at
+   * the hips — the feet stay planted, the shoulders travel furthest — which is what a weight shift
+   * actually looks like and what a flat offset on five joints did not.
+   */
+  sway = 0,
+): (j: V3) => Proj {
   // A continuous heading rotates the basis to any angle mid-turn; the cardinal is the resting case.
   const f: readonly [number, number] = heading !== undefined ? [Math.cos(heading), Math.sin(heading)] : FWD[dir];
   const r: [number, number] = [f[1], -f[0]]; // the character's right, on the floor
   return (j: V3): Proj => {
-    const wx = lx + (f[0] * j.z + r[0] * j.x) * s;
-    const wy = ly + (f[1] * j.z + r[1] * j.x) * s;
+    const jx = sway === 0 ? j.x : j.x + sway * j.y;
+    const wx = lx + (f[0] * j.z + r[0] * jx) * s;
+    const wy = ly + (f[1] * j.z + r[1] * jx) * s;
     const p = project(wx, wy, fit);
     return { p: { x: p.x, y: p.y - j.y * s * fit.scale }, d: wx + wy };
   };
@@ -138,7 +156,23 @@ export function drawCharacter(
   armsOnly = false,
 ): void {
   const { skel: k, node, dir, size } = o;
-  const px = projector(o.lx, o.ly, dir, fit, size, o.heading);
+  /*
+   * IDLE SWAY — the weight-shift a person makes when they are not doing anything (nick, 2026-09-14).
+   *
+   * Between beats a member used to be geometrically perfect and perfectly still, which is the single
+   * biggest thing separating this room from a room. This is a very slow, very small lean of the upper
+   * body, seeded per member so nineteen people are never in phase — an office breathing in unison is
+   * worse than an office holding its breath. Two periods beat against each other so it never reads as
+   * a metronome.
+   *
+   * It needs NO reduced-motion or STILL gate of its own, which is the point of driving it off the
+   * SCENE CLOCK rather than wall time: under reduced motion the loop never starts, and under `?still`
+   * it parks after the one play-through, so in both cases the clock stops and the sway freezes with
+   * it. The a11y sweep's settle detector therefore still sees a page that stops changing.
+   */
+  const swayT = o.t * 0.7 + o.seed * 11;
+  const sway = (Math.sin(swayT) * 0.026 + Math.sin(swayT * 0.37) * 0.011) * size;
+  const px = projector(o.lx, o.ly, dir, fit, size, o.heading, sway);
   const u = fit.scale * size; // one logical unit, in screen px, at this character's size
   // dnd wears the headphones whatever their hashed accessory is — the room-readable signal (§4).
   const look =

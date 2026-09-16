@@ -10,7 +10,6 @@ import { HttpClient, watchClaim } from './client.js';
 import { claimCommand } from './commands/claim.js';
 import { reachabilityNudge, resolve, resolveRead } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
-import { joinCommand } from './commands/join.js';
 import { nudgeCommand } from './commands/nudge.js';
 import { reclaimCommand } from './commands/reclaim.js';
 import { sendCommand } from './commands/send.js';
@@ -712,70 +711,24 @@ describe('team remove command (ADR 019)', () => {
   });
 });
 
-describe('join honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
-  it('refuses to join as a different member than the cached identity without a token', async () => {
+describe('claim honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
+  it('refuses to claim a different member than the cached identity without a key', async () => {
     // nick creates dawn and adds Ada; the cached config identity is nick.
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
 
-    // Joining as Ada with no --token must NOT silently relabel nick's token as "Ada"
+    // Claiming Ada with no --key must NOT silently relabel nick's key as "Ada"
     // (that "succeeds" then fails every send with from/team mismatch). It must refuse.
-    await expect(run(joinCommand, ['dawn', '--as', 'Ada'])).rejects.toMatchObject({ exitCode: 4 });
+    await expect(run(claimCommand, ['Ada', '--team', 'dawn'])).rejects.toMatchObject({
+      exitCode: 4,
+    });
 
     // The cached identity is untouched — still nick, not a poisoned "Ada".
     const cfg = JSON.parse(readFileSync(nickConfig, 'utf8'));
     expect(cfg.identities.dawn.name).toBe('nick');
   });
 
-  it('the legacy `join <slug> --as <name>` spelling runs the claim handshake and says so on stderr (ADR 377)', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
-    const errChunks: string[] = [];
-    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: any) => {
-      errChunks.push(String(c));
-      return true;
-    });
-    try {
-      const ok = await run(joinCommand, ['dawn', '--as', 'nick']);
-      expect(ok.code).toBe(0);
-      // Delegated to claim: claim's output, not a second handshake's.
-      expect(ok.out).toContain('occupied on dawn');
-      expect(ok.out).toContain('online via cli (detached');
-      expect(ok.out).not.toContain('joined');
-    } finally {
-      errSpy.mockRestore();
-    }
-    expect(errChunks.join('')).toContain(
-      'musterd join is now: musterd claim nick --team dawn --detach',
-    );
-    // Same handshake, same result: the folder is bound to the seat claim resolved.
-    const ok2 = await run(claimCommand, ['nick', '--team', 'dawn', '--json']);
-    expect(JSON.parse(ok2.out.trim().split('\n').pop()!)).toMatchObject({
-      team: 'dawn',
-      member: 'nick',
-    });
-  });
-
-  it("under --json the alias is silent on stderr and emits claim's JSON shape", async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
-    const errChunks: string[] = [];
-    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: any) => {
-      errChunks.push(String(c));
-      return true;
-    });
-    try {
-      const ok = await run(joinCommand, ['dawn', '--as', 'nick', '--json']);
-      expect(ok.code).toBe(0);
-      expect(JSON.parse(ok.out.trim().split('\n').pop()!)).toMatchObject({
-        team: 'dawn',
-        member: 'nick',
-      });
-    } finally {
-      errSpy.mockRestore();
-    }
-    expect(errChunks.join('')).not.toContain('ADR 377');
-  });
-
-  it('`claim <name> --team <slug>` is the same handshake — the vault key is found without --key (ADR 377)', async () => {
+  it('uses the cached key for the named seat without relabeling it', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     const ok = await run(claimCommand, ['nick', '--team', 'dawn', '--json']);
     expect(ok.code).toBe(0);

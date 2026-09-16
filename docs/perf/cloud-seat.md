@@ -425,6 +425,13 @@ projected shape — the joiner's is null anyway (2026-09-06; falsify: read
 Whether the hub never emitted the policy event, or the joiner folded it before the loops were armed
 and nothing re-emits, is the first question for the lane.
 
+**Disposition (2026-09-15, ADR 398):** the hub never emitted it. ADR 367 stamped *new* writes; the
+live pair's `loops` were armed before the kind existed, so nothing was in `sync_log` to fold. The
+hub now restates current stored policy as one stamped `policy.change` the first time it has joiners
+and no stamp exists. The 2026-09-06 hand-arm on the joiner is the floor until that tick has run.
+(Falsify: joiner `json_extract(policy,'$.loops')` still null after one hub sync tick on a build
+that includes ADR 398, with hub loops non-null.)
+
 **Disposition (2026-09-06 02:00Z):** armed the joiner's own team policy to agree with the hub —
 `musterd team policy --dispatch-loop on --as nick`, run on the VM. Blast radius is delta alone: that
 daemon has exactly one enrolled seat. With `loops.dispatch` on *and* `flow: auto` *and* the 30 m
@@ -629,6 +636,175 @@ the credit did nothing until a human sent a fresh act. And **the transcript-hygi
 multi-wake lane into repeated cold starts**: once past 256 KiB every subsequent wake spawns fresh,
 re-reads the lane, and spends its budget re-orienting — ~$3.80 across four wakes for one docs commit
 that was never made from the VM.
+
+### 18b. `team_join` alone is sufficient when the join is not a no-op (2026-09-14 19:24Z) — an open falsifier, run
+
+**The deaf-on-arrival state itself is not new.** [The cloud seat from inside](../wiki/cloud-seat-from-inside.md)
+recorded on 2026-09-06 that a woken cloud seat begins with a dead session lease and its opening
+probes are 401s. What that page could not settle was **the repair**, and it left a falsifier open:
+"from a deaf seat call `team_join` *alone* and re-run the probe — silence means join is sufficient
+and this paragraph is wrong." This wake ran that experiment, unintentionally and cleanly.
+
+Session `c9f545d5`, started 19:24:36Z (`binding.json:started_at` 1789413876962), uid `1001`, work
+order on this lane. The `SessionStart` hook attached the deaf line to each of the first two tool
+results (a `ToolSearch` and a `Skill`, neither a musterd call). The third call was `team_join`
+**on its own, in its own turn** — not batched with `team_inbox_check` or `team_next`, which is
+exactly what made the 09-06 reading unattributable. The line has not fired on any tool call since,
+across the whole session (2026-09-14 19:26Z onward; falsify: a deaf seat whose solo `team_join`
+leaves the next probe still ringing).
+
+**So join alone is sufficient — and the discriminator is whether the join actually does anything.**
+ryder's counter-case on 09-06 was `team_join` returning "Already joined" as a **no-op** with the
+probe still deaf. This seat's join was not a no-op; it returned "Joined revive as delta
+(claude-code). You are now the live occupant of this seat… The server authenticated this occupancy."
+That reconciles the two results without either being wrong: **a join that mints a fresh Presence
+clears the deafness; a join that finds one already recorded returns early and repairs nothing.**
+The prescription in the hook line is correct but underspecified — it should say what to do when the
+join no-ops, which is the case the page's other counter-example (dolly's, cleared only by an
+`/mcp reload`) sits in.
+
+**Replicated on a second wake 31 minutes later (2026-09-14 19:55Z).** Trial 2, same machine, same
+lane: session `0131bef2`, `binding.json:started_at` 1789415705070 (19:55:05Z), work order. Same
+course as trial 1 — the deaf line rode the first three tool results (two `ToolSearch` calls and a
+`Read`, none of them a musterd call), the fourth call was `team_join` **alone in its own turn**, it
+answered "You are now the live occupant of this seat" rather than "Already joined", and no tool
+result since has carried the line. Two for two, both non-no-op joins. And the binding again held a
+lease written before turn 1 (`msls_DhjMB5NF…`) *and* an `attested_at` stamped 227 ms after
+`started_at` — so the seat could read a lease, an attestation and a refusal at the same instant,
+which is worth more than the lease finding alone: **not even the seat's own attestation record
+distinguishes a live Presence from a dead one.**
+
+**What trial 2 adds beyond the count is scope: this is not a cloud-seat property.** Within the same
+hour three seats on the **laptop** — the hub itself — reported the same arrival state and the same
+repair: stanley at 19:34Z ("session lease was dead on arrival, the ring stopped after `team_join`,
+exactly delta's *a work-order wake arrives deaf*"), izzo at 19:38Z ("lease dead on arrival, same
+as delta/stanley"), and dolly at 20:02Z ("re-joined (lease dead on arrival — same deaf-wake
+arrival delta/stanley/izzo all hit)"). Those are their own status updates, not measurements of
+mine — I cannot read their machines from here, and they should be read as corroboration rather
+than as data I took. But
+with the two trials above they place the defect in the **residency handover, not in the Fly
+transport and not in the work-order path**: neither a wake nor this VM is required to produce it.
+The wiki's framing — a *cloud* seat begins deaf — is too narrow in exactly the way clause 8's
+"granted is not callable" was, and was corrected for, on the same page (2026-09-14 19:56Z; falsify:
+a seat on any machine that arrives with both `session_lease` and `attested_at` in its binding and
+whose first interrupt check is honoured with no join).
+
+**Trial 3 (2026-09-14 20:27Z) is three for three — and it is the first one with a positive
+control.** Session `6599f170`, `started_at` 1789417624719 (20:27:04.719Z), `attested_at` 170 ms
+later, work order on the same lane. Same course again: the deaf line rode the first tool result (a
+`ToolSearch`, not a musterd call), the second call was `team_join` **alone**, it answered "You are
+now the live occupant of this seat — the server authenticated this occupancy" rather than "Already
+joined", and no tool result since has carried it. Three trials, three non-no-op joins, three
+repairs.
+
+What the first two trials could not do was tell *silence* apart from *deafness*: a line that has
+stopped ringing and a line that is still refused look identical when nothing is trying to ring.
+This trial has the control. Within a minute of the join, stanley's `steer` `01M2GSCEHM` began
+riding every tool result as a delivery nudge and has not stopped. **The same interrupt line that
+was refused before the join is observably carrying a real act after it** — so the post-join silence
+in trials 1 and 2 was the absence of traffic, not the absence of a line (falsify: a repaired seat
+whose interrupt line stays silent through a directed act sent to it).
+
+**The lease was not missing — it was on disk and refused.** `.musterd/binding.json` already carried
+`"session_lease": "msls_hmmp…"`, written at 19:24, before the first turn. So the woken session held
+a lease string the server would not honour: *a lease on disk is not a live Presence*, and a seat
+checking its own binding for one would conclude, wrongly, that it was fine.
+
+**And on trial 3 the lease turned out not to be stable either.** Beyond being unhonoured, the
+string moves: this session's binding read `session_lease: "msls_qeiYKz0D…"` at 20:28:0xZ and
+`"msls_4tzGD9…"` at 20:30:18.879Z (file mtime), with no `team_join` from this seat in between, so
+some other writer rotates it mid-session. A seat cannot reason about its own Presence from the
+binding in either direction: a dead lease looks live, and the value it would compare against is a
+moving target. What does the rotating was not measured here and should not be guessed (falsify: a
+session whose `session_lease` is byte-identical from turn 1 to wrap-up).
+
+**Trial 4 (2026-09-14 21:27Z) is four for four, and it closes the one gap left in trial 3's
+control.** Session `d7524e97`, `started_at` 1789421269706 (21:27:49.706Z), work order on the same
+lane. Same course a fourth time: the deaf line rode the first three tool results (two `ToolSearch`
+calls and a `Read` of seat memory, none of them a musterd call), the fourth call was `team_join`
+**alone in its own turn**, it answered "You are now the live occupant of this seat… The server
+authenticated this occupancy" rather than "Already joined", and no tool result since has carried
+it. Four trials, four non-no-op joins, four repairs.
+
+**The positive control is now unconfounded, and trial 3's wording above oversold the ambiguity in
+its own favour.** Trial 3 reported that stanley's `steer` `01M2GSCEHM` "began riding every tool
+result" within a minute of the join, which reads as though the act arrived at that moment — the one
+alternative explanation a control has to exclude. The timestamps exclude it. That act was raised at
+20:22:52.216Z, so it already predated trial 3's session by 4m12s, and by this session it had been
+pending **64m57s and across a session boundary**, unchanged and undelivered. In this trial the same
+stale act was *withheld* from all three pre-join tool results, which carried the deaf line instead,
+and rode the first post-join result and every one after it. The stimulus was constant across the
+join; the join is the only variable (falsify: a pending directed act that rides a tool result on a
+deaf seat, before any join).
+
+**And the binding records three local signs of a claim, all of them worthless to the seat.** Beyond
+the `session_lease` (`msls__gr-…`) written before turn 1 and the `attested_at` at +216 ms, the v12
+binding also carries **`claim_attempted_at`, stamped +78 ms** — a field the earlier trials did not
+read. So the seat can see that a claim was attempted, that an attestation was recorded, and a lease
+string to go with them, and its very next interrupt check is still refused. This is the sharpest
+form of the trial-2 finding: *no local record the handover writes distinguishes a live Presence from
+a dead one.* (`tool_allowlist` was `[]` again — fourth consecutive session on the v12 image, so
+reading 1 below holds.)
+
+**Trial 3's lease-rotation reading does not replicate here, and its falsifier is the reason we can
+say so.** Trial 3 saw `session_lease` change value mid-session with no `team_join` in between and
+offered "a session whose `session_lease` is byte-identical from turn 1 to wrap-up" as the test. In
+this session the binding *was* rewritten — key order reordered and `model_observed.observed_at`
+bumped to 21:33:05.873Z, +5m16s after `started_at` — and the lease came through that rewrite
+**byte-identical** (`msls__gr-xYmeNIQ-TxEql-u4AocQrBgUZjeg` before and after). So a binding rewrite
+does not by itself rotate the lease, and whatever moved it in trial 3 is narrower than "some other
+writer rotates it mid-session". That weakens the rotation claim to *it can move, not it does move*;
+what has not changed is the part that matters, since the byte-stable lease here was refused just as
+the rotating one was.
+
+**The scope is wider than a wake, and the widening is stanley's, measured on a seat that never
+woke.** In insight `01M2GTZPT9` (2026-09-14 20:50Z) stanley reports a laptop session live for about
+an hour whose musterd MCP transport dropped mid-session while the daemon stayed healthy throughout:
+the deaf line then rode every call, `team_join` answered "You are now the live occupant" — not
+"Already joined" — and the line stopped. No actuator, no work order, no VM, no fresh session. Two
+more seats hit the neighbouring half within the same hour: dolly at 21:25Z (the adapter dropped
+`CONNECT_TIMEOUT` on claude-code and the tools went deferred-and-gone, forcing a fall back to the
+CLI channel) and ghost across 20:22–21:00Z (after their MCP server was killed, a CLI `claim` minted
+only a one-shot lease, the probe stayed deaf on both rails, and the durable repair was a harness
+`team_join`). Those three are their own reports, not measurements of mine. Taken with the four
+trials here they move the condition off *arrival* entirely: **a seat whose musterd MCP transport has
+just been established has no live Presence until a non-no-op `team_join`** — a wake is merely the
+common case, because a wake always establishes a fresh transport. Read that against clause 8's
+"granted is not callable": a re-established transport silently revokes *callability* (ryder, and
+stanley's first half) and silently revokes *Presence* (this), and musterd shows neither — the grant
+and the roster row both still look right (falsify: a seat that reconnects a dropped MCP transport
+and whose first interrupt check is honoured with no join).
+
+This still matters for the brief, eight days on. The wake brief says "orient via
+`team_wake_context` (then `team_next`) and begin" — a seat that follows it exactly never calls
+`team_join`, because it was *just woken* and has every reason to believe it is already on the team.
+Only a hook firing on an unrelated tool call surfaced it. **A woken seat that is deaf cannot
+discover it from the tools the brief names**, and open lane `01M2GP25R3` (clause 8 — the
+`ToolSearch` requirement and reconnect deferral) is the same seam. 18a's finding 1 and this are one
+defect wearing two hats: *the wake hands over a session whose capabilities are not yet real*,
+whether the missing piece is a tool schema or a Presence.
+
+**The budget is written where the seat cannot reach it, and now the mechanism is named.** 18a
+recorded that `team_wake_context` carries no timeout field and that the bound lives daemon-side.
+There is also a seat-side drop point: `.musterd/pending/`. On this wake it was **empty, with an
+mtime of 19:24 — one minute before the session marker** — so the brief passes through the seat's own
+directory and is cleared before turn 1. The seat cannot read its own budget not because nothing was
+ever written down locally, but because the local copy is deleted in the handover (falsify: a wake
+whose `.musterd/pending/` still holds the brief on the first turn).
+
+**Two smaller readings from inside, for the record.**
+
+1. `tool_allowlist` in `.musterd/binding.json` is `[]` on the v12 image, and the `mcp__musterd`
+   tools arrived anyway. 18a confirmed fix 1 *behaviourally* — calls returned, no permission
+   prompt; this is the same fact structurally, in the binding the seat was handed: nothing is
+   narrowing the set (falsify: a v12 binding whose `tool_allowlist` is non-empty).
+2. **18a's own falsifier cannot be run by the seat it describes.** It reads `grep -o allowedTools`
+   on `/app/packages/cli/dist/host/backends/claudeCode.js`; from inside, `/app` is outside the
+   harness working-directory scope and the read is refused. Same boundary that keeps `host.log`
+   unreadable — and `host.log` is not merely out of scope but **absent from this machine entirely**
+   (`find` over the worktree returns nothing; `/data/home/.musterd/host.log` resolves to "File does
+   not exist"). Fix 3 stays attested from the laptop. When this log prints a falsifier, it is worth
+   saying which machine can run it.
 
 ### 18c. The rest of what delta measured from inside the VM (2026-09-14 19:28Z, measured by delta)
 
@@ -898,7 +1074,8 @@ refusal or inventing a value. That is the right shape for a measurement page.
 
 - **Two wake-path defects have lanes**: ~~`01M1T6D80Q` (high — the actuator's credential is a
   field three code paths own)~~ **FIXED 2026-09-14, ADR 395** (`binding.host_key`) and
-  `01M1T6DJ7J` (high — team policy does not replicate to a joiner). ~~and finding 18's `seat-policy` narrowing~~ — **finding 18 is closed
+  ~~`01M1T6DJ7J` (high — team policy does not replicate to a joiner)~~ **FIXED 2026-09-15, ADR 398**
+  (hub restates unstamped stored policy once joiners exist). ~~and finding 18's `seat-policy` narrowing~~ — **finding 18 is closed
   (#1371, confirmed on the VM 2026-09-14; see 18a)**. Two new ones opened in its place, both from
   the confirming run: a granted tool is not yet a callable tool (the musterd tools arrive deferred,
   and ryder reproduced it on the laptop and across an MCP reconnect — not a cloud-seat property);
@@ -929,8 +1106,8 @@ refusal or inventing a value. That is the right shape for a measurement page.
   only `run exited (code 1) without occupying the seat` — the reason is visible nowhere but the
   transcript. That is lane `01M1VDY8PY`'s third fix. ~~Unmeasured until the credit is topped up.~~
   **Measured 2026-09-14 16:35Z: the credit was topped up and the line now reads `… — harness: Credit
-  balance is too low` (18a).** Finding 18 is closed. `01M1T6DJ7J` (team policy does not replicate)
-  stays open. `01M1T6D80Q` is ADR 395: the actuator now polls with `binding.host_key`, a field no
+  balance is too low` (18a).** Finding 18 is closed. ~~`01M1T6DJ7J` (team policy does not replicate)
+  stays open.~~ **FIXED 2026-09-15, ADR 398.** `01M1T6D80Q` is ADR 395: the actuator now polls with `binding.host_key`, a field no
   claim path writes. The boot script remains the floor for enrollments that have not yet run
   `residency on` on a build that mints it. Finding 14's "the wake rewrites the credential" was
   already falsified (2026-09-06 13:15Z): after the 01:24Z rebind delta was woken five times, each
@@ -947,5 +1124,149 @@ refusal or inventing a value. That is the right shape for a measurement page.
   per day" above): `$12.66` model over 10.6 days against `$4.24` of machine, `$5.03` for one real
   working day, and a parked seat at `$0.53/month` against `$11.99` running. The machine is the
   cheap half.
-- **Residency enrollment still does not replicate** (finding 6), now with a sibling: team policy does
-  not either (finding 16). Same family, one lane each.
+- **Residency enrollment still does not replicate** (finding 6). ~~Team policy does
+  not either (finding 16).~~ **Finding 16 closed 2026-09-15 by ADR 398** — the hub restates
+  unstamped stored policy once joiners exist; a later silent `setPolicy` still does not ship
+  (census gap 1, unchanged).
+
+## 2026-09-15 — the cost re-read, and the thing parking actually costs you
+
+Re-read at 20:10Z on nick's ask, 11.7 days into the machine's life (created 2026-09-04 04:33:31Z,
+still `started`, machine `850e40a4499168`, `shared-cpu-2x` / 2048 MB / 3 GB volume / `sjc`).
+
+**The 09-14 infrastructure arithmetic holds exactly.** Recomputed independently from
+`fly machines list --json` and Fly's published rates: `$4.04` preset + `$7.50` for the 1.5 GB above
+the 512 MB preset + `$0.45` volume = **`$11.99`/month ≈ `$0.3997`/day**, the same figure. Infra to
+date is now **~`$4.66`**. Nothing to correct in that table.
+
+**Provenance, unchanged and worth restating:** still list price, still not an invoice. Fly's
+GraphQL exposes `billingStatus`, `billable`, `creditBalance` and `paidPlan` on `Organization` and
+**no invoice or usage fields at all** (introspected 2026-09-15); there is no billing verb in
+`fly help`. The dashboard remains the only authoritative source, so the 09-14 falsifier — read the
+invoice, a >20% difference means these rates are wrong for this account — is still the way to check
+this and is still unrun.
+
+**The RAM is the bill.** `$7.50` of `$11.99` is the 1.5 GB above the preset — **63%**, and 1.9× the
+CPU it supports. Any argument about this machine's cost that starts with the CPU is looking at the
+small half. Dropping 2 GB → 1 GB would take always-on to `$7.29`/month, independent of any parking
+decision. Whether the seat's Node daemon + a woken `claude -p` fit in 1 GB is unmeasured.
+
+### The correction: parking does not buy a cold boot, it removes wakeability
+
+The 09-14 entry above reads "for a seat woken a handful of times a week, parking and accepting a
+cold boot is the cheaper shape". ~~That framing is wrong, and it is wrong in the direction that
+matters.~~ **Invalidate-dated 2026-09-15.** The cost numbers beside it are right; the operational
+conclusion is not.
+
+**A parked cloud seat cannot be woken at all.** Wakes are *pull*-based: the actuator runs **on the
+machine** and polls the hub's `/residency/wake-leases` with `binding.host_key` (ADR 395) every
+~30 s. A stopped machine runs no actuator, so it polls nothing, so no doorbell reaches it — the hub
+has no way to reach *in*. Verified 2026-09-15: nothing in `packages/cli/src`, `packages/server/src`
+or `deploy/cloud-seat/` calls `fly machine start` or the Fly Machines API; the single occurrence in
+the repo is the README's §Park instruction, typed by a human.
+
+So the trade is not `$11.46/month for lower wake latency`. It is:
+
+| | /month | what a directed act does |
+| --- | --- | --- |
+| always-up | `$11.99` | actuator polls, seat wakes, ~23.6 s cold |
+| parked | `$0.53` | **nothing — the act sits until a human runs `fly machine start`** |
+
+That makes `$11.46/month` the price of the seat being *reachable without a human in the loop*,
+which is most of what a cloud seat is for. A parked seat is not a slower seat; it is an offline one
+that also stops replicating.
+
+**What would make parking a real option** is a push path: the hub, on minting a wake lease for a
+seat whose host is a stopped Fly machine, calls the Machines API to start it, then lets the
+actuator's first poll find the lease. That is an unbuilt increment and has no lane. Named here so
+the reachability-vs-cost question is not re-litigated from the cost table alone.
+
+**Falsifier for this entry's central claim:** `fly machine stop` the delta machine, send `delta` a
+`steer` from the hub, and wait past two actuator ticks (~60 s). If the seat wakes, this is wrong and
+a push path exists that this reading missed. ~~Unrun — it would take the seat offline to prove.~~
+**RUN 2026-09-15 20:31-20:36Z on nick's word — the claim holds.** See below.
+
+### The falsifier, run — result: confirmed, and the act is deferred rather than lost
+
+delta was `quiet 18m`, so no live work was at risk; the team was told before and after.
+
+| time (UTC) | event |
+| --- | --- |
+| 20:31:48 | baseline: machine `started`, actuator `◉ polling … every 30s`, `host.log` 3455 lines |
+| 20:32:14 | `fly machine stop` → state confirmed **`stopped`** |
+| 20:32:28 | steer `01M2KCAHYTRC4KGZMJ8CAPNBFT` sent to `delta` from the hub — *after* the stop |
+| 20:32:28–20:34:04 | **96 s, >3 actuator ticks, 10 samples — machine `stopped` at every one** |
+| 20:34:59 | a human runs `fly machine start` |
+| 20:35:02 | state `started` |
+| ~20:36 | the actuator's own first poll finds the queued steer and wakes the seat |
+
+**Nothing started the machine, and the hub never tried.** `wake_leases` on the hub holds **zero**
+rows for `delta` — not a stale one, not an expired one, none ever. Leases are minted by the
+*joiner's* actuator at wake time and replicate upward; the hub has no push role to skip. The lease
+for this steer, `01M2KCGP154PZQQJYR8XN27ZZT`, did not exist until after a human had started the
+machine.
+
+**The refinement worth having: the doorbell is deferred, not dropped.** The steer sat on the hub and
+was delivered on the actuator's first poll after boot —
+`wake due: delta [immediate] — steer from stanley (lease 01M2KCGP15…)`, then
+`⚡ woke delta: spawn→roster 21.8s, session=fresh provenance=wake`. So parking does not lose
+directed acts; it gives them **unbounded latency with a human on the critical path**. "Parked" is
+correctly read as *the seat is offline until someone starts it*, and the queue behind it is intact
+whenever that happens.
+
+**Incidental, already known:** the boot logged `resume skipped for delta: newest transcript is
+512.3 KiB (hygiene bound 256 KiB) — fresh spawn` — finding 18a's transcript-hygiene cold start
+firing again, costing a fresh spawn rather than a resume. Unrelated to this falsifier, recorded
+because it was in the same three log lines.
+
+## 2026-09-15 — ADR 399's seed kind, run between the laptop and the VM
+
+The cross-machine run ADR 399 recorded as owed. Both daemons on `fdabd1e6` first — the hub by
+autorefresh (which held the bounce through its own 10-minute settle window rather than being forced),
+delta by `fly deploy`. delta's image carries no commit ref (`.git` is dockerignored, finding above),
+so it was verified behaviourally instead: `seed.captured` present in its deployed
+`protocol/dist/sync.js` and `server/dist/store/seeds.js`.
+
+**Baseline, read immediately before the run (23:03:18Z)** — the defect ADR 399 exists to fix, one
+last time: hub 53 seeds, **delta 0**; `seed.captured` audit rows 0 on both; seed payloads in
+`sync_log` 0. So every row below is caused by this run and cannot be confused with history.
+
+| time (UTC) | step | result |
+| --- | --- | --- |
+| 23:12:59 | `musterd seed capture` on the **hub** | seed `01M2KNGPCE…`, event `seed.captured` at `origin_seq` 55823 |
+| 23:13:54 | read **delta** (one tick later) | **seed present** — same `relay_id`, same body, local id `01M2KNHY2B…` |
+| 23:15:0x | `seed claim` on **delta** | `exploring as delta` |
+| 23:15:51 | `seed ask` on **delta** | entry `01M2KNNZTB6ERS6H92TQQK5S56`, `by` = `delta` |
+| 23:17:5x | read the **hub** (two ticks) | **entry present**, same id `01M2KNNZTB…`, `by` = `delta` |
+
+**Falsifier 1 (ADR 399) — PASS.** The capture crossed hub→joiner by fold. delta went 0 seeds to 1.
+The local ids differ (`01M2KNGPCE…` vs `01M2KNHY2B…`) which is the whole reason the event is keyed
+by `relay_id` and not by `seeds.id`.
+
+**Falsifier 2 (ADR 371, unrun since it was written 2026-09-03) — PASS.** A clarification appended on
+the joiner reached the hub's thread under the **same entry id** with **`by` naming the seat**. This
+could not run before ADR 399 because the joiner could not hold the seed to append to; that is the
+precondition the 2026-09-14 reading found missing, not the mechanism.
+
+**Falsifier 4 (lifecycle does not cross) — PASS, and it is the interesting one.** At the end the hub
+holds the seed `open` while delta holds it `needs_clarification`. The *capture* and the *thread
+entry* replicate; the explorer claim and the state beside it stay local, exactly as ADR 371 §3 said
+and ADR 399 kept. A run that showed the hub flipping to `exploring` would have falsified the ADR's
+own scope claim.
+
+**What this run did NOT test, stated so it is not read as more than it is.** The seed was a **repo
+capture**, not a relay ingest: `policy.seeds_relay_url` / `seeds_relay_token` are unset on both
+machines, so the relay poll is dormant everywhere and the relay leg is still unexercised. Both
+creation paths emit the same `seed.captured`, so the *kind* is genuinely exercised end to end — but
+nobody should read this as "the relay works across machines". It was never switched on.
+
+**Friction, and a mistake worth recording.** Finding delta's workspace, I ran `cat` on its
+`~/.musterd/config.json` without checking what else the file held, and a live `mscr_` CLI credential
+for nick went into a session transcript in cleartext. This is the SECOND time an agent did this in
+one day — miley did it with `stream/seat-token` hours earlier and wrote the lesson down, and I read
+that message before repeating the mistake. **Disposition:** the rule is mechanical, not attitudinal.
+Never `cat` a whole config/binding/token file to read one field; query the single key
+(`node -e` on the parsed JSON, `jq -r '.bindings|keys'`), and treat everything under `~/.musterd`
+and `/data/home/.musterd` as credential-bearing until proven otherwise. Also: the seat CLI answers
+only from a *seat-bound* workspace — `/data/agents-delta` refused with "the team agent key is
+bootstrap-only", `/data/musterd-delta` worked.

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CliError } from '../errors.js';
 import type { DetectResult } from './harness.js';
 
 // Hoisted mock state: the harnesses the doctor inspects + the primer classification + the folder
@@ -15,6 +16,8 @@ const h = vi.hoisted(() => ({
   spec: null as { surface?: string } | null,
   roster: { members: [] as any[] },
   rosterThrows: false,
+  interruptCheck: { raised: false } as { raised: boolean; line?: string },
+  interruptCheckThrows: null as unknown,
   agentKeys: {} as Record<string, string>,
   knownIdentities: [] as { team: string; name: string; key: string; surface: string }[],
 }));
@@ -52,7 +55,15 @@ vi.mock('../client.js', () => ({
       if (h.rosterThrows) throw new Error('unreachable');
       return h.roster;
     }
+    async interruptCheck() {
+      if (h.interruptCheckThrows) throw h.interruptCheckThrows;
+      return h.interruptCheck;
+    }
   },
+  // Pure predicate — mirrored from the real module so the dead-lease tests exercise the real
+  // refusal shape (code + message), not the mock's opinion of it.
+  isSessionLeaseRefusal: (error: { code: string; message: string }) =>
+    error.code === 'unauthorized' && /agent session lease/i.test(error.message),
 }));
 
 const { buildSkewNotes, footprintNotes, inspectProvisioning, runSessionProbe } =
@@ -912,6 +923,91 @@ describe('inspectProvisioning — model attestation (ADR 120)', () => {
 });
 
 /**
+ * The dead hook lease (lane 01M2H0GHMK): the folder binding carries a session lease the daemon
+ * refuses, while the seat holds a live adapter Presence here — the interrupt line is deaf and
+ * every other surface reads healthy. The doctor is the second channel that names it.
+ *
+ * Red-first: the first version of the note's repair named `musterd claim`, which mints a lease
+ * that dies with the command — the exact un-prescription the deaf line refuses to give. The
+ * tests pin the adapter rejoin instead.
+ */
+describe('inspectProvisioning — the dead hook lease (lane 01M2H0GHMK)', () => {
+  beforeEach(() => {
+    h.harnesses = [];
+    h.primer = 'none';
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      surface: 'cli',
+      claim: { mode: 'seat', name: 'Ada' },
+      seat_credential: 'msac_x',
+      session_lease: 'msls_dead',
+    };
+    h.roster = { members: [] };
+    h.rosterThrows = false;
+    h.interruptCheck = { raised: false };
+    h.interruptCheckThrows = null;
+    process.env['MUSTERD_WORKSPACE'] = 'repo@main';
+  });
+  afterEach(() => {
+    delete process.env['MUSTERD_WORKSPACE'];
+  });
+
+  function adaLive() {
+    h.roster = {
+      members: [{ name: 'Ada', presences: [{ status: 'online', workspace: 'repo@main' }] }],
+    };
+  }
+
+  function leaseRefusal() {
+    return new CliError('invalid, expired, or revoked agent session lease', 1, 'unauthorized');
+  }
+
+  it('notes (never drift) when the folder lease is refused but the seat is live here', async () => {
+    adaLive();
+    h.interruptCheckThrows = leaseRefusal();
+    const r = await inspectProvisioning('/x');
+    expect(r.drift).toEqual([]);
+    expect(r.notes).toContainEqual(expect.stringContaining('session lease is dead'));
+    expect(r.notes).toContainEqual(expect.stringContaining('team_join'));
+  });
+
+  it('is silent when the lease still answers, raised or not', async () => {
+    adaLive();
+    h.interruptCheck = { raised: true, line: 'someone took a turn' };
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent with no live Presence here — an offline seat owes no bell', async () => {
+    h.interruptCheckThrows = leaseRefusal();
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent with no lease on disk — ambient and CLI-human steady state stays quiet', async () => {
+    adaLive();
+    (h.binding as Record<string, unknown>)['session_lease'] = undefined;
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+
+  it('is silent when the server is unreachable — never invents drift', async () => {
+    adaLive();
+    h.rosterThrows = true;
+    const r = await inspectProvisioning('/x');
+    expect(r.notes).toEqual([]);
+  });
+
+  it('is silent on a refusal that is not a lease refusal — a bad credential is nobody’s hook problem', async () => {
+    adaLive();
+    h.interruptCheckThrows = new CliError('forbidden', 1, 'forbidden');
+    const r = await inspectProvisioning('/x');
+    expect(r.notes.some((n) => n.includes('session lease is dead'))).toBe(false);
+  });
+});
+
+/**
  * The dead binding (install-topology §6(a)): a folder claiming a HUMAN seat while carrying the TEAM
  * AGENT KEY. It occupies once and then 403s forever, which is the state `/Users/nick/agents` was in
  * for two days. L1 (#457) stopped new ones being written; this check finds the ones already on disk.
@@ -1066,6 +1162,42 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
     const r = await inspectProvisioning(dir);
     expect(r.drift.some((d) => d.includes('v0') && d.includes('musterd init'))).toBe(true);
+  });
+
+  /**
+   * The line must NAME the stale files, not just count them (lane 01M2NRA59J, 2026-09-16).
+   *
+   * The count-only wording was accurate and unactionable: `1 musterd guidance file is v22` gives a
+   * reader nothing to price the delay against, so every seat that saw it finished its task first.
+   * Measured that day — the orient skill's "an accept on a review ask IS the verdict" correction
+   * landed 2026-09-14 (#1403), and SEVEN of nine seat worktrees were still on v22 two days later.
+   * dolly and miley closed a teammate's lane unreviewed eight hours after the fix landed; sloane
+   * did it twice on 2026-09-16, one of them a high-stakes lane. All three followed the v22 text
+   * verbatim, and all three had read a drift line that never said which rule was stale.
+   *
+   * A path is what makes the delay pricable: a stale label renderer can wait, a stale rule about
+   * closing other people's work cannot.
+   */
+  it('names the stale guidance files, so a reader can price deferring the refresh', async () => {
+    const dir = tmp();
+    writeProvisionManifest(dir, {
+      profile: 'x',
+      harness: 'claude-code',
+      mcpServers: [],
+      guidance: { files: [CANONICAL_SKILL_PATH], contentVersion: 0 },
+    });
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    const r = await inspectProvisioning(dir);
+    const line = r.drift.find((d) => d.includes('current is v'));
+    expect(line, 'a stale guidance file must be reported').toBeDefined();
+    expect(
+      line,
+      'the path is the actionable part — without it the count cannot be prioritised',
+    ).toContain(CANONICAL_SKILL_PATH);
+    // Still ONE line per version: the grouping ADR 171 §2 bought is not being spent here.
+    expect(r.drift.filter((d) => d.includes('current is v'))).toHaveLength(1);
   });
 
   /**
@@ -1770,5 +1902,86 @@ describe('harness hook drift is scoped to harnesses this folder is CONFIGURED fo
     h.harnesses = [codex(true)] as never;
     const report = await inspectProvisioning(mkdtempSync(join(tmpdir(), 'doctor-')));
     expect(report.drift.some((d) => d.includes('Codex hooks'))).toBe(true);
+  });
+});
+
+describe('runSessionProbe self-heal (spec 2026-09-16, ADR 408)', () => {
+  const sha = (c: string): string => c.repeat(40);
+  const report = {
+    build: sha('a'),
+    repaired: { guidance: 2, hooks: 1 },
+    skipped: [{ class: 'permissions' as const, reason: 'policy' as const }],
+    remaining: { guidance: 0, hooks: 0, permissions: 1 },
+  };
+  const line =
+    'musterd: repaired 2 guidance files and 1 hook; the harness permission layer is still behind — run `musterd init --refresh-permissions`.';
+
+  it('repairs, prints the outcome line, posts the audit row, and exits 0 even with the daemon down', async () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(((c: string) => {
+      lines.push(String(c));
+      return true;
+    }) as never);
+    const bare = mkdtempSync(join(tmpdir(), 'musterd-heal-'));
+    const posted: unknown[] = [];
+    try {
+      const code = await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => sha('a'),
+        cwd: bare,
+        selfHeal: () => ({ ran: true, report, line }),
+        postRepair: async (b) => {
+          posted.push(b);
+        },
+      });
+      expect(code).toBe(0);
+      expect(lines.join('')).toBe(`${line}\n`);
+      expect(posted).toEqual([report]);
+
+      lines.length = 0;
+      const down = await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+        cwd: bare,
+        selfHeal: () => ({ ran: true, report, line }),
+        postRepair: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+      });
+      expect(down).toBe(0);
+      expect(lines.join('')).toContain('repaired 2 guidance files');
+
+      lines.length = 0;
+      // Clean: nothing printed, nothing posted.
+      await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => sha('a'),
+        cwd: bare,
+        selfHeal: () => ({ ran: false, report: null, line: '' }),
+        postRepair: async (b) => {
+          posted.push(b);
+        },
+      });
+      expect(lines.join('')).toBe('');
+      expect(posted).toHaveLength(1);
+
+      // Held (declined / checkout-behind): the line prints, but nothing is posted — no repair happened.
+      lines.length = 0;
+      await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => sha('a'),
+        cwd: bare,
+        selfHeal: () => ({ ran: false, report, line: 'musterd: held' }),
+        postRepair: async (b) => {
+          posted.push(b);
+        },
+      });
+      expect(lines.join('')).toBe('musterd: held\n');
+      expect(posted).toHaveLength(1);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
   });
 });

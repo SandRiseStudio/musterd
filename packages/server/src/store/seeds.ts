@@ -117,6 +117,12 @@ export function createSeedFromRelay(
     now,
   );
   const row = db.prepare<[string], SeedRow>('SELECT * FROM seeds WHERE id = ?').get(id)!;
+  // ADR 399: the capture crosses to every joiner, so a seat on a second machine holds the team's
+  // ideation without holding the relay's bearer token.
+  const submitterName = db
+    .prepare<[string], { name: string }>('SELECT name FROM members WHERE id = ?')
+    .get(submitter.id);
+  if (submitterName) stampSeedCapture(db, teamId, row, submitterName.name, now);
   return toSeed(row, team.slug, db);
 }
 
@@ -198,11 +204,9 @@ export function captureRepoSeed(
       now,
       now,
     );
-    return toSeed(
-      db.prepare<[string], SeedRow>('SELECT * FROM seeds WHERE id = ?').get(id)!,
-      team.slug,
-      db,
-    );
+    const row = db.prepare<[string], SeedRow>('SELECT * FROM seeds WHERE id = ?').get(id)!;
+    stampSeedCapture(db, teamId, row, actor.name, now); // ADR 399
+    return toSeed(row, team.slug, db);
   });
   return tx();
 }
@@ -298,6 +302,103 @@ function requireSeed(db: Database, teamId: string, seedId: string): Seed {
   const seed = getSeed(db, teamId, seedId);
   if (!seed) throw new MusterdError('not_found', `Seed "${seedId}" not found`);
   return seed;
+}
+
+/**
+ * Stamp a relay capture as `seed.captured` (ADR 399), in the caller's transaction.
+ *
+ * The event names the seed by `relay_id` and the submitter by NAME — `seeds.id` and `members.id`
+ * are minted per daemon and mean nothing off this machine, exactly as `record.seed_thread` already
+ * has it. Lifecycle state is deliberately NOT carried: this replicates the capture, not the claim
+ * (ADR 371 §3, unchanged). `promoted` seeds ship their `linked_lane_id` because the lane itself
+ * replicates and a repo capture is born promoted; the explorer claim still never crosses.
+ *
+ * Hub-minted by rule: `sync/log.ts` refuses a pushed `seed` event from any node but the hub, so the
+ * relay has one poller per team and a capture has one birth.
+ */
+function stampSeedCapture(
+  db: Database,
+  teamId: string,
+  seed: SeedRow,
+  submitterName: string,
+  now: number,
+): void {
+  appendReplicatedEvent(db, teamId, {
+    actor: submitterName,
+    action: 'seed.captured',
+    target: seed.relay_id,
+    result: 'allow',
+    detail: {
+      relay_id: seed.relay_id,
+      source: seed.source,
+      body: seed.body,
+      captured_at: seed.captured_at,
+      slack_user_id: seed.slack_user_id,
+      by: submitterName,
+      linked_lane_id: seed.linked_lane_id,
+      promotion_kind: seed.promotion_kind,
+      created_at: now,
+    },
+  });
+}
+
+/** What a folded `seed.captured` carries. Mirrors `stampSeedCapture`'s detail. */
+export interface SeedCapture {
+  relay_id: string;
+  source: string;
+  body: string;
+  captured_at: number;
+  slack_user_id: string | null;
+  linked_lane_id: string | null;
+  promotion_kind: string | null;
+}
+
+/**
+ * The fold's projector primitive for `seed.captured` (ADR 399): one seed row, no stamp.
+ *
+ * Idempotent on `(team_id, relay_id)` — the table's own UNIQUE — so a re-delivered pull batch is a
+ * no-op rather than a duplicate, and a node that had already relay-ingested the same capture keeps
+ * its local row. The local `seeds.id` stays daemon-private: it is minted here, and the thread
+ * entries that arrive later resolve to it by `relay_id`, which is the whole reason that key exists.
+ */
+export function applySeedCapture(
+  db: Database,
+  teamId: string,
+  capture: SeedCapture,
+  submitterId: string,
+  now: number,
+): 'applied' | 'held' {
+  const prior = db
+    .prepare<
+      [string, string],
+      { id: string }
+    >('SELECT id FROM seeds WHERE team_id = ? AND relay_id = ?')
+    .get(teamId, capture.relay_id);
+  if (prior) return 'held';
+  const promoted = capture.linked_lane_id !== null;
+  db.prepare(
+    `INSERT INTO seeds
+       (id, team_id, relay_id, source, body, captured_at, slack_user_id, submitted_by, state,
+        linked_lane_id, promotion_kind, research_skipped, promoted_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    ulid(now),
+    teamId,
+    capture.relay_id,
+    capture.source,
+    capture.body,
+    capture.captured_at,
+    capture.slack_user_id,
+    submitterId,
+    promoted ? 'promoted' : 'open',
+    capture.linked_lane_id,
+    capture.promotion_kind,
+    promoted ? 1 : null,
+    promoted ? now : null,
+    now,
+    now,
+  );
+  return 'applied';
 }
 
 type ThreadKind = 'clarification' | 'answer' | 'brief' | 'conclusion';

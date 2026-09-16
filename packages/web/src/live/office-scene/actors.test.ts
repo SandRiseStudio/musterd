@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createActors, deskNeighbourPairs, homePoses, travelDir } from './actors';
+import { GESTURE_DUR, createActors, deskNeighbourPairs, homePoses, travelDir } from './actors';
 import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK, NOOK_RUG_R, STRIP_CAP } from './layout';
-import { GESTURE } from './skeleton';
+import { GESTURE, IDLE_GESTURES } from './skeleton';
+import { LEISURE_SPOTS } from './layout';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
 import { slotRng } from './ambientSeed';
@@ -974,6 +975,41 @@ describe('deskNeighbourPairs — the shared pair pool (E1 spec §2)', () => {
     return { placements, byName, actors };
   }
 
+  /** A room with members sitting somewhere OTHER than a desk. `active` (between claims) is what puts
+   *  someone on the leisure furniture — it is not desk overflow, which is the wrong guess I made
+   *  first and the guard assertion below caught. The 12-desk fixture above has no leisure sitters at
+   *  all, which is why it could not see the two pools disagree (2026-09-14). */
+  function loungeWorld() {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    for (let i = 0; i < 5; i++) nodes[i]!.posture = 'active';
+    const { placements, byName } = world(nodes);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    return { placements, byName, actors };
+  }
+
+  it('the two pools still agree once members sit somewhere other than a desk', () => {
+    const { placements, byName, actors } = loungeWorld();
+    const leisure = [...placements.values()].filter((p) => p.kind === 'leisure');
+    // Guard the guard: if seating ever stops overflowing, this test silently stops testing anything.
+    expect(leisure.length, 'fixture must actually seat someone off-desk').toBeGreaterThan(0);
+    expect(deskNeighbourPairs(placements, byName)).toEqual(actors.deskNeighbours());
+  });
+
+  it('pairs two members in the same leisure zone, and never across zones', () => {
+    const { placements, byName } = loungeWorld();
+    const zoneOf = new Map<string, string>();
+    for (const [name, pl] of placements) {
+      if (pl.kind === 'leisure') zoneOf.set(name, LEISURE_SPOTS[pl.spot]?.zone ?? '?');
+    }
+    const pairs = deskNeighbourPairs(placements, byName).filter(
+      ([a, b]) => zoneOf.has(a) && zoneOf.has(b),
+    );
+    for (const [a, b] of pairs) {
+      expect(zoneOf.get(a), `${a} and ${b} must share a zone`).toBe(zoneOf.get(b));
+    }
+  });
+
   it('matches the scene-state pool exactly when nobody is busy', () => {
     const { placements, byName, actors } = fullWorld();
     expect(deskNeighbourPairs(placements, byName)).toEqual(actors.deskNeighbours());
@@ -1169,5 +1205,59 @@ describe('the laptop on the person (laptop/dock design §0)', () => {
     // which is exactly why the carry is derived per frame rather than baked into the home pose.
     actors.setHomes(placements, new Map([['Ada', idle('Ada')]]), true);
     expect(actors.poses().get('Ada')!.carry).toBe('laptop');
+  });
+});
+
+describe('the gesture window table', () => {
+  /*
+   * Lane 01M2JYBGMQ, finding 2 (delta, re-read by izzo). Four ids shipped in #1430 with no entry
+   * here — shoulders/behindHead/rubEyes/pocketPhone all fell through `?? 2.4` to the SHORTEST
+   * window in the table, two of them held poses where the duration *is* the beat. It shipped
+   * because `Record<number, number>` cannot report that it is incomplete. The type now can;
+   * this is the runtime half of the same claim, so a new beat cannot slip past either.
+   */
+  it('declares a window for every beat the scheduler can pick — and for nothing else', () => {
+    expect(Object.keys(GESTURE_DUR).map(Number).sort((a, b) => a - b)).toEqual(
+      [...IDLE_GESTURES].sort((a, b) => a - b),
+    );
+  });
+
+  it('no beat rides the old 2.4s fallback by accident — every window is one somebody chose', () => {
+    for (const kind of IDLE_GESTURES) {
+      expect(GESTURE_DUR[kind], `gesture ${String(kind)} has no declared window`).toBeGreaterThan(0);
+    }
+  });
+
+  it('a held pose outlasts the quickest arc — behindHead is not a twitch', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.gestureBeat('Ada', GESTURE.behindHead)).toBe(true);
+    expect(actors.gestureBeat('Bo', GESTURE.glance)).toBe(true);
+    for (let i = 0; i < 68; i++) actors.step(0.05); // 3.4s: past glance (2.4s)
+    expect(actors.poses().get('Bo')!.gesture).toBe(0);
+    expect(actors.poses().get('Ada')!.gesture).toBe(GESTURE.behindHead); // still laced behind the head
+  });
+
+  it('settle stays the longest of them — getting comfortable is not a quick motion', () => {
+    const longest = Math.max(...IDLE_GESTURES.map((k) => GESTURE_DUR[k]));
+    expect(GESTURE_DUR[GESTURE.settle]).toBe(longest);
+  });
+});
+
+/**
+ * The runtime half of what `Record<IdleGesture, number>` promises at compile time.
+ *
+ * The type stops a MISSING key. It cannot stop a present key holding something unusable, and the
+ * failure this guards is not a wrong number — it is `dur` being absent or non-finite, which makes
+ * `g.t >= g.dur` permanently false and strands the member mid-beat (izzo, reviewing #1434).
+ */
+describe('GESTURE_DUR covers every scheduler beat with a usable window', () => {
+  it('has a finite, positive window for each one', () => {
+    for (const kind of IDLE_GESTURES) {
+      const dur = GESTURE_DUR[kind];
+      expect(Number.isFinite(dur), `gesture ${kind} has no usable window`).toBe(true);
+      expect(dur).toBeGreaterThan(0);
+    }
   });
 });

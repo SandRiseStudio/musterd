@@ -3,12 +3,13 @@ import type { Parsed } from '../args.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { findWorkspaceDir } from './helpers.js';
-import { emitSessionOrientation, pushAttestation } from './session.js';
+import { checkHookInterrupt, emitSessionOrientation, pushAttestation } from './session.js';
 
 export type CodexHookDeps = {
   start?: (event: Extract<CodexHookEvent, { event: 'start' }>) => Promise<void> | void;
   end?: (event: Extract<CodexHookEvent, { event: 'end' }>) => Promise<void> | void;
   observe?: (event: Extract<CodexHookEvent, { event: 'post-tool-use' }>) => Promise<void> | void;
+  interrupt?: (dir: string | null) => Promise<string | null> | string | null;
 };
 
 type CodexHookCommand = 'start' | 'end' | 'post-tool-use';
@@ -41,13 +42,26 @@ export async function handleCodexHook(
   parsed: Parsed,
   raw: string,
   deps: CodexHookDeps = {},
-): Promise<void> {
+): Promise<string | null> {
   const expected = command(parsed);
   const event = parseCodexHookEvent(raw, expected);
-  if (!event) return;
-  if (event.event === 'start') await (deps.start ?? captureStart)(event);
-  else if (event.event === 'end') await (deps.end ?? captureEnd)(event);
-  else await (deps.observe ?? observeModel)(event);
+  if (!event) return null;
+  if (event.event === 'start') {
+    await (deps.start ?? captureStart)(event);
+    return null;
+  }
+  if (event.event === 'end') {
+    await (deps.end ?? captureEnd)(event);
+    return null;
+  }
+  await (deps.observe ?? observeModel)(event);
+  const local = localBinding(event.cwd);
+  if (!local) return null;
+  try {
+    return formatCodexInterrupt(await (deps.interrupt ?? checkHookInterrupt)(local.dir));
+  } catch {
+    return null;
+  }
 }
 
 export async function codexHookCommand(parsed: Parsed): Promise<number> {
@@ -55,8 +69,18 @@ export async function codexHookCommand(parsed: Parsed): Promise<number> {
   if (parsed.flags['stdin'] !== true) {
     throw new CliError('usage: musterd codex-hook <start|end|post-tool-use> --stdin', 2);
   }
-  await handleCodexHook(parsed, await readStdin());
+  const output = await handleCodexHook(parsed, await readStdin());
+  if (output) process.stdout.write(output + '\n');
   return 0;
+}
+
+/** Codex PostToolUse context seam: null stays silent; a raised daemon line becomes structured context. */
+export function formatCodexInterrupt(line: string | null): string | null {
+  return line
+    ? JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: line },
+      })
+    : null;
 }
 
 function localBinding(cwd: string): { dir: string; binding: Binding } | undefined {

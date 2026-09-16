@@ -8,12 +8,15 @@ import {
   parseContentStamp,
   TOKEN_PREFIXES,
   type Binding,
+  type WorkspaceRepairBody,
 } from '@musterd/protocol';
 import { resolveWorkspace } from '@musterd/protocol/project';
-import { HttpClient } from '../client.js';
+import { HttpClient, isSessionLeaseRefusal } from '../client.js';
+import { resolveRead } from '../commands/helpers.js';
 import { recoverAgentKey } from '../commands/team.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
 import { type Config, findBinding, loadBinding, loadConfig, readBindingAt } from '../config.js';
+import { CliError } from '../errors.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
@@ -29,6 +32,7 @@ import { inspectSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget } from './primer.js';
 import { defaultHarnessContext } from './reconcile/context.js';
 import { inspectHarnesses, type FragmentInspection } from './reconcile/engine.js';
+import { defaultSelfHealDeps, selfHealWorkspace, type SelfHealOutcome } from './selfHeal.js';
 
 /**
  * `musterd init --check` — provisioning drift detector (ADR 060). A read-only checker, never a
@@ -81,6 +85,13 @@ export interface DoctorReport {
 }
 
 /**
+ * How many stale guidance paths one drift line names before it summarises the rest. Four fits the
+ * real shape: a seat worktree carries a handful of guidance files, so an ordinary version bump
+ * names all of them, and only a never-refreshed folder reaches the tail.
+ */
+const STALE_FILES_NAMED = 4;
+
+/**
  * Guidance-file drift (ADR 085, re-anchored by ADR 171).
  *
  * The set inspected is what **this build would write** into this folder — `guidanceTargets` over the
@@ -126,11 +137,23 @@ function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; 
   // it the missing-file line loses the "was recorded, now gone" vs "never arrived" distinction and
   // says the latter — a wording degradation, and both prescribe the same repair.
   const wasRecorded = new Set(v1?.files ?? []);
-  // Stale files are counted, not listed: one version bump used to emit one line PER FILE — six
+  // Stale files are grouped by version, not one line per file: one version bump used to emit six
   // identical-in-substance lines for a single fact on a real seat. ADR 168 pre-registered "becomes
-  // noise" as a failure mode of its own instrument; ADR 171 §2 pays that debt. The remedy is
-  // identical for every file, so the file list is not actionable and the count is.
-  const staleByVersion = new Map<number, number>();
+  // noise" as a failure mode of its own instrument; ADR 171 §2 pays that debt.
+  //
+  // That grouping stands. The clause that used to follow it — "the remedy is identical for every
+  // file, so the file list is not actionable and the count is" — was FALSE, and it cost three
+  // seats a false PASS on a teammate's lane (lane 01M2NRA59J, 2026-09-16). The remedy is indeed
+  // identical; the COST of deferring it is not. `1 musterd guidance file is v22` tells a reader
+  // nothing about what they will do wrong in the meantime, so every seat that saw it reasonably
+  // finished its task first. Measured that day: the orient skill's "an accept on a review ask IS
+  // the verdict" correction landed 2026-09-14 (#1403) and SEVEN of nine seat worktrees were still
+  // on v22 two days later — dolly and miley closed a lane unreviewed eight hours after the fix
+  // landed, sloane twice on 2026-09-16, all three following the v22 text verbatim.
+  //
+  // So the names go in. A path is what lets a reader price the delay: a stale label renderer can
+  // wait, a stale rule about closing other people's work cannot. Still ONE line per version.
+  const staleByVersion = new Map<number, string[]>();
   for (const rel of guidanceTargets(establishedHarnesses(cwd, harnesses))) {
     const abs = join(cwd, rel);
     if (!existsSync(abs)) {
@@ -162,7 +185,7 @@ function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; 
       continue;
     }
     if (stamp.version < GUIDANCE_CONTENT_VERSION) {
-      staleByVersion.set(stamp.version, (staleByVersion.get(stamp.version) ?? 0) + 1);
+      staleByVersion.set(stamp.version, [...(staleByVersion.get(stamp.version) ?? []), rel]);
     } else if (contentHash(strippedBody(text)) !== stamp.hash) {
       notes.push(
         `${rel} has local edits — this is a musterd-managed file, so \`musterd init\` will replace them ` +
@@ -173,10 +196,17 @@ function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; 
   // A recorded path that is no longer expected is a file musterd RETIRED. Deliberately silent: not
   // every absence is drift, and a doctor that nags about a path musterd itself stopped writing
   // teaches people to stop reading it.
-  for (const [version, count] of [...staleByVersion].sort((a, b) => a[0] - b[0])) {
+  for (const [version, files] of [...staleByVersion].sort((a, b) => a[0] - b[0])) {
+    const count = files.length;
+    // Named, but bounded: past a handful the list stops being a reason to act and becomes the
+    // wall of text the grouping above exists to prevent.
+    const named =
+      count <= STALE_FILES_NAMED
+        ? files.join(', ')
+        : `${files.slice(0, STALE_FILES_NAMED).join(', ')} and ${String(count - STALE_FILES_NAMED)} more`;
     drift.push(
       `${count === 1 ? '1 musterd guidance file is' : `${String(count)} musterd guidance files are`} ` +
-        `v${String(version)}, current is v${String(GUIDANCE_CONTENT_VERSION)} — ` +
+        `v${String(version)}, current is v${String(GUIDANCE_CONTENT_VERSION)} (${named}) — ` +
         // ADR 161: point at the refresh that touches ONLY guidance files. Plain `init` also mints
         // members and rewrites bindings, which is the wrong blast radius for a version bump —
         // and in a live seat's worktree, actively dangerous.
@@ -248,6 +278,77 @@ async function inspectModelAttestation(binding: Binding | null): Promise<string[
       `diversity conclusions on its chains become unverifiable (ADR 120). Set MUSTERD_MODEL (or ` +
       `let the harness env carry ANTHROPIC_MODEL) and reconnect to attest.`,
   ];
+}
+
+/**
+ * The dead hook lease (lane 01M2H0GHMK): this folder's binding carries a session lease the daemon
+ * refuses, while the seat holds a live adapter Presence here — so the interrupt line is deaf on
+ * every hook probe while status, waiting, reads and the roster all look healthy. Ordinary commands
+ * self-heal through the one-shot reclaim and the probe deliberately does not (anti-storm), which
+ * is why the seat reads fine everywhere except the one surface that cannot heal. The probe is the
+ * only channel that reports it, and it reports it on the channel being refused.
+ *
+ * Best-effort + read-only like the checks above, and a **note**, never drift: silent when the
+ * folder has no seat binding, carries no lease on disk (ambient and CLI-human steady state stay
+ * quiet — their leases die between commands by design), holds no live Presence here (an offline
+ * seat owes no bell), the lease still answers, the server is unreachable, or the refusal is not
+ * a lease refusal (a bad credential or wrong seat is nobody's hook problem).
+ *
+ * The repair it names is the adapter rejoin, never `musterd claim` — a one-shot mint dies with
+ * its command (the deaf line says so, measured). Harness-neutral on purpose: the deferral
+ * round-trip differs per harness and the probe's own line already names it hook-keyed.
+ */
+async function inspectDeadHookLease(binding: Binding | null): Promise<string[]> {
+  if (!binding?.server || !binding.team) return [];
+  const seat = bindingSeat(binding);
+  const credential = binding?.seat_credential ?? binding?.agent_key;
+  if (!seat || !credential || !binding.session_lease) return [];
+  const workspace = resolveWorkspace();
+  let members;
+  try {
+    ({ members } = await new HttpClient({ server: binding.server }).roster(binding.team));
+  } catch {
+    return [];
+  }
+  const liveHere = (members.find((m) => m.name === seat)?.presences ?? []).filter(
+    (p) => p.status !== 'offline' && (p.workspace === workspace || p.workspace == null),
+  );
+  if (liveHere.length === 0) return [];
+  // The seat is live here under a different authority (the adapter socket). Ask whether THIS
+  // folder's lease — the one every hook presents — is still good: one read-only probe call with
+  // the heals off, exactly as the hook runs it.
+  try {
+    await new HttpClient({
+      server: binding.server,
+      team: binding.team,
+      workspace,
+      key: credential,
+      seat,
+      ...(credential === binding.seat_credential && binding.session_lease !== undefined
+        ? { sessionLease: binding.session_lease }
+        : {}),
+      surface: 'cli',
+      claimSeatPerRequest: false,
+    }).interruptCheck(binding.team);
+    return [];
+  } catch (err) {
+    if (
+      !(err instanceof CliError) ||
+      !isSessionLeaseRefusal({
+        code: typeof err.code === 'string' ? err.code : '',
+        message: err.message,
+      })
+    ) {
+      return [];
+    }
+    return [
+      `seat "${seat}" holds a live adapter Presence here but this folder's session lease is dead ` +
+        `— the interrupt line is deaf on every hook probe while status, waiting and reads all ` +
+        `look healthy. Read and re-join from THIS folder's harness adapter (team_join, in the ` +
+        `session that owns this folder) — never from another folder, whose claim would displace ` +
+        `this Presence; \`musterd claim\` mints a lease that dies with the command.`,
+    ];
+  }
 }
 
 /**
@@ -908,6 +1009,7 @@ export async function inspectProvisioning(
   drift.push(...guidance.drift);
   const duplicateAdapters = await inspectDuplicateAdapters(binding);
   const modelAttestation = await inspectModelAttestation(binding);
+  const deadHookLease = await inspectDeadHookLease(binding);
   const seatIdentity = await inspectSeatIdentity(binding, cwd);
   // ADR 160/185: label coverage is per-capability (cross_rename / self_rename / none). Say so
   // plainly (a note, never drift — capability gaps are not misconfiguration).
@@ -967,6 +1069,7 @@ export async function inspectProvisioning(
       ...guidance.notes,
       ...duplicateAdapters,
       ...modelAttestation,
+      ...deadHookLease,
       ...seatIdentity.notes,
       ...inspectGitAttribution(binding, cwd),
       ...registryNotes,
@@ -1166,6 +1269,10 @@ export async function runSessionProbe(deps?: {
   cliRef?: string | undefined;
   daemonBuild?: () => Promise<string | undefined>;
   cwd?: string;
+  /** Spec 2026-09-16 / ADR 408: the repair step; injectable so the probe's contract is testable. */
+  selfHeal?: (cwd: string, build: string) => SelfHealOutcome;
+  /** The audit-row post; best-effort, a rejection is swallowed here. */
+  postRepair?: (body: WorkspaceRepairBody) => Promise<void>;
 }): Promise<number> {
   const ref = deps?.cliRef !== undefined ? deps.cliRef : cliBuild();
   if (ref) {
@@ -1188,30 +1295,30 @@ export async function runSessionProbe(deps?: {
     }
   }
   try {
-    const { guidance, hooks, permissions } = inspectArtifactDrift(deps?.cwd ?? process.cwd());
-    if (guidance.length + hooks.length + permissions.length > 0) {
-      const what = [
-        guidance.length > 0 ? `${String(guidance.length)} guidance file(s)` : null,
-        hooks.length > 0 ? `${String(hooks.length)} hook(s)` : null,
-        // Named as a layer, not a file count (ADR 261): the reader's next question is always
-        // "which of the three denied me", and this line is where that question gets answered.
-        permissions.length > 0 ? 'the harness permission layer' : null,
-      ].filter(Boolean);
-      const fix = [
-        guidance.length > 0 ? '`musterd init --refresh-guidance`' : null,
-        hooks.length > 0 ? '`musterd init --refresh-hooks`' : null,
-        permissions.length > 0 ? '`musterd init --refresh-permissions`' : null,
-      ].filter(Boolean);
-      process.stdout.write(
-        `musterd: this folder's provisioning is behind what this build writes — ${what.join(' and ')} ` +
-          `missing or stale (ADR 171). Run ${fix.join(' and ')} to repair, ` +
-          `or \`musterd init --check\` for the detail.\n`,
-      );
+    // Spec 2026-09-16 / ADR 408: repair, THEN report. Guidance and in-worktree hooks self-heal;
+    // the permission floor and any file outside the worktree never do, and the line says so. The
+    // contract above is unchanged — silent when clean, exit 0, one bounded line.
+    const cwd = deps?.cwd ?? process.cwd();
+    const build = ref ?? 'unstamped';
+    const heal =
+      deps?.selfHeal ?? ((c: string, b: string) => selfHealWorkspace(c, defaultSelfHealDeps(b)));
+    const out = heal(cwd, build);
+    if (out.report && out.ran) {
+      // Attribution (ADR 408) is best-effort and never a gate: a dead daemon is silence.
+      const post = deps?.postRepair ?? defaultPostRepair;
+      await post(out.report).catch(() => undefined);
     }
+    if (out.line) process.stdout.write(`${out.line}\n`);
   } catch {
     // A health probe never fails a session start, and never invents drift from a folder it cannot read.
   }
   return 0;
+}
+
+/** The real audit-row post: this folder's seat, over the same authority the interrupt probe uses. */
+async function defaultPostRepair(body: WorkspaceRepairBody): Promise<void> {
+  const { http, team } = resolveRead({});
+  await http.workspaceRepair(team, body);
 }
 
 export async function runInitDoctor(json: boolean, cwd: string = process.cwd()): Promise<number> {

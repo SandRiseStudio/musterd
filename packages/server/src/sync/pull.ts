@@ -168,7 +168,17 @@ function reportStop(ctx: Ctx, team: string, stop: FoldStop): void {
         relay_id: stop.relay_id,
         hub_seq: stop.hub_seq,
         detail:
-          'a seed-thread entry names a relay seed this daemon has not ingested yet (ADR 371 §3); transient — one relay poll — and a persisting one is a relay-ingest defect',
+          'a seed-thread entry names a relay seed this daemon holds no row for; since ADR 399 the capture crosses as a `seed` event, so this closes on the tick that carries it — one relay poll OR one fold, whichever this node can do',
+      });
+      return;
+    case 'unknown_seed_event':
+      log.error({
+        msg: 'sync_fold_unknown_seed_event',
+        team,
+        action: stop.action,
+        hub_seq: stop.hub_seq,
+        detail:
+          'a seed verb this build cannot project (ADR 399); a seed projects into a table, so it stops rather than landing a row nothing reads — upgrade this daemon',
       });
       return;
   }

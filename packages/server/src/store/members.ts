@@ -383,6 +383,16 @@ export function authMember(
   token: string,
   actingSeat?: string,
   sessionLease?: string,
+  opts: {
+    /**
+     * ADR 408: accept an agent-seat credential with NO session lease. The one route that uses it
+     * is `POST /workspace/repair`, posted by the SessionStart hook BEFORE the session has joined —
+     * the ADR 164 window in which every lease-gated route is refused. The repair is local and the
+     * credential hash alone proves whose workspace it was; a lease would prove nothing extra and
+     * would refuse every real post. Every other agent route keeps ADR 337's rule.
+     */
+    leaseless?: boolean;
+  } = {},
 ): { team: TeamRow; member: MemberRow } {
   const team = requireTeam(db, teamSlug);
   let member: MemberRow;
@@ -393,7 +403,7 @@ export function authMember(
       'the team agent key is bootstrap-only — claim an agent seat and present its seat credential',
     );
   } else if (token.startsWith(TOKEN_PREFIXES.agent_seat)) {
-    member = authByAgentSeatCredential(db, team, token, actingSeat, sessionLease);
+    member = authByAgentSeatCredential(db, team, token, actingSeat, sessionLease, opts.leaseless);
   } else if (token.startsWith(TOKEN_PREFIXES.credential)) {
     member = authByCredential(db, team, token, actingSeat);
   } else if (token.startsWith(TOKEN_PREFIXES.seat)) {
@@ -422,6 +432,7 @@ function authByAgentSeatCredential(
   credential: string,
   actingSeat: string | undefined,
   sessionLease: string | undefined,
+  leaseless = false,
 ): MemberRow {
   const member = db
     .prepare<
@@ -436,6 +447,8 @@ function authByAgentSeatCredential(
       'forbidden',
       `agent-seat credential identifies "${member.name}", not "${actingSeat}"`,
     );
+  // ADR 408: the seat is proven by the credential hash; a leaseless route stops here.
+  if (leaseless) return member;
   // ADR 391: from here down the seat IS proven — the credential matched a live agent row. A lease
   // failure is still a refusal, but it must not throw the proof away with it: the interrupt line
   // needs to say which seat went deaf, and only this function ever knew.
@@ -495,7 +508,7 @@ export function agentKeySeatKindRefusal(
     message:
       `the human seat "${seat}" is not reachable with the team agent key; it authenticates with ` +
       'its own credential',
-    hint: `musterd join <team> --as ${seat} --key mscr_…`,
+    hint: `musterd claim ${seat} --team <team> --key mscr_…`,
   };
 }
 

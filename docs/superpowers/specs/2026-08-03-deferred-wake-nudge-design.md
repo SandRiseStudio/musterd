@@ -3,7 +3,7 @@
 - Date: 2026-08-03
 - Lane: 01KYJXGW63DQ4P408H37YDGV46 (ryder)
 - Target ADR: 211
-- Status: design, approved in brainstorm — not yet implemented
+- Status: shipped — accepted as ADR 211 (increment 0/1 in PR #613, wake eligibility in PR #617)
 
 ## Problem
 

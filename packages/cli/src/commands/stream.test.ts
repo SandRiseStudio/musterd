@@ -70,6 +70,9 @@ describe('musterd stream', () => {
   const run = (argv: string[], over: Partial<StreamDeps> = {}) =>
     streamCommand(parseArgs(argv), { ...base, ...over });
 
+  const MANIFEST_UNKNOWN =
+    'failed to get manifest ...: request failed: not found [http 404]: ' +
+    '{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}';
   const digest = 'sha256:' + 'a'.repeat(64);
   const withImage = () =>
     writeFileSync(join(repo, 'scripts', 'broadcast', '.image-digest'), digest);
@@ -229,6 +232,112 @@ describe('musterd stream', () => {
       expect(n).toBe(2);
     });
 
+    // 2026-09-15: a MANIFEST_UNKNOWN exit is not proof no machine was created. `fly machine run`
+    // creates the machine, then the VM fails to pull an unpublished digest and heals on its own.
+    // The retry must NOT launch a second machine over the top of the one its "failed" attempt
+    // already left — that is the 2026-09-03 duplicate-launch reached through start's own retry.
+    // 2026-09-15: a MANIFEST_UNKNOWN exit is not proof no machine was created. `fly machine run`
+    // creates the machine, then the VM fails to pull an unpublished digest and heals on its own.
+    // The retry must NOT launch a second machine over the top of the one its "failed" attempt
+    // already left — that is the 2026-09-03 duplicate-launch reached through start's own retry.
+    it('does NOT relaunch when the failed attempt left a machine that then comes up', async () => {
+      withImage();
+      let listCalls = 0;
+      const inner = greenExec({});
+      // 1st list = the top-of-function guard (empty → proceed). 2nd = the reap check, which finds
+      // the machine `created`. 3rd+ = the settle poll, by which point it has reached `started`.
+      const stateful: Exec = (cmd, args) => {
+        const key = [cmd, ...args].join(' ');
+        if (key.startsWith('fly machine list')) {
+          listCalls += 1;
+          if (listCalls === 1) return ok('[]');
+          const state = listCalls >= 3 ? 'started' : 'created';
+          return ok(JSON.stringify([{ id: 'm-booting', state }]));
+        }
+        return inner(cmd, args);
+      };
+      let n = 0;
+      const code = await run(
+        ['start'],
+        sup({
+          exec: stateful,
+          launch: () => ((n += 1), { code: 1, output: MANIFEST_UNKNOWN }),
+          sleep: async () => {},
+        }),
+      );
+      expect(code).toBe(0);
+      expect(n).toBe(1); // launched once, then waited for the machine it had already created
+      expect(out.join('')).toContain('m-booting');
+      expect(out.join('')).toContain('not up yet');
+    });
+
+    // The guard must not trade a duplicate launch for a silent lie. `isUnpropagatedImage` matches
+    // EVERY MANIFEST_UNKNOWN, including a digest that is permanently unresolvable — and `created`
+    // is an OCCUPYING state, so "a machine exists" would report `◉ live` and `ensure`'s
+    // `liveCount > 0` would then read `noop — live` forever. Nobody would stream, and nothing
+    // would say so. Waiting for `started` is what keeps the failure loud.
+    it('FAILS LOUDLY when the leftover machine never starts — a stuck machine is not a live one', async () => {
+      withImage();
+      let listCalls = 0;
+      const inner = greenExec({});
+      const stateful: Exec = (cmd, args) => {
+        const key = [cmd, ...args].join(' ');
+        if (key.startsWith('fly machine list')) {
+          listCalls += 1;
+          // Occupying forever, never `started`: the permanently-unresolvable-digest case.
+          return listCalls === 1
+            ? ok('[]')
+            : ok(JSON.stringify([{ id: 'm-stuck', state: 'created' }]));
+        }
+        return inner(cmd, args);
+      };
+      let n = 0;
+      await expect(
+        run(
+          ['start'],
+          sup({
+            exec: stateful,
+            launch: () => ((n += 1), { code: 1, output: MANIFEST_UNKNOWN }),
+            sleep: async () => {},
+          }),
+        ),
+      ).rejects.toThrow(/never started|not resolvable/);
+      expect(n).toBe(1); // still only one launch — it failed, it did not duplicate
+    });
+
+    // Two machines here is the duplicate this command exists to prevent; it must be said, not
+    // papered over by reporting the first id as live.
+    it('says so when it finds MORE than one occupying machine', async () => {
+      withImage();
+      let listCalls = 0;
+      const inner = greenExec({});
+      const stateful: Exec = (cmd, args) => {
+        const key = [cmd, ...args].join(' ');
+        if (key.startsWith('fly machine list')) {
+          listCalls += 1;
+          if (listCalls === 1) return ok('[]');
+          const state = listCalls >= 3 ? 'started' : 'created';
+          return ok(
+            JSON.stringify([
+              { id: 'm-one', state },
+              { id: 'm-two', state },
+            ]),
+          );
+        }
+        return inner(cmd, args);
+      };
+      await run(
+        ['start'],
+        sup({
+          exec: stateful,
+          launch: () => ({ code: 1, output: MANIFEST_UNKNOWN }),
+          sleep: async () => {},
+        }),
+      );
+      expect(out.join('')).toContain('duplicate launch');
+      expect(out.join('')).toContain('m-one, m-two');
+    });
+
     // A retry loop over real errors is how you bill for nothing. Anything but the transient
     // registry signature stays fatal on the first try.
     it('does NOT retry a launch that failed for any other reason', async () => {
@@ -383,6 +492,62 @@ describe('musterd stream', () => {
       // the next tick is quiet — the ask already stands
       expect(await run(['ensure'], sup())).toBe(0);
       expect(asks.length).toBe(1);
+    });
+
+    /*
+     * Lane 01M2K6BWVR — the end-to-end half. `standDownReport` is unit-tested next door; this is the
+     * wiring, because the defect lived entirely in the wiring: `LaunchResult` already carried
+     * `output`, and `ensure` destructured `{ code }` and dropped it on the floor. The pure function
+     * could have been perfect and the human would still have been told the wrong thing.
+     */
+    it('three failed launches are reported as the environment, with fly’s own error', async () => {
+      // The real line from ensure.log, not an abbreviated one — its length is load-bearing (the
+      // cause is at the end, past where a naive cap would cut).
+      const dns =
+        'Error: failed to run query ($appName: String!) { appcompact:app(name: $appName) { id ' +
+        'internalNumericId name hostname cnameTarget deployed network status appUrl platformVersion ' +
+        'organization { id internalNumericId slug paidPlan } postgresAppRole: role { name } } }: ' +
+        'Post "https://api.fly.io/graphql": dial tcp: lookup api.fly.io: no such host';
+      withImage(); // a relaunch needs a recorded digest to run
+      const failing = sup({ launch: () => ((launches += 1), { code: 1, output: dns }) });
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [],
+        image: 'sha256:' + 'a'.repeat(64), // same digest → not a deploy, so restarts are charged
+      });
+
+      // Each tick: no machine, so a restart is spent; the launch fails, so still no machine.
+      for (let i = 0; i < 3; i++) expect(await run(['ensure'], failing)).toBe(0);
+      expect(launches).toBe(3);
+      // The fourth tick is the one that gives up and speaks to a human.
+      expect(await run(['ensure'], failing)).toBe(0);
+
+      expect(asks.length).toBe(1);
+      const ask = asks[0]!;
+      // What it must say: this is the environment, and here is the thing to go and fix.
+      expect(ask).toContain('launch attempts failed');
+      expect(ask).toContain('lookup api.fly.io: no such host');
+      expect(ask).toContain('musterd stream doctor');
+      // What it must never say again. Nothing crashed — no machine ever came up.
+      expect(ask).not.toContain('crashed');
+    });
+
+    it('machines that really did vanish still read as the broadcast stopping', async () => {
+      // Launches SUCCEED here, so a machine came up each time and then went away on its own —
+      // the one case the old wording actually fitted.
+      withImage();
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [],
+        image: 'sha256:' + 'a'.repeat(64),
+      });
+      for (let i = 0; i < 3; i++) expect(await run(['ensure'], sup())).toBe(0);
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(asks.length).toBe(1);
+      expect(asks[0]!).toContain('stopped 3×');
+      expect(asks[0]!).not.toContain('launch attempts failed');
     });
 
     it('a machine gone across an image change is a deploy — relaunched, budget untouched', async () => {

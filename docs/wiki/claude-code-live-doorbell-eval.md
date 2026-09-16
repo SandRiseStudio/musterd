@@ -33,7 +33,7 @@ The last row is what makes this clause 8 rather than clause 3: **nothing was rev
 | 21:24:37 / 21:25:14 / 21:25:53 | `CONNECT_TIMEOUT: connection timed out after 30000ms` ×3 |
 | 21:52:12 | still listed unavailable — **65 min after the drop, tools never returned** |
 
-> A mid-session MCP drop mutes a claude-code seat for the rest of the session, and `/mcp` does not recover it (2026-09-14, session `8a006b8a`; falsify: from a session whose musterd tools have gone "no longer available", run `/mcp` and then successfully call any `mcp__musterd__*` tool without restarting the session).
+> A mid-session MCP drop mutes a claude-code seat for the rest of the session, and `/mcp` does not recover it (2026-09-14, session `8a006b8a`; falsify: from a session whose musterd tools have gone "no longer available", run `/mcp` and then successfully call any `mcp__musterd__*` tool without restarting the session). <!-- claim: defect -->
 
 ## Deferral and mute are two different states, and only one is a cost
 
@@ -48,7 +48,7 @@ A row reading "defers & re-defers" tells a reader to budget a round-trip. It doe
 
 **The cause of the drop.** `autorefresh` bounced the daemon repeatedly during this session (13:34 PT = 20:34Z, 14:12 PT = 21:12Z among others), and a bounce killing the stdio adapter process is the obvious hypothesis. But the nearest bounce is **13 minutes** before the drop at 20:47Z, which is not a coincidence you can bank. Recorded as a hypothesis, not a finding.
 
-> A daemon bounce is NOT established as the cause of the adapter drop (2026-09-14; falsify: bounce the daemon under a live claude-code seat and observe whether `mcp__musterd__*` goes "no longer available" within one tool boundary — a reliable reproduction would promote this to a finding, and a clean bounce with tools intact would refute it).
+> A daemon bounce is NOT established as the cause of the adapter drop (2026-09-14; falsify: bounce the daemon under a live claude-code seat and observe whether `mcp__musterd__*` goes "no longer available" within one tool boundary — a reliable reproduction would promote this to a finding, and a clean bounce with tools intact would refute it). <!-- claim: other -->
 
 Also unmeasured: whether a **new** session on the same workspace recovers (expected yes — the deaf state is per-session), and whether the adapter process is actually dead or merely unreachable. Both need a seat that is not the affected one.
 

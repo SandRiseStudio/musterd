@@ -70,7 +70,7 @@ export function listInterruptCandidates(
   // DELIVERY and none governed DISCHARGE, and the fold is pure over what it is handed — so the
   // shapes that discharge an act from outside the seat's window are this function's to fetch or
   // to drop. Three live falsifiers on c8e89dd8, 2026-09-14, one per shape below.
-  const rows = dischargeOutsideTheWindow(db, member, windowRows);
+  const rows = dischargeOutsideTheWindow(db, member, buriedTurns(db, member, windowRows, opts));
 
   // Own suppress acts never survive the filters above: `from_member != me` drops them, and an
   // accept/decline is a DM to the asker so `to_member = me` would not have kept it either.
@@ -130,6 +130,56 @@ export function listInterruptCandidates(
 
   const byId = new Map<string, MessageRow>();
   for (const r of [...mineSuppress, ...roots, ...mine, ...rows]) byId.set(r.id, r);
+  return [...byId.values()].sort((a, b) =>
+    a.created_at === b.created_at ? (a.id < b.id ? -1 : 1) : a.created_at - b.created_at,
+  );
+}
+
+/**
+ * ADR 378 amendment (2026-09-04): a huddle turn is the only interrupt class whose admission depends
+ * on a SECOND row — its root — and cross-host the two arrive out of order. A turn can fold before
+ * its root; an unrelated inbox read in that gap moves the cursor past the turn's `created_at`;
+ * when the root finally lands, the turn is below the window and can never ring. Measured on delta:
+ * turn 1 at 1788561769690, cursor moved to 1788562249698, silent through every later probe.
+ *
+ * A turn "arrives" when its root does. So for every huddle root that landed INSIDE the window —
+ * the one row the cursor cannot swallow, because it folds last — fetch that thread's turns from
+ * below the cursor and hand them to the fold with the rest. The fold still decides which ring
+ * (only turns newer than my own last one in that room), and the cursor still discharges them:
+ * once a read carries it past the root, the root leaves the window and its turns with it (the
+ * second test on this). Keyed on root ids already in hand, skipped when there are none — a window
+ * with no freshly landed root costs nothing extra.
+ */
+function buriedTurns(
+  db: Database,
+  member: { id: string; team_id: string },
+  windowRows: MessageRow[],
+  opts: { cursorTs?: number },
+): MessageRow[] {
+  const cursorTs = opts.cursorTs ?? 0;
+  if (cursorTs === 0) return windowRows;
+  const lateRoots = windowRows.filter((r) => {
+    if (!r.meta) return false;
+    try {
+      return (JSON.parse(r.meta) as { huddle?: unknown })['huddle'] != null;
+    } catch {
+      return false;
+    }
+  });
+  if (lateRoots.length === 0) return windowRows;
+  const marks = lateRoots.map(() => '?').join(',');
+  const buried = db
+    .prepare<unknown[], MessageRow>(
+      `SELECT * FROM messages
+        WHERE team_id = ?
+          AND thread_id IN (${marks})
+          AND from_member != ?
+          AND created_at <= ?`,
+    )
+    .all(member.team_id, ...lateRoots.map((r) => r.id), member.id, cursorTs);
+  if (buried.length === 0) return windowRows;
+  const byId = new Map<string, MessageRow>();
+  for (const r of [...buried, ...windowRows]) byId.set(r.id, r);
   return [...byId.values()].sort((a, b) =>
     a.created_at === b.created_at ? (a.id < b.id ? -1 : 1) : a.created_at - b.created_at,
   );

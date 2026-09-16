@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ApertureConfigResponseSchema,
   ApertureConfigSchema,
+  GovernedModelsManifestSchema,
+  GovernedTransportManifestSchema,
   IntegrationDoctorReportSchema,
   TailscaleServeStatusSchema,
   TailscaleStatusSchema,
@@ -145,5 +147,86 @@ describe('IntegrationDoctorReportSchema', () => {
       expect(json).not.toContain(forbidden);
     }
     expect(parsed).toEqual(report);
+  });
+});
+
+describe('GovernedModelsManifestSchema (ADR 400)', () => {
+  const manifest = {
+    version: 1,
+    team: {
+      models: ['anthropic/claude-sonnet-4-6'],
+      quota: { capacity: '$20', rate: '$10/day' },
+      default_tier: 'standard',
+    },
+    quota_tiers: [
+      { id: 'standard', quota: { capacity: '$10', rate: '$5/day' } },
+      { id: 'restricted', quota: { capacity: '$5', rate: '$2/day' } },
+    ],
+    roles: { security: { models: ['anthropic/claude-sonnet-4-6'], quota_tier: 'restricted' } },
+    workloads: { bigbody: { workload_id: 'a7f3c2' } },
+  };
+
+  it('accepts exact provider/model intent and a strictly narrowing quota ladder', () => {
+    expect(GovernedModelsManifestSchema.parse(manifest)).toMatchObject(manifest);
+  });
+
+  it.each([
+    ['floating model', { ...manifest, team: { ...manifest.team, models: ['anthropic/latest'] } }],
+    ['bare model', { ...manifest, team: { ...manifest.team, models: ['claude'] } }],
+    ['broad model', { ...manifest, team: { ...manifest.team, models: ['anthropic/*'] } }],
+    [
+      'non-monotonic tier',
+      {
+        ...manifest,
+        quota_tiers: [
+          { id: 'standard', quota: { capacity: '$10', rate: '$5/day' } },
+          { id: 'restricted', quota: { capacity: '$11', rate: '$2/day' } },
+        ],
+      },
+    ],
+    [
+      'duplicate workload',
+      {
+        ...manifest,
+        workloads: { one: { workload_id: 'a7f3c2' }, two: { workload_id: 'a7f3c2' } },
+      },
+    ],
+  ])('rejects %s', (_name, value) => {
+    expect(GovernedModelsManifestSchema.safeParse(value).success).toBe(false);
+  });
+});
+
+describe('GovernedTransportManifestSchema (ADR 402)', () => {
+  const manifest = {
+    version: 1,
+    aperture_tag: 'tag:aperture',
+    tag_owners: ['group:musterd-operators'],
+    nodes: [{ node_key: 'studio-a', members: ['ada'] }],
+  };
+
+  it('accepts exact tags, explicit owners, and opaque transport node keys', () => {
+    expect(GovernedTransportManifestSchema.parse(manifest)).toEqual(manifest);
+  });
+
+  it('allows ordinary values that merely contain credential-related English words', () => {
+    const ordinary = {
+      ...manifest,
+      nodes: [{ node_key: 'tokenizer-box-01', members: ['secretary'] }],
+    };
+    expect(GovernedTransportManifestSchema.parse(ordinary)).toEqual(ordinary);
+  });
+
+  it.each([
+    ['a wildcard aperture tag', { ...manifest, aperture_tag: 'tag:*' }],
+    ['a wildcard tag owner', { ...manifest, tag_owners: ['group:*'] }],
+    ['an automatic broad tag owner', { ...manifest, tag_owners: ['autogroup:admin'] }],
+    ['a duplicate node key', { ...manifest, nodes: [...manifest.nodes, ...manifest.nodes] }],
+    [
+      'a duplicated Member on one node',
+      { ...manifest, nodes: [{ node_key: 'studio-a', members: ['ada', 'ada'] }] },
+    ],
+    ['a musterd credential', { ...manifest, nodes: [{ node_key: 'mskey_abc', members: ['ada'] }] }],
+  ])('rejects %s', (_name, value) => {
+    expect(GovernedTransportManifestSchema.safeParse(value).success).toBe(false);
   });
 });

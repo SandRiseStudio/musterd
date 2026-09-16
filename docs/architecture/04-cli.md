@@ -39,8 +39,10 @@ src/
   process.ts          // injected synchronous process runner: missing binary → code 127, shared by read-only inspectors
   errors.ts           // CliError(code) -> message + exit code
   exit.ts             // exitAfterFlush: exit only once stdout+stderr have drained — a piped render was cut at 64 KB by a bare process.exit()
-  integrations/       // optional external integration inspectors (ADR 385)
+  integrations/       // optional external integration inspectors and generated-policy support (ADR 385/400)
     aperture.ts        // HuJSON config parsing + secret-safe Aperture retention/provider/grant/quota/identity posture checks
+    governed-models.ts // committed roster + provider-neutral policy resolver and deterministic Aperture artifact renderer
+    governed-transport.ts // committed transport manifest loader + deterministic Tailscale tag/ACL and workload mapping renderer (ADR 402)
     report.ts          // stable report composition + exact terminal rendering for independent optional postures
     tailscale.ts       // typed Tailscale status/Serve parsing + bounded Host-gate upgrade probe; no mutation commands
   help/               // the structured command catalog behind `musterd help` (ADR 113)
@@ -107,6 +109,8 @@ src/
     doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060); baked entry secrets flagged on PRESENCE, report.repair routes --fix to `wire` (entry drift, headless, repairs the repo-root-shared family) vs full init (ADR 165); an entry read from a harness's machine-global config (DetectResult.registeredElsewhere) is reported with that path and its machine-wide reach, and never with a repair prescription — musterd does not write those files (ADR 031); ADR 232 increment 2 census notes ride the report (warn-only, never exit-1)
     workspace.ts      // provisionWorkspace(name): git worktree / sibling folder for an isolated agent seat (ADR 065)
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
+    atomicWrite.ts    // writeJsonAtomic(path, value, validate?): stage → parse back → validate → rename, so a hook-driven repair can never leave a settings/hooks JSON half-written (spec 2026-09-16 workspace self-heal, ADR 408); every harness's hook JSON write routes through it
+    selfHeal.ts       // selfHealWorkspace(cwd, deps): the SessionStart repair step — inspect, refresh guidance + in-worktree hooks (withinWorktreeOnly), re-inspect, ONE line; never the ADR 261 permission floor, never a write outside the worktree; declined tombstone (`musterd:self-heal`) and ADR 168 checkout-behind both hold it; defaultSelfHealDeps wires the real functions (ADR 408)
     declined.ts       // recorded refusals, the ADR 332 tombstone: read/write `.musterd/declined.json` (`<harness>:<slot>` names, version 1). The third provisioning state — absence that was CHOSEN — so a drift check can stop prescribing a repair the user already declined. Fails OPEN (a malformed file yields no refusals, never an invented one); sibling of binding.json because a re-claim rewrites that and a preference must not depend on identity churn
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
     mcpEntry.ts       // resolve how to launch @musterd/mcp; buildMcpEnv returns {} — the repo-root-shared entry carries NO per-seat state, everything resolves from binding.json/workspace.json (ADR 158/165)
@@ -128,11 +132,11 @@ src/
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
       cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks: preToolUse gate (ADR 150/369), postToolUse interrupt (ADR 088/369), sessionStart orient (ADR 333), model_id observe (ADR 198), afterShellExecution + afterMCPExecution (ADR 265)
-      codex.ts        // detect/configure via project-local .codex/config.toml + marker-owned observational hooks (ADR 031/249); toolkit-declared plugin fragments write [plugins."id"] enable tables in the same file (ADR 323)
+      codex.ts        // detect/configure via project-local .codex/config.toml + marker-owned causal hooks (ADR 031/249/397); toolkit-declared plugin fragments write [plugins."id"] enable tables in the same file (ADR 323)
       opencode.ts     // detect/configure via project-local .opencode/opencode.json (`mcp.musterd`, McpLocalConfig shape); plain JSON only — an opencode.jsonc sibling is refused, never raced (ADR 321 §3/§4); no hooks, guidance rides the AGENTS.md primer opencode reads natively; orient skill is canonical `.musterd/skill/orient.md` (ADR 333)
       opencodePlugin.ts // OpenCode doorbell (ADR 392): renders the marker-owned, dependency-free `.opencode/plugins/musterd.js` — `tool.execute.after` appends a raised `inbox --interrupt-check` line to tool output, `session.idle` delivers it as a capped `prompt_async`; generation-stamped for the doctor (ADR 168), `init --refresh-hooks` is the only writer
       grok.ts         // detect/configure via project-local .grok/config.toml + hooks in .grok/hooks/musterd.json (inbox --waiting, PreToolUse interrupt additionalContext + Stop continuation (ADR 370), gate, capture, end); inspectGrokHookDrift compares command text + FEATURE_EPOCH two-way (ADR 168); statusline, permission floor; Cursor hook compat off (ADR 352)
-      codexHooks.ts   // reversible .codex/hooks.json renderer: marker-owned SessionStart/SessionEnd/PostToolUse + UserPromptSubmit orient-nudge (ADR 249 / ADR 333)
+      codexHooks.ts   // reversible .codex/hooks.json renderer: marker-owned SessionStart/SessionEnd/PostToolUse + UserPromptSubmit orient-nudge; exact event/type/command + FEATURE_EPOCH two-way drift detection, including the git-common-dir copy (ADR 249/333/397)
       codexToml.ts    // TOML read/merge helper for the Codex adapter — [mcp_servers.*] and [plugins.*] tables only (ADR 031/323)
   archaeology/        // cookoff wasted-work reference collector — git-only, no daemon (ADR 122/123)
     engine.ts         // pure predicate-set-v1 classifier: W3 dup → W1 abandoned → W2 clobbered → W4 churn
@@ -141,7 +145,7 @@ src/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report; --check --fix → `wire` for entry drift, full init otherwise (ADR 165)
     wire.ts           // musterd wire: headless fragment reconcile, plus --migrate-bootstrap atomic replacement of a Workspace's legacy Team key while Presence stays occupied (ADR 080/282/350)
     harness.ts        // musterd harness configure|status: the ONE desired-set editor/legacy converter + the read-only fragment inspection (ADR 281/282/286)
-    codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence (ADR 249); start also emits the ADR 326 orientation block on stdout (ADR 333)
+    codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence; PostToolUse returns a raised daemon line only as Codex hookSpecificOutput additional context (ADR 249/397); start also emits the ADR 326 orientation block on stdout (ADR 333)
     agent.ts          // musterd agent <name> [--role <label>] [--profile <profile>] [--harness claude-code|cursor|codex|opencode|grok]: add an agent + isolated worktree + binding + MCP register (any harness) + standing grant + committed workspace.json (ADR 065/080/116); --role = team fact, --profile = local setup (ADR 272)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
@@ -160,7 +164,6 @@ src/
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
     team.ts           // Team/member management, scoped bootstrap lifecycle + readiness-gated legacy cutover (ADR 344/350), policy, and roster export
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files: team + seats + roles (ADR 058 guard 2)
-    join.ts           // hidden alias since 2026-09-03 (ADR 377): pure argv translation onto `claim <name> --team <slug> --detach`, prints the new spelling; removed one epoch on
     send.ts           // send
     huddle.ts         // huddle open/say/close — a huddle is a thread: meta.huddle on the root, turns in the thread, resolve names the anchor; lays the whiteboard room out best-effort, never spawns it (ADR 378)
     inbox.ts          // inbox [--watch] [--wait] [--limit <n>] — bounded recent window + day-grouped smart dates, always-show-unread (ADR 054/117)
@@ -174,7 +177,7 @@ src/
     surface.ts        // musterd surface list|decline|accept (ADR 332): the vocabulary for refusing a provisioned surface. `decline` removes it AND records the tombstone (one command, one outcome); `list` names what is refusable here plus any refusal this build no longer recognises; `accept` clears one. `init --refresh-hooks` overrides every tombstone in the folder and says which it resurrected
     wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 209)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036); the ONE occupancy verb since ADR 377 — `--team/--key/--grant` cover the fresh-folder bootstrap `join` used to, `--detach` is join's one-shot HTTP claim (Presence outlives the process); MCP twin `team_join`
-    lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256); counterpart resolve ignores --pr/--sha (ADR 305)
+    lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256); counterpart resolve ignores --pr/--sha (ADR 305); submit empty_pool copy (ADR 404)
     seed.ts           // shared Seed tray/read/claim/clarification/brief/conclude/promote Surface (ADR 319)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
     node.ts           // machine credentials (ADR 328, federation 3a): invite/join/rotate/revoke/list. `join <hub-url> <code>` does NOT call the hub — it asks THIS machine's daemon to enroll, so the process holding the nodes row also holds the credential and writes node.json. join/list use resolveRead (a fresh laptop has no bound identity; the code plus being on-machine is the authority); the admin verbs use resolve. join prints no credential — it went to disk
@@ -243,8 +246,8 @@ committed). `saveWorkspaceSpec` parse-strips any secret so one can't leak into t
 MCP adapter reads it as a base **under** `binding.json` (env → binding.json → workspace.json for the
 non-secret fields; secrets only from env/binding). A binding may also be **policy-only**
 (claim-on-first-use, ADR 032): no resolved seat, just a `claim` policy — `resolve()` skips such a
-binding as an identity source, and `musterd claim` fills the seat in. Relatedly, `join --as <name>` without `--token` now **refuses** when the cached identity belongs to
-a different member, rather than silently relabeling its token (which "succeeded" then failed every
+binding as an identity source, and `musterd claim` fills the seat in. Relatedly, `claim <name> --team <slug>` without `--key` now **refuses** when the cached identity belongs to
+a different member, rather than silently relabeling its key (which "succeeded" then failed every
 send with `from/team must match`).
 
 **Act vs. read — the global config is a credential store, not an act-authority (ADR 036).** The
@@ -257,7 +260,7 @@ can't silently act as a real teammate (the 2026-06-23 dogfood: `notify` ran as t
 `David`). Read/operator commands use `resolveRead()` (the **read** path) — a team is required, an
 identity is optional; `status` always prints the auth-free roster and shows its per-member "⚑ waiting
 for you" comeback summary only when an identity is explicit. To keep onboarding frictionless,
-`team create` / `join` **auto-bind the current folder** to the new identity (init already binds it to
+`team create` / `claim` **auto-bind the current folder** to the new identity (init already binds it to
 the provisioned agent), so the folder you set up in is immediately active while every other unbound
 folder stays read-only. Server-side this needs nothing new: `/health` and the roster are already
 unauthenticated; `inbox` + writes already require a member token.
@@ -320,6 +323,22 @@ Aperture, musterd configuration, or Team state. Ready Aperture configuration rem
 `off`; the command makes no device-management, sandbox, or unrelated-harness claim. A selected failed
 check exits 1, invalid usage exits 2, and JSON stdout parses as `IntegrationDoctorReportSchema`.
 
+### `musterd integration generate tailscale [--write | --check]`
+
+Reads the committed roster, `.musterd/governed-models.json`, and strict
+`.musterd/governed-transport.json` to derive a reviewed transport fragment (ADR 402). Default mode
+prints the deterministic `policy.hujson` and `workloads.json` without writing; `--write` atomically
+replaces exactly `.musterd/generated/tailscale/{policy.hujson,workloads.json}`; `--check` exits 1 when
+either file is missing or stale. The manifest maps each active agent Member's existing opaque workload
+ID to one or more opaque transport node keys, one exact Aperture tag, and explicit Tailscale tag owners.
+The mapping artifact also accounts for out-of-scope human and inactive Members.
+
+Generated ACLs allow only each exact workload tag to reach the declared Aperture tag on HTTPS. The
+command performs no network request, Tailscale command, configuration application, node discovery,
+daemon change, or runtime binding. It rejects missing, stale, duplicate, wildcard, broad, or
+Musterd-credential-prefixed transport data before writing (ADR 405). A current artifact reports
+`Tailscale transport policy is current`.
+
 ### `musterd team create <slug> [--display <name>] [--as <yourname>] [--role <role>]`
 
 `POST /teams`. Creates the team and you as its first **human** member. Saves identity+token to config, sets `current`, and **auto-binds the current folder** to you (ADR 036) so you can act there with no `--as`. Output: `cmd/team-create` frame — green `✓ team "dawn" created`, your member line, the dim _bound this folder_ note, dim add hint. Errors: slug taken → `conflict` (exit 9).
@@ -373,10 +392,6 @@ Tell the running **service-managed** daemon to re-resolve its roster roots and r
 ### `musterd reset [--force] [--no-backup]`
 
 Local clean-slate (ADR 022) — wipes the daemon's SQLite db (every team, member, presence, message) by deleting the db file + its `-wal`/`-shm` siblings, and clears the local CLI `identities`/`bindings`/`current` in `config.json` (the `server` URL is kept). A fresh `musterd serve` re-creates an empty db at the current schema. Pure filesystem + config: it never imports `@musterd/server` (ADR 002) or opens the db, and talks to a running daemon only through the read-only `/health` probe. **Safety, three layers:** (1) **refuses while a daemon is live on the target db** — `/health` reports the served db path (ADR 016); deleting an open SQLite file orphans the daemon onto a ghost inode, so it tells you to stop the daemon first (exit 11). A daemon on a _different_ db doesn't block. (2) **Backs up first** by default — db files + `config.json` → `~/.musterd/backups/*.<ts>.bak`; `--no-backup` opts out. (3) **Confirms** — interactive `y/N` on a TTY, and on a non-TTY refuses unless `--force`/`--yes`. Per-folder `.musterd/binding.json` files are not touched (run `musterd init` to repoint them). Output: `✓ reset — wiped <db>; cleared N local identities`.
-
-### `musterd join <slug> --as <name> …` — hidden alias (ADR 377, 2026-09-03) of `musterd claim <name> --team <slug> [--key …] [--grant …]`
-
-Attaches a Presence for an existing member, stores identity locally, and **auto-binds the current folder** to it (ADR 036) so you can act here without `--as`. If `--token` omitted, uses config (and refuses to relabel a different member's token — see Identity resolution above). Opens a short WS `hello` to confirm + register presence, then exits 0 (presence is held by `inbox --watch` or one-shot pings; plain `join` just registers and confirms). Output: `cmd/join` (`✓ <name> joined <slug>` + presence line).
 
 ### `musterd send --to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v ...] [--urgent --urgent-reason <why>] <body...>`
 

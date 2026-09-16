@@ -6,6 +6,8 @@ import {
   chairYaw,
   DESK_REACH,
   GESTURE,
+  IDLE_GESTURES,
+  isIdleGesture,
   handsInLap,
   seedOf,
   solveSkeleton,
@@ -327,5 +329,32 @@ describe('rig invariants', () => {
 
   it('has a stride long enough to be a step, not a shuffle', () => {
     expect(STRIDE).toBeGreaterThan(CHAR.thigh);
+  });
+});
+
+/**
+ * The scheduler's beats and the errand overlays are two families in one registry, and only
+ * `IDLE_GESTURES` separates them. #1434 keyed `GESTURE_DUR` by `IdleGesture` and dropped its
+ * `?? 2.4` fallback — correct, because a table that cannot report its own gaps is how four beats
+ * shipped on the shortest window in it. But the guard has to reach the ONE caller that takes a
+ * number from outside the type system: `pokeGesture`, fed a URL param by `/office-preview?beat=`.
+ * Without it an errand id reached `gestureBeat` with no window at all, `g.t >= g.dur` was never
+ * true against `undefined`, and that member gestured for the life of the scene (izzo, reviewing
+ * #1434: red on the branch, green on main).
+ */
+describe('isIdleGesture — the boundary between scheduler beats and errand overlays', () => {
+  it('accepts every beat the scheduler can pick, including the four #1430 added', () => {
+    for (const kind of IDLE_GESTURES) expect(isIdleGesture(kind)).toBe(true);
+    for (const kind of [GESTURE.shoulders, GESTURE.behindHead, GESTURE.rubEyes, GESTURE.pocketPhone])
+      expect(isIdleGesture(kind)).toBe(true);
+  });
+
+  it('rejects the errand overlays, which have no scheduler window and never did', () => {
+    for (const kind of [GESTURE.browse, GESTURE.fill, GESTURE.eat, GESTURE.pour, GESTURE.call])
+      expect(isIdleGesture(kind)).toBe(false);
+  });
+
+  it('rejects a number that is no beat at all — the URL param case', () => {
+    for (const n of [0, 99, -1, 1.5, Number.NaN]) expect(isIdleGesture(n)).toBe(false);
   });
 });

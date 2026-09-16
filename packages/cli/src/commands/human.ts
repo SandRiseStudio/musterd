@@ -105,7 +105,7 @@ export async function humanCommand(parsed: Parsed): Promise<number> {
         `"${name}" is already on "${team}" but this machine holds no credential for them.\n` +
           `  re-issuing one invalidates their existing credential wherever it is — confirm with:\n` +
           `    musterd human ${name} --team ${team} --rotate\n` +
-          `  or, if you already have the secret: musterd join ${team} --as ${name} --key <mscr_…>`,
+          `  or, if you already have the secret: musterd claim ${name} --team ${team} --key <mscr_…>`,
         4,
       );
     }

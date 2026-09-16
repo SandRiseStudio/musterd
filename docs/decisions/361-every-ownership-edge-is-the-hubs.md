@@ -118,6 +118,11 @@ its birth folded on the hub; the joiner retries after sync.
   discharges the sender's ledger. Falsifiers in `sync/claim.test.ts`: a handoff minted on the hub
   for a seat enrolled on the joiner leases exactly one wake on the joiner's poll and none on the
   hub; ada's folded `accept` removes the handoff from the hub's open ledger. Nothing to build.
+- **2026-09-16 — a submit from a joiner was the close hole one verb over** (lane `01M2HNSVA79`).
+  `updateLane` skips `lane.state_changed` for awaiting_acceptance because the origin owns
+  `lane.ready_for_review`. On the hub that skip left nothing foldable. A hub-arbitrated write
+  (`audit.node` set) now records `lane.state_changed` so the joiner can fold the state; the origin
+  still writes `lane.ready_for_review` once.
 
 ## Observability & Evaluation
 
@@ -130,8 +135,10 @@ its birth folded on the hub; the joiner retries after sync.
   act on the joiner); a handoff on a stale joiner row is `409` naming the real holder with the
   joiner row untouched and no handoff act; a handoff lands on the hub and the recipient's act is
   minted once, on the joiner, never on the hub; a close while the hub is unreachable is `503` and
-  moves nothing; a handoff while unreachable is `503` while a title edit still lands; an
-  arbitrated claim yields exactly one `[lane] claimed` act on both machines. The pre-existing
+  moves nothing; a submit on the joiner is decided by the hub (hub row awaiting_acceptance,
+  `lane.state_changed` on the hub with `node`, none joiner-origin, retry not `409`); a handoff
+  while unreachable is `503` while a title edit still lands; an arbitrated claim yields exactly
+  one `[lane] claimed` act on both machines. The pre-existing
   claim, presence and lane-replication suites are unchanged except the one case that asserted the
   deferral.
 - **Experiment.** Pre-registered: on the dogfood team once a second machine enrolls, every

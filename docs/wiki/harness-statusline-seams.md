@@ -34,7 +34,7 @@ Codex's TUI genuinely has a configurable status line (`codex-rs/tui/src/bottom_p
 
 The one variant carrying arbitrary text, `WorkspaceHeadline`, is not a local seam either: it is fetched from the OpenAI app-server via `GetWorkspaceMessagesResponse` and gated behind `response.feature_enabled` (`codex-rs/tui/src/workspace_messages.rs`, refreshed every 5 minutes). A local coordination daemon cannot write it.
 
-> Codex CLI's status line cannot render a locally-produced string (2026-08-26; falsify: check whether `StatusLineItem` still derives `Copy` at `status_line_setup.rs:54` — a variant carrying a `String` cannot be `Copy`, so operator-supplied text is impossible by the type, not merely absent from today's list. If that derive is dropped, re-read the variants: the enum can then hold text and the chip may have a seam here).
+> Codex CLI's status line cannot render a locally-produced string (2026-08-26; falsify: check whether `StatusLineItem` still derives `Copy` at `status_line_setup.rs:54` — a variant carrying a `String` cannot be `Copy`, so operator-supplied text is impossible by the type, not merely absent from today's list. If that derive is dropped, re-read the variants: the enum can then hold text and the chip may have a seam here). <!-- claim: defect -->
 
 That falsifier is deliberately structural rather than enumerative (ryder's #1080 review): "scan ~30 variants and judge each" asks a reader to repeat a survey, and answers only "we looked and did not find one". The `Copy` bound answers "one cannot exist without a derive change", and re-checking it is a single grep.
 
@@ -42,7 +42,7 @@ That falsifier is deliberately structural rather than enumerative (ryder's #1080
 
 Cursor has the largest hook table of the four (`sessionStart`, `sessionEnd`, `preToolUse`, `postToolUse`, `beforeShellExecution`, `beforeSubmitPrompt`, `stop`, `workspaceOpen`, and more), and musterd already uses `sessionStart` for observation under ADR 198. None of them render persistent UI. The user-visible outputs are transient: `user_message` on a denial, and `followup_message` from `stop`, which auto-submits as the next user message rather than displaying a label.
 
-> Cursor exposes no persistent user-visible surface a seat chip could occupy (2026-08-26; falsify: find a documented Cursor hook or setting whose output persists in the UI after the hook returns — the `user_message` and `followup_message` fields do not, they are consumed once).
+> Cursor exposes no persistent user-visible surface a seat chip could occupy (2026-08-26; falsify: find a documented Cursor hook or setting whose output persists in the UI after the hook returns — the `user_message` and `followup_message` fields do not, they are consumed once). <!-- claim: defect -->
 
 ### opencode — no statusline key; a toast is the nearest thing
 
@@ -50,13 +50,13 @@ The opencode config reference documents TUI keys (`scroll_speed`, `cursor`, `mou
 
 That is a real but different affordance: a toast is a one-shot notification, not a persistent chip. `session.created` + `tui.toast.show` would give an opencode seat a **greeting** — closer to what ADR 326 originally promised than to what the statusline delivers — but it would scroll away and could not answer "which seat is this terminal?" ten minutes later.
 
-> opencode has no persistent statusline slot, only a transient toast (2026-08-26; falsify: find a config key or plugin API in opencode docs that renders text which survives past its triggering event).
+> opencode has no persistent statusline slot, only a transient toast (2026-08-26; falsify: find a config key or plugin API in opencode docs that renders text which survives past its triggering event). <!-- claim: defect -->
 
 ### Grok CLI — yes, command-driven (2026-09-02)
 
 Grok's `[ui.status_line]` accepts `type = "command"` and pipes JSON to a script, painting stdout as a persistent row (`~/.grok/docs/user-guide/25-status-line.md`, Grok 1.0.13). ADR 352 writes that slot in project `.grok/config.toml` when absent, never overwriting a foreign builtin.
 
-> Grok CLI can host the seat chip via `[ui.status_line] type = "command"` (2026-09-02; falsify: that key gone from Grok's status-line docs, or `type = "command"` refused).
+> Grok CLI can host the seat chip via `[ui.status_line] type = "command"` (2026-09-02; falsify: that key gone from Grok's status-line docs, or `type = "command"` refused). <!-- claim: other -->
 
 ## What follows from this
 

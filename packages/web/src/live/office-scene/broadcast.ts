@@ -64,6 +64,37 @@ export function ambientFrameBudgetMs(
 }
 
 /**
+ * One tick of the draw coalescer: given the phase carried from the last tick, the rAF period just
+ * observed, and the frame budget, decide whether to draw now.
+ *
+ * The rule the loop used to apply was `acc < budget → skip`. That is exact when the rAF runs far
+ * faster than the budget (a 60Hz viewer against 50ms draws every third tick) and wrong when the two
+ * run at nearly the same rate — which is exactly what the capture box does. Measured 2026-09-16 on
+ * the live performance-4x at 1080p20: Chrome's rAF ran ~19-20Hz against a 50ms budget, so every tick
+ * that landed a hair early (49ms) was skipped and the next one (~98ms) drew. Delivered frames read
+ * **14.9/s** while the pump sent ffmpeg 20 — a quarter of the encoded frames were repeats, spaced
+ * unevenly, and that padding is the judder nick saw on walks and bubbles.
+ *
+ * Two changes fix it without touching the viewer path:
+ *  - **Nearest tick, not first tick past.** Draw when this tick is at least as close to the budget as
+ *    the next tick would be (`phase + raf/2 ≥ budget`). A tick at 49ms draws; at 60Hz the third tick
+ *    (50ms) still draws and the second (33ms) still skips.
+ *  - **Carry the remainder.** Subtract the budget instead of zeroing, so a rAF a little fast or slow
+ *    converges on the budget rate over time instead of rounding the same way every tick. Clamped to
+ *    ±half a budget: a stall must not bank a burst of catch-up draws (the pump already handles gaps).
+ */
+export function coalesceStep(
+  phase: number,
+  rafMs: number,
+  budgetMs: number,
+): { draw: boolean; phase: number } {
+  const p = phase + rafMs;
+  if (p + rafMs / 2 < budgetMs) return { draw: false, phase: p };
+  const half = budgetMs / 2;
+  return { draw: true, phase: Math.max(-half, Math.min(half, p - budgetMs)) };
+}
+
+/**
  * Should this tick consult the frame budget and possibly skip the draw?
  *
  * Viewers only coalesce when the room is ambient-only (no walks, cues, or afterglow). Broadcast

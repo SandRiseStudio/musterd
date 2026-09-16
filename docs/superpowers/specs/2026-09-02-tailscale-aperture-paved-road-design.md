@@ -314,12 +314,17 @@ Figma terminal contract; this spec defines behavior, not an unreviewed terminal 
   retention, providers, default grants, quotas, and identity prerequisites.
 - Make no external changes.
 
-### Increment 2 — configuration generator
+### Increment 2 — reviewed configuration artifacts
 
-- Generate secret-free tailnet policy, Aperture configuration, Member identity mappings, and daemon
-  settings.
-- Validate exact identities, deny-by-default grants, zero retention, and least privilege.
-- Leave application to the operator.
+- **2a — Aperture policy generation (implemented):** generate the secret-free, musterd-managed
+  Aperture fragment and complete Member workload mapping from the committed roster and
+  governed-model policy.
+- **2b — Tailscale transport generation:** generate secret-free workload-tag ownership, exact
+  workload-to-Aperture HTTPS ACLs, and opaque Member-to-transport-node-key mapping from the
+  committed transport manifest.
+- Validate exact identities, deny-by-default grants, zero retention, exact transport tags, and least
+  privilege. Neither generator discovers runtime nodes, changes daemon settings, calls an external
+  service, or applies configuration; the operator reviews and applies both artifacts.
 
 ### Increment 3 — governed model launcher
 

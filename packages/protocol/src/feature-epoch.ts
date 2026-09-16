@@ -94,5 +94,8 @@
 // Epoch 19 — `team_availability` (surface survey #1245, item 6): the MCP twin of `musterd
 // availability`. A seat at this epoch can set its own availability from an MCP session; an older
 // seat's tool list does not carry it and it keeps shelling out.
-export const FEATURE_EPOCH = 19 as const;
+// Epoch 20 — ADR 397: Codex's marker-owned project hooks now deliver a raised interrupt line at
+// the supported PostToolUse model boundary. The epoch keeps an older checkout from rewriting the
+// exact command set and dropping that delivery seam during hook refresh.
+export const FEATURE_EPOCH = 20 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

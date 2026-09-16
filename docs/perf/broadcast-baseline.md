@@ -43,15 +43,35 @@ holds a flat queue, one without grows one.
 
 ## Baseline numbers
 
-_Pending a quiet machine._ Run each row with the command above; `--secs 60` minimum, and re-run
-interleaved rather than trusting a single capture.
+These rows stood as em-dashes from 2026-07-25 to 2026-09-15 — the table was written, the harness was
+built, and nobody ran it. 720p was chosen on the #369 spot measurement and the hosting-spec run D
+instead, so the setting that governs what every viewer sees was picked without the comparison this
+document asked for. Two arms are now measured; the other two remain unrun and are marked as such.
 
-| Config                   | delivered fps | draw fps | draws/delivered | queue growth | peak queue | chrome %CPU | load1 |
-| ------------------------ | ------------- | -------- | --------------- | ------------ | ---------- | ----------- | ----- |
-| 1080p30 (today)          | —             | —        | —               | —            | —          | —           | —     |
-| 1080p30, draws capped 30 | —             | —        | —               | —            | —          | —           | —     |
-| 720p30                   | —             | —        | —               | —            | —          | —           | —     |
-| 1080p15                  | —             | —        | —               | —            | —          | —           | —     |
+**Measured 2026-09-15 on the live `musterd-broadcast` performance-4x machine** — the real box, the
+real room, libx264, not the local harness (a Mac composites at a true 60Hz with VideoToolbox and its
+numbers do not transfer to a GPU-less Linux box). Read from ffmpeg's own `-stats`, which Fly emits as
+one line when the capture ends.
+
+| Config            | delivered fps | speed      | bitrate      | px/frame  | held for |
+| ----------------- | ------------- | ---------- | ------------ | --------- | -------- |
+| 720p25 (was)      | 25.0          | 1.00x      | ~2900 kbit/s | 0.92M     | 14 min   |
+| 1080p15           | 15.0          | 1.00x      | ~3334 kbit/s | 2.07M     | 45 min   |
+| **1080p20 (now)** | **20.0**      | **0.998x** | ~3517 kbit/s | **2.07M** | 6.5 min  |
+| 1080p30           | —             | —          | —            | 2.07M     | unrun (10.2 fps delivered, July spot check) |
+
+**Every 1080p arm sustains real time, so the box was never the reason for 720p.** `speed` is ffmpeg's
+own ratio against wall clock; below 1.0 is the viewer-buffering failure mode.
+
+**1080p20 is the first arm that is not cleanly 1.00x**, and that is recorded rather than rounded:
+0.998x is ~7 s of lag per hour, which the drift-compensating pump absorbs by design (see
+`makeFramePump`), but it places this rung near the box's limit rather than inside it. Re-measure it
+first if viewers ever report buffering. 1080p15 is the fallback with real headroom.
+
+**Why resolution mattered more than frame rate.** This channel gets no Twitch transcode — the quality
+menu carries a single entry — so a 720p ingest was upscaled to a 1080p surface on every viewer's
+screen. The spatial gain is certain: 2.25x the pixels and no upscale. The frame rate was settled by
+eye, not by the numbers — 15 read crisper but choppy on a walk; 20 read right (nick, 2026-09-15).
 
 **What the first row is expected to show,** from #369's spot measurement: delivered ~35 fps at
 ~181 KB/frame, canvas drawing at ~60, so **draws/delivered ≈ 1.7–2.0**. If that holds, the page is

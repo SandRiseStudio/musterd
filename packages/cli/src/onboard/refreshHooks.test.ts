@@ -1,9 +1,18 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { FEATURE_EPOCH } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { declineSurface, isDeclined } from './declined.js';
-import { SURFACE_STATUSLINE } from './harnesses/claudeCode.js';
+import { checkoutBehindHooks, hookEpochOf, SURFACE_STATUSLINE } from './harnesses/claudeCode.js';
 import { runRefreshHooks } from './init.js';
 
 /**
@@ -60,12 +69,12 @@ const seedProvisioned = (hooks: unknown = {}) => {
 
 describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
   it('refuses in an unbound folder rather than guessing a team', () => {
-    expect(runRefreshHooks(cwd)).toBe(1);
+    expect(runRefreshHooks(cwd).code).toBe(1);
   });
 
   it('writes NOTHING where the harness was never provisioned — a refresh is not a first install', () => {
     h.folderBinding = { team: 'revive' };
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
     expect(existsSync(localSettings())).toBe(false);
   });
 
@@ -80,7 +89,7 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
       Notification: [{ hooks: [{ type: 'command', command: 'x # musterd-notify-hook' }] }],
     });
 
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
 
     const commands = allCommands();
     expect(commands).toContain('musterd-gate-hook'); // ADR 150 — had been missing in 11 of 13
@@ -106,7 +115,7 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
       return true;
     });
 
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
 
     expect(isDeclined(cwd, SURFACE_STATUSLINE)).toBe(false);
     const out = said.join('');
@@ -129,7 +138,7 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
       return true;
     });
 
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
 
     // The refusal record survives: clearing it would recreate the absence-carries-no-intent state
     // for a surface this refresh cannot bring back.
@@ -166,7 +175,7 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
       return true;
     });
 
-    expect(runRefreshHooks(cwd)).toBe(1); // the refusal still exits non-zero
+    expect(runRefreshHooks(cwd).code).toBe(1); // the refusal still exits non-zero
 
     const out = said.join('');
     // The tombstone was cleared on the user's explicit ask, but part of the refresh did not land —
@@ -190,7 +199,7 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
       return true;
     });
 
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
 
     expect(isDeclined(cwd, SURFACE_STATUSLINE)).toBe(false);
     expect(isDeclined(cwd, 'gone-harness:oldChip')).toBe(true);
@@ -211,21 +220,21 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
       said.push(String(c));
       return true;
     });
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
     expect(said.join('')).not.toContain('was declined');
   });
 
   it('stamps the machine-wide orientation hook, so the next stale writer is refused', () => {
     h.folderBinding = { team: 'revive' };
     seedProvisioned();
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
     expect(readFileSync(globalSettings(), 'utf8')).toContain('musterd-sessionstart-hook e');
   });
 
   it('installs the machine-wide UserPromptSubmit nudge hook, stamped and label-nudge-bearing', () => {
     h.folderBinding = { team: 'revive' };
     seedProvisioned();
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
     const global = readFileSync(globalSettings(), 'utf8');
     expect(global).toContain('musterd-promptsubmit-hook e');
     expect(global).toContain('musterd session label-nudge');
@@ -255,7 +264,7 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
       }),
       'utf8',
     );
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
     const parsed = JSON.parse(readFileSync(globalSettings(), 'utf8')) as {
       hooks: { UserPromptSubmit: { hooks: { command: string }[] }[] };
     };
@@ -268,10 +277,10 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
   it('is idempotent — a second refresh changes nothing', () => {
     h.folderBinding = { team: 'revive' };
     seedProvisioned();
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
     const local = readFileSync(localSettings(), 'utf8');
     const global = readFileSync(globalSettings(), 'utf8');
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
     expect(readFileSync(localSettings(), 'utf8')).toBe(local);
     expect(readFileSync(globalSettings(), 'utf8')).toBe(global);
   });
@@ -291,7 +300,7 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
       }),
       'utf8',
     );
-    expect(runRefreshHooks(cwd)).toBe(1); // refused ⇒ non-zero, so a script can see it
+    expect(runRefreshHooks(cwd).code).toBe(1); // refused ⇒ non-zero, so a script can see it
     // …and the protected slot genuinely left alone (the file itself may gain OTHER global hooks —
     // the refusal is per-slot, and the UserPromptSubmit nudge still installs beside it).
     const after = JSON.parse(readFileSync(globalSettings(), 'utf8')) as {
@@ -309,7 +318,79 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
     seedProvisioned({
       PostToolUse: [{ hooks: [{ type: 'command', command: 'echo mine' }] }],
     });
-    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(runRefreshHooks(cwd).code).toBe(0);
     expect(allCommands()).toContain('echo mine');
+  });
+});
+
+describe('every hook JSON write is atomic (spec 2026-09-16, workspace self-heal)', () => {
+  it('a refresh leaves a parseable file ending in one newline and no stage file beside it', () => {
+    h.folderBinding = { team: 't' };
+    seedProvisioned({});
+    runRefreshHooks(cwd);
+    const raw = readFileSync(localSettings(), 'utf8');
+    expect(() => JSON.parse(raw)).not.toThrow();
+    expect(raw.endsWith('\n')).toBe(true);
+    expect(raw.endsWith('\n\n')).toBe(false);
+    expect(readdirSync(join(cwd, '.claude')).filter((f) => f.includes('.tmp-'))).toEqual([]);
+  });
+});
+
+describe('withinWorktreeOnly (spec 2026-09-16, workspace self-heal)', () => {
+  it('skips and NAMES every write outside the worktree — the machine-wide settings stay untouched', () => {
+    h.folderBinding = { team: 't' };
+    seedProvisioned({});
+    const res = runRefreshHooks(cwd, { withinWorktreeOnly: true, quiet: true });
+    expect(res.code).toBe(0);
+    // The project-local file was refreshed …
+    expect(allCommands()).toContain('musterd');
+    expect(res.files).toContain(localSettings());
+    // … the machine-wide one was neither written nor claimed, and is reported as skipped.
+    expect(existsSync(globalSettings())).toBe(false);
+    expect(res.files).not.toContain(globalSettings());
+    expect(res.skipped).toContain(globalSettings());
+  });
+
+  it('without the option the machine-wide settings are written, exactly as before', () => {
+    h.folderBinding = { team: 't' };
+    seedProvisioned({});
+    const res = runRefreshHooks(cwd, { quiet: true });
+    expect(res.code).toBe(0);
+    expect(existsSync(globalSettings())).toBe(true);
+    expect(res.skipped).toEqual([]);
+  });
+});
+
+describe('checkoutBehindHooks — ADR 168 downgrade refusal as a predicate (spec 2026-09-16)', () => {
+  it('is true when an installed marker hook carries a newer epoch than this build', () => {
+    const newer = `d="x"; echo hi # musterd-interrupt-hook e${String(FEATURE_EPOCH + 1)}`;
+    expect(hookEpochOf(newer)).toBe(FEATURE_EPOCH + 1);
+    seedProvisioned({ PostToolUse: [{ hooks: [{ type: 'command', command: newer }] }] });
+    expect(checkoutBehindHooks(cwd)).toBe(true);
+  });
+
+  it('is true when only the MACHINE-WIDE settings carry the newer epoch', () => {
+    seedProvisioned({});
+    const newer = `echo hi # musterd-sessionstart-hook e${String(FEATURE_EPOCH + 1)}`;
+    writeFileSync(
+      globalSettings(),
+      JSON.stringify({
+        hooks: { SessionStart: [{ hooks: [{ type: 'command', command: newer }] }] },
+      }),
+    );
+    expect(checkoutBehindHooks(cwd)).toBe(true);
+  });
+
+  it('is false with no settings file, and false at the current epoch', () => {
+    expect(checkoutBehindHooks(cwd)).toBe(false);
+    const current = `echo hi # musterd-interrupt-hook e${String(FEATURE_EPOCH)}`;
+    seedProvisioned({ PostToolUse: [{ hooks: [{ type: 'command', command: current }] }] });
+    expect(checkoutBehindHooks(cwd)).toBe(false);
+  });
+
+  it('is false on an unparseable settings file — never invented drift', () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(localSettings(), '{not json');
+    expect(checkoutBehindHooks(cwd)).toBe(false);
   });
 });

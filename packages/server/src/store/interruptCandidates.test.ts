@@ -47,7 +47,7 @@ function say(
   to: MemberRow | null,
   act: string,
   id: string,
-  opts: { meta?: Record<string, unknown>; thread?: string } = {},
+  opts: { meta?: Record<string, unknown>; thread?: string; now?: number } = {},
 ) {
   insertMessage(
     db,
@@ -65,6 +65,7 @@ function say(
       meta: opts.meta ?? null,
       ts: ts++,
     }),
+    opts.now === undefined ? {} : { now: opts.now },
   );
 }
 
@@ -264,5 +265,43 @@ describe('listInterruptCandidates', () => {
     const raised = viaCandidates(db, team, ada, true);
     expect(raised).not.toContain('steer-new');
     expect(raised).not.toContain('steer-old');
+  });
+
+  it('ADR 378 amendment: a huddle turn that folded BEFORE its root is admitted once the root lands, even under the cursor', () => {
+    // Cross-host, the two rows arrive out of order: the turn at receipt T1, an unrelated inbox
+    // read moves the cursor to T2 > T1, then the root lands at T3 > T2. The turn is below the
+    // cursor as if it were self-describing — it is not: its admission depends on the root, so
+    // it "arrives" when the root does. Measured on delta 2026-09-04: turn 1 at 1788561769690,
+    // cursor at 1788562249698, silent forever.
+    const { db, team, nick, ada, bob } = seed();
+    const huddle = {
+      huddle: {
+        topic: { kind: 'design', id: 'bell' },
+        room: 'http://127.0.0.1:4851/b/h',
+        anchor: 'docs/wiki/huddles.md',
+      },
+    };
+    say(db, team, bob, null, 'message', 'turn-early', { thread: 'h1', now: 100 });
+    say(db, team, nick, ada, 'message', 'h1', { meta: huddle, now: 300 });
+    const rows = listInterruptCandidates(db, ada, { cursorTs: 200 });
+    const raised = pendingInterrupts(rowsToEnvelopes(db, team.slug, rows), ada.name, {
+      huddles: true,
+    }).map((e) => e.id);
+    expect(raised).toEqual(['turn-early']);
+  });
+
+  it('ADR 378 amendment: once the cursor passes the root, the buried turn is discharged like any read row', () => {
+    const { db, team, nick, ada, bob } = seed();
+    const huddle = {
+      huddle: {
+        topic: { kind: 'design', id: 'bell' },
+        room: 'http://127.0.0.1:4851/b/h',
+        anchor: 'docs/wiki/huddles.md',
+      },
+    };
+    say(db, team, bob, null, 'message', 'turn-early', { thread: 'h1', now: 100 });
+    say(db, team, nick, ada, 'message', 'h1', { meta: huddle, now: 300 });
+    const rows = listInterruptCandidates(db, ada, { cursorTs: 300 });
+    expect(rowsToEnvelopes(db, team.slug, rows).map((e) => e.id)).not.toContain('turn-early');
   });
 });

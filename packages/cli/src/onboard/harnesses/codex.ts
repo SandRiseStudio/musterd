@@ -11,7 +11,7 @@ import {
 } from '../harness.js';
 import type { McpServerEntry } from '../mcpEntry.js';
 import { launchEntryEnv, markerGenerationOfEnv, resolveMcpLaunch } from '../mcpEntry.js';
-import type { FsSeam, HarnessContext } from '../reconcile/context.js';
+import { nodeFs, type FsSeam, type HarnessContext } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
   folderResourceKey,
@@ -21,9 +21,12 @@ import {
 import { BUILTIN_TOOLKITS, parseToolkit } from '../toolkit.js';
 import {
   CODEX_HOOK_MARKER,
+  codexCommonDirRoot,
   codexHookCommands,
   codexHooksPath,
+  hasNewerCodexHookEpoch,
   inspectCodexHookDrift,
+  codexCommonHooksPath,
   installCodexHooks,
   removeCodexHooks,
 } from './codexHooks.js';
@@ -151,14 +154,16 @@ export const codex: Harness = {
    */
   refreshHooks: {
     applies: (dir) => existsSync(projectConfigPath(dir)) || existsSync(codexHooksPath(dir)),
-    run: (dir) => {
-      const files = installCodexHooks(dir);
+    run: (dir, opts) => {
+      const files = installCodexHooks(dir, opts);
+      const common = opts?.withinWorktreeOnly ? codexCommonHooksPath(dir) : undefined;
+      const skipped = common !== undefined ? [common] : [];
       // A malformed file is left untouched by design (it may be hand-authored), and returns no
       // files — so without this the driver would print "✓ Codex hooks refreshed" over a repair that
       // never happened. Reuse the inspector's own wording rather than inventing a second phrasing.
       const warnings =
         files.length === 0 ? inspectCodexHookDrift(dir).filter((d) => d.includes('malformed')) : [];
-      return { files, warnings };
+      return { files, warnings, skipped };
     },
   },
 
@@ -429,6 +434,23 @@ export const codexAdapter: HarnessAdapter = {
         const read = readHooksJson(ctx.fs, path);
         if (read === null) throw new Error('.codex/hooks.json invalid at apply time');
         const file = read ?? {};
+        const commonPath =
+          ctx.fs === nodeFs
+            ? (() => {
+                const commonRoot = codexCommonDirRoot(ctx.worktreeRoot);
+                return commonRoot ? codexHooksPath(commonRoot) : undefined;
+              })()
+            : undefined;
+        const common = commonPath ? readHooksJson(ctx.fs, commonPath) : undefined;
+        if (
+          mutation.kind !== 'remove' &&
+          (hasNewerCodexHookEpoch(musterdCodexHandlers(file).map(({ command }) => command)) ||
+            (common !== null &&
+              common !== undefined &&
+              hasNewerCodexHookEpoch(musterdCodexHandlers(common).map(({ command }) => command))))
+        ) {
+          return;
+        }
         const hooks: NonNullable<CodexHooksJson['hooks']> = {};
         // Keep every non-musterd handler/group; drop every marker-owned one.
         for (const [event, groups] of Object.entries(file.hooks ?? {})) {
@@ -455,6 +477,9 @@ export const codexAdapter: HarnessAdapter = {
         else delete next.hooks;
         ctx.fs.mkdirp(dirname(path));
         ctx.fs.writeFile(path, `${JSON.stringify(next, null, 2)}\n`, 0o644);
+        // The fragment ledger owns the workspace copy. In a real worktree, Codex reads the shared
+        // git-common-dir copy instead, so refresh that runtime copy through the same epoch guard.
+        if (mutation.kind !== 'remove' && ctx.fs === nodeFs) installCodexHooks(ctx.worktreeRoot);
         return;
       }
       default: {

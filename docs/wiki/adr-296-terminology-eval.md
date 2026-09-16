@@ -25,7 +25,7 @@ is usage voting against a chosen word — revise the term, not the gate.
 
 Trajectory of the user-facing half: 49 → 13 → 5, with **0 pending** — burn-down C (the five root
 docs) is complete on branch `stanley/vocab-burndown-c`, handed to sloane with lane 01M0K5XTX9
-(2026-08-24; falsify: `git log origin/stanley/vocab-burndown-c`). ~~The design half (28
+(2026-08-24; falsify: `git log origin/stanley/vocab-burndown-c`). ~~The design half (28 <!-- claim: other -->
 `DESIGN_BASELINE` docs, burn-down D, lane 01M0K5Y0F4) is open and unstarted.~~ **BOTH LANES CLOSED —
 re-read 2026-09-03:** `01M0K5XTX9` (burn-down C) and `01M0K5Y0F4` (burn-down D) are `done`, owned by
 sloane. This paragraph is a snapshot of the day it was written; a lane id in a wiki page is a
@@ -35,7 +35,7 @@ is **on track, not yet discharged** — this page is the baseline record, not th
 
 The measure-first method mattered more than migration: B found 36 of its files exempt for
 nothing (one hit, a false positive); A found 4 of 8; C found 3 of 5. Roughly **half of every
-exemption list protected nothing** (2026-08-24; falsify: the three lane reports, #1000/#1019 and
+exemption list protected nothing** (2026-08-24; falsify: the three lane reports, #1000/#1019 and <!-- claim: defect -->
 lane 01M0K5XTX9).
 
 ## Zero introductions — with the one exception, on landing day
@@ -44,9 +44,9 @@ The claim "zero banned-term introductions merge to main" has exactly one excepti
 happened before the gate had been on main an hour: ADR 299 (#972) landed minutes before the gate
 (#973) with an unquoted "worktree" in its frozen Decision, turning main red. Resolution: #978
 bumped `TERMINOLOGY_GATE_FROM` 299 → 300 — the boundary moved rather than the frozen ADR being
-edited (2026-08-21; falsify: `git log --oneline 63d53ab6..51ad3f3a` and the comment above
+edited (2026-08-21; falsify: `git log --oneline 63d53ab6..51ad3f3a` and the comment above <!-- claim: other -->
 `TERMINOLOGY_GATE_FROM` in scripts/check-vocab.ts). Since #978: zero introductions have merged
-(2026-08-24; falsify: `pnpm vocab:check` red on any main commit since 51ad3f3a).
+(2026-08-24; falsify: `pnpm vocab:check` red on any main commit since 51ad3f3a). <!-- claim: other -->
 
 That incident is also the gate's one real trip — it caught an actual banned word in an actual
 ADR, in anger, on its first day. The registry entry now records `everTripped: true,
@@ -86,7 +86,7 @@ Not 'profile'." The two Not columns answer the admin's question directly, in two
 ("how a harness session runs: desktop, terminal, IDE, headless") gives the reader the right
 question — the laptop runs a desktop/terminal driver, the server headless — but the per-harness
 specifics live in the driver support matrix, and that is still the open reserved lane
-01M0K5ZC33 (2026-08-24; falsify: the lane board — a claimed/done state, or a support-matrix page
+01M0K5ZC33 (2026-08-24; falsify: the lane board — a claimed/done state, or a support-matrix page <!-- claim: other -->
 in this wiki, disproves this).~~ COMPLETED 2026-08-24: the matrix exists —
 [driver support matrix](driver-support-matrix.md) — and its labeling row answers Q2 concretely
 (desktop = cross_rename via the app's MCP tools, terminal = OSC 0 tab title only, headless = none).
@@ -100,7 +100,7 @@ unbackticked "profile" in a new `help/` file → caught; **Toolkit** dropped fro
 glossary drift caught; dead path in `USER_FACING_BASELINE` → rot caught. Plus
 `scripts/check-vocab.test.ts` (15 tests) green.
 
-## The Not column was never enforced — 17 of its 21 words are linted by nothing (2026-09-05; falsify: `terminologyBans()` against the distinct Not entries in `docs/glossary/terms.ts`)
+## The Not column was never enforced — 17 of its 21 words are linted by nothing (2026-09-05; falsify: `terminologyBans()` against the distinct Not entries in `docs/glossary/terms.ts`) <!-- claim: defect -->
 
 The ADR's Decision says "with the Not column enforced, not merely published", and brand.md §5 said
 "the Not column is enforced on new docs, not merely published". Both were false on the day they
@@ -109,7 +109,7 @@ the gate scans — never the *table* the gate scans them against.
 
 Measured 2026-09-05 at 4a0f8b42: `docs/glossary/terms.ts` holds 19 entries; `terminologyBans()`
 filters `status === 'banned'`, which is **four** words — kit, profile, template, worktree. The Not
-columns publish **21** distinct words, so **seventeen** of them are linted by nothing (2026-09-05; falsify: collect `not[]` across `GLOSSARY` into a set and subtract `terminologyBans()`) — adapter, agent, channel, client, connection, event, kind, participant, project, room, seat, session, status, swarm, type, user, verb.
+columns publish **21** distinct words, so **seventeen** of them are linted by nothing (2026-09-05; falsify: collect `not[]` across `GLOSSARY` into a set and subtract `terminologyBans()`) — adapter, agent, channel, client, connection, event, kind, participant, project, room, seat, session, status, swarm, type, user, verb. <!-- claim: defect -->
 
 The count is the small half. The finding is that **the enforceable subset among the seventeen is
 empty**, so "enforce what we can, then correct the sentence" has nothing to enforce (2026-09-05;
@@ -129,7 +129,7 @@ in review; the Decision carries a dated marker and the substance is a Consequenc
 behaviour is unchanged — the same four words are banned as before. `lintedSetDrift`
 (`scripts/check-vocab.ts`) now fails when brand.md's "Linted outright" sentence and
 `terminologyBans()` disagree in either direction, so the sentence cannot drift from the code again
-without CI saying so (2026-09-05; falsify: drop `**worktree**` from that sentence, or add a word
+without CI saying so (2026-09-05; falsify: drop `**worktree**` from that sentence, or add a word <!-- claim: other -->
 the glossary does not ban, and run `pnpm vocab:check`).
 
 One artefact was honest the whole time: the control registry's `counterfactual` for
@@ -137,7 +137,7 @@ One artefact was honest the whole time: the control registry's `counterfactual` 
 (agent-as-generic-noun, surface-as-lane-paths): a regex cannot catch those, and claiming it would
 is the decoration this registry exists to refuse." The field whose whole job is to say what the
 control does *not* buy said it, in the same repo, while two documents claimed the opposite
-(2026-09-05; falsify: `git log -S'No for the semantic half' docs/controls/registry.ts` — it landed
+(2026-09-05; falsify: `git log -S'No for the semantic half' docs/controls/registry.ts` — it landed <!-- claim: other -->
 with the gate). The registry's discipline worked; nothing propagated it to the prose.
 
 Fourth exercise case, run live 2026-09-05 before this page was written: dropping `**worktree**`

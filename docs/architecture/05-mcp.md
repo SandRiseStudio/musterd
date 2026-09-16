@@ -209,7 +209,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
 ```json
 {
   "name": "team_send",
-  "description": "Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires meta.species and meta.tier; 2–4 to names mean any may answer.",
+  "description": "Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires meta.species and meta.tier. 2–4 to names mean any may answer on message, request_help, or challenge — not ask (quiet-set fan-out is unshipped, ADR 260 / ADR 401).",
   "inputSchema": {
     "type": "object",
     "required": ["act", "body"],
@@ -401,7 +401,7 @@ src/
     availability.ts // team_availability — set your OWN availability (ADR 044), the MCP twin of `musterd availability`; not a WRITE_TOOL, a muted seat may still say it is away (surface survey #1245 item 6)
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
     wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 209)
-    lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256); counterpart resolve omits merged (ADR 305)
+    lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256); counterpart resolve omits merged (ADR 305); lane_submit empty_pool copy (ADR 404)
     seeds.ts      // three team_seed_* tools: shared tray/read plus compact lifecycle update (ADR 318/319)
     teamMemory.ts // team_insight_save + team_insight_search — findings for the whole team, pull-only retrieval (ADR 327)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)

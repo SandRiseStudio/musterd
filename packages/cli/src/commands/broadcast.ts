@@ -8,9 +8,11 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { z } from 'zod';
 import type { Parsed } from '../args.js';
 import { configPath } from '../config.js';
@@ -116,6 +118,12 @@ export function parseOptions(
  * there threw away half the frames the box could actually produce: 720p30 delivered 14fps under
  * `everyNthFrame: 2` and 26.5fps under `1`, at identical render cost. Assuming 30 keeps the
  * skip-derivation honest on hardware that never had 60 composited frames to skip.
+ *
+ * Re-measured 2026-09-16 at 1080p20 on the same box class: the page's rAF ran ~19-20Hz (median 19,
+ * max 27) — the compositor is saturated at about the encode rate, not at 30. That does not change
+ * `everyNthFrame` (floor(30/20) and floor(20/20) are both 1) but it does mean the office's own draw
+ * coalescer must not assume it is running faster than the budget; see `coalesceStep` in
+ * packages/web/src/live/office-scene/broadcast.ts for the frame-drop that assumption caused.
  */
 export function compositorHz(platform: NodeJS.Platform = process.platform): number {
   return platform === 'darwin' ? 60 : 30;
@@ -183,6 +191,92 @@ export async function resolveSink(
     );
   }
   return { kind: 'rtmp', target: `rtmps://live.twitch.tv/app/${key}` };
+}
+
+/**
+ * ffmpeg prints its output URL verbatim on error, and an RTMPS sink carries the Twitch stream key
+ * in that URL. With stderr inherited, that line lands in the machine logs where `fly logs`
+ * re-exposes the live key to whoever reads them (surfaced 2026-09-15: a single ffmpeg error put
+ * nick's key into a session transcript in cleartext). Scrub the URL — and the bare key — before
+ * ffmpeg's stderr reaches ours. A file sink has no secret and passes through untouched.
+ */
+export function redactSink(text: string, sink: { kind: 'file' | 'rtmp'; target: string }): string {
+  if (sink.kind !== 'rtmp') return text;
+  const key = streamKeyOf(sink.target);
+  const masked = maskRtmpUrl(sink.target);
+  // NOTE the two conditions are separate on purpose. "this URL has no key segment" justifies
+  // passing text through; "I could not compute a mask" does NOT — and collapsing them was a real
+  // leak: a target with a TRAILING SLASH made `maskRtmpUrl` a no-op, the function early-returned,
+  // and the full key printed. In a redactor, an unknown shape must fail CLOSED.
+  let out = text;
+  if (masked !== sink.target) out = out.split(sink.target).join(masked);
+  // The bare key alone, which librtmp prints as the playpath (`Publishing 'live_…' failed`).
+  // Only when it is long enough to be the secret rather than an incidental substring.
+  if (key && key.length >= 12) out = out.split(key).join('<redacted>');
+  return out;
+}
+
+/**
+ * The stream key inside an rtmp(s) target: the last non-empty path segment, with any query or
+ * fragment stripped. `rtmps://h/app/KEY`, `rtmps://h/app/KEY/` and `rtmps://h/app/KEY?t=1` all
+ * yield `KEY` — the trailing-slash and query forms are ordinary copy-paste shapes, and both used
+ * to defeat redaction.
+ */
+function streamKeyOf(url: string): string {
+  const schemeEnd = url.indexOf('://');
+  if (schemeEnd < 0) return '';
+  const pathStart = url.indexOf('/', schemeEnd + 3);
+  if (pathStart < 0) return ''; // host only — nothing after it to be a key
+  const path = url.slice(pathStart).split(/[?#]/)[0] ?? '';
+  const segments = path.split('/').filter((seg) => seg !== '');
+  return segments.length > 1 ? (segments[segments.length - 1] ?? '') : '';
+}
+
+/**
+ * Replace the trailing path segment (the stream key) of an rtmp(s) URL with `<redacted>`. A URL
+ * with only a host and no path (e.g. `rtmp://x`) carries no key segment, so it is left as-is.
+ */
+function maskRtmpUrl(url: string): string {
+  const key = streamKeyOf(url);
+  if (!key) return url; // host only, or no path segment that could be a key
+  // Replace the key segment wherever it sits, so a trailing slash or a `?query` after it keeps the
+  // rest of the URL readable and still hides the secret.
+  return url.split(key).join('<redacted>');
+}
+
+/**
+ * A stateful scrubber for a child's stderr stream. Chunk boundaries can split the secret URL
+ * across two `data` events, so a per-chunk `redactSink` could emit half a key before the mask
+ * matches. This buffers the incomplete trailing line and only scrubs-then-emits complete
+ * segments (up to the last CR or LF — ffmpeg's progress uses CR, its errors LF, so live output
+ * still streams). Call `flush()` when the stream closes to scrub and emit the final partial line.
+ */
+export function makeSecretScrubber(sink: { kind: 'file' | 'rtmp'; target: string }): {
+  (chunk: string): string;
+  flush(): string;
+} {
+  let buf = '';
+  const push = (chunk: string): string => {
+    buf += chunk;
+    let cut = -1;
+    for (let i = buf.length - 1; i >= 0; i--) {
+      const c = buf[i];
+      if (c === '\n' || c === '\r') {
+        cut = i;
+        break;
+      }
+    }
+    if (cut < 0) return '';
+    const emit = buf.slice(0, cut + 1);
+    buf = buf.slice(cut + 1);
+    return redactSink(emit, sink);
+  };
+  push.flush = (): string => {
+    const rest = buf;
+    buf = '';
+    return rest ? redactSink(rest, sink) : '';
+  };
+  return push;
 }
 
 /** macOS Keychain lookup (`security find-generic-password -w`); null on any miss/error. */
@@ -329,6 +423,69 @@ export function makeFramePump(
       for (let i = 0; i < n; i++) write(latest);
       emitted += n;
       return n;
+    },
+  };
+}
+
+/**
+ * How long the capture may go without a screencast frame before the picture is called frozen.
+ *
+ * Sized from measurement, not taste. Two captures on the performance-4x box on 2026-09-16 (778s
+ * total, a quiet Saturday floor) delivered a worst SECOND of 7 frames and **zero** seconds with no
+ * frame at all — the office's ambient motion means a healthy capture never goes even one second
+ * dark. Five seconds is therefore ~5x the coarsest healthy bucket and ~75x the healthy inter-frame
+ * gap, which is the margin that keeps a still room from being mistaken for a wedged one.
+ *
+ * It is also cheap to be wrong slowly here: the pump re-emits `latest`, so a gap under the
+ * threshold costs the viewer nothing. Only a SUSTAINED gap is the freeze.
+ */
+export const FRAME_STALL_MS = 5_000;
+
+/**
+ * The watchdog for the failure every other counter calls healthy.
+ *
+ * On 2026-09-16 (machine 84e694b2424e38) Chrome refused every screencast ack because the sessionId
+ * went back stringified. Delivery stopped after three frames. The pump kept re-emitting the last
+ * one at 20fps, so ffmpeg's `fps=` and `speed=` stayed clean, the ADR 159 queue watchdog saw a flat
+ * queue because the queue WAS being drained, and **one frozen frame went out for six and a half
+ * minutes**. The only counter that knew was `deliveredFps` — and it is opt-in behind
+ * MUSTERD_BROADCAST_PERF, so on an ordinary run nothing was watching it.
+ *
+ * The lesson generalises past that bug: every existing health signal measures the ENCODER, and the
+ * encoder is downstream of the freeze. A frozen source keeps it perfectly fed. So the only honest
+ * question is "when did a frame last ARRIVE", which is what this asks.
+ *
+ * Pure, and driven by an injected clock, for the same reason the pump and the ack gate are: the
+ * predicate that takes the stream down is the one a test can drive without CDP, Chrome or a wait.
+ */
+export function makeFrameWatchdog(
+  onStall: (sinceMs: number) => void,
+  now: () => number = () => performance.now(),
+  thresholdMs: number = FRAME_STALL_MS,
+): { arm: () => void; arrived: () => void; check: () => void; disarm: () => void } {
+  // `null` is "not armed" — before the screencast starts, and after a deliberate stop. Chrome
+  // launching and the page loading can take a minute, and none of it is a freeze.
+  let last: number | null = null;
+  let fired = false;
+  return {
+    arm: () => {
+      last = now();
+      fired = false;
+    },
+    // Deliberately ignored while disarmed: a frame that lands during teardown must not re-arm a
+    // watchdog whose stream is already going down.
+    arrived: () => {
+      if (last !== null) last = now();
+    },
+    check: () => {
+      if (last === null || fired) return;
+      const since = now() - last;
+      if (since < thresholdMs) return;
+      fired = true; // one report per arming — a wedged capture sweeps many more times before exit
+      onStall(since);
+    },
+    disarm: () => {
+      last = null;
     },
   };
 }
@@ -998,18 +1155,29 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   let buildTimer: NodeJS.Timeout | undefined;
   let perfTimer: NodeJS.Timeout | undefined;
   let live = false; // flips when the pump starts feeding ffmpeg
+  /** When the pump actually started — the clock `socketLossExitCode` judges restart-eligibility by. */
+  let runStartedAt = Date.now();
   let stopping = false;
   /** Set when the stop in flight is a build pickup, not an ending — see the build watch below. */
   let restarting = false;
   let checking = false; // one health poll at a time
   /** The daemon's build as we found it — the reference the watch compares against. */
   let baselineBuild: string | undefined;
+  /**
+   * Flushes the stderr scrubber's buffered tail synchronously. Assigned once ffmpeg is spawned;
+   * a no-op before that. `process.exit()` truncates pending ASYNC writes and `process.stderr` is
+   * async when stderr is a pipe, so without this every forced stop drops ffmpeg's final lines —
+   * a regression against `inherit`, which never queued them in this process at all.
+   */
+  let flushScrubbedStderr: () => void = () => {};
   const forceStop = (code: number): never => {
     killGroup(ffmpeg, 'SIGKILL');
     killGroup(chrome, 'SIGKILL');
+    flushScrubbedStderr(); // before exit: the last lines say why the stream died
     process.exit(code);
   };
   const gracefulStop = () => {
+    disarmFrameWatch();
     if (pumpTimer) clearInterval(pumpTimer);
     ffmpeg.stdin?.end(); // let ffmpeg finalize the container (moov atom in file mode)
     // If ffmpeg never exits (wedged RTMP socket), the stop must still stop. unref'd: it never
@@ -1022,6 +1190,36 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
    * graceful path's 5s backstop is `unref()`'d, so it only fires if the loop is still healthy. Going
    * straight to the force path is what guarantees this terminates.
    */
+  /**
+   * The picture has frozen: no screencast frame for FRAME_STALL_MS while the pump kept emitting.
+   *
+   * Treated exactly like a lost DevTools socket rather than like the encoder stall below, and the
+   * distinction is the point. An encoder that stops draining is THIS run's problem — a bad bitrate,
+   * a wedged sink — and relaunching re-runs it. A screencast that stops arriving is the class that
+   * a relaunch genuinely fixes: Chrome's delivery has wedged while everything downstream is fine.
+   * So it borrows `socketLossExitCode`'s judgement whole — ask the supervisor for a relaunch once
+   * the run has proven itself, stay fatal for a run that never worked so a broken config cannot
+   * bill in a loop, and never ask on a laptop where nothing is standing by.
+   */
+  let frozen = false;
+  /** Set once the watchdog exists; the stop paths disarm it through this so a teardown that
+   *  stops delivery is never reported as a freeze. */
+  let disarmFrameWatch: () => void = () => {};
+  const onFrameStall = (sinceMs: number) => {
+    if (frozen || stopping || restarting) return;
+    frozen = true;
+    const code = socketLossExitCode(Date.now() - runStartedAt);
+    process.stderr.write(
+      `${theme.err('✗')} no screencast frame for ${(sinceMs / 1000).toFixed(1)}s — the picture is frozen. ` +
+        `ffmpeg keeps reporting a healthy rate because the pump re-emits the last frame, so this is the ` +
+        `only counter that can see it. ${
+          code === RESTART_EXIT_CODE
+            ? 'Asking the supervisor for a relaunch.'
+            : 'Ending the stream.'
+        }\n`,
+    );
+    forceStop(code);
+  };
   let stalled = false;
   const onStall = () => {
     if (stalled) return;
@@ -1066,9 +1264,43 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     },
   );
   const ffmpeg: ChildProcess = spawn('ffmpeg', ffmpegArgs(opts, sink), {
-    stdio: ['pipe', 'inherit', 'inherit'],
+    // stderr is piped (not inherited) so a secret scrubber sits between ffmpeg and our own
+    // stderr: ffmpeg prints its RTMPS output URL — stream key and all — verbatim on error, and an
+    // inherited stderr put that straight into the machine logs where `fly logs` re-exposes it.
+    stdio: ['pipe', 'inherit', 'pipe'],
     detached: true,
   });
+  const scrubStderr = makeSecretScrubber(sink);
+  // A StringDecoder, not `d.toString()`: ffmpeg emits UTF-8, and a codepoint straddling a read
+  // boundary would decode as U+FFFD — which also destroys the two halves for the string matcher.
+  const stderrDecoder = new StringDecoder('utf8');
+  ffmpeg.stderr?.on('data', (d: Buffer) => {
+    const clean = scrubStderr(stderrDecoder.write(d));
+    if (clean) process.stderr.write(clean);
+  });
+  // `close` is the ordinary path. It does NOT run when the process is torn down with
+  // `process.exit()`, which is why `flushScrubbedStderr` below is called on every forced path —
+  // piping stderr made this process responsible for bytes `inherit` used to deliver for free.
+  ffmpeg.stderr?.on('close', () => {
+    const rest = scrubStderr.flush();
+    if (rest) process.stderr.write(rest);
+  });
+  /**
+   * Flush the scrubber's buffered tail SYNCHRONOUSLY. `process.exit()` truncates pending async
+   * writes, and `process.stderr` is async when stderr is a pipe — exactly the `fly logs` case this
+   * redaction exists for. Without this, a forced stop drops ffmpeg's last lines, which are the ones
+   * that say why the stream died.
+   */
+  flushScrubbedStderr = () => {
+    const rest = scrubStderr.flush();
+    if (rest) {
+      try {
+        writeSync(2, rest);
+      } catch {
+        /* stderr already gone — nothing useful left to do */
+      }
+    }
+  };
   // ffmpeg closes its stdin the moment `-t <duration>` is satisfied (or its sink dies) — a pump tick
   // racing that close is an EPIPE, which on a Socket is an *emitted* error that would crash the
   // process. It's the normal end-of-stream handshake here, not a failure: swallow it and let the
@@ -1114,6 +1346,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   let exitCode = 0;
   let cdp: Cdp | undefined;
   const cleanup = () => {
+    disarmFrameWatch();
     if (pumpTimer) clearInterval(pumpTimer);
     if (buildTimer) clearInterval(buildTimer);
     if (perfTimer) clearInterval(perfTimer);
@@ -1156,10 +1389,13 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // See broadcast-perf.ts for why queue *growth*, not ffmpeg's `speed=`, is the margin metric.
     let emitted = 0;
     const perf = startPerfRecording(page, ffmpeg, chrome, () => emitted);
+    const frameWatch = makeFrameWatchdog(onFrameStall);
+    disarmFrameWatch = frameWatch.disarm;
     page.on('Page.screencastFrame', (p) => {
       const frame = Buffer.from(String(p['data']), 'base64');
       perf?.frame(frame.byteLength);
       pump.frame(frame);
+      frameWatch.arrived();
       void page.send('Page.screencastFrameAck', { sessionId: p['sessionId'] });
     });
     // JPEG, and this is load-bearing: Chrome encodes screencast frames on the compositor thread,
@@ -1179,9 +1415,16 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     });
     // Tick at 2× frame cadence: the pump owes frames by wall clock, so the timer only needs to
     // fire *often enough* — late ticks emit catch-up frames instead of losing them.
+    // Armed HERE, not at startup: Chrome launching and the page loading can take a minute, and
+    // none of it is a freeze. The sweep rides the pump's own timer rather than a second interval —
+    // the pump tick is the moment a frozen source is being papered over, so it is the honest place
+    // to ask whether anything has arrived.
+    runStartedAt = Date.now();
+    frameWatch.arm();
     pumpTimer = setInterval(
       () => {
         emitted += pump.tick();
+        frameWatch.check();
       },
       Math.max(1, Math.round(500 / opts.fps)),
     );

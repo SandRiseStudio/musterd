@@ -23,7 +23,7 @@ import { sym } from '../render/ui.js';
 import { acceptSurface, readDeclined } from './declined.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { CANONICAL_SKILL_PATH, establishedHarnesses, writeGuidance } from './guidance.js';
-import type { Harness } from './harness.js';
+import type { Harness, RefreshHooksOptions } from './harness.js';
 import { HARNESSES, harnessAdapters } from './harnesses/index.js';
 import { loadProvisioning, saveProvisioning } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
@@ -125,10 +125,21 @@ function candidateTeams(config: Config, folderTeam: string | null): string[] {
  * line used to say "run `musterd init`", pointing at the one command that also re-mints identity:
  * a cosmetic version bump should never route a human through an identity-rewriting flow.
  */
-export function runRefreshGuidance(dir: string = process.cwd()): number {
+export function runRefreshGuidance(
+  dir: string = process.cwd(),
+  opts: { quiet?: boolean } = {},
+): number {
+  // `quiet`: the self-heal caller (spec 2026-09-16) prints its own one line; this driver's file
+  // list would otherwise land in model context at every session start (ADR 171).
+  const out = (line: string): void => {
+    if (!opts.quiet) process.stdout.write(line);
+  };
+  const err = (line: string): void => {
+    if (!opts.quiet) process.stderr.write(line);
+  };
   const team = folderTeamHere(dir);
   if (!team) {
-    process.stderr.write(
+    err(
       `${theme.warn(sym.warn)} no musterd binding here — run \`musterd init\` to set this folder up first\n`,
     );
     return 1;
@@ -142,18 +153,18 @@ export function runRefreshGuidance(dir: string = process.cwd()): number {
   // to refresh. Caught live running this in a seat worktree that had never been provisioned. Refuse
   // instead, and name the command that legitimately creates it.
   if (present.length === 0 && !existsSync(join(dir, CANONICAL_SKILL_PATH))) {
-    process.stdout.write(
+    out(
       `${theme.meta('no musterd guidance in this folder to refresh — `musterd init` provisions it')}\n`,
     );
     return 0;
   }
   const res = writeGuidance(dir, present, { team });
-  process.stdout.write(
+  out(
     `${theme.ok(sym.ok)} guidance refreshed to v${res.contentVersion} — ${res.files.length} file(s)\n`,
   );
-  for (const f of res.files) process.stdout.write(`  ${theme.meta(f)}\n`);
+  for (const f of res.files) out(`  ${theme.meta(f)}\n`);
   if (res.skipped.length > 0) {
-    process.stdout.write(
+    out(
       `${theme.meta(`skipped ${res.skipped.length} user-authored file(s): ${res.skipped.join(', ')}`)}\n`,
     );
   }
@@ -174,22 +185,42 @@ export function runRefreshGuidance(dir: string = process.cwd()): number {
  * re-provisioning. A declared enforcement class was therefore silently a no-op in most seats — it
  * fails open, so nothing broke and nothing complained.
  */
-export function runRefreshHooks(dir: string = process.cwd()): number {
+export interface RefreshHooksResult {
+  /** 0, or 1 when some harness refused (the ADR 168 downgrade guard) or the folder is unbound. */
+  code: number;
+  files: string[];
+  /** Paths a harness would have written but did not, because they resolve outside the worktree. */
+  skipped: string[];
+  refused: number;
+}
+
+export function runRefreshHooks(
+  dir: string = process.cwd(),
+  opts: RefreshHooksOptions & { quiet?: boolean } = {},
+): RefreshHooksResult {
+  // `quiet`: the self-heal caller prints its own one line; the driver's per-harness chatter would
+  // land in model context at every session start, which is exactly the noise ADR 171 forbids.
+  const out = (line: string): void => {
+    if (!opts.quiet) process.stdout.write(line);
+  };
+  const err = (line: string): void => {
+    if (!opts.quiet) process.stderr.write(line);
+  };
   const team = folderTeamHere(dir);
   if (!team) {
-    process.stderr.write(
+    err(
       `${theme.warn(sym.warn)} no musterd binding here — run \`musterd init\` to set this folder up first\n`,
     );
-    return 1;
+    return { code: 1, files: [], skipped: [], refused: 0 };
   }
   // Only harnesses this folder is already provisioned for. A refresh updates what is there; a first
   // install is `init`'s job — the same line --refresh-guidance draws.
   const present = HARNESSES.filter((h) => h.refreshHooks?.applies(dir));
   if (present.length === 0) {
-    process.stdout.write(
+    out(
       `${theme.meta('no musterd hooks in this folder to refresh — `musterd init` provisions them')}\n`,
     );
-    return 0;
+    return { code: 0, files: [], skipped: [], refused: 0 };
   }
   // ADR 332: an explicit `--refresh-hooks` IS the user asking for these surfaces back, so it clears
   // every tombstone in this folder — but never silently. A surface reappearing with no explanation is
@@ -205,16 +236,21 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
   for (const t of resurrected) acceptSurface(dir, t.surface);
 
   let refused = 0;
+  const files: string[] = [];
+  const skipped: string[] = [];
   for (const h of present) {
-    const res = h.refreshHooks!.run(dir);
-    process.stdout.write(`${theme.ok(sym.ok)} ${h.label} hooks refreshed\n`);
-    for (const f of res.files) process.stdout.write(`  ${theme.meta(f)}\n`);
+    const res = h.refreshHooks!.run(dir, { withinWorktreeOnly: opts.withinWorktreeOnly ?? false });
+    files.push(...res.files);
+    skipped.push(...res.skipped);
+    out(`${theme.ok(sym.ok)} ${h.label} hooks refreshed\n`);
+    for (const f of res.files) out(`  ${theme.meta(f)}\n`);
+    for (const f of res.skipped) out(`  ${theme.meta(`skipped ${f} — outside this worktree`)}\n`);
     // A refusal is the ADR 168 downgrade guard firing: a NEWER build wrote the hook we were about to
     // replace. Loud, and non-zero exit — silently "succeeding" while declining to write is the exact
     // failure mode this whole ADR exists to end.
     for (const w of res.warnings) {
       refused++;
-      process.stderr.write(`${theme.warn(sym.warn)} ${w}\n`);
+      err(`${theme.warn(sym.warn)} ${w}\n`);
     }
   }
   for (const t of resurrected) {
@@ -226,7 +262,7 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
     // which was exact while Claude Code was the only refreshHooks implementer; with Cursor, Grok and
     // OpenCode (ADR 392) also implementing it, the hedge is wider than the refusal — scoping it to the
     // harness that refused is the next improvement here.
-    process.stdout.write(
+    out(
       refused > 0
         ? `${theme.warn('↑')} cleared the refusal of ${t.surface}, ${declined}` +
             `part of this refresh was refused (above), so verify with \`musterd init --check\`. ${again}\n`
@@ -234,7 +270,7 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
     );
   }
   for (const t of left) {
-    process.stdout.write(
+    out(
       `${theme.meta(
         `left ${t.surface} declined (${t.at.slice(0, 10)}) — nothing in this refresh installs it; ` +
           '`musterd surface accept ' +
@@ -243,7 +279,7 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
       )}\n`,
     );
   }
-  return refused > 0 ? 1 : 0;
+  return { code: refused > 0 ? 1 : 0, files, skipped, refused };
 }
 
 /**

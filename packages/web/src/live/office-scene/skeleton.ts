@@ -104,6 +104,14 @@ export const GESTURE = {
    * as making yourself comfortable rather than a twitch.
    */
   settle: 14,
+  /** Both shoulders roll up, back and down — the desk-stiffness beat. Reads by silhouette. */
+  shoulders: 15,
+  /** Back in the chair, both hands laced behind the head, elbows wide. Held, not arced. */
+  behindHead: 16,
+  /** Thumb and fingers to the eyes, a brief squeeze. The tired beat. */
+  rubEyes: 17,
+  /** A glance at the phone in the hand, down in the lap, then back to the screen. */
+  pocketPhone: 18,
   // Errand beats (played on a walk's hold/sit legs via `Leg.overlay`, not by the gesture scheduler):
   /** Peering into the open fridge, one hand on the door. */
   browse: 9,
@@ -116,6 +124,43 @@ export const GESTURE = {
   /** Phone to the ear, held for the length of a call. */
   call: 13,
 } as const;
+
+/**
+ * The errand beats: played on a walk's hold/sit legs via `Leg.overlay`, never chosen by the gesture
+ * scheduler. Listed here (rather than by id range) because this is the ONLY thing that separates the
+ * two families, and the separation has to be derivable — see `IDLE_GESTURES` directly below.
+ */
+const ERRAND_GESTURES = ['browse', 'fill', 'eat', 'pour', 'call'] as const;
+
+/** A beat the gesture scheduler may pick: everything in the registry that is not an errand overlay. */
+export type IdleGesture = (typeof GESTURE)[Exclude<keyof typeof GESTURE, (typeof ERRAND_GESTURES)[number]>];
+
+/**
+ * Every scheduler-pickable beat, DERIVED from the registry rather than re-listed (lane 01M2JYBGMQ).
+ * #1430 added four beats and the duration table did not hear about it, so all four silently took the
+ * shortest window in it; a re-listed set would have gone stale the same way. Add a beat to `GESTURE`
+ * and it lands here automatically — and `GESTURE_DUR`, keyed by `IdleGesture`, stops compiling until
+ * somebody chooses its window.
+ */
+export const IDLE_GESTURES: readonly IdleGesture[] = Object.entries(GESTURE)
+  .filter(([key]) => !(ERRAND_GESTURES as readonly string[]).includes(key))
+  .map(([, id]) => id as IdleGesture);
+
+/**
+ * Is this number a beat the scheduler may pick?
+ *
+ * The one place a gesture id arrives from OUTSIDE the type system is `pokeGesture`, which
+ * `/office-preview?beat=<n>` feeds a URL param. `GESTURE_DUR` is keyed by `IdleGesture` and has no
+ * fallback (#1434, correctly — a table that cannot report its own gaps is how four beats shipped on
+ * the shortest window in it), so an errand id arriving there produced `dur: undefined`, and
+ * `g.t >= g.dur` is never true against `undefined`: the member gestured for the life of the scene
+ * and was excluded from every later beat. A cast cannot catch that; this can (izzo, reviewing #1434
+ * — falsify: `pokeGesture(GESTURE.call)` and step the scene; a member still holding a gesture after
+ * its longest window means this guard is not on the path).
+ */
+export function isIdleGesture(kind: number): kind is IdleGesture {
+  return (IDLE_GESTURES as readonly number[]).includes(kind);
+}
 
 /** An arc-shaped envelope over the gesture window: 0 → 1 → 0, zero-velocity at both ends (no pop). */
 const arcEnv = (gT: number): number => Math.sin(smooth(gT) * Math.PI);
@@ -623,6 +668,55 @@ function applyOverlays(s: Skel, inp: SkelInput): void {
     for (const k of ['chest', 'neck', 'head'] as const) s[k] = v(s[k].x + a * 2.2, s[k].y, s[k].z);
     s.shoulder[0] = v(s.shoulder[0].x + a * 1.6, s.shoulder[0].y - a * 0.8, s.shoulder[0].z);
     s.head = v(s.head.x + a * 1.2, s.head.y - a * 0.6, s.head.z);
+  } else if (inp.gesture === GESTURE.shoulders) {
+    /* Shoulder roll: both shoulders lift, travel BACK, and drop. The whole beat is in the shoulder
+     * line and the small counter-dip of the head — no hand goes anywhere, which is what makes it read
+     * at 40px where a hand gesture would be four pixels of nothing. Two envelopes a quarter-cycle
+     * apart give the lift and the travel, so it rolls rather than shrugs. */
+    const a = arcEnv(inp.gestureT);
+    const back = Math.sin(smooth(inp.gestureT) * Math.PI * 2) * a;
+    for (const i of [0, 1] as const) {
+      s.shoulder[i] = v(s.shoulder[i].x, s.shoulder[i].y + a * 2.6, s.shoulder[i].z - back * 2.2);
+      // The arms hang from the shoulders, so they have to travel with them or the body tears.
+      s.elbow[i] = v(s.elbow[i].x, s.elbow[i].y + a * 1.6, s.elbow[i].z - back * 1.4);
+      s.wrist[i] = v(s.wrist[i].x, s.wrist[i].y + a * 0.6, s.wrist[i].z - back * 0.5);
+    }
+    s.head = v(s.head.x, s.head.y - a * 1.1, s.head.z);
+    s.neck = v(s.neck.x, s.neck.y - a * 0.6, s.neck.z);
+  } else if (inp.gesture === GESTURE.behindHead) {
+    /* Hands behind the head: recline, both wrists up beside the skull, elbows driven WIDE. The width
+     * is the whole read — from the front it is a triangle, from behind it is two wings, and either way
+     * it is unmistakable at office scale. Held, because the pose IS the beat. */
+    const a = holdEnv(inp.gestureT);
+    recline(a * 0.22);
+    for (const i of [0, 1] as const) {
+      const sgn = i === 0 ? -1 : 1;
+      const nape = v(sgn * (C.headR * 0.8), s.head.y + 1, s.head.z - C.headR * 0.7);
+      s.wrist[i] = lerp3(s.wrist[i], nape, a);
+      // Hint the elbow far out to the side so ik2 opens the arm rather than tucking it in.
+      s.elbow[i] = ik2(s.shoulder[i], s.wrist[i], C.upperArm, C.foreArm, v(sgn * 1.6, 0.2, -0.5));
+    }
+  } else if (inp.gesture === GESTURE.rubEyes) {
+    /* Rub the eyes: one hand up to the bridge of the nose with a small squeeze, head tipping down into
+     * it. The head dip does most of the work — a hand at the face is small, a bowed head is not. */
+    const a = holdEnv(inp.gestureT);
+    const squeeze = Math.sin(inp.t * 6) * 0.8 * a;
+    const eyes = v(1.5, s.head.y + 1 + squeeze, s.head.z + C.headR * 0.75);
+    s.wrist[1] = lerp3(s.wrist[1], eyes, a);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, -0.5, 0.2));
+    s.head = v(s.head.x, s.head.y - a * 2.2, s.head.z + a * 1.4);
+    s.neck = v(s.neck.x, s.neck.y - a * 0.9, s.neck.z);
+  } else if (inp.gesture === GESTURE.pocketPhone) {
+    /* The phone in the lap: the right hand comes down and in, and the head follows it down. Deliberately
+     * NOT the `call` pose — that one is a phone at the ear for the length of a call, an errand with a
+     * destination. This is the three-second check you do without leaving your chair, and the two must
+     * not read as the same thing. Held, so the glance lands. */
+    const a = holdEnv(inp.gestureT);
+    const lap = v(4, s.pelvis.y + 7, s.pelvis.z + 9);
+    s.wrist[1] = lerp3(s.wrist[1], lap, a);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, -0.2, 0.2));
+    s.head = v(s.head.x + a * 1.2, s.head.y - a * 2.6, s.head.z + a * 1.8);
+    s.neck = v(s.neck.x, s.neck.y - a * 1, s.neck.z);
   } else if (inp.gesture === GESTURE.roll) {
     // Roll-back: the chair (and body — `chairShift`) drifts back from the desk; hands in the lap, a
     // hint of recline, then it all rolls home.
