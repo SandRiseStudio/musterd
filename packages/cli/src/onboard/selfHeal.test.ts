@@ -38,7 +38,7 @@ describe('selfHealWorkspace', () => {
   it('repairs guidance and hooks, never permissions, and reports what remains', () => {
     const d = deps();
     const out = selfHealWorkspace('/w', d);
-    expect(d.refreshGuidance).toHaveBeenCalledWith('/w');
+    expect(d.refreshGuidance).toHaveBeenCalledWith('/w', { quiet: true });
     expect(d.refreshHooks).toHaveBeenCalledWith('/w', { withinWorktreeOnly: true, quiet: true });
     expect(out.ran).toBe(true);
     expect(out.report).toEqual({

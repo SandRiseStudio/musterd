@@ -125,10 +125,21 @@ function candidateTeams(config: Config, folderTeam: string | null): string[] {
  * line used to say "run `musterd init`", pointing at the one command that also re-mints identity:
  * a cosmetic version bump should never route a human through an identity-rewriting flow.
  */
-export function runRefreshGuidance(dir: string = process.cwd()): number {
+export function runRefreshGuidance(
+  dir: string = process.cwd(),
+  opts: { quiet?: boolean } = {},
+): number {
+  // `quiet`: the self-heal caller (spec 2026-09-16) prints its own one line; this driver's file
+  // list would otherwise land in model context at every session start (ADR 171).
+  const out = (line: string): void => {
+    if (!opts.quiet) process.stdout.write(line);
+  };
+  const err = (line: string): void => {
+    if (!opts.quiet) process.stderr.write(line);
+  };
   const team = folderTeamHere(dir);
   if (!team) {
-    process.stderr.write(
+    err(
       `${theme.warn(sym.warn)} no musterd binding here — run \`musterd init\` to set this folder up first\n`,
     );
     return 1;
@@ -142,18 +153,18 @@ export function runRefreshGuidance(dir: string = process.cwd()): number {
   // to refresh. Caught live running this in a seat worktree that had never been provisioned. Refuse
   // instead, and name the command that legitimately creates it.
   if (present.length === 0 && !existsSync(join(dir, CANONICAL_SKILL_PATH))) {
-    process.stdout.write(
+    out(
       `${theme.meta('no musterd guidance in this folder to refresh — `musterd init` provisions it')}\n`,
     );
     return 0;
   }
   const res = writeGuidance(dir, present, { team });
-  process.stdout.write(
+  out(
     `${theme.ok(sym.ok)} guidance refreshed to v${res.contentVersion} — ${res.files.length} file(s)\n`,
   );
-  for (const f of res.files) process.stdout.write(`  ${theme.meta(f)}\n`);
+  for (const f of res.files) out(`  ${theme.meta(f)}\n`);
   if (res.skipped.length > 0) {
-    process.stdout.write(
+    out(
       `${theme.meta(`skipped ${res.skipped.length} user-authored file(s): ${res.skipped.join(', ')}`)}\n`,
     );
   }

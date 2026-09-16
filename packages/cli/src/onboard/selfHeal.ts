@@ -19,7 +19,7 @@ export const SELF_HEAL_SURFACE = 'musterd:self-heal';
 
 export interface SelfHealDeps {
   inspect: (cwd: string) => { guidance: string[]; hooks: string[]; permissions: string[] };
-  refreshGuidance: (cwd: string) => number;
+  refreshGuidance: (cwd: string, opts: { quiet: true }) => number;
   refreshHooks: (
     cwd: string,
     opts: { withinWorktreeOnly: true; quiet: true },
@@ -64,7 +64,9 @@ export function selfHealWorkspace(cwd: string, deps: SelfHealDeps): SelfHealOutc
       // A throwing refresh is reported as unrepaired below, never surfaced: the probe's contract
       // is exit 0 and one line, and the re-inspect is what says whether anything changed.
       try {
-        if (deps.refreshGuidance(cwd) === 0) repairedGuidance = before.guidance.length;
+        if (deps.refreshGuidance(cwd, { quiet: true }) === 0) {
+          repairedGuidance = before.guidance.length;
+        }
       } catch {
         /* counted as remaining by the re-inspect */
       }
@@ -150,7 +152,7 @@ function composeLine(r: WorkspaceRepairBody, declined: boolean, behind: boolean)
 export function defaultSelfHealDeps(build: string): SelfHealDeps {
   return {
     inspect: inspectArtifactDrift,
-    refreshGuidance: runRefreshGuidance,
+    refreshGuidance: (cwd, opts) => runRefreshGuidance(cwd, opts),
     refreshHooks: (cwd, opts) => runRefreshHooks(cwd, opts),
     declined: (cwd) => isDeclined(cwd, SELF_HEAL_SURFACE),
     checkoutBehind: checkoutBehindHooks,
