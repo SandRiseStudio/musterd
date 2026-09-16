@@ -173,6 +173,11 @@ measurements to date (#912 and its predecessor) were run by hand. The gate holdi
 therefore a control nobody exercises, and a trigger that fired would go unnoticed. Registering it
 with a last-fired date is lane `01M0ER0A0B`.
 
+**2026-09-16 — the hand-run happened again** (wanderer, lane `01M2NSG380`). Live count is 2
+`roster.role_query` rows (both 2026-08-21, none since). The discovery→send join has not fired as
+specified — one accidental hit (query `admin`/nick, then `accept` to stanley). §5 stays deferred.
+`adr-272-routing-deferral-gate.lastExercised` is 2026-09-16.
+
 **Experiment.** None for §4 beyond the migration's own round-trip (a template
 rendered before and after must produce the same workspace). The routing
 experiment from the original text — ordinary work through a role route across
