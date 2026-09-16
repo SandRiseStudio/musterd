@@ -152,9 +152,9 @@ _Priority order across all unshipped work — the coarse status grouping above, 
 
 ## How priorities are decided
 
-The wedge is persistent teams with identity, presence, and humans as peers — the coordination layer where about 79% of multi-agent failures actually happen. Work is weighed by whether it strengthens that layer, not by adding more agents or more orchestration. Human partnership ranks first, on evidence: collaborative agents beat fully autonomous ones on real-user preference, and removing the notification protocol more than halves the win rate.
+The wedge is persistent teams with identity, presence, and humans as peers — the coordination layer where MAST (arXiv 2503.13657) attributes about 79% of multi-agent failures, across other teams’ systems rather than ours. Work is weighed by whether it strengthens that layer, not by adding more agents or more orchestration. Human partnership ranks first, on evidence: collaborative agents beat fully autonomous ones on real-user preference, and removing the notification protocol more than halves the win rate.
 
-See: [ROADMAP.md](https://github.com/SandRiseStudio/musterd/blob/main/ROADMAP.md), [research-foundation.md](https://github.com/SandRiseStudio/musterd/blob/main/docs/design/research-foundation.md), [landscape.md](https://github.com/SandRiseStudio/musterd/blob/main/docs/design/landscape.md).
+See: [MAST (arXiv 2503.13657)](https://arxiv.org/abs/2503.13657), [ROADMAP.md](https://github.com/SandRiseStudio/musterd/blob/main/ROADMAP.md), [research-foundation.md](https://github.com/SandRiseStudio/musterd/blob/main/docs/design/research-foundation.md), [landscape.md](https://github.com/SandRiseStudio/musterd/blob/main/docs/design/landscape.md).
 
 <!-- END GENERATED ROADMAP -->
 
