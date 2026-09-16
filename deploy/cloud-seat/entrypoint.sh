@@ -31,7 +31,17 @@ mkdir -p "$HOME/.musterd" /data/tailscale /run/tailscale
 LOG_DIR=/data/log
 mkdir -p "$LOG_DIR"
 
-log() { printf '%s cloud-seat: %s\n' "$(date -u +%FT%TZ)" "$*"; }
+# Boot narration goes to stdout AND to the volume. Fly's log retention is finite and the 2026-09-04
+# deaf-seat investigation ran past it: by the time anyone looked, every line that would have said
+# which step failed was gone, and "configure failed" vs "configure succeeded and the new build
+# invalidated the state" could not be told apart (docs/wiki/cross-machine-huddle-bell.md §2).
+# $LOG_DIR already holds tailscaled/daemon/host/workspace-install logs — the boot narration was the
+# one thing missing from it. LOG_DIR crosses the setpriv (below), so seat.sh appends to the same file.
+# `|| true`: narration must never be able to kill a boot under `set -o pipefail`. stdout still
+# carries every line even when the volume will not take the file.
+log() {
+  printf '%s cloud-seat: %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$LOG_DIR/entrypoint.log" || true
+}
 
 # ── 0. what must NOT be here ──────────────────────────────────────────────────────────────────────
 # The hub's team agent key on a joiner is the over-grant the first boot found and the runbook
@@ -92,6 +102,12 @@ unset TAILSCALE_AUTHKEY
 # chown is a no-op after the first boot on this image; on a volume from the root-era image it is
 # the one-time migration. `setpriv` (util-linux) is the exec-and-drop: no setuid helper, no
 # inheritable capabilities, the seat's own supplementary groups.
+# The boot log specifically: on a volume whose $LOG_DIR is ALREADY seat-owned (every machine after
+# its first boot), the loop below skips the dir and never reaches a file root created inside it —
+# and root creates entrypoint.log on the first boot that carries this tee. seat.sh would then hit
+# EACCES on `tee -a` and, under `set -o pipefail`, take the whole boot down. Hand the file over
+# explicitly, every boot, before the drop.
+chown "$SEAT_USER:$SEAT_USER" "$LOG_DIR/entrypoint.log" 2>/dev/null || true
 for d in "$HOME" /data/musterd /data/musterd-"$MUSTERD_SEAT" "$LOG_DIR"; do
   [ -e "$d" ] || continue
   if [ "$(stat -c %U "$d")" != "$SEAT_USER" ]; then
