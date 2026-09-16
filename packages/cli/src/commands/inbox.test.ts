@@ -183,6 +183,68 @@ describe('inbox command', () => {
     expect(new Set(ids).size).toBe(205); // every message, each exactly once
   });
 
+  /**
+   * Lane 01M2P69FHZ: the interrupt line now names `musterd inbox --id <id>`, so the spelling has to
+   * exist and has to fetch exactly that act. The point is a seat with thousands unread: the whole
+   * value is a bounded read, so this must not be the ordinary view with a filter bolted on.
+   */
+  describe('--id (lane 01M2P69FHZ)', () => {
+    it('reads exactly the named act, whatever the size of the inbox behind it', async () => {
+      await seed(20);
+      const all = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+      const msgs = JSON.parse(all.out) as Array<{ id: string; body: string }>;
+      const target = msgs[3]!;
+
+      const res = await capture(() => inboxCommand(parseArgs(['--id', target.id])));
+      expect(res.code).toBe(0);
+      expect(res.out).toContain(target.body);
+      // Exactly one row: every other unread stays behind, which is what makes this one call cheap.
+      expect((res.out.match(/msg \d+/g) ?? []).length).toBe(1);
+    });
+
+    it('moves no cursor — naming one act must not consume the unread window behind it', async () => {
+      await seed(20);
+      const all = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+      const target = (JSON.parse(all.out) as Array<{ id: string }>)[3]!;
+      expect(await unreadCount()).toBe(20);
+
+      await capture(() => inboxCommand(parseArgs(['--id', target.id])));
+      // Still 20: a by-id read is a lens like --from/--act, not a drain. A seat woken by an
+      // interrupt reads the act it was rung about; it has not read the other 19.
+      expect(await unreadCount()).toBe(20);
+    });
+
+    it('says so on stderr when the named act is not in this seat\'s inbox, rather than printing nothing', async () => {
+      await seed(3);
+      const errs: string[] = [];
+      const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: never) => {
+        errs.push(String(c));
+        return true;
+      });
+      let code: number;
+      try {
+        code = await inboxCommand(parseArgs(['--id', 'NOSUCHACT']));
+      } finally {
+        errSpy.mockRestore();
+      }
+      // A miss is a real miss: the caller named a row and it is not there. Naming it back is what
+      // separates "no such act" from "the act is empty", which an empty stdout cannot.
+      expect(errs.join('')).toContain('NOSUCHACT');
+      expect(code).toBe(1);
+    });
+
+    it('--json emits the named act so a script can read it back', async () => {
+      await seed(5);
+      const all = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+      const target = (JSON.parse(all.out) as Array<{ id: string }>)[1]!;
+
+      const res = await capture(() => inboxCommand(parseArgs(['--id', target.id, '--json'])));
+      const got = JSON.parse(res.out) as Array<{ id: string }>;
+      expect(got).toHaveLength(1);
+      expect(got[0]!.id).toBe(target.id);
+    });
+  });
+
   it('--peek never advances the read cursor', async () => {
     await seed(5);
     await capture(() => inboxCommand(parseArgs(['--peek'])));

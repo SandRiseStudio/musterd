@@ -717,7 +717,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'inbox',
     signature:
-      '[--watch] [--all] [--unread] [--peek] [--deferred] [--limit <n>] [--from <name>] [--act <act>]  |  --waiting  |  defer <act_id> --until-lane <id> | --until-reply  |  --wait [--timeout <s>]  |  --interrupt-check',
+      '[--watch] [--all] [--unread] [--peek] [--deferred] [--limit <n>] [--from <name>] [--act <act>]  |  --id <act_id>  |  --waiting  |  defer <act_id> --until-lane <id> | --until-reply  |  --wait [--timeout <s>]  |  --interrupt-check',
     summary: 'read what’s waiting for you; watch or block for the next act',
     group: 'waiting',
     primary: true,
@@ -732,7 +732,10 @@ export const CATALOG: readonly CommandEntry[] = [
       '`defer <act_id>` postpones one act until a condition fires — `--until-lane <id>` (that lane moves) ' +
       'or `--until-reply` (someone answers on its thread); it comes back on its own then, even if the ' +
       'cursor has passed it. There is no time form: "later" is a state edge, never a clock (ADR 211). ' +
-      '`--deferred` lists what you have postponed and which ones have since raised.',
+      '`--deferred` lists what you have postponed and which ones have since raised. ' +
+      '`--id <act_id>` reads exactly one named act whatever its read state and moves no cursor — the '  +
+      'bounded read the interrupt line points at, so a seat thousands of messages behind can fetch the '  +
+      'act it was rung about in one call instead of paging its whole inbox.',
     examples: [
       'musterd inbox',
       'musterd inbox --unread',
@@ -741,6 +744,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'musterd inbox --wait --timeout 300',
       'musterd inbox defer 01KZ4PAE1E --until-reply',
       'musterd inbox --deferred',
+      'musterd inbox --id 01KZ4PAE1E',
     ],
   },
   {

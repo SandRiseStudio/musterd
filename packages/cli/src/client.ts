@@ -551,7 +551,7 @@ export class HttpClient {
   }
   inbox(
     slug: string,
-    opts: { unread?: boolean; limit?: number; since?: number } = {},
+    opts: { unread?: boolean; limit?: number; since?: number; ids?: readonly string[] } = {},
   ): Promise<{
     messages: Envelope[];
     cursor: { last_read_ts: number };
@@ -581,9 +581,14 @@ export class HttpClient {
     unread_remaining?: number;
   }> {
     const q = new URLSearchParams();
-    if (opts.unread) q.set('unread', '1');
-    if (opts.limit) q.set('limit', String(opts.limit));
-    if (opts.since !== undefined) q.set('since', String(opts.since));
+    // `?ids=` reads named acts back and nothing else — no cursor floor, no window, no `truncated`
+    // (lane 01M2JZYTAH). It is the whole request when present, so the other params are moot.
+    if (opts.ids !== undefined && opts.ids.length > 0) q.set('ids', opts.ids.join(','));
+    else {
+      if (opts.unread) q.set('unread', '1');
+      if (opts.limit) q.set('limit', String(opts.limit));
+      if (opts.since !== undefined) q.set('since', String(opts.since));
+    }
     const qs = q.toString();
     return this.request('GET', `/teams/${slug}/inbox${qs ? `?${qs}` : ''}`);
   }
