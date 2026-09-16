@@ -7,8 +7,6 @@ import {
   LANE_STAKES_PROVENANCE,
   LANE_STATES,
   type EmptyPool,
-  type EmptyPoolKind,
-  type EmptyPoolLiveSeat,
   type LaneState,
 } from './lanes.wire.js';
 import { SEED_SOURCES } from './seeds.wire.js';
