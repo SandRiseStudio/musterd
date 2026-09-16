@@ -146,6 +146,7 @@ import {
 } from '../store/lanes.js';
 import { SWEEP_GRACE_MS } from '../store/laneSweep.js';
 import {
+  hueSharedWith,
   addMember,
   authMember,
   agentKeyMayOccupy,
@@ -1883,6 +1884,8 @@ export async function handleHttp(
             }
             token = rotateToken(ctx.db, row.id);
           }
+          const sharedWith =
+            row.hue === null ? null : hueSharedWith(ctx.db, team.id, row.hue, row.id);
           return sendJson(res, 201, {
             member: toMember(row, team.slug),
             token,
@@ -1893,10 +1896,11 @@ export async function handleHttp(
             ...(row.kind === 'human'
               ? { human_credential: mintCredential(ctx.db, row.id).credential }
               : {}),
+            ...(sharedWith !== null ? { hue_shared_with: sharedWith } : {}),
           });
         }
         const team = requireTeam(ctx.db, slug);
-        const { row, token } = addMember(ctx.db, team, {
+        const { row, token, hue_shared_with } = addMember(ctx.db, team, {
           name: body.name,
           kind: body.kind,
           role: body.role ?? '',
@@ -1917,6 +1921,9 @@ export async function handleHttp(
           ...(row.kind === 'human'
             ? { human_credential: mintCredential(ctx.db, row.id).credential }
             : {}),
+          // ADR 374 Decision 4 / lane 01M2P43WQ7: past a full wheel the colour is shared, and the
+          // caller says so out loud — the name rides the response instead of a 409.
+          ...(hue_shared_with !== undefined ? { hue_shared_with } : {}),
         });
       }
 
@@ -6081,9 +6088,12 @@ export async function handleHttp(
             'conflict',
             `"${slug}" is file-backed — set \`hue = ${body.hue}\` in seats/${targetName}.toml (the file owns it; \`musterd team hue\` does this)`,
           );
-        setMemberHue(ctx.db, target, body.hue);
+        const sharedWith = setMemberHue(ctx.db, target, body.hue);
         const me = summarize(ctx, team.slug, team.id, member).find((m) => m.name === targetName);
-        return sendJson(res, 200, { member: me });
+        return sendJson(res, 200, {
+          member: me,
+          ...(sharedWith !== null ? { hue_shared_with: sharedWith } : {}),
+        });
       }
 
       const reclaimMatch = rest.match(/^\/members\/([^/]+)\/reclaim$/);

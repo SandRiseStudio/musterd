@@ -7,7 +7,13 @@ import {
   type WorkingHours,
   TOKEN_PREFIXES,
 } from '@musterd/protocol';
-import { HUE_MIN_SEPARATION, assignHue, defaultHue, hueConflict } from '@musterd/protocol/hue';
+import {
+  HUE_MIN_SEPARATION,
+  assignHue,
+  defaultHue,
+  hueConflict,
+  nearestClearHue,
+} from '@musterd/protocol/hue';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { MusterdError, SessionLeaseRefused } from '../errors.js';
@@ -163,6 +169,13 @@ export interface AddMemberInput {
    *  `undefined` is "nobody said" and the daemon assigns, which is right only on a DB-only team,
    *  where the daemon is the source. */
   hue?: number | null;
+  /**
+   * The hue is the seat FILE's word (reconcile), not a caller's ask: stored as declared, never
+   * refused. ADR 058 — the daemon does not argue with the file; a collision is reported back
+   * (`hue_shared_with`), not thrown, because a throw here aborts the whole team's reconcile and
+   * one hand-edited seat file would wedge every seat on the roster (lane 01M2P43WQ7).
+   */
+  hueDeclared?: boolean;
   /** Provision a read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. */
   observer?: boolean;
   /** Observer grade (ADR 136): `'public'` sees only team/broadcast traffic — what a shared watch-link
@@ -175,7 +188,7 @@ export function addMember(
   db: Database,
   team: TeamRow,
   input: AddMemberInput,
-): { row: MemberRow; token: string } {
+): { row: MemberRow; token: string; hue_shared_with?: string } {
   if (!input.name || /\s/.test(input.name)) {
     throw new MusterdError(
       'bad_request',
@@ -190,7 +203,15 @@ export function addMember(
   if (lifecycle === 'until' && !input.lifecycleUntil) {
     throw new MusterdError('bad_request', 'lifecycle "until" requires a timestamp');
   }
-  const hue = resolveHue(db, team.id, input.name, input.hue, existing?.hue ?? null, existing?.id);
+  const { hue, sharedWith } = resolveHue(
+    db,
+    team.id,
+    input.name,
+    input.hue,
+    existing?.hue ?? null,
+    existing?.id,
+    input.hueDeclared === true,
+  );
   // A *tombstoned* row (soft-removed, `left_at` set) still squats the (team, name) UNIQUE index, so a
   // plain INSERT would dead-end on a constraint error with no CLI way out — the recurring "departed
   // name can't be reused" trap (ADR 065). Re-adding a removed name is a revive, not a new row: reuse
@@ -249,7 +270,7 @@ export function addMember(
      VALUES
        (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @working_hours, @slack_user_id, @hue, @token_hash, @observer, @observer_scope, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
   ).run(row);
-  return { row, token };
+  return { row, token, ...(sharedWith !== null ? { hue_shared_with: sharedWith } : {}) };
 }
 
 /** The hues the LIVE roster members of a team hold — the set a new colour must clear.
@@ -268,7 +289,10 @@ export function takenHues(db: Database, teamId: string, except?: string): number
 
 /**
  * The hue a member ends up with (ADR 374), from what the caller said:
- *   - a number — kept, once it clears every live roster member; a collision names the neighbour;
+ *   - a number — kept once it clears every live roster member. A collision is refused, naming the
+ *     neighbour AND a clear hue, while a clear hue exists; past a full wheel it is kept and the
+ *     neighbour is returned as `sharedWith` (lane 01M2P43WQ7 — never a dead-end 409). A DECLARED
+ *     hue (the seat file's word) is never refused at all, only reported;
  *   - `null` — kept as null: the seat file has no hue and the daemon never invents one;
  *   - `undefined` — nobody said: keep what the seat already had (a revive), else assign the nearest
  *     clear hue to the name's default. Only a DB-only caller says nothing; reconcile always says.
@@ -280,45 +304,81 @@ function resolveHue(
   asked: number | null | undefined,
   had: number | null,
   except?: string,
-): number | null {
-  if (asked === null) return null;
+  declared = false,
+): { hue: number | null; sharedWith: string | null } {
+  if (asked === null) return { hue: null, sharedWith: null };
   if (asked !== undefined) {
-    assertHueClear(db, teamId, asked, except);
-    return asked;
+    if (!Number.isInteger(asked) || asked < 0 || asked > 359)
+      throw new MusterdError('bad_request', `hue must be an integer 0–359, got ${asked}`);
+    return {
+      hue: asked,
+      sharedWith: declared
+        ? hueSharedWith(db, teamId, asked, except)
+        : assertHueClear(db, teamId, asked, except),
+    };
   }
-  if (had !== null) return had;
+  if (had !== null) return { hue: had, sharedWith: null };
   // The name comes from the caller, never from a row lookup: a NEW member has no row yet, and the
   // first cut looked one up by id and seeded every fresh seat from `defaultHue('')` — one colour for
   // everyone, walked apart by `assignHue` so nobody noticed until gptbot read it (#1258 acceptance).
-  return assignHue(defaultHue(name), takenHues(db, teamId, except));
+  const hue = assignHue(defaultHue(name), takenHues(db, teamId, except));
+  return { hue, sharedWith: hueSharedWith(db, teamId, hue, except) };
 }
 
-/** Refuse a hue within `HUE_MIN_SEPARATION` of a live roster member's, naming them. */
-export function assertHueClear(db: Database, teamId: string, hue: number, except?: string): void {
-  if (!Number.isInteger(hue) || hue < 0 || hue > 359)
-    throw new MusterdError('bad_request', `hue must be an integer 0–359, got ${hue}`);
+/** The live roster member whose hue sits within `HUE_MIN_SEPARATION` of `hue`, or null. */
+export function hueSharedWith(
+  db: Database,
+  teamId: string,
+  hue: number,
+  except?: string,
+): string | null {
   const near = hueConflict(hue, takenHues(db, teamId, except));
-  if (near === null) return;
+  if (near === null) return null;
   const who = db
     .prepare<
       [string, number],
       { name: string }
     >('SELECT name FROM members WHERE team_id = ? AND left_at IS NULL AND observer = 0 AND hue = ?')
     .get(teamId, near);
+  return who?.name ?? '?';
+}
+
+/**
+ * The uniqueness floor for a hue a CALLER asked for (ADR 374 Decision 3), with the hatch ADR 145
+ * demands (lane 01M2P43WQ7): while a clear hue exists, a collision is refused naming the neighbour
+ * and one clear hue to take instead; past a full wheel — the greedy walk seats a median 24 at 12° —
+ * the hue is kept and the neighbour's name is returned, so the caller can say "colour shared with"
+ * out loud exactly as Decision 4's walk does. Returns null when the hue is clear.
+ */
+export function assertHueClear(
+  db: Database,
+  teamId: string,
+  hue: number,
+  except?: string,
+): string | null {
+  if (!Number.isInteger(hue) || hue < 0 || hue > 359)
+    throw new MusterdError('bad_request', `hue must be an integer 0–359, got ${hue}`);
+  const taken = takenHues(db, teamId, except);
+  const near = hueConflict(hue, taken);
+  if (near === null) return null;
+  const who = hueSharedWith(db, teamId, hue, except);
+  const alternative = nearestClearHue(hue, taken);
+  if (alternative === null) return who;
   throw new MusterdError(
     'conflict',
-    `hue ${hue} is within ${HUE_MIN_SEPARATION}° of "${who?.name ?? '?'}" (${near}) — pick another`,
+    `hue ${hue} is within ${HUE_MIN_SEPARATION}° of "${who}" (${near}) — ${alternative} is clear`,
   );
 }
 
 /** Set a live member's hue in place (the DB-only `team hue` path; ADR 374). */
-export function setMemberHue(db: Database, member: MemberRow, hue: number): void {
-  assertHueClear(db, member.team_id, hue, member.id);
+export function setMemberHue(db: Database, member: MemberRow, hue: number): string | null {
+  const sharedWith = assertHueClear(db, member.team_id, hue, member.id);
   db.prepare('UPDATE members SET hue = ?, updated_at = ? WHERE id = ?').run(
     hue,
     Date.now(),
     member.id,
   );
+  return sharedWith;
 }
 
 export function getMemberByName(db: Database, teamId: string, name: string): MemberRow | undefined {

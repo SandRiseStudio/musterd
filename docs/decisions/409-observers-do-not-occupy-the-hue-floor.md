@@ -71,7 +71,9 @@ who counts, not how far apart.
   (`assertHueClear` has no hatch; revive is one seat from the median 24), and ADR 374 still does
   not say what happens past that. Who counts is this ADR; degrade-or-override past 30 is a
   separate lane.
-  Follows-up: 01M2P43WQ7MSBPJF2ZDZVVA732
+  Follows-up: 01M2P43WQ7MSBPJF2ZDZVVA732 — landed 2026-09-16 (ADR 374 Consequences, same date):
+  the file's word is never refused, a caller's 409 names a clear hue, and past a full wheel the
+  colour is kept and shared out loud.
 
 ## Observability & Evaluation
 

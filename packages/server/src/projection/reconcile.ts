@@ -131,6 +131,9 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
         workingHours: fields.workingHours ?? null,
         slackUserId: fields.slackUserId ?? null,
         hue: fields.hue ?? null,
+        // The file's word: stored, never refused (lane 01M2P43WQ7). A throw here would abort the
+        // whole team's reconcile over one seat file's colour.
+        hueDeclared: true,
       });
       result.added.push(name);
       result.minted[name] = token;

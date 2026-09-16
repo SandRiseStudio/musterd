@@ -111,6 +111,23 @@ export function hueConflict(hue: number, taken: readonly number[]): number | nul
 }
 
 /**
+ * The nearest hue to `seed` that clears every taken hue, walking outward one degree at a time on
+ * both sides — `seed` itself when it is clear — or `null` when no hue on the wheel is clear. The
+ * null is the whole point (lane 01M2P43WQ7): "the wheel is full" is a fact a caller can act on,
+ * where a bare refusal is not. A 409 that can name a clear hue is a redirect; one that cannot is
+ * a dead end, and ADR 145 says degrade, never wedge.
+ */
+export function nearestClearHue(seed: number, taken: readonly number[]): number | null {
+  const start = wrap(seed);
+  for (let step = 0; step < 180; step++) {
+    for (const h of step === 0 ? [start] : [wrap(start + step), wrap(start - step)]) {
+      if (hueConflict(h, taken) === null) return h;
+    }
+  }
+  return null;
+}
+
+/**
  * The hue a new member gets: `seed` if it is clear of every taken hue, else the nearest hue that
  * is, walking outward from the seed one degree at a time on both sides. Past a full wheel — no
  * clear hue anywhere — the answer is the hue that sits farthest from its nearest neighbour, which
@@ -119,11 +136,8 @@ export function hueConflict(hue: number, taken: readonly number[]): number | nul
  */
 export function assignHue(seed: number, taken: readonly number[]): number {
   const start = wrap(seed);
-  for (let step = 0; step < 180; step++) {
-    for (const h of step === 0 ? [start] : [wrap(start + step), wrap(start - step)]) {
-      if (hueConflict(h, taken) === null) return h;
-    }
-  }
+  const clear = nearestClearHue(start, taken);
+  if (clear !== null) return clear;
   let best = start;
   let bestGap = -1;
   for (let h = 0; h < 360; h++) {

@@ -28,6 +28,7 @@ import {
   defaultHue,
   hueConflict,
   legacyHue,
+  nearestClearHue,
   type HueKind,
 } from '@musterd/protocol/hue';
 import { flagHue, flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
@@ -775,6 +776,23 @@ async function teamAdd(parsed: Parsed): Promise<number> {
   // back the token). A db-only team has no roster home, so this is skipped and the daemon originates.
   const home = loadConfig().rosterHome[team];
   if (home) {
+    // An explicit colour is checked against the sibling seat files BEFORE the file is written
+    // (lane 01M2P43WQ7): the daemon stores the file's word without arguing, so this is the one
+    // place a chosen collision can be turned back — and it is turned back with a clear hue named,
+    // not a bare refusal. Past a full wheel there is nothing clear to name, and the seat is
+    // written anyway; the daemon says whom it shares with.
+    if (hue !== undefined) {
+      const taken = readSeatHues(home, name);
+      const near = hueConflict(hue, Object.values(taken));
+      const alternative = nearestClearHue(hue, Object.values(taken));
+      if (near !== null && alternative !== null) {
+        const who = Object.entries(taken).find(([, h]) => h === near)?.[0] ?? '?';
+        throw new CliError(
+          `hue ${hue} is within ${HUE_MIN_SEPARATION}° of "${who}" (${near}) — ${alternative} is clear`,
+          4,
+        );
+      }
+    }
     writeSeatFile(home, name, { kind, role, lifecycle, until, hue });
   }
   const res = await http.addMember(team, {
@@ -814,6 +832,11 @@ async function teamAdd(parsed: Parsed): Promise<number> {
       `added ${theme.memberName(name, kind)} ${theme.meta(`(${kind}${role ? `, ${role}` : ''})`)} to ${team}`,
     ) + '\n',
   );
+  // ADR 374 Decision 4: past a full wheel the colour is shared, and it is said out loud.
+  if (res.hue_shared_with)
+    process.stdout.write(
+      `  ${theme.warn(`colour shared with ${res.hue_shared_with} — the wheel is full`)}\n`,
+    );
   if (kind === 'agent') {
     // ADR 344: the handoff carries a one-seat bootstrap credential, never the Team-wide legacy key.
     process.stdout.write(theme.meta('connect this agent via MCP with its scoped key:') + '\n');
@@ -1007,26 +1030,34 @@ async function teamHue(parsed: Parsed): Promise<number> {
       const seatKind = readSeatFiles(home)[name]?.kind ?? 'agent';
       const taken = readSeatHues(home, name);
       const near = hueConflict(hue, Object.values(taken));
-      if (near !== null) {
-        const who = Object.entries(taken).find(([, h]) => h === near)?.[0] ?? '?';
+      const alternative = nearestClearHue(hue, Object.values(taken));
+      const who =
+        near === null ? null : (Object.entries(taken).find(([, h]) => h === near)?.[0] ?? '?');
+      if (near !== null && alternative !== null) {
         throw new CliError(
-          `hue ${hue} is within ${HUE_MIN_SEPARATION}° of "${who}" (${near}) — pick another`,
+          `hue ${hue} is within ${HUE_MIN_SEPARATION}° of "${who}" (${near}) — ${alternative} is clear`,
           4,
         );
       }
       const p = setSeatHue(home, name, hue);
+      if (who !== null)
+        process.stdout.write(`  ${theme.warn(`colour shared with ${who} — the wheel is full`)}\n`);
       process.stdout.write(
         success(`${theme.memberName(name, seatKind)} ${theme.meta('→')} hue ${hue}`) +
           `  ${theme.meta(`(${p} — the file owns it; commit and push)`)}\n`,
       );
       return 0;
     }
-    const { member } = await http().setHue(team, name, hue);
+    const { member, hue_shared_with } = await http().setHue(team, name, hue);
     process.stdout.write(
       success(
         `${theme.memberName(name, member.kind)} ${theme.meta('→')} hue ${member.hue ?? hue}`,
       ) + '\n',
     );
+    if (hue_shared_with)
+      process.stdout.write(
+        `  ${theme.warn(`colour shared with ${hue_shared_with} — the wheel is full`)}\n`,
+      );
     return 0;
   }
 

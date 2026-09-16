@@ -663,6 +663,21 @@ describe('reconcile — the seat file owns the hue (ADR 374)', () => {
     expect(getMemberByName(db, t.id, 'miley')!.hue).toBeNull();
   });
 
+  /* Lane 01M2P43WQ7: reconcile creates a seat through `addMember`, which used to refuse a
+     colliding explicit hue — so ONE seat file whose colour sat within 12° of a teammate's aborted
+     the whole team's reconcile, every seat included. The file's word is stored, never refused. */
+  it('a seat file whose hue collides with a teammate does not abort the team — the file is the writer', () => {
+    writeRoster(team, {
+      ryder: 'kind = "agent"\nrole = ""\nhue = 214\n',
+      miley: 'kind = "agent"\nrole = "designer"\nhue = 212\n',
+    });
+    const result = reconcile();
+    expect(result.added.sort()).toEqual(['miley', 'ryder']);
+    const t = getTeamBySlug(db, 'acme')!;
+    expect(getMemberByName(db, t.id, 'miley')!.hue).toBe(212);
+    expect(getMemberByName(db, t.id, 'ryder')!.hue).toBe(214);
+  });
+
   it('never invents a hue for a file-backed seat — a file without one projects null on ADD', () => {
     writeRoster(team, { dolly: 'kind = "agent"\nrole = ""\n' });
     reconcile();

@@ -1,7 +1,7 @@
-import { HUE_MIN_SEPARATION, defaultHue, hueSeparation } from '@musterd/protocol/hue';
+import { HUE_MIN_SEPARATION, defaultHue, hueConflict, hueSeparation } from '@musterd/protocol/hue';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { addMember, getMemberByName, leaveMember } from './members.js';
+import { addMember, getMemberByName, leaveMember, setMemberHue, takenHues } from './members.js';
 import { toMember } from './rows.js';
 import { createTeam } from './teams.js';
 
@@ -90,5 +90,67 @@ describe('addMember hue (ADR 374)', () => {
     const { row } = addMember(db, team, { name: 'compo', kind: 'agent', hue: 77 });
     leaveMember(db, row.id);
     expect(addMember(db, team, { name: 'compo', kind: 'agent' }).row.hue).toBe(77);
+  });
+
+  /* Lane 01M2P43WQ7 — past a full wheel (the greedy walk seats a median 24 at 12°), an explicit hue
+     that collides is KEPT and the neighbour is named on the way out, never a bare 409 with no hatch
+     (ADR 145: degrade, never wedge). The 409 survives only while a clear hue exists — and then it
+     names one, so it is a redirect rather than a dead end. */
+  function fillTheWheel(db: ReturnType<typeof seed>['db'], team: ReturnType<typeof seed>['team']) {
+    for (let i = 0; i < 40; i++) addMember(db, team, { name: `seat-${i}`, kind: 'agent' });
+    expect(hueConflict(212, takenHues(db, team.id))).not.toBeNull();
+  }
+
+  it('past a full wheel an explicit colliding hue is kept, and the neighbour it shares with is named', () => {
+    const { db, team } = seed();
+    fillTheWheel(db, team);
+    const { row, hue_shared_with } = addMember(db, team, {
+      name: 'miley',
+      kind: 'agent',
+      hue: 212,
+    });
+    expect(row.hue).toBe(212);
+    expect(hue_shared_with).toMatch(/^seat-\d+$/);
+  });
+
+  it('with clear hues left, an explicit collision is still refused — and the refusal names a clear hue', () => {
+    const { db, team } = seed();
+    addMember(db, team, { name: 'ryder', kind: 'agent', hue: 214 });
+    let message = '';
+    try {
+      addMember(db, team, { name: 'miley', kind: 'agent', hue: 212 });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/"ryder" \(214\)/);
+    const alt = Number(/(\d+) is clear/.exec(message)?.[1]);
+    expect(Number.isInteger(alt)).toBe(true);
+    expect(hueConflict(alt, takenHues(db, team.id))).toBeNull();
+  });
+
+  it("the seat file's word is never refused — a declared hue is stored even when it collides", () => {
+    const { db, team } = seed();
+    addMember(db, team, { name: 'ryder', kind: 'agent', hue: 214 });
+    const { row, hue_shared_with } = addMember(db, team, {
+      name: 'miley',
+      kind: 'agent',
+      hue: 212,
+      hueDeclared: true,
+    });
+    expect(row.hue).toBe(212);
+    expect(hue_shared_with).toBe('ryder');
+  });
+
+  it('setMemberHue follows the same rule: refused with an alternative while clear hues exist, kept past a full wheel', () => {
+    const { db, team } = seed();
+    addMember(db, team, { name: 'ryder', kind: 'agent', hue: 214 });
+    const { row: miley } = addMember(db, team, { name: 'miley', kind: 'agent', hue: 40 });
+    expect(() => setMemberHue(db, miley, 212)).toThrow(/is clear/);
+    // A member's own hue is left out of its own way — so past a full wheel, re-asking for the
+    // colour it already has is clear, and only a NEW colour meets the shared verdict.
+    fillTheWheel(db, team);
+    const { row: lin } = addMember(db, team, { name: 'lin', kind: 'agent', hue: 212 });
+    expect(setMemberHue(db, lin, 214)).toBe('ryder');
+    expect(getMemberByName(db, team.id, 'lin')!.hue).toBe(214);
   });
 });

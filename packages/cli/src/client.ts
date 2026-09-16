@@ -449,11 +449,24 @@ export class HttpClient {
       creator: { name: creator.name, kind: 'human', role: creator.role },
     });
   }
-  addMember(slug: string, body: Record<string, unknown>) {
+  addMember(
+    slug: string,
+    body: Record<string, unknown>,
+  ): Promise<{
+    member: MemberSummary;
+    token: string;
+    human_credential?: string;
+    /** ADR 374 Decision 4 / lane 01M2P43WQ7: past a full wheel the colour is shared with this seat. */
+    hue_shared_with?: string;
+  }> {
     return this.request('POST', `/teams/${slug}/members`, body);
   }
   /** ADR 374: set a member's hue on a DB-only team (a file-backed team edits the seat file). */
-  setHue(slug: string, name: string, hue: number): Promise<{ member: MemberSummary }> {
+  setHue(
+    slug: string,
+    name: string,
+    hue: number,
+  ): Promise<{ member: MemberSummary; hue_shared_with?: string }> {
     return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(name)}/hue`, { hue });
   }
   /**
