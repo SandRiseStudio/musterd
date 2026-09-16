@@ -250,7 +250,7 @@ import {
 import { getRoleCharter, listRoles } from '../store/roles.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import {
-  hasFullMessageVisibility,
+  messageVisibilityOf,
   parseWorkingHours,
   resolveAccountStatus,
   resolveCapabilities,
@@ -5891,11 +5891,14 @@ export async function handleHttp(
         assertSeatCanRead(member);
         const since = url.searchParams.get('since');
         const limit = url.searchParams.get('limit');
-        const scoped = !hasFullMessageVisibility(member);
+        // ADR 407: the reader's grade decides the timeline. Every claimed seat reads every act on
+        // its team; the one act hidden from a `team`-grade reader is a to-human ask naming a seat
+        // (§3), and a public watch-link stays on team/broadcast traffic (ADR 136). Delivery — the
+        // inbox, its cursor, the interrupt line — is a different question and is not asked here.
         const rows = listTeamMessages(ctx.db, team.id, {
           ...(since ? { since: Number(since) } : {}),
           ...(limit ? { limit: Math.min(Math.max(Number(limit), 1), 1000) } : {}),
-          ...(scoped ? { forMemberId: member.id } : {}),
+          scope: { grade: messageVisibilityOf(member), readerId: member.id },
         });
         const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
         return sendJson(res, 200, { messages });

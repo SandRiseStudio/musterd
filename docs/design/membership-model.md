@@ -151,7 +151,7 @@ A Role is more than a label: it carries **capabilities** (what a seat may do) at
 - **Non-admin seats/agents see a projection** — their teammates' handles + presence + the acts addressed to them; **not** credentials, grants, audit, team policy, or other roles' charters.
 - The roster/info endpoints return a _viewer-scoped_ view; the server enforces it.
 
-> **Shipped (ADR 128/136):** the server scopes `GET /teams/:slug/messages` and the `team-all` firehose to a regular Member's sent, received, and Team-broadcast Acts. Admins and full-grade observers retain full visibility; a public watch-link observer receives Team-broadcast traffic only. Watch links remain identified observers rather than anonymous access: roster handles and Presence remain visible. See `security.md` § Capabilities & visibility for the full policy.
+> **Shipped (ADR 128/136, amended by ADR 407 — 2026-09-16):** every claimed Member reads every Act on its Team over `GET /teams/:slug/messages` and the `team-all` firehose. Two exceptions, both named in ADR 407 §3: a to-human `ask` carrying `meta.about` (naming a seat as its subject) is read only by its sender, its addressee, admins and full-grade observers; and a public watch-link observer receives Team-broadcast traffic only. Reading is not receiving — the inbox and its cursor are unchanged. Watch links remain identified observers rather than anonymous access: roster handles and Presence remain visible. See `security.md` § Capabilities & visibility for the full policy.
 
 **Enforce vs declare (keeps Principle 4 intact):**
 

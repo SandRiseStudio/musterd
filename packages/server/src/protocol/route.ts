@@ -9,6 +9,7 @@ import {
   type Lane,
   makeEnvelope,
   modelFamily,
+  confidentialAskSubject,
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import type { Ctx } from '../context.js';
@@ -432,14 +433,16 @@ function routeEnvelopeInner(
   );
   const skip = new Set(recipients);
   skip.add(sender.id);
-  // Directed (member-kind) envelopes reach only full-visibility connections on the firehose — admins
-  // and read-only observers (ADR 063); team/broadcast acts stay public. Regular non-party members no
-  // longer see others' DMs (recipient-scoping).
+  // What a non-party subscriber may see is its ADR 407 grade (see `hub.broadcastFirehose`): a
+  // directed envelope reaches every claimed seat, a confidential ask — ADR 407 §3, the one act that
+  // names a seat as its subject — reaches admins and full observers only, and a public watch-link
+  // gets team/broadcast acts alone. `confidentialAskSubject` is the same test the SQL read mirrors.
   const firehoseDelivered = ctx.hub.broadcastFirehose(
     team.id,
     { type: 'deliver', envelope: firehoseEnv },
     skip,
     message.to_kind === 'member',
+    confidentialAskSubject(env) !== null,
   );
 
   // The to-human ask stream's guaranteed reach (ADR 147 §3): an `ask` routes to admin humans by default.

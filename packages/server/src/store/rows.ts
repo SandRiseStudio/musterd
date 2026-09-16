@@ -172,18 +172,29 @@ export function parseWorkingHours(raw: string | null | undefined) {
 }
 
 /**
- * May this seat read the team's *directed* traffic — every DM, not just its own?
+ * How much of the team's message traffic a seat may READ (ADR 407) — as distinct from what it is
+ * SENT, which is the inbox predicate in `store/messages.ts` and does not live here.
  *
- * The single predicate behind both enforcement points (`GET /messages` and the firehose). They were
+ * - `full`   — every envelope, including the one confidential act. Admins, and full-grade observers
+ *              (the trusted local dashboard, ADR 136).
+ * - `team`   — every envelope on the team save a to-human `ask` that names a seat with `meta.about`
+ *              and is not this seat's own (ADR 407 §3). Every claimed member that is not an observer.
+ * - `public` — team/broadcast acts only. A public-grade observer on a shared watch-link (ADR 136):
+ *              the one reader who is not on the team, and the reason a scoped grade survives at all.
+ *
+ * The single predicate behind both enforcement points, `GET /messages` and the firehose. They were
  * two independent `member.observer` / `conn.observer` tests before ADR 136, which is precisely the
- * shape that lets a scoping rule drift out of sync between the history read and the live stream.
- *
- * Full visibility is: an **admin**, or a **full-grade observer** (the trusted local dashboard). Every
- * other seat — ordinary members and public-grade observers alike — is recipient-scoped (ADR 128).
+ * shape that lets a scoping rule drift between the history read and the live stream. It was a
+ * boolean (`hasFullMessageVisibility`) from ADR 128 to ADR 407; the confidential act made visibility
+ * a fact about the pair (reader, envelope), and a boolean on the reader alone could no longer carry
+ * it — so it is a grade, and the envelope-side half is `confidentialAskSubject` in the protocol.
  */
-export function hasFullMessageVisibility(row: MemberRow): boolean {
-  if (resolveCapabilities(row).is_admin) return true;
-  return row.observer === 1 && resolveObserverScope(row) === 'full';
+export type MessageVisibility = 'full' | 'team' | 'public';
+
+export function messageVisibilityOf(row: MemberRow): MessageVisibility {
+  if (resolveCapabilities(row).is_admin) return 'full';
+  if (row.observer === 1) return resolveObserverScope(row);
+  return 'team';
 }
 
 /** The roles a seat holds (ADR 227). Defensive parse; NULL/corrupt falls back to the legacy single

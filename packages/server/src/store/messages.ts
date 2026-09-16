@@ -8,7 +8,7 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import type { MessageRow } from './rows.js';
+import type { MessageRow, MessageVisibility } from './rows.js';
 
 /**
  * The sender's presence provenance at send time — the freshest non-held row (a resident socket's
@@ -720,16 +720,62 @@ export function latestStatusUpdate(
   return state ? { state, ts: row.ts } : null;
 }
 
+/**
+ * What a READER may see of the timeline (ADR 407): the reader's grade from `messageVisibilityOf`,
+ * plus its id so the confidential clause can exempt the reader's own acts. Distinct from
+ * {@link TeamMessagesOpts.forMemberId}, which is a PARTY scope — "what is this member in" — and is
+ * what the deferral fold and the residency poll ask; those are delivery-side questions and ADR 407
+ * §2 leaves them exactly where they were.
+ */
+export interface ReadScope {
+  grade: MessageVisibility;
+  readerId: string;
+}
+
 export interface TeamMessagesOpts {
   since?: number;
   limit?: number;
   /**
-   * Recipient-scoping (need-to-know): when set, restrict the timeline to envelopes this member is a
-   * party to — sender, recipient, or a team/broadcast act. Admin-visibility callers omit it and read
-   * the whole team timeline. Closes the DM-leak gap where any seat's `GET /messages` returned every
-   * directed envelope (ADR 061 follow-up).
+   * Party-scoping: when set, restrict the timeline to envelopes this member is a party to — sender,
+   * recipient, or a team/broadcast act. From ADR 128 to ADR 407 this was ALSO the visibility rule
+   * for a regular member's `GET /messages`; it no longer is (see {@link ReadScope}). It remains the
+   * right question for the two delivery-side callers that ask "what am I in": `deferralFold` and
+   * the residency poll.
    */
   forMemberId?: string;
+  /** Visibility scoping for a timeline READ (ADR 407). Wins over `forMemberId` when both are set. */
+  scope?: ReadScope;
+}
+
+/**
+ * The SQL half of ADR 407's visibility grades. Mirrors `confidentialAskSubject` in the protocol —
+ * an `ask` whose `meta.about` is a non-empty string — and MUST stay in step with it: the firehose
+ * asks the function, this read asks the column, and a divergence is a message visible on one
+ * surface and hidden on the other.
+ */
+function readScopeSql(scope: ReadScope): { sql: string; params: unknown[] } {
+  switch (scope.grade) {
+    case 'full':
+      return { sql: '', params: [] };
+    case 'team':
+      // Everything but a confidential ask the reader is not party to. `IS NOT` rather than `!=` so
+      // a NULL `to_member` (impossible for a valid `about`, but a row is not a validator) excludes
+      // rather than yielding NULL and vanishing from the NOT.
+      return {
+        sql:
+          " AND NOT (act = 'ask' AND json_extract(meta, '$.about') IS NOT NULL" +
+          " AND json_extract(meta, '$.about') != ''" +
+          ' AND from_member IS NOT ? AND to_member IS NOT ?)',
+        params: [scope.readerId, scope.readerId],
+      };
+    case 'public':
+      // The ADR 128 party predicate, which for an observer — never a sender, never a directed
+      // recipient except of its own mail — collapses to exactly the public timeline (ADR 136).
+      return {
+        sql: " AND (from_member = ? OR to_member = ? OR to_kind IN ('team','broadcast'))",
+        params: [scope.readerId, scope.readerId],
+      };
+  }
 }
 
 /**
@@ -752,11 +798,17 @@ export function listTeamMessages(
   opts: TeamMessagesOpts = {},
 ): MessageRow[] {
   const limit = opts.limit ?? 200;
-  // Need-to-know scope: a party is the sender, the recipient, or anyone (a team/broadcast act).
-  const scopeSql = opts.forMemberId
-    ? " AND (from_member = ? OR to_member = ? OR to_kind IN ('team','broadcast'))"
-    : '';
-  const scopeParams = opts.forMemberId ? [opts.forMemberId, opts.forMemberId] : [];
+  // A READ scope (ADR 407 grade) or a PARTY scope (what this member is in) — see the opts.
+  const scoped = opts.scope
+    ? readScopeSql(opts.scope)
+    : opts.forMemberId
+      ? {
+          sql: " AND (from_member = ? OR to_member = ? OR to_kind IN ('team','broadcast'))",
+          params: [opts.forMemberId, opts.forMemberId],
+        }
+      : { sql: '', params: [] };
+  const scopeSql = scoped.sql;
+  const scopeParams = scoped.params;
   if (typeof opts.since === 'number') {
     // Forward catch-up: walk forward from the cursor, oldest-first, so no message in the gap is skipped.
     return db

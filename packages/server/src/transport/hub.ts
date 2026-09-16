@@ -1,4 +1,5 @@
 import type { WSServerFrame } from '@musterd/protocol';
+import type { MessageVisibility } from '../store/rows.js';
 
 export interface Connection {
   connId: string;
@@ -9,17 +10,17 @@ export interface Connection {
   /** Read-only observer seat (ADR 063): no presence events, exempt from single-active displacement. */
   observer?: boolean;
   /**
-   * May this connection see the team's *directed* traffic on the firehose (ADR 128 + ADR 136)?
+   * How much of the team's traffic this connection may read on the firehose — the ADR 407 grade,
+   * from the same `messageVisibilityOf` the history read uses, so the live stream and
+   * `GET /messages` can never disagree about what a seat may see.
    *
    * Deliberately NOT the same bit as `observer`. An observer is still an observer for presence and
    * displacement purposes whatever it may read; what changes with its grade is only how much of the
    * stream it gets. Conflating the two is what made every shared watch-link full-visibility.
    *
-   * True for admins and full-grade observers (the local dashboard). A public-grade observer is false —
-   * it sees team/broadcast acts, and directed envelopes addressed to it still arrive by direct
-   * delivery, never through this fan-out.
+   * Absent (an older or unclaimed connection) reads as `public`, the least it could be.
    */
-  fullVisibility?: boolean;
+  visibility?: MessageVisibility;
   /**
    * The client's workspace (e.g. `repo@branch`), if it sent one. Agent single-active displacement is
    * scoped by this: a hello from the *same* workspace is the same seat reconnecting (a reload or a
@@ -148,25 +149,28 @@ export class Hub {
 
   /**
    * Push a frame to every firehose subscriber on a team, skipping members in `skipMemberIds`
-   * (recipients + sender already handled by `deliver`/`ack`, so no one is double-sent). When
-   * `directed` is set (a member-kind envelope), only `fullVisibility` connections receive it — admins
-   * and **full-grade** observers, i.e. the trusted local dashboard (ADR 128 + ADR 136). Every firehose
-   * subscriber that reaches this loop is a non-party (parties are in `skipMemberIds`), so a regular
-   * member — or a public-grade observer on a shared watch-link — must not see another seat's DM.
-   * team/broadcast acts stay public (`directed` false). Returns how many got it.
+   * (recipients + sender already handled by `deliver`/`ack`, so no one is double-sent). Every
+   * subscriber that reaches this loop is therefore a NON-PARTY, and what it may see is its ADR 407
+   * grade: a `directed` (member-kind) envelope reaches `team` and `full` connections; a
+   * `confidential` one — a to-human ask naming a seat, ADR 407 §3 — reaches `full` only; a
+   * public-grade observer on a shared watch-link gets team/broadcast acts and nothing else
+   * (ADR 136). Returns how many got it.
    */
   broadcastFirehose(
     teamId: string,
     frame: WSServerFrame,
     skipMemberIds?: Set<string>,
     directed?: boolean,
+    confidential?: boolean,
   ): number {
     let n = 0;
     for (const connId of this.firehose) {
       const conn = this.byConn.get(connId);
       if (!conn || conn.teamId !== teamId) continue;
       if (skipMemberIds?.has(conn.memberId)) continue;
-      if (directed && !conn.fullVisibility) continue;
+      const grade = conn.visibility ?? 'public';
+      if (directed && grade === 'public') continue;
+      if (confidential && grade !== 'full') continue;
       conn.send(frame);
       n++;
     }
