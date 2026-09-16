@@ -159,6 +159,8 @@ describe('report command', () => {
   it('report coordination renders the MAST page (and --json)', async () => {
     const res = await capture(() => reportCommand(parseArgs(['coordination'])));
     expect(res.out).toContain('coordination — dawn');
+    expect(res.out).toContain('peer demand');
+    expect(res.out).toContain('challenges received');
     expect(res.out).toContain('steering');
     expect(res.out).toContain('time to unblock');
     expect(res.out).toContain('ignored help');
@@ -169,10 +171,12 @@ describe('report command', () => {
     const asJson = await capture(() => reportCommand(parseArgs(['coordination', '--json'])));
     const parsed = JSON.parse(asJson.out) as {
       coordination: unknown;
+      peer_demand: { window_days: number };
       mast: unknown;
       steering: unknown;
     };
     expect(parsed.coordination).toBeDefined();
+    expect(parsed.peer_demand.window_days).toBe(7);
     expect(parsed.mast).toBeDefined();
     expect(parsed.steering).toBeDefined();
   });

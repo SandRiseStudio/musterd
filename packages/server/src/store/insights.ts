@@ -2,6 +2,7 @@ import {
   LANE_CONTENDING_STATES,
   type BlockedLane,
   type CoordinationDensity,
+  type PeerDemand,
   type FlowMetrics,
   type GoalFlow,
   type LongDeferred,
@@ -249,6 +250,81 @@ export function coordinationDensity(
     journal_ratio,
     exchange_ratio,
     flag: acts >= COORD_MIN_ACTS && journal_ratio >= 0.5 && exchange_ratio < 0.2,
+  };
+}
+
+/**
+ * Peer demand, from the human's side (ADR 320 §5b, lane 01M2P7GMVJ): over the density window, how
+ * many `challenge` acts reached humans vs agents, how many `decline`s answered a human's vs an
+ * agent's `handoff`, and for each human how many of their own acts were `accept`. Three grouped
+ * passes over the message log, kind joined from members. Counts only — the share is the surface's
+ * call, and only over a sample it deems stable. `flag` is the ADR's baseline condition itself:
+ * humans present, a non-trivial sample, and zero of both — the state in which "keeps you sharp"
+ * comes off every surface.
+ */
+export function peerDemand(db: Database, teamId: string, now: number = Date.now()): PeerDemand {
+  const since = now - COORD_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+  const challenges = db
+    .prepare<
+      [string, number],
+      { to_human: number; to_agent: number; to_service: number; unaddressed: number }
+    >(
+      `SELECT SUM(CASE WHEN m.to_kind = 'member' AND r.kind = 'human' THEN 1 ELSE 0 END) AS to_human,
+              SUM(CASE WHEN m.to_kind = 'member' AND r.kind = 'agent' THEN 1 ELSE 0 END) AS to_agent,
+              SUM(CASE WHEN m.to_kind = 'member' AND r.kind = 'service' THEN 1 ELSE 0 END) AS to_service,
+              SUM(CASE WHEN m.to_kind <> 'member' THEN 1 ELSE 0 END) AS unaddressed
+         FROM messages m
+         LEFT JOIN members r ON r.id = m.to_member
+        WHERE m.team_id = ? AND m.ts > ? AND m.act = 'challenge'`,
+    )
+    .get(teamId, since)!;
+  const declines = db
+    .prepare<[string, number], { of_human: number; of_agent: number; of_service: number }>(
+      `SELECT SUM(CASE WHEN s.kind = 'human' THEN 1 ELSE 0 END) AS of_human,
+              SUM(CASE WHEN s.kind = 'agent' THEN 1 ELSE 0 END) AS of_agent,
+              SUM(CASE WHEN s.kind = 'service' THEN 1 ELSE 0 END) AS of_service
+         FROM messages d
+         JOIN messages h ON h.team_id = d.team_id AND h.id = json_extract(d.meta, '$.in_reply_to')
+         JOIN members s ON s.id = h.from_member
+        WHERE d.team_id = ? AND d.ts > ? AND d.act = 'decline' AND h.act = 'handoff'`,
+    )
+    .get(teamId, since)!;
+  const humans = db
+    .prepare<[number, string], { name: string; acts: number; accepts: number }>(
+      `SELECT u.name,
+              COUNT(m.id) AS acts,
+              SUM(CASE WHEN m.act = 'accept' THEN 1 ELSE 0 END) AS accepts
+         FROM members u
+         LEFT JOIN messages m ON m.from_member = u.id AND m.team_id = u.team_id AND m.ts > ?
+        WHERE u.team_id = ? AND u.kind = 'human' AND u.left_at IS NULL
+        GROUP BY u.id
+        ORDER BY u.name`,
+    )
+    .all(since, teamId)
+    .map((h) => ({ name: h.name, acts: h.acts, accepts: h.accepts ?? 0 }));
+  const acts = db
+    .prepare<
+      [string, number],
+      { n: number }
+    >(`SELECT COUNT(*) AS n FROM messages WHERE team_id = ? AND ts > ?`)
+    .get(teamId, since)!.n;
+  const toHuman = challenges.to_human ?? 0;
+  const ofHuman = declines.of_human ?? 0;
+  return {
+    window_days: COORD_WINDOW_DAYS,
+    challenges: {
+      to_human: toHuman,
+      to_agent: challenges.to_agent ?? 0,
+      to_service: challenges.to_service ?? 0,
+      unaddressed: challenges.unaddressed ?? 0,
+    },
+    handoff_declines: {
+      of_human: ofHuman,
+      of_agent: declines.of_agent ?? 0,
+      of_service: declines.of_service ?? 0,
+    },
+    humans,
+    flag: humans.length > 0 && acts >= COORD_MIN_ACTS && toHuman === 0 && ofHuman === 0,
   };
 }
 
@@ -818,6 +894,7 @@ export function deriveReport(
     goals: listGoals(db, teamId, teamSlug),
     blocked,
     coordination: coordinationDensity(db, teamId, now),
+    peer_demand: peerDemand(db, teamId, now),
     open_directed: openDirectedLedger(db, teamId, now),
     mast: deriveMast(db, teamId, now),
     steering: deriveSteeringMetrics(db, teamId, now),

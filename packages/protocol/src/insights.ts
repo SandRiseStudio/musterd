@@ -105,6 +105,46 @@ export const CoordinationDensitySchema = z.object({
 export type CoordinationDensity = z.infer<typeof CoordinationDensitySchema>;
 
 /**
+ * Peer demand, read from the human's side (ADR 320 §5b's falsifier, lane 01M2P7GMVJ): do humans on
+ * this team get challenged, do their handoffs get declined, and are their own acts anything but
+ * `accept`? Counts by member KIND over the density window — never a score, and a share is rendered
+ * only over a per-member sample the surface deems stable (the 2026-08-21 rule: no percentage over a
+ * moving denominator). An ADR 050 projection: derived per query, never stored.
+ */
+export const PeerDemandSchema = z.object({
+  /** The window this is computed over, in days (the coordination-density window). */
+  window_days: z.number().int(),
+  /** `challenge` acts in the window, by the recipient's kind. `unaddressed` = sent to the team or
+   *  broadcast, where no single recipient kind exists and none is guessed. */
+  challenges: z.object({
+    to_human: z.number().int(),
+    to_agent: z.number().int(),
+    /** Service seats (autorefresh, guardian, …) are members too — their own bucket, never folded
+     *  into `agent`. */
+    to_service: z.number().int(),
+    unaddressed: z.number().int(),
+  }),
+  /** `decline` acts whose `meta.in_reply_to` names a `handoff`, by the handoff SENDER's kind. */
+  handoff_declines: z.object({
+    of_human: z.number().int(),
+    of_agent: z.number().int(),
+    of_service: z.number().int(),
+  }),
+  /** Each human member's acts in the window and how many of them were `accept`. */
+  humans: z.array(
+    z.object({
+      name: z.string(),
+      acts: z.number().int(),
+      accepts: z.number().int(),
+    }),
+  ),
+  /** True when the falsifier's baseline holds on a real sample: humans on the roster, a non-trivial
+   *  act count, zero challenges to humans and zero declines of human handoffs. */
+  flag: z.boolean(),
+});
+export type PeerDemand = z.infer<typeof PeerDemandSchema>;
+
+/**
  * One recipient's rung on the delivery ladder (ADR 090): `logged` (persisted to the inbox — in
  * musterd durability IS delivery, so there is no local `failed`) → `seen` (their read cursor crossed
  * the act) → `answered` (their accept/decline named it, or a resolve closed its thread). Derived from
@@ -499,6 +539,8 @@ export const ReportSchema = z.object({
   blocked: z.array(BlockedLaneSchema),
   /** Coordination-density: is recent traffic real exchange, or broadcast journal? */
   coordination: CoordinationDensitySchema,
+  /** ADR 320 §5b's human-side falsifier, as counts (lane 01M2P7GMVJ). */
+  peer_demand: PeerDemandSchema,
   /**
    * The open directed ledger (ADR 090): loop-opening acts (request_help/handoff, plus urgent
    * directed acts) not yet answered — finding 002's "open_loops=1 for ~70 h" made answerable

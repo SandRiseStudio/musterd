@@ -1,4 +1,11 @@
-import type { ActDelivery, FlowMetrics, Goal, GoalFlow, Report } from '@musterd/protocol';
+import type {
+  ActDelivery,
+  FlowMetrics,
+  Goal,
+  GoalFlow,
+  Report,
+  PeerDemand,
+} from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
@@ -95,6 +102,43 @@ function renderCoordination(r: Report, w: (s: string) => void): void {
   if (c.flag)
     w(
       `  ${theme.warn('⚠ coordination that only looks collaborative')} — mostly broadcast status_updates, little directed or threaded exchange\n`,
+    );
+}
+
+/** A human's `accept` share prints only over a per-member sample this size or larger — below it the
+ *  line is counts only (the 2026-08-21 rule: no percentage over a denominator that small or moving). */
+export const PEER_DEMAND_MIN_ACTS = 10;
+
+/**
+ * Peer demand, read from the human's side (ADR 320 §5b, lane 01M2P7GMVJ): three lines in the density
+ * line's theme — challenges by recipient kind, handoff declines by the handoff sender's kind, and each
+ * human's own accept count — plus the falsifier's warn when its baseline holds on a real sample.
+ * Counts, never a score; the share is rendered only where the sample is stable.
+ */
+export function renderPeerDemand(p: PeerDemand, w: (s: string) => void): void {
+  const c = p.challenges;
+  w(
+    `  challenges received · humans ${c.to_human} · agents ${c.to_agent}` +
+      (c.to_service > 0 ? ` · services ${c.to_service}` : '') +
+      (c.unaddressed > 0 ? ` · unaddressed ${c.unaddressed}` : '') +
+      ` ${theme.meta(`(${p.window_days}d)`)}\n`,
+  );
+  w(
+    `  handoffs declined · of human handoffs ${p.handoff_declines.of_human} · of agent handoffs ${p.handoff_declines.of_agent}` +
+      (p.handoff_declines.of_service > 0
+        ? ` · of service handoffs ${p.handoff_declines.of_service}`
+        : '') +
+      '\n',
+  );
+  if (p.humans.length === 0) w(theme.meta('  no human members') + '\n');
+  for (const h of p.humans) {
+    const share =
+      h.acts >= PEER_DEMAND_MIN_ACTS ? ` ${theme.meta(`(${pct(h.accepts / h.acts)})`)}` : '';
+    w(`  ${h.name} — ${h.accepts} accept of ${h.acts} act${h.acts === 1 ? '' : 's'}${share}\n`);
+  }
+  if (p.flag)
+    w(
+      `  ${theme.warn('⚠ humans receive no challenge and no decline')} — 5b is unsupported by this window\n`,
     );
 }
 
@@ -323,6 +367,7 @@ async function coordinationReport(parsed: Parsed): Promise<number> {
       w(
         JSON.stringify({
           coordination: report.coordination,
+          peer_demand: report.peer_demand,
           mast: m,
           steering: report.steering,
         }) + '\n',
@@ -332,6 +377,8 @@ async function coordinationReport(parsed: Parsed): Promise<number> {
 
   w(`${theme.accent('coordination')} — ${team} ${theme.meta(`· last ${m.window_days}d`)}\n\n`);
   renderCoordination(report, w);
+  w(`\n${theme.accent('peer demand')} ${theme.meta('(ADR 320 §5b)')}:\n`);
+  renderPeerDemand(report.peer_demand, w);
   w(`\n${theme.accent('steering')}:\n`);
   renderSteering(report, w);
 

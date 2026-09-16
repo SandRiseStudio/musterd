@@ -50,6 +50,13 @@ honoring the **surveillance asymmetry** — without building the deferred dashbo
 - Reuses the **shipped reachability predicate**; the waiting-on view is nearly free.
 - The **cost metric, dashboard, and v0.3 governance** are named seams, not built here.
 - Depends on **ADR 048**; composes with **ADR 049** (same derivations feed `musterd next`).
+- 2026-09-16 (izzo, lane 01M2P7GMVJ): `Report` gains `peer_demand`, the projection behind ADR 320
+  §5b's human-side falsifier — `challenge` acts by recipient kind, `decline`s of `handoff`s by the
+  handoff sender's kind, and each human's own `accept` count, over the density window. Counts only;
+  the surface renders a share solely over a per-member sample of ten or more acts (the 2026-08-21
+  rule: no percentage over a small or moving denominator), and a warn line when the falsifier's
+  baseline holds on a real sample. Same shape as the density line: derived per query, never stored,
+  Goodhart-safe because it measures whether humans get pushed back on, not how much anyone talks.
 
 ## Amendment (2026-08-21): seam disposition — one seam stays deferred, one is retired
 
