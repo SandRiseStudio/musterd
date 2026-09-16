@@ -428,6 +428,69 @@ export function makeFramePump(
 }
 
 /**
+ * How long the capture may go without a screencast frame before the picture is called frozen.
+ *
+ * Sized from measurement, not taste. Two captures on the performance-4x box on 2026-09-16 (778s
+ * total, a quiet Saturday floor) delivered a worst SECOND of 7 frames and **zero** seconds with no
+ * frame at all — the office's ambient motion means a healthy capture never goes even one second
+ * dark. Five seconds is therefore ~5x the coarsest healthy bucket and ~75x the healthy inter-frame
+ * gap, which is the margin that keeps a still room from being mistaken for a wedged one.
+ *
+ * It is also cheap to be wrong slowly here: the pump re-emits `latest`, so a gap under the
+ * threshold costs the viewer nothing. Only a SUSTAINED gap is the freeze.
+ */
+export const FRAME_STALL_MS = 5_000;
+
+/**
+ * The watchdog for the failure every other counter calls healthy.
+ *
+ * On 2026-09-16 (machine 84e694b2424e38) Chrome refused every screencast ack because the sessionId
+ * went back stringified. Delivery stopped after three frames. The pump kept re-emitting the last
+ * one at 20fps, so ffmpeg's `fps=` and `speed=` stayed clean, the ADR 159 queue watchdog saw a flat
+ * queue because the queue WAS being drained, and **one frozen frame went out for six and a half
+ * minutes**. The only counter that knew was `deliveredFps` — and it is opt-in behind
+ * MUSTERD_BROADCAST_PERF, so on an ordinary run nothing was watching it.
+ *
+ * The lesson generalises past that bug: every existing health signal measures the ENCODER, and the
+ * encoder is downstream of the freeze. A frozen source keeps it perfectly fed. So the only honest
+ * question is "when did a frame last ARRIVE", which is what this asks.
+ *
+ * Pure, and driven by an injected clock, for the same reason the pump and the ack gate are: the
+ * predicate that takes the stream down is the one a test can drive without CDP, Chrome or a wait.
+ */
+export function makeFrameWatchdog(
+  onStall: (sinceMs: number) => void,
+  now: () => number = () => performance.now(),
+  thresholdMs: number = FRAME_STALL_MS,
+): { arm: () => void; arrived: () => void; check: () => void; disarm: () => void } {
+  // `null` is "not armed" — before the screencast starts, and after a deliberate stop. Chrome
+  // launching and the page loading can take a minute, and none of it is a freeze.
+  let last: number | null = null;
+  let fired = false;
+  return {
+    arm: () => {
+      last = now();
+      fired = false;
+    },
+    // Deliberately ignored while disarmed: a frame that lands during teardown must not re-arm a
+    // watchdog whose stream is already going down.
+    arrived: () => {
+      if (last !== null) last = now();
+    },
+    check: () => {
+      if (last === null || fired) return;
+      const since = now() - last;
+      if (since < thresholdMs) return;
+      fired = true; // one report per arming — a wedged capture sweeps many more times before exit
+      onStall(since);
+    },
+    disarm: () => {
+      last = null;
+    },
+  };
+}
+
+/**
  * Best-effort, synchronous kill of a child's whole process group. Both children spawn
  * `detached: true`, so each leads its own group and `kill(-pid)` reaches it plus anything it
  * spawned. This is the backstop for the ungraceful stop: when the parent dies to an external
@@ -1092,6 +1155,8 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   let buildTimer: NodeJS.Timeout | undefined;
   let perfTimer: NodeJS.Timeout | undefined;
   let live = false; // flips when the pump starts feeding ffmpeg
+  /** When the pump actually started — the clock `socketLossExitCode` judges restart-eligibility by. */
+  let runStartedAt = Date.now();
   let stopping = false;
   /** Set when the stop in flight is a build pickup, not an ending — see the build watch below. */
   let restarting = false;
@@ -1112,6 +1177,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     process.exit(code);
   };
   const gracefulStop = () => {
+    disarmFrameWatch();
     if (pumpTimer) clearInterval(pumpTimer);
     ffmpeg.stdin?.end(); // let ffmpeg finalize the container (moov atom in file mode)
     // If ffmpeg never exits (wedged RTMP socket), the stop must still stop. unref'd: it never
@@ -1124,6 +1190,36 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
    * graceful path's 5s backstop is `unref()`'d, so it only fires if the loop is still healthy. Going
    * straight to the force path is what guarantees this terminates.
    */
+  /**
+   * The picture has frozen: no screencast frame for FRAME_STALL_MS while the pump kept emitting.
+   *
+   * Treated exactly like a lost DevTools socket rather than like the encoder stall below, and the
+   * distinction is the point. An encoder that stops draining is THIS run's problem — a bad bitrate,
+   * a wedged sink — and relaunching re-runs it. A screencast that stops arriving is the class that
+   * a relaunch genuinely fixes: Chrome's delivery has wedged while everything downstream is fine.
+   * So it borrows `socketLossExitCode`'s judgement whole — ask the supervisor for a relaunch once
+   * the run has proven itself, stay fatal for a run that never worked so a broken config cannot
+   * bill in a loop, and never ask on a laptop where nothing is standing by.
+   */
+  let frozen = false;
+  /** Set once the watchdog exists; the stop paths disarm it through this so a teardown that
+   *  stops delivery is never reported as a freeze. */
+  let disarmFrameWatch: () => void = () => {};
+  const onFrameStall = (sinceMs: number) => {
+    if (frozen || stopping || restarting) return;
+    frozen = true;
+    const code = socketLossExitCode(Date.now() - runStartedAt);
+    process.stderr.write(
+      `${theme.err('✗')} no screencast frame for ${(sinceMs / 1000).toFixed(1)}s — the picture is frozen. ` +
+        `ffmpeg keeps reporting a healthy rate because the pump re-emits the last frame, so this is the ` +
+        `only counter that can see it. ${
+          code === RESTART_EXIT_CODE
+            ? 'Asking the supervisor for a relaunch.'
+            : 'Ending the stream.'
+        }\n`,
+    );
+    forceStop(code);
+  };
   let stalled = false;
   const onStall = () => {
     if (stalled) return;
@@ -1250,6 +1346,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   let exitCode = 0;
   let cdp: Cdp | undefined;
   const cleanup = () => {
+    disarmFrameWatch();
     if (pumpTimer) clearInterval(pumpTimer);
     if (buildTimer) clearInterval(buildTimer);
     if (perfTimer) clearInterval(perfTimer);
@@ -1292,10 +1389,13 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // See broadcast-perf.ts for why queue *growth*, not ffmpeg's `speed=`, is the margin metric.
     let emitted = 0;
     const perf = startPerfRecording(page, ffmpeg, chrome, () => emitted);
+    const frameWatch = makeFrameWatchdog(onFrameStall);
+    disarmFrameWatch = frameWatch.disarm;
     page.on('Page.screencastFrame', (p) => {
       const frame = Buffer.from(String(p['data']), 'base64');
       perf?.frame(frame.byteLength);
       pump.frame(frame);
+      frameWatch.arrived();
       void page.send('Page.screencastFrameAck', { sessionId: p['sessionId'] });
     });
     // JPEG, and this is load-bearing: Chrome encodes screencast frames on the compositor thread,
@@ -1315,9 +1415,16 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     });
     // Tick at 2× frame cadence: the pump owes frames by wall clock, so the timer only needs to
     // fire *often enough* — late ticks emit catch-up frames instead of losing them.
+    // Armed HERE, not at startup: Chrome launching and the page loading can take a minute, and
+    // none of it is a freeze. The sweep rides the pump's own timer rather than a second interval —
+    // the pump tick is the moment a frozen source is being papered over, so it is the honest place
+    // to ask whether anything has arrived.
+    runStartedAt = Date.now();
+    frameWatch.arm();
     pumpTimer = setInterval(
       () => {
         emitted += pump.tick();
+        frameWatch.check();
       },
       Math.max(1, Math.round(500 / opts.fps)),
     );

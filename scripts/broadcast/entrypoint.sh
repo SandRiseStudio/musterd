@@ -189,5 +189,11 @@ while :; do
   if [ "$elapsed" -lt "$RESTART_MIN_INTERVAL" ]; then
     sleep $((RESTART_MIN_INTERVAL - elapsed))
   fi
-  echo "▸ restarting the stream on the rebuilt daemon code (ran ${elapsed}s)"
+  # Do NOT name a cause here. RESTART_EXIT_CODE has three of them now — a daemon rebuild, a lost
+  # DevTools socket, and a frozen picture (the frame-arrival watchdog) — and this line used to
+  # assert the first one for all three. Read on the hosted falsifier 2026-09-16: a deliberately
+  # wedged screencast relaunched twice, both times logged as "the rebuilt daemon code", which tells
+  # an operator a deploy landed and to stop looking. The stream prints its own reason on stderr
+  # immediately before exiting, so the honest line is the one that points at it.
+  echo "▸ relaunching the stream (ran ${elapsed}s) — reason on the line above"
 done
