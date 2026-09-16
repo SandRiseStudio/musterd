@@ -39,3 +39,34 @@ This is the third instance in 48 hours of one pattern — a correct fix that doe
 - this one, where the warning was rendered into a field the client discards.
 
 The general case — making a fix actually reach a seat at the moment it decides something — is named and unowned.
+
+## Unknown is not clean
+
+Three states, not two. A warning that reports only "wrong" and "quiet" leaves *not known* with nowhere to go, so it lands in the quiet one — where it reads as good news.
+
+`provisioningDriftOf` (ADR 408 inc 4) returned `null` for an absent cache, an unparseable one and a genuinely clean one alike, so a seat whose drift record was missing reported exactly like a seat with nothing wrong (2026-09-16; falsify: delete `.musterd/drift.json` on a bound seat, run `team_inbox_check`, and read `structuredContent.warnings`). <!-- claim: defect -->
+
+The population that hits it is the population it exists for. The cache is written on the interrupt-check cadence — the PostToolUse hook — so a seat whose hook is stale or missing never writes one. The census of 2026-09-16 found exactly that on big-body, kimi and ghost. The sharpest case is not absence but **staleness**: a seat whose hook breaks *after* one clean write leaves a zeroed file behind, and absence-only detection stays quiet about it forever.
+
+This is the same family as the rest of this page, with the sign flipped. The other instances were fixes that did not arrive, and every one of them was found because something *looked* wrong. A report that does not arrive looks right.
+
+## The hard half is not crying wolf
+
+A warning that fires on healthy workspaces is one people learn to ignore, so the gate matters more than the detection.
+
+The obvious discriminator is unusable (2026-09-16; falsify: run the adapter from a folder with no `.musterd` and read `client.workspaceDir`): `resolveBindingDir` falls back to `process.cwd()` when its walk-up finds nothing (`packages/mcp/src/binding.ts`), so the adapter's `workspaceDir` is **always** defined and cannot distinguish a seat workspace from a fresh clone or a scratch folder. The gate that does work is the resolver's own predicate — a seat workspace is one carrying `.musterd/binding.json` or `.musterd/workspace.json`, which is precisely what that walk-up accepts. Reusing the predicate rather than inventing one means the two can never disagree about what counts as a seat. <!-- claim: other -->
+
+## Where the hooks live, and why the exclusion is load-bearing
+
+Measured across `agents-kimi`, `agents-big-body` and `agents-ghost` (2026-09-16; falsify: read the `hooks` keys of each file in any seat worktree): <!-- claim: other -->
+
+| file | hook kinds |
+| --- | --- |
+| machine-wide `~/.claude/settings.json` | `SessionStart`, `UserPromptSubmit` |
+| project-local `.claude/settings.local.json` | `Notification`, `PostToolUse`, `PreToolUse`, `SessionEnd`, `SessionStart` |
+
+Every hook the census found stale or missing was project-local. The repair carrier — the machine-wide `SessionStart` — sits in the one file self-heal refuses to write.
+
+So `withinWorktreeOnly` is not merely caution about touching a neighbour's files: **the excluded file is the repair carrier**, and refusing to let a seat's own session rewrite it is what keeps a floor under every other repair. A seat that could rewrite it could remove its own recovery path.
+
+The floor below that is still open. If the machine-wide hook is absent — never provisioned, or removed by hand — nothing repairs and nothing writes, and the adapter is the only surface still running, because the harness loads it directly.

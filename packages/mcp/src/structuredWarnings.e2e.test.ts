@@ -68,6 +68,7 @@ beforeEach(async () => {
   );
   tokens['ada_grant'] = grant.json.token;
   seatDir = mkdtempSync(join(tmpdir(), 'musterd-warn-seat-'));
+  mkdirSync(join(seatDir, '.musterd'), { recursive: true });
 });
 
 afterEach(async () => {
@@ -148,6 +149,31 @@ async function checkInbox(
     client.close();
   }
 }
+
+describe('an unreadable drift record reaches a structuredContent-only client (lane 01M2NYV805)', () => {
+  it('says UNKNOWN rather than staying silent, and says it in structuredContent', async () => {
+    // A seat workspace — the binding is what makes this a seat rather than any folder — with no
+    // drift record at all. That is what a seat whose interrupt-check hook is not running looks like.
+    writeFileSync(join(seatDir, '.musterd', 'binding.json'), '{}');
+    const { structured, text } = await checkInbox(adaConfig(DAEMON_BUILD));
+    const warnings = (structured['warnings'] as Warning[] | undefined) ?? [];
+    const unreadable = warnings.find((w) => w.kind === 'drift_unreadable');
+    expect(unreadable, `no drift_unreadable in ${JSON.stringify(warnings)}`).toBeDefined();
+    expect(unreadable!['reason']).toBe('absent');
+    expect(String(unreadable!.text)).toMatch(/unknown/i);
+    // The prose keeps it too — one wording, both audiences.
+    expect(text).toMatch(/UNKNOWN, not clean/);
+  }, 30_000);
+
+  it('stays silent on a workspace that was never a seat — no binding, no spec', async () => {
+    // seatDir has a .musterd (the fixture makes one) but no binding and no committed spec, which is
+    // what resolveBindingDir's cwd fallback lands on. A warning here would be noise on every fresh
+    // clone, and a warning that fires on healthy folders is one people learn to ignore.
+    const { structured } = await checkInbox(adaConfig(DAEMON_BUILD));
+    const warnings = (structured['warnings'] as Warning[] | undefined) ?? [];
+    expect(warnings.find((w) => w.kind === 'drift_unreadable')).toBeUndefined();
+  }, 30_000);
+});
 
 describe('a stale adapter tells a structuredContent-only client about itself', () => {
   it('puts the build skew in structuredContent, not only in the prose', async () => {

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   MODEL_UNKNOWN,
@@ -300,7 +300,11 @@ export type ProvisioningDriftWarning = {
   inspected_at: number;
 };
 
-export type ToolWarning = BuildSkewWarning | SyncWedgeWarningFact | ProvisioningDriftWarning;
+export type ToolWarning =
+  | BuildSkewWarning
+  | SyncWedgeWarningFact
+  | ProvisioningDriftWarning
+  | DriftUnreadableWarning;
 
 /**
  * Read `.musterd/drift.json` and say what is behind — the adapter half of workspace self-heal.
@@ -311,6 +315,107 @@ export type ToolWarning = BuildSkewWarning | SyncWedgeWarningFact | Provisioning
  * ever reads what it left. A cache it cannot read, cannot parse, or that says nothing is wrong is
  * silence — the same rule as build skew: an unknown state is never reported as a problem.
  */
+/**
+ * How old a drift cache may be before it stops being evidence about the present.
+ *
+ * The CLI re-inspects on a 10-minute TTL (`DRIFT_CACHE_TTL_MS`), so a running writer never leaves a
+ * cache older than that. Three missed cycles is the threshold: far enough above the TTL that an
+ * ordinary quiet stretch or a slow machine never trips it, close enough that a stopped writer is
+ * named within the hour. Deliberately NOT imported from `@musterd/cli` — the adapter takes no cli
+ * dependency (ADR 408 inc 4) — so this is a duplicated constant, and if the TTL moves this must be
+ * re-checked against it. That coupling is the price of the boundary, and it is named rather than
+ * hidden.
+ */
+export const DRIFT_STALE_AFTER_MS = 30 * 60 * 1000;
+
+export type DriftUnreadableWarning = {
+  kind: 'drift_unreadable';
+  text: string;
+  /** Why the record could not be believed — absent, malformed, or too old to be about now. */
+  reason: 'absent' | 'unparseable' | 'stale';
+  /** Age of the cache in ms; only meaningful for `stale`. */
+  age_ms?: number;
+};
+
+/**
+ * "I cannot tell" as a fact of its own (lane 01M2NYV805).
+ *
+ * `provisioningDriftOf` returns null for an absent cache, an unparseable one and a genuinely clean
+ * one alike, so a seat whose drift record is missing reports exactly like a seat with nothing wrong.
+ * That is the worse half of the family this repo kept finding on 2026-09-16: the other instances
+ * were fixes that did not arrive and were found because something LOOKED wrong; this one is a report
+ * that does not arrive, and it looks like good news.
+ *
+ * The population it hits is the population it exists for. The cache is written on the interrupt-check
+ * cadence, i.e. by the PostToolUse hook, so a seat whose hook is stale or missing never writes one —
+ * measured across big-body, kimi and ghost on 2026-09-16. `stale` is the sharper of the three: a seat
+ * whose hook breaks AFTER one clean write leaves a zeroed file behind, and absence-only detection
+ * stays quiet about it forever.
+ *
+ * NOT CRYING WOLF is the hard half. `resolveBindingDir` falls back to `process.cwd()` when its walk-up
+ * finds nothing (binding.ts:204), so `workspaceDir` is always defined and cannot be the discriminator
+ * — a fresh clone or a scratch folder would be told its provisioning is unreadable, which is noise and
+ * exactly how a warning gets muted. The gate is the resolver's OWN predicate: a seat workspace is one
+ * carrying `.musterd/binding.json` or `.musterd/workspace.json`, which is precisely what the walk-up
+ * accepts. Anywhere else has no drift record because it never should have one.
+ */
+export function driftUnreadableOf(
+  cwd: string | undefined,
+  now: number = Date.now(),
+): DriftUnreadableWarning | null {
+  if (cwd === undefined) return null;
+  const dir = join(cwd, '.musterd');
+  // The resolver's own two files, in its own order. Using the same predicate means this can never
+  // disagree with what counts as a seat workspace elsewhere in the adapter.
+  const isSeatWorkspace =
+    existsSync(join(dir, 'binding.json')) || existsSync(join(dir, 'workspace.json'));
+  if (!isSeatWorkspace) return null;
+
+  let raw: string;
+  try {
+    raw = readFileSync(join(dir, 'drift.json'), 'utf8');
+  } catch {
+    return unreadable('absent');
+  }
+  let cache: DriftCache;
+  try {
+    const parsed = DriftCacheSchema.safeParse(JSON.parse(raw) as unknown);
+    if (!parsed.success) return unreadable('unparseable');
+    cache = parsed.data;
+  } catch {
+    return unreadable('unparseable');
+  }
+  const age = now - cache.inspected_at;
+  // A future timestamp is clock skew, not a stopped writer — Math.max keeps it from reading as fresh
+  // forever without inventing a second failure mode for it.
+  if (age > DRIFT_STALE_AFTER_MS) return unreadable('stale', age);
+  return null;
+}
+
+function unreadable(
+  reason: 'absent' | 'unparseable' | 'stale',
+  age_ms?: number,
+): DriftUnreadableWarning {
+  // Says neither "you are drifted" (not known) nor nothing (a lie), and names the most likely cause,
+  // because the reader's next move depends on it: the writer runs from the hook, so an unreadable
+  // record is usually a hook that is not running rather than a provisioning problem of its own.
+  const why =
+    reason === 'absent'
+      ? 'no drift record has been written'
+      : reason === 'unparseable'
+        ? 'its drift record cannot be read'
+        : `its drift record is ${String(Math.round((age_ms ?? 0) / 60000))}m old`;
+  return {
+    kind: 'drift_unreadable',
+    reason,
+    ...(age_ms === undefined ? {} : { age_ms }),
+    text:
+      `⚠ this workspace's provisioning state is UNKNOWN, not clean — ${why}. The record is written ` +
+      `by the interrupt-check hook, so the likeliest cause is that the hook is not running. ` +
+      `\`musterd init --check\` reads it directly.`,
+  };
+}
+
 export function provisioningDriftOf(cwd: string | undefined): ProvisioningDriftWarning | null {
   if (cwd === undefined) return null;
   let cache: DriftCache;
