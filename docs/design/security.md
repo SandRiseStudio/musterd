@@ -96,6 +96,13 @@ musterd-managed policy fragment. Its committed input is secret-free, exact provi
 opaque Member workload mappings; it writes no provider credentials and never contacts Aperture.
 Generation or a matching doctor result remains configuration evidence, not enforced routing.
 
+[ADR 401](../decisions/401-tailscale-transport-generator.md) adds the paired local transport
+generator. It derives only explicit workload-tag owners, exact workload-to-Aperture HTTPS ACLs, and
+opaque Member-to-transport-node-key mappings from committed policy. The generated files contain no
+credentials, node IDs, machine paths, or runtime configuration; they neither call Tailscale nor prove
+that a declared node key identifies a live machine. A later authorization protocol must establish that
+runtime binding before governed launch can rely on it.
+
 ## Out of scope (roadmap, named so we don't design into a corner)
 
 Automatic/scheduled credential rotation; mTLS / authenticated remote transport; encryption-at-rest for the DB; multi-admin policy & delegation; signed audit log; rate-limiting / anomaly detection on claims; secret storage via OS keychain instead of plaintext config files.

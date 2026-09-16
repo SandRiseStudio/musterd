@@ -42,6 +42,7 @@ src/
   integrations/       // optional external integration inspectors and generated-policy support (ADR 385/400)
     aperture.ts        // HuJSON config parsing + secret-safe Aperture retention/provider/grant/quota/identity posture checks
     governed-models.ts // committed roster + provider-neutral policy resolver and deterministic Aperture artifact renderer
+    governed-transport.ts // committed transport manifest loader + deterministic Tailscale tag/ACL and workload mapping renderer (ADR 401)
     report.ts          // stable report composition + exact terminal rendering for independent optional postures
     tailscale.ts       // typed Tailscale status/Serve parsing + bounded Host-gate upgrade probe; no mutation commands
   help/               // the structured command catalog behind `musterd help` (ADR 113)
@@ -319,6 +320,22 @@ sources, missing roles, and other roles fail readiness (ADR 394). It never chang
 Aperture, musterd configuration, or Team state. Ready Aperture configuration remains enforcement
 `off`; the command makes no device-management, sandbox, or unrelated-harness claim. A selected failed
 check exits 1, invalid usage exits 2, and JSON stdout parses as `IntegrationDoctorReportSchema`.
+
+### `musterd integration generate tailscale [--write | --check]`
+
+Reads the committed roster, `.musterd/governed-models.json`, and strict
+`.musterd/governed-transport.json` to derive a reviewed transport fragment (ADR 401). Default mode
+prints the deterministic `policy.hujson` and `workloads.json` without writing; `--write` atomically
+replaces exactly `.musterd/generated/tailscale/{policy.hujson,workloads.json}`; `--check` exits 1 when
+either file is missing or stale. The manifest maps each active agent Member's existing opaque workload
+ID to one or more opaque transport node keys, one exact Aperture tag, and explicit Tailscale tag owners.
+The mapping artifact also accounts for out-of-scope human and inactive Members.
+
+Generated ACLs allow only each exact workload tag to reach the declared Aperture tag on HTTPS. The
+command performs no network request, Tailscale command, configuration application, node discovery,
+daemon change, or runtime binding. It rejects missing, stale, duplicate, wildcard, broad, or
+credential-like transport data before writing. A current artifact reports
+`Tailscale transport policy is current`.
 
 ### `musterd team create <slug> [--display <name>] [--as <yourname>] [--role <role>]`
 
