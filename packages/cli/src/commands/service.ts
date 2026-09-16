@@ -22,6 +22,7 @@ import { collectSignals, type HealthPayload } from '../guardian/signals.js';
 import { loadHostRegistry } from '../host/registry.js';
 import { infraTouchWarning } from '../infra-gate.js';
 import { osNotify, type NotifyItem } from '../notify/os.js';
+import { installCodexHooks } from '../onboard/harnesses/codexHooks.js';
 import { theme } from '../render/theme.js';
 import { sym } from '../render/ui.js';
 import { MIN_NODE_MAJOR } from '../runtime.js';
@@ -873,6 +874,8 @@ export async function serviceCommand(
     /** ADR 232 §3 amendment: the per-tick service-seat presence heartbeat (injected so tests
      *  never read the real token file or reach a daemon). */
     touch?: (ok: (s: string) => void) => Promise<void>;
+    /** ADR 408 inc 5: the shared-Codex-hooks refresh (injected so tests never write the real file). */
+    refreshSharedHooks?: (dir: string) => string[];
   } = {},
 ): Promise<number> {
   const sub = parsed.positionals[0];
@@ -993,6 +996,7 @@ export async function serviceCommand(
         okStamped,
         fail,
         deps.touch,
+        deps.refreshSharedHooks,
       );
     }
     const arCtx = deps.autoRefreshCtx ?? resolveAutoRefreshCtx(ctx.run, parsed);
@@ -1473,6 +1477,7 @@ async function announceRefreshBounce(
   sha: string,
   conns: number,
   ok: (s: string) => void,
+  refreshedSharedHooks = false,
 ): Promise<void> {
   const auth = serviceSeatAuth();
   if (!auth) return; // unprovisioned — pre-232 behaviour, silently
@@ -1487,7 +1492,11 @@ async function announceRefreshBounce(
         from: AUTOREFRESH_SEAT,
         to: { kind: 'team' },
         act: 'status_update',
-        body: `bounced the daemon on ${sha}, ${conns} live session${s} notified`,
+        // Only when something was actually written: a clause that appears on every bounce stops
+        // carrying information, and this line is read by a human asking what the machine just did.
+        body:
+          `bounced the daemon on ${sha}, ${conns} live session${s} notified` +
+          (refreshedSharedHooks ? ', refreshed the shared Codex hooks' : ''),
       }),
     );
     ok(`announced the bounce in-band as ${AUTOREFRESH_SEAT}`);
@@ -1698,6 +1707,7 @@ async function autoRefreshTick(
   ok: (s: string) => void,
   fail: (step: string, r: RunResult) => never,
   touch: (ok: (s: string) => void) => Promise<void> = touchServicePresence,
+  refreshSharedHooks: (dir: string) => string[] = (d) => installCodexHooks(d),
 ): Promise<number> {
   const dir = daemonCheckout(ctx) ?? ctx.workingDir;
   let health0: DaemonHealth;
@@ -1843,7 +1853,34 @@ async function autoRefreshTick(
     // The bounce landed and the daemon verified up — say so IN-BAND, as the service seat
     // (ADR 232 §2). After the verify on purpose: announcing a bounce that didn't happen is the
     // same lie the OS notice was moved off of (#631).
-    if (code === 0) await announceRefreshBounce(tip.slice(0, 7), conns, ok);
+    if (code === 0) {
+      // ADR 408 increment 5 — the one hook file no seat may write.
+      //
+      // `withinWorktreeOnly` makes a seat's SessionStart skip Codex's git-common-dir `hooks.json`,
+      // because that file is one copy shared by every workspace in the family and a hook running in
+      // one seat's session must not rewrite it (decision 2). That refusal is right, and it leaves
+      // the file permanently unrepaired: every seat skips it, names it, and moves on. This tick is
+      // the only thing on the machine that runs outside any seat AND already owns the shared
+      // checkout, so the shared copy is its property — nothing else will ever do it.
+      //
+      // After the bounce verified, never before: refreshing on a build that did not land would
+      // write this build's hook text for a daemon still running the old one, which is the
+      // split-generation state `installCodexHooks`' own epoch preflight exists to prevent.
+      let sharedHooks: string[] = [];
+      try {
+        sharedHooks = refreshSharedHooks(dir);
+        if (sharedHooks.length > 0)
+          ok(`refreshed the shared Codex hooks (${sharedHooks.join(', ')})`);
+      } catch (err) {
+        // A hook install is not the refresh. It must never pin the daemon or debounce the tip.
+        ok(
+          theme.meta(
+            `shared Codex hook refresh failed (${(err as Error).message}) — the bounce itself succeeded`,
+          ),
+        );
+      }
+      await announceRefreshBounce(tip.slice(0, 7), conns, ok, sharedHooks.length > 0);
+    }
     return code;
   } catch (err) {
     // A failed tick is the one state nothing else surfaces. The debounce then parks it, so the

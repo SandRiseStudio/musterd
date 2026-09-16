@@ -149,8 +149,17 @@ decision refuses both.
   is a third state, it deserves its own decision about what a client does with it, and the adapter
   is the one surface that still runs when everything else is broken. Increment 4 leaves the warning
   union open for it rather than closing the union against it.
-- Not repaired, ever, by this path: the permission floor; the machine-wide Claude Code settings;
-  Codex's common-dir hooks; a v2 provisioning manifest (`musterd harness configure` is a choice of
+- **The shared Codex hooks become the auto-refresher's** (increment 5). Decision 2 forbids a seat's
+  session from writing Codex's git-common-dir `hooks.json`, and that refusal has no counterpart: if
+  every seat skips it, nothing repairs it, and the file rots exactly as the census found. The
+  `musterd service refresh --auto` tick is the only process on the machine that runs outside any
+  seat *and* already owns the shared checkout, so it installs them after a bounce it has verified —
+  after, because a build that did not land would write this build's hook text for a daemon still
+  running the old one, the split-generation state `installCodexHooks`' epoch preflight exists to
+  prevent. It can never fail the tick, and the in-band bounce line names it only when something was
+  actually written.
+- Not repaired by a SEAT, ever: the permission floor; the machine-wide Claude Code settings;
+  Codex's common-dir hooks (which the auto-refresher owns instead, above); a v2 provisioning manifest (`musterd harness configure` is a choice of
   harness set, not drift).
 
 ## Observability & Evaluation
