@@ -185,6 +185,24 @@ export function planInboxCheck(
    * every bounded check, or a closed acceptance occupies the view forever while the cursor holds.
    */
   closed: readonly string[] = [],
+  /**
+   * The OLDEST unread, contiguous from the cursor — the server's prefix read (`headLimit`), fetched
+   * alongside the tail. Empty when the caller could not get one, which degrades to the behaviour
+   * below and holds the cursor.
+   *
+   * WHY THIS PARAMETER EXISTS. Lane 01M2GT874Y made the drain ordinary and proved it — against
+   * arrays this function was handed whole. The tool never had one: `registerInboxCheck` always
+   * names a `limit`, and a named `limit` selects the newest TAIL on the server (`listInbox`,
+   * server/src/store/messages.ts:278), while the oldest-first prefix is served only to a caller
+   * that names none (server/src/transport/http.ts:5590). A tail does not begin at the cursor, so
+   * `unreachable` was non-zero on every check past the limit, the digest below never ran, and the
+   * treadmill lane 01M2GT874Y closed was still turning — at the DEFAULT of 50, not at some far
+   * backlog. Measured 2026-09-16 on this seat: two checks, zero rows walked (lane 01M2NGB60Q).
+   *
+   * The prefix is what makes the walk legal. `unreachable` still forbids inventing a prefix out of
+   * a tail; it no longer forbids walking one the caller actually holds.
+   */
+  head: readonly Envelope[] = [],
 ): InboxCheckPlan {
   const closedSet = new Set(closed);
   const pinned = ordered.filter((e) => isPinnedNeed(e) && !closedSet.has(e.id));
@@ -225,22 +243,29 @@ export function planInboxCheck(
   //
   // The digest is costed too. A row the budget cannot carry is NOT walked over — that is ADR 287
   // exactly as it reads for `limit`, applied to the other kind of bound.
+  //
+  // WHICH rows the walk may cross: `head` when the caller fetched the prefix, because it begins at
+  // the cursor by construction whatever the fetch left behind; otherwise `ordered`, and only when
+  // the fetch was complete (`unreachable === 0`) — a bounded fetch's `ordered` begins somewhere
+  // after the cursor, and digesting its oldest rows would step over everything cut.
   const shownIds = new Set(shown.map((e) => e.id));
   const digested: Envelope[] = [];
   let prefixEnd = -1;
-  if (unreachable === 0) {
-    for (let i = 0; i < ordered.length; i++) {
-      const e = ordered[i]!;
-      if (!shownIds.has(e.id)) {
-        if (digested.length >= DIGEST_ROWS) break;
-        const cost = formatDigestLine(e).length + 1;
-        if (spent + cost > RESULT_BUDGET) break;
-        digested.push(e);
-        spent += cost;
-      }
-      prefixEnd = i;
+  const walk = head.length > 0 ? head : unreachable === 0 ? ordered : [];
+  for (let i = 0; i < walk.length; i++) {
+    const e = walk[i]!;
+    if (!shownIds.has(e.id)) {
+      if (digested.length >= DIGEST_ROWS) break;
+      const cost = formatDigestLine(e).length + 1;
+      if (spent + cost > RESULT_BUDGET) break;
+      digested.push(e);
+      spent += cost;
     }
+    prefixEnd = i;
   }
+  // A digested row drawn from the prefix may not be in `ordered` at all — it is one of the rows the
+  // tail fetch left behind, and so is already counted inside `unreachable`. Either way it is now
+  // rendered, so subtracting it once from the total is right in both cases.
   const elided = ordered.length - shown.length - digested.length + unreachable;
   return {
     shown,
@@ -249,7 +274,7 @@ export function planInboxCheck(
     drainLimit: ordered.length + unreachable,
     // `null` on an empty inbox and on a bounded fetch — there is no contiguous rendered prefix to
     // advance over, and inventing one is exactly how a watermark passes something nobody read.
-    advanceTo: prefixEnd < 0 ? null : ordered[prefixEnd]!.id,
+    advanceTo: prefixEnd < 0 ? null : walk[prefixEnd]!.id,
   };
 }
 
@@ -332,11 +357,28 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
           ...(fetched.answered ?? []),
           ...(fetched.discharged ?? []).map((d) => d.id),
         ];
+        // The fetch above is a TAIL — `limit` is always named, and a named limit means newest-N on
+        // the server. A tail does not begin at the cursor, so on its own it can never be walked: the
+        // drain lane 01M2GT874Y built ran on nothing for a seat past its limit, which is every seat
+        // with a real backlog (lane 01M2NGB60Q). So when rows were left behind, ask for the PREFIX
+        // as well — the same read with no `limit`, which the daemon answers oldest-first from the
+        // cursor — and let the digest walk that. One extra request, and only when actually behind.
+        //
+        // A failure degrades to the tail alone: the cursor holds, which is exactly the behaviour
+        // this call had before. An inbox that fits in the tail never pays for the round trip.
+        const head =
+          (fetched.unread_remaining ?? 0) > 0
+            ? await client
+                .fetchInbox(args.unread_only ?? true)
+                .then((r) => r.messages)
+                .catch(() => [] as Envelope[])
+            : [];
         const plan = planInboxCheck(
           ordered,
           args.limit ?? 50,
           fetched.unread_remaining ?? 0,
           closed,
+          head,
         );
         const messages = plan.shown;
 
