@@ -428,6 +428,41 @@ export function makeFramePump(
 }
 
 /**
+ * What to do with a screencast ack that Chrome rejected.
+ *
+ * TWO DIFFERENT EVENTS ARRIVE HERE AND CONFLATING THEM HAS COST US BOTH WAYS.
+ *
+ * The first is a socket closing under us. `ws.onclose` calls `failAll`, which rejects EVERY pending
+ * send — the ack included — and on the ADR 159 restart path that is entirely expected. Leaving it
+ * unobserved is a crash: the rejection carries a CliError whose code `socketLossExitCode` already
+ * chose (75 when a supervisor is standing by), but an UNHANDLED rejection exits 1 instead, and
+ * `entrypoint.sh` ends a machine that was going to be restarted. Measured 2026-09-16 on machine
+ * 78460d2c55eed8. So it must be caught — and caught quietly, or every clean restart cries wolf.
+ *
+ * The second is Chrome refusing the ack itself, and that one is nearly fatal in silence. A refused
+ * ack drains Chrome's in-flight budget and the picture freezes while the pump keeps re-emitting
+ * `latest` and ffmpeg keeps reporting a healthy rate. The first attempt at the fix above swallowed
+ * BOTH cases with a bare `.catch(() => {})`, and the very next hosted run carried one frozen frame
+ * for six and a half minutes with nothing in the log (2026-09-16, machine 84e694b2424e38). The
+ * silence was the fix working as written and as under-specified.
+ *
+ * Hence: quiet while tearing down, loud exactly once otherwise. Once, because Chrome refuses one per
+ * delivered frame and at ~15/s the repeats bury the first line — which is the only one that says
+ * when it began.
+ */
+export function makeAckRefusalReporter(
+  isTearingDown: () => boolean,
+  report: (message: string) => void,
+): (err: unknown) => void {
+  let reported = false;
+  return (err) => {
+    if (isTearingDown() || reported) return;
+    reported = true;
+    report(String(err instanceof Error ? err.message : err));
+  };
+}
+
+/**
  * How long the capture may go without a screencast frame before the picture is called frozen.
  *
  * Sized from measurement, not taste. Two captures on the performance-4x box on 2026-09-16 (778s
@@ -1389,6 +1424,14 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // See broadcast-perf.ts for why queue *growth*, not ffmpeg's `speed=`, is the margin metric.
     let emitted = 0;
     const perf = startPerfRecording(page, ffmpeg, chrome, () => emitted);
+    const ackRefused = makeAckRefusalReporter(
+      () => stopping || restarting,
+      (message) =>
+        process.stderr.write(
+          `${theme.err('✗')} Chrome refused a screencast ack — the picture will freeze while every ` +
+            `other counter reads healthy: ${message}\n`,
+        ),
+    );
     const frameWatch = makeFrameWatchdog(onFrameStall);
     disarmFrameWatch = frameWatch.disarm;
     page.on('Page.screencastFrame', (p) => {
@@ -1396,7 +1439,10 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
       perf?.frame(frame.byteLength);
       pump.frame(frame);
       frameWatch.arrived();
-      void page.send('Page.screencastFrameAck', { sessionId: p['sessionId'] });
+      // NOT `void` — see makeAckRefusalReporter. An unobserved rejection here exits 1 and ends a
+      // machine the supervisor was standing by to restart, discarding the code socketLossExitCode
+      // had already chosen and attached to the error.
+      page.send('Page.screencastFrameAck', { sessionId: p['sessionId'] }).catch(ackRefused);
     });
     // JPEG, and this is load-bearing: Chrome encodes screencast frames on the compositor thread,
     // and 1080p PNG is so expensive there that delivery measured 4.7fps — a slideshow the pump then

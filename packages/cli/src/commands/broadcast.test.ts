@@ -34,6 +34,7 @@ import {
   killGroup,
   makeFramePump,
   makeFrameWatchdog,
+  makeAckRefusalReporter,
   FRAME_STALL_MS,
   parseOptions,
   PULSE_SINK,
@@ -305,6 +306,51 @@ describe('ffmpegArgs', () => {
   it('no -t when duration is 0 (run until stopped)', () => {
     const forever = parseOptions({ team: 't', out: 'p.mp4' }, 'darwin');
     expect(ffmpegArgs(forever, { kind: 'file', target: 'p.mp4' })).not.toContain('-t');
+  });
+});
+
+describe('makeAckRefusalReporter (a refused ack is not the same as a closing socket)', () => {
+  const setup = (tearingDown = false) => {
+    let down = tearingDown;
+    const said: string[] = [];
+    const handle = makeAckRefusalReporter(
+      () => down,
+      (m) => said.push(m),
+    );
+    return { handle, said, teardown: () => (down = true) };
+  };
+
+  it('reports a genuine refusal, because a refused ack is a stream about to freeze', () => {
+    const { handle, said } = setup();
+    handle(new Error('Invalid parameters'));
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/Invalid parameters/);
+  });
+
+  it('reports only the FIRST one — a refused ack repeats every frame', () => {
+    // Chrome refuses one per delivered frame. At ~15/s an unthrottled report buries the first
+    // line, which is the only one that says when it started.
+    const { handle, said } = setup();
+    for (let i = 0; i < 50; i++) handle(new Error('Invalid parameters'));
+    expect(said).toHaveLength(1);
+  });
+
+  it('stays SILENT while tearing down — that rejection is expected, not news', () => {
+    // The ADR 159 restart closes the DevTools socket with acks in flight. failAll rejects every
+    // pending send, ours included. Reporting it would cry wolf on every clean restart.
+    const { handle, said, teardown } = setup();
+    teardown();
+    handle(new Error('the Chrome DevTools socket closed'));
+    expect(said).toEqual([]);
+  });
+
+  it('never throws, whatever it is handed — an unobserved rejection is the crash this prevents', () => {
+    // The bug: `void page.send(...)` with no catch. On a lost socket the CliError carrying
+    // socketLossExitCode's considered 75 became an UNHANDLED rejection and Node exited 1 instead,
+    // so entrypoint.sh ended the machine a supervisor was standing by to restart.
+    const { handle } = setup();
+    for (const junk of [undefined, null, 'a string', 42, { no: 'message' }, new Error('x')])
+      expect(() => handle(junk)).not.toThrow();
   });
 });
 
