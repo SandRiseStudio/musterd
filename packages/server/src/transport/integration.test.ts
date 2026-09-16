@@ -4334,6 +4334,65 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
       const sent = await post('/teams/dawn/messages', { envelope: handoff('h-231g') }, nickTok);
       expect(sent.json.handoff_lane).toBeUndefined();
     });
+
+    // Doorbell contract clause 7, the shape the inbox had no clause for. MEASURED 2026-09-16 on the
+    // laptop daemon: schmidt handed ryder a lane, the lane reached `abandoned` with ryder holding
+    // it, and the handoff kept presenting as an open obligation on every check until answered by
+    // hand. `handoffNamedLaneOutOfPlay` already decided this for wake candidacy, the orientation
+    // `why` and the delivery ledger; GET /inbox was the one reader that never asked it. Its own
+    // comment says every reader of a handoff-as-live-instruction must use the same test — #745 is
+    // what a second opinion costs, and this is the same defect one surface further out.
+    describe('a handoff whose lane has left play is discharged on the inbox', () => {
+      it('names the retired lane as the reason, with no answerer invented', async () => {
+        const { nickTok, bobTok } = await twoSeats();
+        const lane = await post(
+          '/teams/dawn/lanes',
+          { title: 'handed over', claim: true },
+          nickTok,
+        );
+        await post('/teams/dawn/messages', { envelope: handoff('h-settled') }, nickTok);
+        await req('PATCH', `/teams/dawn/lanes/${lane.json.lane.id}`, { state: 'done' }, nickTok);
+
+        const inbox = await get('/teams/dawn/inbox', bobTok);
+        expect(inbox.json.discharged).toContainEqual({ id: 'h-settled', reason: 'lane_closed' });
+      });
+
+      it('an abandoned lane settles it too — terminal is terminal', async () => {
+        const { nickTok, bobTok } = await twoSeats();
+        const lane = await post('/teams/dawn/lanes', { title: 'dropped', claim: true }, nickTok);
+        await post('/teams/dawn/messages', { envelope: handoff('h-dropped') }, nickTok);
+        await req(
+          'PATCH',
+          `/teams/dawn/lanes/${lane.json.lane.id}`,
+          { state: 'abandoned' },
+          nickTok,
+        );
+
+        const inbox = await get('/teams/dawn/inbox', bobTok);
+        expect(inbox.json.discharged).toContainEqual({ id: 'h-dropped', reason: 'lane_closed' });
+      });
+
+      // The direction this must never err. A handoff that stops asking is work dropped on the
+      // floor; a handoff that asks twice costs a moment. Only one of those is recoverable, which is
+      // why `handoffNamedLaneOutOfPlay` is deliberately narrow and why these two stay owed.
+      it('a live lane keeps asking', async () => {
+        const { nickTok, bobTok } = await twoSeats();
+        await post('/teams/dawn/lanes', { title: 'still going', claim: true }, nickTok);
+        await post('/teams/dawn/messages', { envelope: handoff('h-live') }, nickTok);
+
+        const inbox = await get('/teams/dawn/inbox', bobTok);
+        expect(inbox.json.discharged).toEqual([]);
+      });
+
+      it('a handoff naming no lane at all keeps asking', async () => {
+        const { nickTok, bobTok } = await twoSeats();
+        const bare = { ...handoff('h-bare'), meta: {} };
+        await post('/teams/dawn/messages', { envelope: bare }, nickTok);
+
+        const inbox = await get('/teams/dawn/inbox', bobTok);
+        expect(inbox.json.discharged).toEqual([]);
+      });
+    });
   });
 
   it('delivery ledger (ADR 090): logged → seen (cursor) → answered, on the endpoint and the report', async () => {
