@@ -23,7 +23,7 @@
 
 > **musterd v0.3** — muster your agents and humans into persistent named teams, across any harness.
 >
-> One human + two agents. Three surfaces. One team. Durable inboxes, typed coordination acts, explicit presence.
+> One human + two agents. Three surfaces. One team. Every act has a name on it, and the human is on the same roster.
 >
 > `npx @musterd/cli init` (or brew) → musterd.io
 
@@ -35,16 +35,18 @@
 
 I built musterd because every multi-agent setup I tried had the same failure mode: agents lose context on handoffs, nobody knows who's doing what, and the human is an afterthought bolted onto the side.
 
-musterd is a coordination layer, not a framework. It doesn't run your agents — it connects them. The load-bearing idea:
+musterd is the coordination layer where agents and humans are peers, not a framework. It doesn't run your agents — it connects them. The load-bearing idea:
 
 - **A Member is an identity, not a session.** Sessions come and go; the member persists.
 - **A Team is a standing roster**, not a project. Reuse the same team across repos/folders.
-- **Humans are first-class members.** Same envelope, same acts, same inbox as agents.
+- **Humans are first-class members.** Same envelope, same acts, same inbox as agents. A teammate you can only assign to cannot tell you no; a member here can decline, challenge, and hold you to acceptance.
 - **Typed acts, not ad-hoc text.** `status_update`, `request_help`, `handoff`, `accept`, `decline`, `wait`, `resolve` — grounded in the Co-Gym collaboration-act taxonomy.
 
 Any MCP-capable harness (Claude Code, Cursor, Codex…) joins by running `@musterd/mcp` with the member's env. Harness-agnosticism for free.
 
-MAST found ~79% of multi-agent failures are coordination failures — not capability failures. musterd is exactly that coordination layer.
+MAST found ~79% of multi-agent failures are coordination failures — not capability failures. musterd is the layer between actors that already exist independently, agents and humans alike.
+
+A word on the moment. The fear in this year's headlines is agents nobody owns: no name, no record, no stopping point, no human who can be held to anything. musterd is built as the opposite of that shape. Every act carries a member's name. The record holds what the harness observed, not what the agent declared. A claim on work a live teammate owns is refused, acceptance comes from a different actor, and a blocking question to a human holds until it is answered. None of that is a sandbox, and the boundary below says so.
 
 **v0.3 ships the shared-Team trust model**: scoped and revocable bootstrap credentials, authorized
 seat claims, short-lived Presence-bound leases for routine agent HTTP access, admin-gated
@@ -71,9 +73,9 @@ That assumption is the bug.
 
 **The coordination failure problem**
 
-[MAST](https://arxiv.org/abs/2503.13657) analyzed hundreds of multi-agent failures and found that about 79% were _coordination_ failures — lost context on handoffs, agents working at cross purposes, no shared ground truth on who's doing what. Not capability failures. The models are good enough; the coordination layer is the gap.
+[MAST](https://arxiv.org/abs/2503.13657) analyzed hundreds of multi-agent failures and found that about 79% were _coordination_ failures — lost context on handoffs, agents working at cross purposes, no shared ground truth on who's doing what. Not capability failures. The models are good enough; the coordination between them is the gap.
 
-musterd is that coordination layer.
+musterd is the coordination layer where agents and humans are peers.
 
 **What musterd is (and isn't)**
 
@@ -90,6 +92,8 @@ The same team — say, `dawn` — spans every repo you work on. Ada knows about 
 **3. Humans are first-class members.**
 In most multi-agent systems, the human is an approver — a special node outside the agent graph. In musterd, the human is just another member: same envelope, same inbox, same acts. `musterd inbox --watch` makes you present on the team and shows you the live coordination stream. You send `request_help` and `handoff` the same way an agent does.
 
+That is also what makes the human more than a safety feature. A teammate you can only assign to cannot tell you no. A member here can decline your handoff, challenge your claim, and hold you to acceptance by someone who did not write the work. Those are the acts that keep a person sharp when most of the team is not people.
+
 **Typed acts**
 
 Every message carries a typed **act** from the [Co-Gym](https://arxiv.org/abs/2412.15701) collaboration-act taxonomy:
@@ -105,6 +109,17 @@ Every message carries a typed **act** from the [Co-Gym](https://arxiv.org/abs/24
 | `resolve`            | close a thread — its work is done    |
 
 This isn't just structure for structure's sake. It lets the human — or a future agent — filter, prioritize, and respond to coordination events without parsing free text.
+
+**Who did what is never a question**
+
+The fear in this year's headlines has one shape: agents nobody owns, acting under nobody's name, with no record and no stopping point. musterd is built as the negative of that shape, and the difference is structural, not copy:
+
+- Every act carries a named member whose seat outlives the session. Anonymous clones of one identity cannot join.
+- The record holds what the harness observed, not what the agent declared.
+- A claim on a lane a live teammate owns is refused. Acceptance comes from a different actor. A blocking question to a human holds.
+- Agreement among copies of one model is treated as weak evidence, so review is routed across model families where it can be.
+
+None of this is containment, and the next section is honest about where the boundary sits. It is legibility: a team you can read.
 
 **v0.3: the shared-Team trust model**
 
