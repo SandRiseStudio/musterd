@@ -5,6 +5,7 @@ import { appendAudit } from './audit.js';
 import {
   coordinationDensity,
   deriveReport,
+  peerDemand,
   deriveSteeringMetrics,
   deriveWakeMetrics,
   flowMetrics,
@@ -311,6 +312,140 @@ describe('waitingOn (ADR 050 Part 6 — the bottleneck view)', () => {
     ask(db, team.id, nick.id, 'ada', ada.id, 'followup', now - 1 * 86_400_000, 'root');
     const w = waitingOn(db, team.id, now);
     expect(w).toEqual([{ member: 'ada', threads: 1, oldest_age_ms: 2 * 86_400_000 }]);
+  });
+});
+
+describe("peerDemand (ADR 320 §5b, read from the human's side)", () => {
+  const NOW = 40 * 86_400_000;
+  let n = 0;
+  const post = (
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    from: { id: string; name: string },
+    act: Act,
+    to: { kind: 'team' } | { kind: 'member'; name: string; id: string },
+    meta?: Record<string, unknown>,
+  ) => {
+    const id = `p${n++}`;
+    insertMessage(
+      db,
+      teamId,
+      from.id,
+      to.kind === 'member' ? to.id : null,
+      makeEnvelope({
+        id,
+        team: 'revive',
+        from: from.name,
+        to: to.kind === 'member' ? { kind: 'member', name: to.name } : { kind: 'team' },
+        act,
+        body: 'x',
+        ts: NOW - 1000,
+        ...(meta ? { meta } : {}),
+      }),
+    );
+    return id;
+  };
+
+  it('counts challenges by recipient kind and keeps team-addressed ones apart', () => {
+    const { db, team, nick, ada } = seed();
+    const bob = addMember(db, team, { name: 'bob', kind: 'agent' }).row;
+    const svc = addMember(db, team, { name: 'guardian', kind: 'service' }).row;
+    post(db, team.id, ada, 'challenge', { kind: 'member', name: 'nick', id: nick.id });
+    post(db, team.id, nick, 'challenge', { kind: 'member', name: 'ada', id: ada.id });
+    post(db, team.id, bob, 'challenge', { kind: 'member', name: 'ada', id: ada.id });
+    post(db, team.id, ada, 'challenge', { kind: 'team' });
+    // A service seat is a member with its own kind — never folded into `agent`.
+    post(db, team.id, ada, 'challenge', { kind: 'member', name: 'guardian', id: svc.id });
+    const p = peerDemand(db, team.id, NOW);
+    expect(p.challenges).toEqual({ to_human: 1, to_agent: 2, to_service: 1, unaddressed: 1 });
+  });
+
+  it("counts declines of handoffs by the handoff SENDER's kind, and ignores declines of asks", () => {
+    const { db, team, nick, ada } = seed();
+    const h1 = post(db, team.id, nick, 'handoff', { kind: 'member', name: 'ada', id: ada.id });
+    post(
+      db,
+      team.id,
+      ada,
+      'decline',
+      { kind: 'member', name: 'nick', id: nick.id },
+      { in_reply_to: h1 },
+    );
+    const h2 = post(db, team.id, ada, 'handoff', { kind: 'member', name: 'nick', id: nick.id });
+    post(
+      db,
+      team.id,
+      nick,
+      'decline',
+      { kind: 'member', name: 'ada', id: ada.id },
+      { in_reply_to: h2 },
+    );
+    const a1 = post(db, team.id, ada, 'request_help', {
+      kind: 'member',
+      name: 'nick',
+      id: nick.id,
+    });
+    post(
+      db,
+      team.id,
+      nick,
+      'decline',
+      { kind: 'member', name: 'ada', id: ada.id },
+      { in_reply_to: a1 },
+    );
+    const p = peerDemand(db, team.id, NOW);
+    expect(p.handoff_declines).toEqual({ of_human: 1, of_agent: 1, of_service: 0 });
+  });
+
+  it('lists every human with their act and accept counts, zero when quiet', () => {
+    const { db, team, nick, ada } = seed();
+    const lin = addMember(db, team, { name: 'lin', kind: 'human' }).row;
+    const r1 = post(db, team.id, ada, 'request_help', {
+      kind: 'member',
+      name: 'nick',
+      id: nick.id,
+    });
+    post(
+      db,
+      team.id,
+      nick,
+      'accept',
+      { kind: 'member', name: 'ada', id: ada.id },
+      { in_reply_to: r1 },
+    );
+    post(db, team.id, nick, 'status_update', { kind: 'team' });
+    post(db, team.id, nick, 'challenge', { kind: 'member', name: 'ada', id: ada.id });
+    const p = peerDemand(db, team.id, NOW);
+    expect(p.humans).toEqual([
+      { name: 'lin', acts: 0, accepts: 0 },
+      { name: 'nick', acts: 3, accepts: 1 },
+    ]);
+    expect(lin.kind).toBe('human');
+  });
+
+  it('flags the falsifier baseline only on a real sample: humans present, ≥ min acts, zero of both', () => {
+    const { db, team, nick, ada } = seed();
+    for (let i = 0; i < 12; i++) post(db, team.id, ada, 'status_update', { kind: 'team' });
+    expect(peerDemand(db, team.id, NOW).flag).toBe(true);
+    // One challenge to a human clears it.
+    post(db, team.id, ada, 'challenge', { kind: 'member', name: 'nick', id: nick.id });
+    expect(peerDemand(db, team.id, NOW).flag).toBe(false);
+  });
+
+  it('does not flag a tiny sample, and is empty-safe', () => {
+    const { db, team, ada } = seed();
+    expect(peerDemand(db, team.id, NOW)).toMatchObject({
+      challenges: { to_human: 0, to_agent: 0, to_service: 0, unaddressed: 0 },
+      handoff_declines: { of_human: 0, of_agent: 0, of_service: 0 },
+      flag: false,
+    });
+    for (let i = 0; i < 3; i++) post(db, team.id, ada, 'status_update', { kind: 'team' });
+    expect(peerDemand(db, team.id, NOW).flag).toBe(false);
+  });
+
+  it('is on the derived report', () => {
+    const { db, team } = seed();
+    expect(deriveReport(db, team.id, team.slug, NOW).peer_demand.window_days).toBe(7);
   });
 });
 

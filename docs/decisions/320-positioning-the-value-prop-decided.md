@@ -290,8 +290,10 @@ at a number, not at the doctrine. A pitch is stronger for saying this out loud.
   `accept`, then "keeps you sharp" is a doctrine the product's own usage falsifies and 5b comes off
   every surface. Dataset: the team's message log by act and recipient kind, via the ADR 050
   projections. Baseline: zero challenges received by humans, zero declines of human handoffs, over
-  a post-launch review window. The number does not exist in the coordination report today; adding
-  it is an owner-less increment this amendment surfaces but does not decide.
+  a post-launch review window. ~~The number does not exist in the coordination report today; adding
+  it is an owner-less increment this amendment surfaces but does not decide.~~ Landed 2026-09-16
+  (izzo, lane 01M2P7GMVJ): `musterd report coordination` prints it under "peer demand" and the
+  `--json` arm carries it as `peer_demand` (ADR 050 note of the same date).
 - **The fear-vocabulary test (decision 5a).** If press or users describe musterd as "a swarm
   platform" or "agent orchestration" after the counter-line is on every surface, 5a has failed on
   its own terms and the category framing of decision 1 reopens.
