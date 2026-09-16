@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -311,5 +319,18 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
     });
     expect(runRefreshHooks(cwd)).toBe(0);
     expect(allCommands()).toContain('echo mine');
+  });
+});
+
+describe('every hook JSON write is atomic (spec 2026-09-16, workspace self-heal)', () => {
+  it('a refresh leaves a parseable file ending in one newline and no stage file beside it', () => {
+    h.folderBinding = { team: 't' };
+    seedProvisioned({});
+    runRefreshHooks(cwd);
+    const raw = readFileSync(localSettings(), 'utf8');
+    expect(() => JSON.parse(raw)).not.toThrow();
+    expect(raw.endsWith('\n')).toBe(true);
+    expect(raw.endsWith('\n\n')).toBe(false);
+    expect(readdirSync(join(cwd, '.claude')).filter((f) => f.includes('.tmp-'))).toEqual([]);
   });
 });

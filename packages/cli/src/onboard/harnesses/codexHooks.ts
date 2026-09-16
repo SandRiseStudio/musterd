@@ -1,7 +1,8 @@
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { FEATURE_EPOCH } from '@musterd/protocol';
 import { z } from 'zod';
+import { writeJsonAtomic } from '../atomicWrite.js';
 
 export const CODEX_HOOK_MARKER = 'musterd-codex-hook:v2';
 
@@ -147,7 +148,7 @@ function installCodexHooksAt(path: string): string[] {
     hooks[event] = [...(hooks[event] ?? []), requiredGroup(command)];
   }
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify({ ...file, hooks }, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, { ...file, hooks });
   return [path];
 }
 
@@ -199,11 +200,7 @@ function removeCodexHooksAt(path: string): string[] {
   // silently kept its original hooks untouched. Delete first, then re-add only if non-empty.
   const next: Record<string, unknown> = { ...file };
   delete next['hooks'];
-  writeFileSync(
-    path,
-    JSON.stringify({ ...next, ...(Object.keys(hooks).length ? { hooks } : {}) }, null, 2) + '\n',
-    'utf8',
-  );
+  writeJsonAtomic(path, { ...next, ...(Object.keys(hooks).length ? { hooks } : {}) });
   return [path];
 }
 

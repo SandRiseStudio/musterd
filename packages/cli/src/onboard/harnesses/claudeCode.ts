@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { CCD_SEND_MESSAGE_TOOL, FEATURE_EPOCH } from '@musterd/protocol';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
+import { writeJsonAtomic } from '../atomicWrite.js';
 import { isDeclined } from '../declined.js';
 import { primaryCheckoutFor } from '../entryGuard.js';
 import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
@@ -87,7 +88,7 @@ function mergePermissions(perms: ProvisionPermissions): ProvisionPermissions {
   }
   if (changed) {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+    writeJsonAtomic(path, settings);
   }
   return added;
 }
@@ -111,7 +112,7 @@ function removePermissions(perms: ProvisionPermissions): void {
       else delete settings.permissions[list];
     }
   }
-  if (changed) writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  if (changed) writeJsonAtomic(path, settings);
 }
 
 /**
@@ -458,7 +459,7 @@ function upsertHook(
   existing.push({ ...(matcher ? { matcher } : {}), hooks: [{ type: 'command', command }] });
   settings.hooks[event] = existing;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, settings);
   return undefined;
 }
 
@@ -550,7 +551,7 @@ function dropHook(path: string, event: string, matches: (m: ClaudeHookMatcher) =
   if (kept.length > 0) settings.hooks![event] = kept;
   else delete settings.hooks![event];
   if (settings.hooks && Object.keys(settings.hooks).length === 0) delete settings.hooks;
-  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, settings);
 }
 
 /**
@@ -641,7 +642,7 @@ export function installMusterdStatusline(dir: string = process.cwd()): string | 
   }
   settings.statusLine = { type: 'command', command: statuslineCommandText() };
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, settings);
   return undefined;
 }
 
@@ -651,7 +652,7 @@ export function removeMusterdStatusline(dir: string = process.cwd()): void {
   const settings = readSettingsSafe(path);
   if (!settings || !isMusterdStatusline(settings)) return;
   delete settings.statusLine;
-  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, settings);
 }
 
 /**
