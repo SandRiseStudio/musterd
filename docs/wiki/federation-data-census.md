@@ -155,6 +155,18 @@ ADR 325's prereq-fix lane addresses the first four; strike-and-date here as they
   records `lane.closed` (with `node`) inside the write's transaction and returns the ADR 283 verdict;
   the joiner serves the local row only when it agrees with the hub on owner and state.
 
+- ~~**An arbitrated submit never entered the log as a foldable state move** (2026-09-16; falsify: <!-- claim: defect -->
+  `lane_submit` from a joiner and `SELECT * FROM audit WHERE action = 'lane.state_changed'` on the
+  hub — a row whose `to` is `awaiting_acceptance` means this is wrong).~~
+  **FIXED 2026-09-16** by lane `01M2HNSVA79` (`sync/claim.test.ts`, "a submit on the joiner is
+  decided by the hub"). Same hole as the close, one verb over: `updateLane` skips
+  `lane.state_changed` for awaiting_acceptance because the origin PATCH handler owns
+  `lane.ready_for_review` (routing + ask stay where the seat lives, ADR 361 §2). On the hub that
+  skip left nothing foldable — the hub row moved, the joiner stayed `claimed`, and a retry CAS'd as
+  "now owned by \<seat\> (awaiting_acceptance)". A hub-arbitrated write carries `audit.node`; that
+  is when `updateLane` records `lane.state_changed` so the fold can apply the state. The origin
+  still writes `lane.ready_for_review` once.
+
 - **`audit` cannot be a correctness log** (2026-08-25; falsify: read `appendAudit`, <!-- claim: other -->
   `store/audit.ts:335` — it try/catches its own INSERT and logs a warning on failure). Contract
   is explicit ("best-effort observability, never a gate"); ADR 131 already ruled on it. This one

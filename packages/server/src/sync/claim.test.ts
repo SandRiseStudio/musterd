@@ -629,6 +629,63 @@ describe('ADR 361 — release, handoff and close on a joiner are decided by the 
     expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')!.resolved_at).not.toBeNull();
   });
 
+  it("a submit on the joiner is decided by the hub: the answer says awaiting_acceptance, the hub's log carries a foldable state move naming the joiner, and every read on the joiner agrees after the fold", async () => {
+    const laneId = await claimedOnJoiner('s');
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { state: 'ready_for_review', merged: { pr: 1, sha: 'abc', authorized_by: 'nick' } },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(200);
+    // The submit's own echo is the decision, not the stale local row — same echo fault the close
+    // had until lane 01M2GPX0HP.
+    expect(res.json.lane).toMatchObject({
+      id: laneId,
+      owner_seat: 'nick',
+      state: 'awaiting_acceptance',
+      merged: { pr: 1, sha: 'abc', authorized_by: 'nick' },
+    });
+    expect(getLane(hub.db, hubTeam().id, laneId, 'bravo')).toMatchObject({
+      owner_seat: 'nick',
+      state: 'awaiting_acceptance',
+      merged: { pr: 1, sha: 'abc', authorized_by: 'nick' },
+    });
+    // updateLane skips lane.state_changed for awaiting_acceptance — that verb is
+    // lane.ready_for_review, owned by the origin PATCH handler (routing + ask stay where the
+    // seat lives). On the hub that skip left NOTHING foldable, so the joiner's row stayed
+    // claimed and a retry CAS'd against awaiting_acceptance. The hub records the state move
+    // as lane.state_changed (with node) so the fold can apply it; ready_for_review stays the
+    // origin's, once.
+    const changed = laneAudit(hub.db, laneId, 'lane.state_changed');
+    expect(changed).toHaveLength(1);
+    expect(changed[0]!.actor).toBe('nick');
+    expect(JSON.parse(changed[0]!.detail)).toMatchObject({
+      node: joinerNode(),
+      from: 'claimed',
+      to: 'awaiting_acceptance',
+    });
+    expect(
+      laneAudit(joiner.db, laneId, 'lane.state_changed').filter(
+        (r) => r.origin_node === joinerNode(),
+      ),
+    ).toHaveLength(0);
+    await hubToJoiner();
+    expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')).toMatchObject({
+      owner_seat: 'nick',
+      state: 'awaiting_acceptance',
+      merged: { pr: 1, sha: 'abc', authorized_by: 'nick' },
+    });
+    // The prescribed retry is not a permanent wedge: the joiner's expectation now matches the hub.
+    const retry = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { state: 'ready_for_review', merged: { pr: 1, sha: 'abc', authorized_by: 'nick' } },
+      nickOnJoiner,
+    );
+    expect(retry.status).not.toBe(409);
+  });
+
   it('a terminal close while the hub is unreachable refuses hub_unreachable and moves nothing', async () => {
     const laneId = await claimedOnJoiner('c');
     await hub.close();

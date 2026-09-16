@@ -137,7 +137,9 @@ function laneAuditRow(
 /**
  * The four edges the store records, with the same exclusivity the PATCH handler used to apply —
  * moved here, not duplicated, so the predicates cannot drift (ryder, #1071 acceptance). Terminal
- * edges belong to `recordLaneClose`; entering awaiting_acceptance belongs to `lane.ready_for_review`.
+ * edges belong to `recordLaneClose`. Entering awaiting_acceptance belongs to `lane.ready_for_review`
+ * on the origin; a hub-arbitrated submit also records `lane.state_changed` so the fold can apply
+ * the state (lane 01M2HNSVA79).
  */
 function recordLaneEdges(
   db: Database,
@@ -175,11 +177,17 @@ function recordLaneEdges(
       owner_before: before.owner_seat,
     });
   }
+  const enteringAcceptance =
+    isAwaitingAcceptance(after.state) && !isAwaitingAcceptance(before.state);
   if (
     after.state !== before.state &&
     !LANE_TERMINAL_STATES.has(after.state) &&
     !released &&
-    !(isAwaitingAcceptance(after.state) && !isAwaitingAcceptance(before.state)) &&
+    // Local path: the origin PATCH handler owns `lane.ready_for_review` (routing + ask).
+    // Hub-arbitrated path: that handler runs on the joiner AFTER the write, so nothing
+    // foldable lands in the hub log unless we record the state move here (lane 01M2HNSVA79).
+    // `audit.node` is the residence TRACE of a hub write (ADR 361) — absent on a local one.
+    !(enteringAcceptance && audit.node === undefined) &&
     !claimed
   ) {
     laneAuditRow(db, teamId, audit, 'lane.state_changed', after.id, {
