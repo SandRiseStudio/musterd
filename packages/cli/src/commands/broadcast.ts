@@ -1346,8 +1346,17 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     let emitted = 0;
     const perf = startPerfRecording(page, ffmpeg, chrome, () => emitted);
     // Acks are gated to the pump, not sent on arrival — see makeAckGate for the measured reason.
+    //
+    // The rejection is swallowed on purpose. An ack is fire-and-forget, and gating moved the send
+    // from Chrome's delivery moment to the pump's tick — which on the ADR 159 restart path means an
+    // ack can be in flight when the DevTools socket closes. The socket's close rejects every pending
+    // send, and an unobserved rejection is a crash: the first hosted run of this gate (2026-09-16,
+    // 78460d2c55eed8) died with "Uncaught CliError: the Chrome DevTools socket closed" and exit 1
+    // where the supervisor expected 75, so the machine ended instead of restarting.
     const acks = makeAckGate((sessionId) => {
-      void page.send('Page.screencastFrameAck', { sessionId });
+      page.send('Page.screencastFrameAck', { sessionId }).catch(() => {
+        /* socket gone mid-teardown — the frame it acked is gone with it */
+      });
     });
     page.on('Page.screencastFrame', (p) => {
       const frame = Buffer.from(String(p['data']), 'base64');
