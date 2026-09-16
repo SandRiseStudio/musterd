@@ -33,6 +33,7 @@ import {
   ffmpegArgs,
   killGroup,
   makeFramePump,
+  makeAckGate,
   parseOptions,
   PULSE_SINK,
   resolveSink,
@@ -303,6 +304,71 @@ describe('ffmpegArgs', () => {
   it('no -t when duration is 0 (run until stopped)', () => {
     const forever = parseOptions({ team: 't', out: 'p.mp4' }, 'darwin');
     expect(ffmpegArgs(forever, { kind: 'file', target: 'p.mp4' })).not.toContain('-t');
+  });
+});
+
+describe('makeAckGate (screencast acks follow the encode rate)', () => {
+  const harness = (holdMs = 250) => {
+    const acked: string[] = [];
+    let clock = 0;
+    const gate = makeAckGate(
+      (id) => acked.push(id),
+      () => clock,
+      holdMs,
+    );
+    return { acked, gate, advance: (ms: number) => (clock += ms) };
+  };
+
+  it('MEASURED 2026-09-16: holds a delivered frame until the pump emits one, then acks the oldest', () => {
+    // Chrome JPEG-encoded ~27 frames/s for a 20fps pump on the box; each ack is what lets it send
+    // the next one, so acking per emitted frame makes the encode cost follow what is kept.
+    const { acked, gate } = harness();
+    gate.arrived('a');
+    gate.arrived('b');
+    expect(acked).toEqual([]);
+    gate.release(1);
+    expect(acked).toEqual(['a']);
+    gate.release(1);
+    expect(acked).toEqual(['a', 'b']);
+  });
+
+  it('a catch-up burst releases one ack per emitted frame, never more than are pending', () => {
+    const { acked, gate } = harness();
+    gate.arrived('a');
+    gate.release(3);
+    expect(acked).toEqual(['a']);
+    gate.release(2); // nothing pending — nothing to ack, nothing thrown
+    expect(acked).toEqual(['a']);
+  });
+
+  it('a stalled pump can never wedge Chrome: anything held past the hold time is acked on sweep', () => {
+    const { acked, gate, advance } = harness(250);
+    gate.arrived('a');
+    advance(100);
+    gate.arrived('b');
+    advance(100);
+    gate.sweep(); // a is 200ms old, b 100ms — neither past 250
+    expect(acked).toEqual([]);
+    advance(100);
+    gate.sweep(); // a is 300ms old
+    expect(acked).toEqual(['a']);
+    advance(100);
+    gate.sweep();
+    expect(acked).toEqual(['a', 'b']);
+  });
+
+  it('acks each session exactly once, in arrival order', () => {
+    const { acked, gate, advance } = harness(250);
+    gate.arrived('a');
+    gate.arrived('b');
+    gate.arrived('c');
+    gate.release(1);
+    advance(300);
+    gate.sweep();
+    expect(acked).toEqual(['a', 'b', 'c']);
+    gate.release(5);
+    gate.sweep();
+    expect(acked).toEqual(['a', 'b', 'c']);
   });
 });
 

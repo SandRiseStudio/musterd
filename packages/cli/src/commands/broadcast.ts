@@ -428,6 +428,59 @@ export function makeFramePump(
 }
 
 /**
+ * How long a delivered screencast frame may sit un-acked before the gate acks it anyway.
+ *
+ * The gate below acks per *emitted* frame, so a pump that stopped ticking would leave Chrome waiting
+ * on acks forever with its in-flight budget spent — a wedged screencast that no counter reports.
+ * Five pump periods at 20fps is long enough that the sweep never fires while the pump is healthy,
+ * and short enough that a hiccup costs a quarter-second of stale frames rather than the stream.
+ */
+export const ACK_HOLD_MS = 250;
+
+/**
+ * Screencast acks that follow the encode rate, not the compositor's.
+ *
+ * Chrome keeps only a small number of screencast frames in flight until `Page.screencastFrameAck`
+ * arrives for one of them, and every delivered frame is a full-stage JPEG encoded on the compositor
+ * thread. Acking on arrival — what this did until 2026-09-16 — told Chrome "send the next one" the
+ * moment each frame landed, so it encoded every composited frame: measured **26.9 delivered/s**
+ * against a 20fps pump on the performance-4x box, with Chrome at 253% of a core, and ~7 of those
+ * JPEGs a second were overwritten in `latest` before any tick sampled them.
+ *
+ * Holding each ack until the pump has *emitted* a frame makes the next JPEG cost the pump's demand
+ * rather than the compositor's supply: one ack per kept frame, so in steady state Chrome encodes at
+ * the encode rate. A frame still arrives within one compositor period of its ack, which at ~27Hz is
+ * inside the 50ms tick, so `latest` is as fresh as before. `sweep` is the backstop: anything held
+ * past {@link ACK_HOLD_MS} is acked regardless, so a pump that stalls can never wedge Chrome.
+ *
+ * Pure so a test can drive it with no CDP: `arrived` on delivery, `release(n)` after the pump emits
+ * `n`, `sweep` on every pump tick.
+ */
+export function makeAckGate(
+  ack: (sessionId: string) => void,
+  now: () => number = () => performance.now(),
+  holdMs: number = ACK_HOLD_MS,
+): {
+  arrived: (sessionId: string) => void;
+  release: (n: number) => void;
+  sweep: () => void;
+} {
+  const pending: { id: string; t: number }[] = [];
+  return {
+    arrived: (id) => {
+      pending.push({ id, t: now() });
+    },
+    release: (n) => {
+      for (let i = 0; i < n && pending.length > 0; i++) ack(pending.shift()!.id);
+    },
+    sweep: () => {
+      const cutoff = now() - holdMs;
+      while (pending.length > 0 && pending[0]!.t <= cutoff) ack(pending.shift()!.id);
+    },
+  };
+}
+
+/**
  * Best-effort, synchronous kill of a child's whole process group. Both children spawn
  * `detached: true`, so each leads its own group and `kill(-pid)` reaches it plus anything it
  * spawned. This is the backstop for the ungraceful stop: when the parent dies to an external
@@ -1292,11 +1345,15 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // See broadcast-perf.ts for why queue *growth*, not ffmpeg's `speed=`, is the margin metric.
     let emitted = 0;
     const perf = startPerfRecording(page, ffmpeg, chrome, () => emitted);
+    // Acks are gated to the pump, not sent on arrival — see makeAckGate for the measured reason.
+    const acks = makeAckGate((sessionId) => {
+      void page.send('Page.screencastFrameAck', { sessionId });
+    });
     page.on('Page.screencastFrame', (p) => {
       const frame = Buffer.from(String(p['data']), 'base64');
       perf?.frame(frame.byteLength);
       pump.frame(frame);
-      void page.send('Page.screencastFrameAck', { sessionId: p['sessionId'] });
+      acks.arrived(String(p['sessionId']));
     });
     // JPEG, and this is load-bearing: Chrome encodes screencast frames on the compositor thread,
     // and 1080p PNG is so expensive there that delivery measured 4.7fps — a slideshow the pump then
@@ -1317,7 +1374,10 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     // fire *often enough* — late ticks emit catch-up frames instead of losing them.
     pumpTimer = setInterval(
       () => {
-        emitted += pump.tick();
+        const n = pump.tick();
+        emitted += n;
+        acks.release(n);
+        acks.sweep();
       },
       Math.max(1, Math.round(500 / opts.fps)),
     );
