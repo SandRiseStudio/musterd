@@ -37,6 +37,7 @@ export const DEFAULT_PROJECT = 'default';
 
 /** The lane vocabulary itself is validator-free (`lanes.wire.js`); this module is its zod face. */
 export {
+  ACCEPTANCE_MOVES_NOTICE,
   ACCEPTANCE_STALE_MS,
   LANE_STAKES,
   LANE_STAKES_PROVENANCE,
@@ -46,6 +47,7 @@ export {
   EMPTY_POOL_LIVE_EXCLUSIONS,
   emptyPoolFromCandidates,
   isAwaitingAcceptance,
+  laneAckAck,
   laneVerdictAck,
   type EmptyPool,
   type EmptyPoolKind,
@@ -53,6 +55,7 @@ export {
   type EmptyPoolLiveSeat,
   type LaneStakes,
   type LaneStakesProvenance,
+  type LaneAckAck,
   type LaneState,
   type LaneVerdictAck,
   type MergeVerification,

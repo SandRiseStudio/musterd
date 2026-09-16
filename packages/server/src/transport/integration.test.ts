@@ -7,6 +7,7 @@ import {
   type Envelope,
   FEATURE_EPOCH,
   GENERALIST_CAPABILITIES,
+  isAwaitingAcceptance,
   PROTOCOL_VERSION,
   type WSServerFrame,
 } from '@musterd/protocol';
@@ -6632,6 +6633,85 @@ describe('two-stage close (ADR 169)', () => {
       const merged = await auditRows(nickTok, 'git.pr_merged');
       expect(merged[0].detail.pr).toBe(7);
       expect(merged[0].detail.attested_by).toBe('ada');
+    });
+
+    /**
+     * Lane 01M2P2E2H6 — the falsifier that opened the lane, run as a test: reply to a fresh
+     * acceptance ask with the announcement a seat actually means, and read the lane's state.
+     * Before this, the only reply the rail offered was `accept`, which closed the lane on the send.
+     */
+    it('a `wait` on the ask TAKES it without deciding: nothing moves, and the verdict is still owed', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const { laneId, reviewer, auth, askId } = await laneAwaitingAcceptance(nickTok, ada, gee);
+
+      const taken = await verdict(auth, reviewer, askId, 'wait');
+      expect(taken.status).toBe(201);
+      // The sender learns what their send did — here, that it did NOT decide. Without this the
+      // acknowledge and the verdict are indistinguishable from the sender's side, which is the
+      // ambiguity this lane exists to remove rather than relocate.
+      expect(taken.json.lane_ack).toEqual({ lane: laneId });
+      expect(taken.json.lane_verdict).toBeUndefined();
+
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      const still = (lanes.json.lanes as { id: string; state: string }[]).find(
+        (l) => l.id === laneId,
+      );
+      expect(isAwaitingAcceptance(still!.state)).toBe(true);
+      expect(await auditRows(nickTok, 'lane.closed')).toHaveLength(0);
+
+      // It IS recorded — the board and the teammates can see the review is taken.
+      const acked = await auditRows(nickTok, 'lane.review_acknowledged');
+      expect(acked).toHaveLength(1);
+      expect(acked[0].detail.lane).toBe(laneId);
+      expect(acked[0].detail.ask).toBe(askId);
+      expect(acked[0].detail.acceptor).toBe(reviewer);
+
+      // And the ask is NOT discharged: the same ask still takes the real verdict afterwards. An
+      // acknowledge that consumed the ask would have replaced one trap with a quieter one.
+      const decided = await verdict(auth, reviewer, askId, 'accept');
+      expect(decided.status).toBe(201);
+      expect(decided.json.lane_verdict).toEqual({ lane: laneId, state: 'done' });
+      const closed = await auditRows(nickTok, 'lane.closed');
+      expect(closed).toHaveLength(1);
+      expect(closed[0].detail.verified).toBe(true);
+    });
+
+    it('the ask itself names both moves, so the acceptor reads it BEFORE deciding', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const { auth, laneId } = await laneAwaitingAcceptance(nickTok, ada, gee);
+      const inbox = await get('/teams/dawn/inbox?unread=1', auth);
+      const ask = inbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      // The guidance used to arrive only in the ack, i.e. after the write it was warning about.
+      expect(ask.body).toContain('IS the verdict');
+      expect(ask.body).toContain('`wait`');
+    });
+
+    it('a `wait` that answers something other than a live acceptance ask reports no ack', async () => {
+      const { nickTok, ada, gee } = await setup();
+      // A plain directed act, not a daemon-composed lane_review ask.
+      const plain = await post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id: ulid(),
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from: 'ada',
+            to: { kind: 'member', name: 'gee' },
+            act: 'request_help',
+            body: 'can you look at this',
+            ts: Date.now(),
+          },
+        },
+        ada,
+      );
+      const taken = await verdict(gee, 'gee', plain.json.ack.id as string, 'wait');
+      expect(taken.status).toBe(201);
+      expect(taken.json.lane_ack).toBeUndefined();
+      expect(await auditRows(nickTok, 'lane.review_acknowledged')).toHaveLength(0);
     });
 
     // The acceptance a human routes by hand had no door into the ledger. Measured 2026-09-01 on

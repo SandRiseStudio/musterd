@@ -154,6 +154,10 @@ export type AuditAction =
   | 'lane.closed'
   | 'lane.review_sent_back'
   | 'lane.review_peer_confirmed'
+  // The acknowledge, which decides nothing (lane 01M2P2E2H6): a `wait` replying to a `lane_review`
+  // ask — "I have this, I have not judged it yet". Carries no state and does NOT discharge the ask;
+  // the verdict is still owed. detail: { lane, ask, acceptor }.
+  | 'lane.review_acknowledged'
   // A hand re-route of a STANDING acceptance (lane 01M1QYHJFY): the lane was already
   // awaiting_acceptance and the owner (or an admin) named a different acceptor. Its own verb, not a
   // second `lane.ready_for_review` — that row is the submit, and the review-loop breaker and the

@@ -112,6 +112,20 @@ What the fix leaves behind, for a reader who meets the rows:
 - A superseded ask is closed by a daemon-composed `resolve` on its own thread (`meta.lane_review_superseded`), and a verdict on it no longer moves the lane. A seat that finds a `resolve` it did not write on an acceptance ask should read the body: the acceptance went somewhere else.
 - The invariant is the durable half: a named acceptor with no ask minted by the end of the handler is a 500, never a 200. If you see `acceptor "X" was named and validated but no acceptance ask was minted`, that is a daemon bug — report it; the lane is awaiting with no ask.
 
+## The only reply the rail recorded was the one that closed the lane (2026-09-16; falsify: on a daemon built before `lane.review_acknowledged` exists, reply `wait` to a fresh `lane_review` ask and read the lane — it stays `awaiting_acceptance` and no audit row names the acknowledge, so nothing but `accept` was ever countable) <!-- claim: defect -->
+
+Every other obligation on this rail has an "I have this" reply that does not discharge it: a `request_help` is taken with `accept` and discharged by *doing the work* (`delivery.ts`, #745), and so is a handoff. A `lane_review` ask was the one act where that learned reflex is also the irreversible close (ADR 202) — and the daemon said so only in the ack, i.e. after the write.
+
+Three seats sent "taking this" announcements as `accept` in one month — miley `01M2GH2FZN` ("taking it as mine"), stanley `01M2GPXE4S` ("taking the acceptance review of…"), schmidt `01M1MKB55W` — and all three were harmless *only* because they answered `request_help` acts rather than acceptance asks. The first one aimed at a real `lane_review` ask closed lane `01M2NR7N9V` unreviewed, `verified: true`, with the acceptor's name on the `lane.closed` row (2026-09-16 14:31). It was sent by this section's author, two days after guidance v23 was written specifically to prevent it, which is the part worth keeping: **the seat that had read the warning still sent the wrong act, because the right one did not exist.**
+
+The fix names both moves in the ask body itself and makes `wait` on a `lane_review` ask the acknowledge — audited `lane.review_acknowledged`, moving nothing, discharging nothing. Two properties are load-bearing and easy to lose in a later refactor:
+
+- **It does not discharge the ask.** `openAcceptanceLoad` must keep counting the verdict as owed, or acknowledging would quietly clear the queue this page measures — and the ADR 260 latency numbers would improve by definition rather than by anyone reviewing anything.
+- **Its ack states the negative outcome out loud** ("no lane moved, the verdict is still yours"). A silent acknowledge leaves "acknowledged" and "accepted" indistinguishable from the sender's side, which is the original defect with the sign flipped.
+
+Related in kind: [a check that cannot separate two causes](cannot-separate-two-causes.md). This is the affordance version of it — not two causes sharing one reading, but two *intentions* sharing one act.
+
+
 ## Acceptance concentrates on one seat for two measured reasons, and neither is "the picker prefers it" (2026-09-05; falsify: `sqlite3 ~/.musterd/musterd.db "select policy from residency"` shows more than one row carrying `"flow":"auto"`, or a `lane.ready_for_review` row after cd138abd whose `selected.tie_decided_by` is `roster` while the losing `tie_break` candidate held fewer open asks) <!-- claim: defect -->
 
 Lane `01M1QYHJFY` left "six acceptance asks on gptbot while ghost, kimi and schmidt sat idle" out of scope. Measured before deciding anything (lane `01M1S6GZ96`), the premise as told was half wrong and the number was worse.

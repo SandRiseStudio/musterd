@@ -8,6 +8,7 @@ import {
   CLI_REPLY_TO_STYLE,
   type BlockedBy,
   type Envelope,
+  laneAckAck,
   laneVerdictAck,
   makeEnvelope,
   MAX_ELIGIBLE,
@@ -234,6 +235,7 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
         ? { ...envelope, ask_contract: ackBody?.ask_contract ?? askContract(askTier) }
         : envelope),
       ...(ackBody?.lane_verdict ? { lane_verdict: ackBody.lane_verdict } : {}),
+      ...(ackBody?.lane_ack ? { lane_ack: ackBody.lane_ack } : {}),
     };
     process.stdout.write(JSON.stringify(payload) + '\n');
     return 0;
@@ -260,5 +262,10 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
   // closed and not that `decline` would fail to reopen it.
   const verdict = ackBody?.lane_verdict;
   if (verdict) process.stdout.write(theme.dim(laneVerdictAck(verdict).guidance) + '\n');
+  // Lane 01M2P2E2H6: and the acknowledge, at the same parity. A `wait` on an acceptance ask is
+  // recorded and moves nothing — worth one line, because the whole point of offering the move is
+  // that the sender can tell it apart from the one that decides.
+  const laneAck = ackBody?.lane_ack;
+  if (laneAck) process.stdout.write(theme.dim(laneAckAck(laneAck).guidance) + '\n');
   return 0;
 }

@@ -129,6 +129,32 @@ adapter's wording, so a reviewer meets the same refusal whichever surface they a
   stand down, and a flag on `accept` meaning "not really" would make the verdict act ambiguous
   where this ADR made it definite.
 
+- _Dated amendment, 2026-09-16 — the acknowledge move (lane `01M2P2E2H6`)._ The note above closed
+  with "not built, on purpose: a stand-down act for review asks", on two grounds: there is no second
+  addressee to stand down, and a flag on `accept` meaning "not really" would make the verdict act
+  ambiguous. **Both grounds still hold and neither is touched here.** What the note did not weigh is
+  that the rail then offered the acceptor *no* non-terminal reply at all — while every neighbouring
+  obligation does (a `request_help` is taken with `accept` and discharged by doing the work). So the
+  reflex every seat has learned elsewhere was, here alone, the irreversible close; three seats sent
+  "taking this" announcements as `accept` in one month, and on 2026-09-16 14:31 the first one aimed
+  at a real acceptance ask closed lane `01M2NR7N9V` unreviewed, `verified: true`, under the
+  acceptor's name — by the author of this amendment, two days after guidance v23 was written to
+  prevent exactly that. A correction that reaches the reader only after the write is not a control.
+
+  Two changes, neither of which makes `accept` mean less. **(1) The ask names both moves**, in the
+  ask body where the acceptor reads it before deciding anything (`ACCEPTANCE_MOVES_NOTICE`, carried
+  by the peer ask and the ADR 188 human ask alike). **(2) `wait` on a `lane_review` ask is the
+  acknowledge** — not a new act (ADR 145 §4: `wait` already means "deciding — check back"), and not
+  a modifier on the verdict. It writes `lane.review_acknowledged` and does exactly nothing else:
+  the lane does not move, and the ask is **not** discharged, so `openAcceptanceLoad` keeps counting
+  the verdict as owed and the same ask still takes it afterwards. The send ack reports `lane_ack`,
+  whose guidance states the negative outcome outright — an acknowledge that stayed quiet would leave
+  "acknowledged" and "accepted" indistinguishable from the sender's side, which is this lane's
+  defect with the sign flipped. Guidance v24 replaces "say 'on it' with a status_update" with the
+  recorded move (2026-09-16; falsify: reply `wait` to a fresh `lane_review` ask and read the lane —
+  if it leaves `awaiting_acceptance`, or if a later `accept` on the same ask no longer closes it,
+  this is wrong). <!-- claim: other -->
+
 ## Observability & Evaluation
 
 - **Traces.** No new audit actions — `lane.closed`, `lane.review_sent_back` and `git.pr_merged` are

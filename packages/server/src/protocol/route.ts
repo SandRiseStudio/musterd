@@ -5,6 +5,7 @@ import {
   DeferUntilSchema,
   eligibleOf,
   type Envelope,
+  ACCEPTANCE_MOVES_NOTICE,
   isAwaitingAcceptance,
   type Lane,
   makeEnvelope,
@@ -51,6 +52,11 @@ export interface RouteResult {
    *  they gave a verdict at the moment they gave it (lane 01M2GQFJXG, 2026-09-14: a reviewer sent
    *  `accept` as "taking this review" and found out afterwards that the lane was already closed). */
   lane_verdict?: { lane: string; state: 'done' | 'active' };
+  /** Lane 01M2P2E2H6 — the acceptance ask this `wait` TOOK without deciding. Absent for every other
+   *  act, and for a `wait` that answered anything but a live `lane_review` ask. Reported on the ack
+   *  for the same reason `lane_verdict` is: the sender learns what their send did, as they do it —
+   *  here, that it did NOT move the lane. */
+  lane_ack?: { lane: string };
 }
 
 /**
@@ -93,6 +99,7 @@ function routeEnvelopeInner(
   // HTTP and every client above them get it from one implementation. Explicit meta always wins.
   let handoffLane: RouteResult['handoff_lane'];
   let laneVerdict: RouteResult['lane_verdict'];
+  let laneAck: RouteResult['lane_ack'];
   /** ADR 243: which evidence answered — audited, never on the wire. */
   let handoffBasis: HandoffLaneBasis | undefined;
   if (env.act === 'handoff' && !(env.meta as { lane_handoff?: unknown } | null)?.lane_handoff) {
@@ -378,6 +385,19 @@ function routeEnvelopeInner(
         log.warn({ msg: 'acceptance_verdict_failed', err: String(err) });
       }
     }
+  } else if (env.act === 'wait') {
+    // Lane 01M2P2E2H6: the acknowledge move. `wait` already means "deciding — check back" (ADR 145
+    // §4's reason for not minting a verb), so on a `lane_review` ask it is the reply that says "I
+    // have this" without saying what it is. Nothing here moves the lane, deliberately: the whole
+    // defect was that the only reply the rail offered also decided.
+    const ref = env.meta?.['in_reply_to'];
+    if (typeof ref === 'string') {
+      try {
+        laneAck = applyAcceptanceAck(ctx, team, sender, ref);
+      } catch (err) {
+        log.warn({ msg: 'acceptance_ack_failed', err: String(err) });
+      }
+    }
   } else if (env.act === 'resolve' && env.thread) {
     const rootTs = getMessageTs(ctx.db, team.id, env.thread);
     if (rootTs !== null && env.ts >= rootTs)
@@ -492,6 +512,7 @@ function routeEnvelopeInner(
     delivered,
     ...(handoffLane ? { handoff_lane: handoffLane } : {}),
     ...(laneVerdict ? { lane_verdict: laneVerdict } : {}),
+    ...(laneAck ? { lane_ack: laneAck } : {}),
   };
 }
 
@@ -796,7 +817,8 @@ function fireGatedHumanAsk(
     '(2) Principles — project/musterd hard rules? ' +
     '(3) Usable — exercise the path enough to say it works? ' +
     '(4) Feel — only if UI/copy/brand is in surface, else N/A. ' +
-    'Accept → move the lane to done; reject → send it back to active with a concrete note.';
+    'Accept → move the lane to done; reject → send it back to active with a concrete note.' +
+    ACCEPTANCE_MOVES_NOTICE;
   const ask = makeEnvelope({
     id: ulid(),
     team: team.slug,
@@ -823,6 +845,57 @@ function fireGatedHumanAsk(
   // daemonComposed: the daemon authored this ask, so its `lane_review` is authentic (ADR 225).
   routeEnvelope(ctx, team, owner, ask, undefined, true);
   return true;
+}
+
+/**
+ * Lane 01M2P2E2H6 — "I have this" on an acceptance ask, without deciding it.
+ *
+ * Every other obligation on this rail has a non-terminal take: a `request_help` is accepted and
+ * then discharged by doing the work. A `lane_review` ask had none, so the learned reflex —
+ * `accept` with a body saying "taking this review" — was also the irreversible close, and the
+ * daemon explained that only in the ack, after the write. Three seats sent that announcement in a
+ * month; the first aimed at a real acceptance ask closed a teammate's lane unreviewed, under the
+ * acceptor's own name and `verified: true` (2026-09-16 14:31, lane 01M2NR7N9V, by this lane's
+ * author).
+ *
+ * Same narrowness as {@link applyAcceptanceVerdict}, and for the same reasons: only from a real
+ * `lane_review` ask, only while the lane is still awaiting acceptance, never on a superseded ask.
+ * One difference is deliberate — this writes an audit row and NOTHING else. It does not discharge
+ * the ask (the verdict is still owed and `openAcceptanceLoad` must keep counting it), and it does
+ * not touch lane state. An acknowledge that quietly changed something would be the defect it
+ * replaces wearing a friendlier word.
+ */
+function applyAcceptanceAck(
+  ctx: Ctx,
+  team: TeamRow,
+  acceptor: MemberRow,
+  repliedToId: string,
+): RouteResult['lane_ack'] {
+  const replied = ctx.db
+    .prepare<
+      [string, string],
+      { meta: string | null }
+    >('SELECT meta FROM messages WHERE team_id = ? AND id = ?')
+    .get(team.id, repliedToId);
+  if (!replied?.meta) return;
+  let laneId: string | undefined;
+  try {
+    laneId = (JSON.parse(replied.meta) as { lane_review?: { lane?: string } }).lane_review?.lane;
+  } catch {
+    return;
+  }
+  if (!laneId) return;
+  const lane = getLane(ctx.db, team.id, laneId, team.slug);
+  if (!lane || !isAwaitingAcceptance(lane.state)) return;
+  if (supersededAcceptanceAsks(ctx.db, team.id, laneId).has(repliedToId)) return;
+  appendAudit(ctx.db, team.id, {
+    actor: acceptor.name,
+    action: 'lane.review_acknowledged',
+    target: lane.id,
+    result: 'allow',
+    detail: { lane: lane.id, ask: repliedToId, acceptor: acceptor.name },
+  });
+  return { lane: lane.id };
 }
 
 /**
