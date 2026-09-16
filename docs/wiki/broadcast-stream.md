@@ -12,8 +12,8 @@ The verbs record intent in `~/.musterd/stream/state.json`: `start` says live (be
 
 ## Two claims the evidence killed (measured 2026-07-29; falsify: read entrypoint.sh + re-measure bitrate)
 
-1. ~~"The hosted stream runs 1080p30 and delivers 10 fps"~~ — wrong: `scripts/broadcast/entrypoint.sh` pins 720p25; the 1080p30 row in docs/perf/broadcast-baseline.md is the REJECTED arm. Read the entrypoint, not just the bench.
-2. ~~"Lower the bitrate to halve egress"~~ — wrong: the flat-color iso scene encodes at ~780 kbit/s against a 4500k cap that never binds; a 10 h stream is ~3 GB of egress, cents. The cost is compute, and at ~2.7 cores of pipeline performance-4x cannot step down to 2x.
+1. ~~"The hosted stream runs 1080p30 and delivers 10 fps"~~ — wrong: `scripts/broadcast/entrypoint.sh` pins 720p25; the 1080p30 row in docs/perf/broadcast-baseline.md is the REJECTED arm. Read the entrypoint, not just the bench. ~~720p25 (2026-07-29)~~ SUPERSEDED 2026-09-15: the entrypoint now pins **1080p20**, measured at speed 0.998x on the same box (1080p15 sustains a clean 1.00x and is the fallback rung) — 1080p30 stays rejected, but 1080p was never the problem at a lower frame rate and nobody had checked.
+2. ~~"Lower the bitrate to halve egress"~~ — wrong: a 10 h stream is ~3 GB of egress, cents. The cost is compute, and at ~2.7 cores of pipeline performance-4x cannot step down to 2x. ~~"the flat-color iso scene encodes at ~780 kbit/s against a 4500k cap that never binds" (2026-07-29)~~ INVALIDATED 2026-09-15 (falsify: read ffmpeg's `-stats` summary off any capture): measured **~2900 kbit/s at 720p25**, **~3334 at 1080p15** and **~3517 at 1080p20**, against the same 4500k cap. The room has gained props, lighting, a night veil and more members since July; the scene is no longer "flat colour" in the sense that figure assumed. The conclusion above still holds — egress is still cents, compute is still the cost — but the cap is much nearer binding than recorded, and a bitrate decision made on the 780 figure would be made on a number that is four times off. <!-- claim: other -->
 
 ## The local VideoToolbox arm (measured 2026-07-29, 45 s probe — promising, UNPROVEN)
 
@@ -40,6 +40,30 @@ Fixed by asking the right question: `occupiedMachines()` counts `created`/`start
 same bug made `stream stop` during a boot print "nothing live" and walk away from a machine that
 then came up and billed unattended; that path is fixed with it. `status` deliberately still reports
 `started`, because there "live" means *streaming* and a booting machine is not yet.
+
+## ffmpeg's `fps=20 speed=1.00x` was padding — the page delivered 15 (2026-09-16; falsify: `MUSTERD_BROADCAST_PERF` on the live box, compare `deliveredFps` to `encodedFps`) <!-- claim: defect -->
+
+nick saw a "tiny bit choppy" on member walks and act bubbles at 1080p20 while every throughput
+number said healthy. The perf recorder on the live performance-4x (407 s) said why: Chrome
+delivered **14.9 distinct frames/s** (min 12, p95 16) while the pump emitted **20.0**, so ~26 % of
+encoded frames were the previous frame re-sent, unevenly spaced. `speed=` and `fps=` are the
+encoder's view and do not carry this; the pump re-emits the latest frame on a wall clock by design.
+The instrument that could — `deliveredFps` vs `encodedFps` in the JSONL — existed since July and had
+not been run on the hosted box.
+
+Cause: the office's broadcast draw coalescer skipped any rAF tick that arrived under the 50 ms
+budget (`acc < budget → skip`). That is exact when rAF runs far faster than the budget (a 60 Hz
+viewer), but on the box at 1080p the rAF itself ran **~19-20 Hz** — a period equal to the budget —
+so every tick a hair early was dropped and the next drew at ~100 ms. `draws/s ≈ delivered/s ≈ 15`,
+`ticks/s ≈ 19`. Fixed by `coalesceStep`: draw on the tick nearest the budget (`phase + raf/2 ≥
+budget`) and carry the remainder, clamped to ±half a budget so a stall cannot bank catch-up draws.
+The viewer's 20 fps ambient cap is unchanged (60 Hz still draws every third tick).
+
+What this does **not** fix: the rAF running at ~20 Hz means the box's per-frame cost (paint +
+composite + 1080p JPEG screencast) is ~50 ms with no headroom. Chrome sat at 220 % of a core with
+canvas draw rate making no difference to that figure (14/s and 16/s buckets both 219 %), so the
+cost is in the screencast/composite path, not the scene painting. Delivered ≥ 19 after this fix is
+the acceptance; if it lands short, that path is next.
 
 ## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream) <!-- claim: defect -->
 

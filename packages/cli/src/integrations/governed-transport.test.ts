@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GovernedTransportManifest } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { renderTailscaleTransport } from './governed-transport.js';
+import { loadGovernedTransportManifest, renderTailscaleTransport } from './governed-transport.js';
 
 function workspace(): string {
   const root = mkdtempSync(join(tmpdir(), 'musterd-transport-'));
@@ -87,6 +87,20 @@ describe('Tailscale governed-transport renderer (ADR 402)', () => {
       ],
     });
     expect(forward).toEqual(reverse);
+  });
+
+  it('loads legitimate Member and node names containing credential-related English words', () => {
+    const root = workspace();
+    writeFileSync(
+      join(root, '.musterd', 'governed-transport.json'),
+      JSON.stringify({
+        ...manifest,
+        nodes: [{ node_key: 'tokenizer-box-01', members: ['secretary'] }],
+      }),
+    );
+    expect(loadGovernedTransportManifest(root)).toMatchObject({
+      nodes: [{ node_key: 'tokenizer-box-01', members: ['secretary'] }],
+    });
   });
 
   it.each([

@@ -334,7 +334,7 @@ The mapping artifact also accounts for out-of-scope human and inactive Members.
 Generated ACLs allow only each exact workload tag to reach the declared Aperture tag on HTTPS. The
 command performs no network request, Tailscale command, configuration application, node discovery,
 daemon change, or runtime binding. It rejects missing, stale, duplicate, wildcard, broad, or
-credential-like transport data before writing. A current artifact reports
+Musterd-credential-prefixed transport data before writing (ADR 405). A current artifact reports
 `Tailscale transport policy is current`.
 
 ### `musterd team create <slug> [--display <name>] [--as <yourname>] [--role <role>]`
