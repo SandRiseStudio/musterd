@@ -7,6 +7,8 @@ import {
   askContract,
   askContractText,
   chooseAutoTarget,
+  ELIGIBLE_ACTS,
+  eligibleSetRefusal,
   type Envelope,
   makeEnvelope,
   MAX_ELIGIBLE,
@@ -25,8 +27,9 @@ const DESCRIPTION =
   'Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to ' +
   'transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to ' +
   'redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires ' +
-  'meta.species and meta.tier; handoff names its lane in meta.lane_handoff {lane, branch} or one is ' +
-  'derived; 2–4 to names mean any may answer.';
+  'meta.species and meta.tier; handoff names its lane in meta.lane_handoff {lane, branch} or one ' +
+  'is derived. 2–4 to names mean any may answer on message, request_help, or challenge — not ask ' +
+  '(quiet-set fan-out is unshipped, ADR 260 / ADR 401).';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
@@ -51,8 +54,16 @@ function recipient(to: string): Recipient {
  * The array is SURFACE SUGAR. A multi-name send is persisted and audited as a team act carrying
  * `meta.eligible`, never as an array-shaped recipient, so nothing below `routeEnvelope` learns a new
  * wire shape.
+ *
+ * `act` is required once arity is 2+: composing the set act-blind (the previous shape) produced a
+ * valid-looking team act that the envelope guard then refused, with copy that read as a design
+ * principle. `ask` is the parked increment (ADR 260 / ADR 401); handoff and the rest are structurally
+ * single-target. One-name and empty `to` ignore `act` — they never compose a set.
  */
-export function normalizeTo(to: string | string[]): {
+export function normalizeTo(
+  to: string | string[],
+  act?: Act,
+): {
   to: Recipient;
   eligible: string[] | null;
 } {
@@ -69,6 +80,9 @@ export function normalizeTo(to: string | string[]): {
   const alias = names.find((n) => n.startsWith('@'));
   if (alias) {
     throw new Error(`"${alias}" cannot appear in a list of seats — send to ${alias} on its own`);
+  }
+  if (act !== undefined && !ELIGIBLE_ACTS.has(act)) {
+    throw new Error(eligibleSetRefusal(act));
   }
   return { to: { kind: 'team' }, eligible: names };
 }
@@ -134,7 +148,9 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
         to: z
           .union([z.string(), z.array(z.string())])
           .default('@team')
-          .describe("member name, '@team', '@broadcast', or 2-4 names (either may answer)"),
+          .describe(
+            "member name, '@team', '@broadcast', or 2-4 names (any may answer on message, request_help, challenge — not ask)",
+          ),
         // Derived from ACTS (the protocol's single source of truth) so the MCP surface can never drift
         // from the enum — a new act lands here the moment it's appended (ADR 103). Rebuilt with this
         // package's zod (4) rather than importing ActSchema: the protocol package is still on zod 3,
@@ -187,7 +203,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
       // as text is recoverable; a send to the wrong audience is not.
       let addressed: { to: Recipient; eligible: string[] | null };
       try {
-        addressed = normalizeTo(args.to);
+        addressed = normalizeTo(args.to, args.act as Act);
       } catch (err) {
         return textResult(err instanceof Error ? err.message : String(err));
       }

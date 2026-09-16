@@ -539,6 +539,20 @@ describe('team_send handler', () => {
       expect(text(r)).toMatch(/eligible/i);
     });
 
+    it('refuses an eligible set on ask as unshipped, not as a one-owner act, and nothing is sent', async () => {
+      const { sendEnvelope, client } = liveClient();
+      const handler = capture(registerSend, client, config);
+      const r = await handler({
+        to: ['stanley', 'izzo'],
+        act: 'ask',
+        body: 'either of you?',
+        meta: { species: 'consult', tier: 'advisory' },
+      });
+      expect(sendEnvelope).not.toHaveBeenCalled();
+      expect(text(r)).toMatch(/unshipped increment/);
+      expect(text(r)).not.toMatch(/one owner cannot have several/);
+    });
+
     it('regression: a one-element array still sends a plain directed act', async () => {
       const { sendEnvelope, client } = liveClient();
       const handler = capture(registerSend, client, config);

@@ -338,12 +338,33 @@ describe('meta.eligible (the eligible set)', () => {
 
   // A handoff to two seats is incoherent — two owners is zero owners — and the single-target acts
   // have nowhere to put a second addressee. This restriction is what earns one global discharge rule.
-  it.each(['handoff', 'accept', 'decline', 'defer', 'steer', 'status_update', 'ask', 'resolve'])(
-    'rejects an eligible set on %s',
+  it.each(['handoff', 'accept', 'decline', 'defer', 'steer', 'status_update', 'resolve'])(
+    'rejects an eligible set on %s as structurally single-target',
     (act) => {
       expect(() => withEligible(['Lin', 'Ada2'], act)).toThrow(/cannot carry meta\.eligible/);
+      expect(() => withEligible(['Lin', 'Ada2'], act)).toThrow(/one owner cannot have several/);
     },
   );
+
+  // Lane 01M2HM0K2C: `ask` is in this list because quiet-set fan-out (ADR 260 increment 2) is
+  // parked, not because an ask has "one owner". The refusal has to name the unshipped increment
+  // or a reader treats a sequencing fact as a design principle and stops asking.
+  it('rejects an eligible set on ask as an unshipped increment, not as a one-owner act', () => {
+    let message = '';
+    try {
+      makeEnvelope({
+        ...teamBase,
+        act: 'ask',
+        body: 'either of you?',
+        meta: { species: 'consult', tier: 'advisory', eligible: ['Lin', 'Ada2'] },
+      });
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    expect(message).toMatch(/cannot carry meta\.eligible/);
+    expect(message).toMatch(/unshipped increment/);
+    expect(message).not.toMatch(/one owner cannot have several/);
+  });
 
   it('leaves an envelope without the key alone', () => {
     expect(makeEnvelope({ ...teamBase, act: 'message', body: 'hi' }).meta).toBeNull();
