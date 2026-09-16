@@ -38,8 +38,8 @@ for this seat?*
 
 - **No** → exit 0, **zero output**. The common case must be free: no context added, no tokens spent.
 - **Yes** → exactly **one line** to stdout and exit 0, e.g.
-  `⚡ musterd: urgent from june (handoff) — read exactly it: team_inbox_check {ids:["01KZ4PAE1E"]} or 'musterd inbox --id 01KZ4PAE1E'.`
-  (Until Amendment 4 below, 2026-09-16, the tail read `— run 'musterd inbox' to read it.`)
+  `⚡ musterd: urgent from june (handoff) — run 'musterd inbox' to read it.`
+  _(Amended 2026-09-16: the tail now names the act id and a by-id read. See the amendment below.)_
 
 It reuses the waiting-act predicate ADR 046 built for the per-command nudge — this extends that nudge
 from "musterd commands only" to "every tool call the agent makes." No SPEC bump, no new wire frames.
