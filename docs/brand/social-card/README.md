@@ -1,7 +1,10 @@
 # The share card
 
-`social-card.html` is **the source**. `docs/design/assets/social-card.png` (1200×630, the
-`og:image` / `twitter:image` on musterd.io and the README unfurl) is a build artifact — never
+`social-card.html` is **the source**. Two PNGs are build artifacts and must stay identical:
+`docs/design/assets/social-card.png` (the brand asset the README unfurl points at) and
+`packages/web/src/brand/social-card.png` (what `__root.tsx` imports as `og:image` /
+`twitter:image` — Vite hashes and ships THIS one, so a re-render that misses it never reaches
+musterd.io; that is exactly what happened on 2026-09-16, deploy ff6b60b2) — never
 hand-edit it, and never ship a PNG whose copy you have not changed here first.
 
 ## Rebuild it
@@ -14,6 +17,10 @@ Needs Chrome, the only dependency, not added to the repo:
   --screenshot="docs/design/assets/social-card.png" \
   --virtual-time-budget=2000 \
   "file://$PWD/docs/brand/social-card/social-card.html"
+```
+
+```bash
+cp docs/design/assets/social-card.png packages/web/src/brand/social-card.png
 ```
 
 Then open the PNG and look at it, and update `SITE_CARD_ALT` in
