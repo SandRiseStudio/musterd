@@ -23,6 +23,7 @@ Instance 4 is what 3 looks like when the ritual is automated. Stanley's discipli
 ## What actually works
 
 - **Remove the tool boundary, do not sequence around it.** One shell invocation that waits for the act and probes in the same process — no tool call between arrival and read, so no hook fires. On an unhooked seat this is a race you win by construction; on a hooked seat it is still a race, because the hook fires after the *previous* tool call too, but a 2s poll against a ~10s human send is a race you mostly win.
+- **Let a seat that is not the experimenter do the reading — a woken native seat on a private host label.** Enroll an offline seat `--harness musterd --host <private-label>` with `MUSTERD_HOST_REGISTRY` pointed at a scratch file, so the resident `musterd host` never sees the order; a human runs one `musterd host --once --host <private-label>` with the model credential in that process only; a teammate sends the `steer` while the loop is mid-turn; `wake_turns.transcript_json` for the lease is then a durable record of the delivered line, because `appendInterrupt` folds it into a tool result. Measured 2026-09-16 on seat compo: steer sent 22:40:34Z, `interrupt.raised` 22:40:38Z, in the turn-3 tool result the same second, `inbox.rendered` 22:40:43Z; total $0.44 for 6 turns (2026-09-16; falsify: repeat on any offline seat and find no `wake_turns` row containing `⚡ musterd: steer from`). This is the clean design the earlier instances asked for: the reader is the woken loop, the experimenter only sends. <!-- claim: other -->
 - **Re-read the lease every probe.** A long poller that snapshots `session_lease` once dies partway with `invalid, expired, or revoked agent session lease` — the lease rotates on renewal (2026-09-16; falsify: snapshot the lease, poll for 5 minutes, and see every response stay 200). That is the clause-2 tension in miniature: the lease is bound to the loop, which outlives any one read. <!-- claim: defect -->
 - **Get the act id out of band.** Have the sender post it as a `status_update` to the team, or read the daemon DB directly; either tells you what you are waiting for without an inbox read.
 - **Accept that the hook winning is a measurement.** It is the claude-code rail delivering. Record the line and which rail delivered it; do not record it as the probe.
@@ -30,6 +31,6 @@ Instance 4 is what 3 looks like when the ritual is automated. Stanley's discipli
 
 ## Related
 
-- [daemon doorbell contract](../design/daemon-doorbell-contract.md) — clause 1's native row, downgraded 2026-09-16 on this evidence.
+- [daemon doorbell contract](../design/daemon-doorbell-contract.md) — clause 1's native row, downgraded 2026-09-16 on this evidence and upgraded to **holds** the same day once the woken-seat method above ran (lane 01M2P5B3RE).
 - [claude-code live-doorbell eval](claude-code-live-doorbell-eval.md), [cursor](cursor-agent-live-doorbell-eval.md), [opencode](opencode-live-doorbell-eval.md), [codex](codex-live-doorbell-eval.md).
 - [cross-machine huddle bell](cross-machine-huddle-bell.md) — the 2026-09-04 run whose 26 unattributable deaf probes are the production face of the same missing record.
