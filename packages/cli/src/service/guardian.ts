@@ -7,6 +7,7 @@
  * A tick must never throw: the guardian reporting nothing is a claim (wiki: instrument silence),
  * so every failure path degrades to a logged line and the stamp still records the tick.
  */
+import { CliError, isConnRefused } from '../errors.js';
 import {
   classify,
   DEFAULT_TIERS,
@@ -20,6 +21,7 @@ import {
   loadStamp,
   recordTick,
   saveStamp,
+  type GuardianPolicyError,
   type GuardianPolicySource,
   type GuardianStamp,
 } from '../guardian/damp.js';
@@ -110,13 +112,44 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
     stamp = {
       ...stamp,
       policySource: policy.source,
-      lastPolicyReadAt: policy.source === 'team_policy' ? now : stamp.lastPolicyReadAt,
+      lastPolicyReadAt:
+        policy.source === 'team_policy' || policy.source === 'team_policy_unset'
+          ? now
+          : stamp.lastPolicyReadAt,
       lastPolicyErrorAt: null,
+      lastPolicyError: null,
+      policyDegradedSince: null,
     };
-  } catch {
+  } catch (e) {
+    // The error is BOUND (lane 01M2NZDXPD). The bare catch that used to stand here discarded the
+    // one object that knew why, at the only point it existed — so a dead daemon, a revoked
+    // guardian token and a malformed policy body all produced the same byte-identical line, in the
+    // component whose whole job is separating causes. The tier map decides whether a class reaches
+    // a human at all, so falling back silently changes who gets woken and for what.
+    //
+    // NOT alertable, and that is a measurement rather than a preference: the live log holds ten of
+    // these lines between 2026-08-20 and 2026-09-16, every one an isolated tick that recovered on
+    // the next. A degrade that has never once persisted does not need its own GuardianClass and its
+    // own ADR 274 damper; it needs to be legible, which is what `policyDegradedSince` and the
+    // status line below make it. Revisit if a run ever outlives a handful of ticks.
+    const failure = classifyPolicyError(e, now);
     tiers = DEFAULT_TIERS;
-    stamp = { ...stamp, policySource: 'shipped_default_degraded', lastPolicyErrorAt: now };
-    d.log('guardian.policy_unreadable {"source":"shipped_default_degraded"}');
+    const degradedSince = stamp.policyDegradedSince ?? now;
+    stamp = {
+      ...stamp,
+      policySource: 'shipped_default_degraded',
+      lastPolicyErrorAt: now,
+      lastPolicyError: failure,
+      policyDegradedSince: degradedSince,
+    };
+    d.log(
+      `guardian.policy_unreadable ${JSON.stringify({
+        source: 'shipped_default_degraded',
+        reason: failure.reason,
+        detail: failure.detail,
+        degraded_for_ms: now - degradedSince,
+      })}`,
+    );
   }
 
   if (incidents.length === 0) {
@@ -142,6 +175,51 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
   return 0;
 }
 
+/** Enough of the message to act on, bounded so one pathological error cannot own the log file. */
+const POLICY_DETAIL_MAX = 200;
+
+/**
+ * Name the cause of a failed policy read, coarsely enough that each reason maps to a DIFFERENT
+ * repair: start the daemon (`unreachable`), re-provision or re-mint the guardian seat
+ * (`unauthorized`/`forbidden`), fix the policy body or the daemon's version of this route
+ * (`malformed`). `unknown` carries the message rather than guessing — filing an unrecognised
+ * failure under a recognised one is the defect this replaces, not a smaller version of it.
+ *
+ * NOT a reason: an absent policy. A team that has set no tiers returns 200 with nothing in it and
+ * never reaches this function (see `team_policy_unset`) — that distinction is the difference
+ * between a fresh install and a revoked token, and it used to be invisible.
+ */
+export function classifyPolicyError(e: unknown, now: number): GuardianPolicyError {
+  const message = e instanceof Error ? e.message : String(e);
+  const detail =
+    message.length > POLICY_DETAIL_MAX ? `${message.slice(0, POLICY_DETAIL_MAX)}…` : message;
+  const at = now;
+  if (e instanceof CliError && e.code !== undefined) {
+    switch (e.code) {
+      case 'unauthorized':
+      case 'expired_grant':
+        return { reason: 'unauthorized', detail, at };
+      case 'forbidden':
+        return { reason: 'forbidden', detail, at };
+      case 'validation':
+      case 'bad_request':
+      case 'version_mismatch':
+        return { reason: 'malformed', detail, at };
+      case 'hub_unreachable':
+        return { reason: 'unreachable', detail, at };
+      default:
+        return { reason: 'unknown', detail, at };
+    }
+  }
+  // Exit 7 is the client's own "can't reach the daemon" wrapper; the timeout shapes below are what
+  // an aborted fetch looks like, and both mean the same repair.
+  if (e instanceof CliError && e.exitCode === 7) return { reason: 'unreachable', detail, at };
+  if (isConnRefused(e) || /abort|timed? ?out/i.test(message))
+    return { reason: 'unreachable', detail, at };
+  if (e instanceof SyntaxError) return { reason: 'malformed', detail, at };
+  return { reason: 'unknown', detail, at };
+}
+
 /**
  * A pending clean-exit down sighting older than this is stale — the guardian was quiet in between,
  * so the next unreachable tick counts as a fresh first sighting rather than a confirmation.
@@ -151,6 +229,28 @@ export const PENDING_DOWN_MAX_AGE_MS = 15 * 60_000;
 
 /** Stamp staleness past this is loud in `service status` — 5 missed 2-minute ticks. */
 export const GUARDIAN_STALE_MS = 10 * 60_000;
+
+/**
+ * Which tier map is in force, and — when it is not the team's — why not, so the question is
+ * answerable from `musterd service status` instead of by reading a log file (lane 01M2NZDXPD §3).
+ */
+function policyStatus(s: GuardianStamp, now: number): string {
+  switch (s.policySource) {
+    case 'team_policy':
+      return 'policy team';
+    case 'team_policy_unset':
+      return 'policy defaults (team has set no tiers)';
+    case 'shipped_default_degraded': {
+      const since = s.policyDegradedSince ?? s.lastPolicyErrorAt ?? now;
+      const why = s.lastPolicyError
+        ? `${s.lastPolicyError.reason}: ${s.lastPolicyError.detail}`
+        : 'cause not recorded (stamp predates the bound error)';
+      return `policy defaults — degraded since ${new Date(since).toISOString()} (${why})`;
+    }
+    default:
+      return 'policy defaults (guardian unprovisioned)';
+  }
+}
 
 /** One `service status` line: last tick age, last incident, staleness. Never throws. */
 export function guardianStatusLine(stampPath: string, now: number): string {
@@ -163,11 +263,6 @@ export function guardianStatusLine(stampPath: string, now: number): string {
     ? `last incident ${s.lastIncident.class} at ${new Date(s.lastIncident.at).toISOString()}`
     : 'no incident';
   const stale = age > GUARDIAN_STALE_MS ? ' — STALE: the guardian itself needs attention' : '';
-  const policy =
-    s.policySource === 'team_policy'
-      ? 'policy team'
-      : s.policySource === 'shipped_default_degraded'
-        ? `policy defaults — degraded since ${new Date(s.lastPolicyErrorAt ?? now).toISOString()}`
-        : 'policy defaults (guardian unprovisioned)';
+  const policy = policyStatus(s, now);
   return `guardian: last tick ${ageStr} ago, ${incident}; ${policy}${stale}`;
 }
