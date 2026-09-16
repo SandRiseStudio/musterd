@@ -32,7 +32,14 @@ import { inspectSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget } from './primer.js';
 import { defaultHarnessContext } from './reconcile/context.js';
 import { inspectHarnesses, type FragmentInspection } from './reconcile/engine.js';
-import { defaultSelfHealDeps, selfHealWorkspace, type SelfHealOutcome } from './selfHeal.js';
+import { isDeclined } from './declined.js';
+import { refreshDriftCache, type RefreshDriftDeps } from './driftCache.js';
+import {
+  defaultSelfHealDeps,
+  selfHealWorkspace,
+  SELF_HEAL_SURFACE,
+  type SelfHealOutcome,
+} from './selfHeal.js';
 
 /**
  * `musterd init --check` — provisioning drift detector (ADR 060). A read-only checker, never a
@@ -1285,6 +1292,15 @@ export async function runSessionProbe(deps?: {
           return ((await res.json()) as { build?: string }).build;
         });
       const daemon = await fetchDaemon();
+      // The one place the daemon build is already in hand (ADR 408 inc 4): the same value that
+      // decides build skew also keys the drift cache, so a session that starts against a NEW daemon
+      // re-inspects immediately instead of reporting the previous build's counts for up to its TTL.
+      // Deliberately one fetch feeding both — two would be two answers with no arbiter.
+      try {
+        refreshWorkspaceDrift(deps?.cwd ?? process.cwd(), daemon);
+      } catch {
+        /* a health probe never fails a session start */
+      }
       if (daemon && !sameCommit(daemon, ref)) {
         process.stdout.write(
           `musterd: your CLI build (${ref.slice(0, 7)}) differs from the daemon (${daemon.slice(0, 7)}) — this checkout's dist is stale. Rebuild it (pnpm build); if your MCP tools also warn, /mcp reload after.\n`,
@@ -1313,6 +1329,21 @@ export async function runSessionProbe(deps?: {
     // A health probe never fails a session start, and never invents drift from a folder it cannot read.
   }
   return 0;
+}
+
+/**
+ * The real wiring for the drift cache (ADR 408 inc 4). Lives here because this module owns both
+ * halves — the inspection and, through `selfHeal.js`, the tombstone surface — while `driftCache.ts`
+ * itself stays a leaf. Callers that only want the cache warmed call this and nothing else.
+ */
+export function refreshWorkspaceDrift(cwd: string, daemonBuild: string | undefined): void {
+  const deps: RefreshDriftDeps = {
+    daemonBuild,
+    now: Date.now(),
+    inspect: inspectArtifactDrift,
+    declined: (c) => isDeclined(c, SELF_HEAL_SURFACE),
+  };
+  refreshDriftCache(cwd, deps);
 }
 
 /** The real audit-row post: this folder's seat, over the same authority the interrupt probe uses. */
