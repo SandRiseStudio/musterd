@@ -18,6 +18,7 @@ import { solidHit, walkable } from './nav';
 import { helpWalks } from './mapping';
 import {
   ambientFrameBudgetMs,
+  coalesceStep,
   DEFAULT_CAPTURE_FPS,
   officeDpr,
   officeVisible,
@@ -1327,6 +1328,7 @@ export function mountOffice(
   let raf = 0;
   let last = 0;
   let acc = 0; // wall time accrued since the last drawn frame — coalesced under the ambient FPS cap
+  let phase = 0; // coalescer carry: where this tick sits against the budget (see coalesceStep)
   let wasActive = false;
   // Render counters for a capture harness (OfficeHandle.stats). Under broadcast, `draws` tracks the
   // capture fps while `ticks` tracks rAF — the gap is the waste the draw-rate cap removes.
@@ -1343,11 +1345,20 @@ export function mountOffice(
     const noRealMotion = actors.ambientOnly() || !actors.active();
     const ambientOnly = noRealMotion && cues.length === 0 && !inAfterglow;
     const capped = shouldCoalesceDraw(broadcast, ambientOnly);
-    acc += last ? now - last : 1000 / 60;
+    const rafMs = last ? now - last : 1000 / 60;
+    acc += rafMs;
     last = now;
-    if (capped && acc < ambientFrameBudgetMs(broadcast, AMBIENT_FRAME_MS, captureFps)) {
-      raf = requestAnimationFrame(tick); // too soon for the next coalesced frame — keep the loop, skip the draw
-      return;
+    if (capped) {
+      // Nearest-tick with carry, not "first tick past the budget": on the capture box the rAF runs
+      // at about the budget itself, and the strict rule dropped a quarter of the frames (2026-09-16).
+      const step = coalesceStep(phase, rafMs, ambientFrameBudgetMs(broadcast, AMBIENT_FRAME_MS, captureFps));
+      phase = step.phase;
+      if (!step.draw) {
+        raf = requestAnimationFrame(tick); // too soon for the next coalesced frame — keep the loop, skip the draw
+        return;
+      }
+    } else {
+      phase = 0; // an uncapped stretch paints every rAF; the carry restarts when coalescing resumes
     }
     draws++;
     const dt = Math.min(0.05, acc / 1000);

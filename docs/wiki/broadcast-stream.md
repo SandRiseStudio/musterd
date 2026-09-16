@@ -41,6 +41,30 @@ same bug made `stream stop` during a boot print "nothing live" and walk away fro
 then came up and billed unattended; that path is fixed with it. `status` deliberately still reports
 `started`, because there "live" means *streaming* and a booting machine is not yet.
 
+## ffmpeg's `fps=20 speed=1.00x` was padding — the page delivered 15 (2026-09-16; falsify: `MUSTERD_BROADCAST_PERF` on the live box, compare `deliveredFps` to `encodedFps`) <!-- claim: defect -->
+
+nick saw a "tiny bit choppy" on member walks and act bubbles at 1080p20 while every throughput
+number said healthy. The perf recorder on the live performance-4x (407 s) said why: Chrome
+delivered **14.9 distinct frames/s** (min 12, p95 16) while the pump emitted **20.0**, so ~26 % of
+encoded frames were the previous frame re-sent, unevenly spaced. `speed=` and `fps=` are the
+encoder's view and do not carry this; the pump re-emits the latest frame on a wall clock by design.
+The instrument that could — `deliveredFps` vs `encodedFps` in the JSONL — existed since July and had
+not been run on the hosted box.
+
+Cause: the office's broadcast draw coalescer skipped any rAF tick that arrived under the 50 ms
+budget (`acc < budget → skip`). That is exact when rAF runs far faster than the budget (a 60 Hz
+viewer), but on the box at 1080p the rAF itself ran **~19-20 Hz** — a period equal to the budget —
+so every tick a hair early was dropped and the next drew at ~100 ms. `draws/s ≈ delivered/s ≈ 15`,
+`ticks/s ≈ 19`. Fixed by `coalesceStep`: draw on the tick nearest the budget (`phase + raf/2 ≥
+budget`) and carry the remainder, clamped to ±half a budget so a stall cannot bank catch-up draws.
+The viewer's 20 fps ambient cap is unchanged (60 Hz still draws every third tick).
+
+What this does **not** fix: the rAF running at ~20 Hz means the box's per-frame cost (paint +
+composite + 1080p JPEG screencast) is ~50 ms with no headroom. Chrome sat at 220 % of a core with
+canvas draw rate making no difference to that figure (14/s and 16/s buckets both 219 %), so the
+cost is in the screencast/composite path, not the scene painting. Delivered ≥ 19 after this fix is
+the acceptance; if it lands short, that path is next.
+
 ## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream) <!-- claim: defect -->
 
 Within a second of going live, ffmpeg reported against **both** inputs: `Thread message queue
