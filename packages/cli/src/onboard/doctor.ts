@@ -82,6 +82,13 @@ export interface DoctorReport {
 }
 
 /**
+ * How many stale guidance paths one drift line names before it summarises the rest. Four fits the
+ * real shape: a seat worktree carries a handful of guidance files, so an ordinary version bump
+ * names all of them, and only a never-refreshed folder reaches the tail.
+ */
+const STALE_FILES_NAMED = 4;
+
+/**
  * Guidance-file drift (ADR 085, re-anchored by ADR 171).
  *
  * The set inspected is what **this build would write** into this folder — `guidanceTargets` over the
@@ -127,11 +134,23 @@ function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; 
   // it the missing-file line loses the "was recorded, now gone" vs "never arrived" distinction and
   // says the latter — a wording degradation, and both prescribe the same repair.
   const wasRecorded = new Set(v1?.files ?? []);
-  // Stale files are counted, not listed: one version bump used to emit one line PER FILE — six
+  // Stale files are grouped by version, not one line per file: one version bump used to emit six
   // identical-in-substance lines for a single fact on a real seat. ADR 168 pre-registered "becomes
-  // noise" as a failure mode of its own instrument; ADR 171 §2 pays that debt. The remedy is
-  // identical for every file, so the file list is not actionable and the count is.
-  const staleByVersion = new Map<number, number>();
+  // noise" as a failure mode of its own instrument; ADR 171 §2 pays that debt.
+  //
+  // That grouping stands. The clause that used to follow it — "the remedy is identical for every
+  // file, so the file list is not actionable and the count is" — was FALSE, and it cost three
+  // seats a false PASS on a teammate's lane (lane 01M2NRA59J, 2026-09-16). The remedy is indeed
+  // identical; the COST of deferring it is not. `1 musterd guidance file is v22` tells a reader
+  // nothing about what they will do wrong in the meantime, so every seat that saw it reasonably
+  // finished its task first. Measured that day: the orient skill's "an accept on a review ask IS
+  // the verdict" correction landed 2026-09-14 (#1403) and SEVEN of nine seat worktrees were still
+  // on v22 two days later — dolly and miley closed a lane unreviewed eight hours after the fix
+  // landed, sloane twice on 2026-09-16, all three following the v22 text verbatim.
+  //
+  // So the names go in. A path is what lets a reader price the delay: a stale label renderer can
+  // wait, a stale rule about closing other people's work cannot. Still ONE line per version.
+  const staleByVersion = new Map<number, string[]>();
   for (const rel of guidanceTargets(establishedHarnesses(cwd, harnesses))) {
     const abs = join(cwd, rel);
     if (!existsSync(abs)) {
@@ -163,7 +182,7 @@ function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; 
       continue;
     }
     if (stamp.version < GUIDANCE_CONTENT_VERSION) {
-      staleByVersion.set(stamp.version, (staleByVersion.get(stamp.version) ?? 0) + 1);
+      staleByVersion.set(stamp.version, [...(staleByVersion.get(stamp.version) ?? []), rel]);
     } else if (contentHash(strippedBody(text)) !== stamp.hash) {
       notes.push(
         `${rel} has local edits — this is a musterd-managed file, so \`musterd init\` will replace them ` +
@@ -174,10 +193,17 @@ function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; 
   // A recorded path that is no longer expected is a file musterd RETIRED. Deliberately silent: not
   // every absence is drift, and a doctor that nags about a path musterd itself stopped writing
   // teaches people to stop reading it.
-  for (const [version, count] of [...staleByVersion].sort((a, b) => a[0] - b[0])) {
+  for (const [version, files] of [...staleByVersion].sort((a, b) => a[0] - b[0])) {
+    const count = files.length;
+    // Named, but bounded: past a handful the list stops being a reason to act and becomes the
+    // wall of text the grouping above exists to prevent.
+    const named =
+      count <= STALE_FILES_NAMED
+        ? files.join(', ')
+        : `${files.slice(0, STALE_FILES_NAMED).join(', ')} and ${String(count - STALE_FILES_NAMED)} more`;
     drift.push(
       `${count === 1 ? '1 musterd guidance file is' : `${String(count)} musterd guidance files are`} ` +
-        `v${String(version)}, current is v${String(GUIDANCE_CONTENT_VERSION)} — ` +
+        `v${String(version)}, current is v${String(GUIDANCE_CONTENT_VERSION)} (${named}) — ` +
         // ADR 161: point at the refresh that touches ONLY guidance files. Plain `init` also mints
         // members and rewrites bindings, which is the wrong blast radius for a version bump —
         // and in a live seat's worktree, actively dangerous.
