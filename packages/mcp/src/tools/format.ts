@@ -345,7 +345,7 @@ export function provisioningDriftOf(cwd: string | undefined): ProvisioningDriftW
   const tail = declined
     ? 'self-heal is declined in this folder, so nothing repairs it by itself'
     : repairable_at === 'manual'
-      ? "the permission floor is never self-healed — it is the harness's security boundary"
+      ? "the permission floor is never self-healed; it is the harness's security boundary"
       : permissions > 0
         ? 'the next session start repairs the guidance and hooks, but the permission floor never is'
         : 'the next session start repairs this, or you can do it now';

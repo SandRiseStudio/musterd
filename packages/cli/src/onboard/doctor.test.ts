@@ -1562,6 +1562,36 @@ describe('build skew (ADR 135) — warn-only freshness, never drift', () => {
       spy.mockRestore();
     }
   });
+
+  // Measured on the live arm 2026-09-16, not predicted: written BEFORE the repair, the cache
+  // recorded `guidance: 1` on a workspace the very next line had just healed. `init --check` read
+  // coherent while every inbox check for the next ten minutes would have warned about drift that no
+  // longer existed and prescribed a repair already done — the same failure class as #1479, a
+  // correct fix reported as failing, arriving through the surface built to prevent it.
+  it('writes the drift cache AFTER the repair, so it holds what REMAINS', async () => {
+    const bare = mkdtempSync(join(tmpdir(), 'musterd-order-'));
+    const order: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as never);
+    try {
+      await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => sha('d'),
+        cwd: bare,
+        selfHeal: () => {
+          order.push('repair');
+          return { ran: true, report: null, line: '' };
+        },
+        postRepair: async () => undefined,
+        refreshDrift: (cwd, daemonBuild) => {
+          order.push(`cache:${cwd}:${daemonBuild ?? 'unknown'}`);
+        },
+      });
+    } finally {
+      spy.mockRestore();
+      rmSync(bare, { recursive: true, force: true });
+    }
+    expect(order).toEqual(['repair', `cache:${bare}:${sha('d')}`]);
+  });
 });
 
 describe('footprint note (ADR 242) — orphaned sidecars, warn-only', () => {

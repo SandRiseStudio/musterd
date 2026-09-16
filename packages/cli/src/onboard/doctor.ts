@@ -1280,8 +1280,14 @@ export async function runSessionProbe(deps?: {
   selfHeal?: (cwd: string, build: string) => SelfHealOutcome;
   /** The audit-row post; best-effort, a rejection is swallowed here. */
   postRepair?: (body: WorkspaceRepairBody) => Promise<void>;
+  /** The drift-cache write (ADR 408 inc 4); injectable so its ORDER against the repair is testable. */
+  refreshDrift?: (cwd: string, daemonBuild: string | undefined) => void;
 }): Promise<number> {
   const ref = deps?.cliRef !== undefined ? deps.cliRef : cliBuild();
+  // Learned once and used twice: it decides build skew below, and it keys the drift cache after the
+  // repair — so a session starting against a NEW daemon re-inspects immediately instead of trusting
+  // the previous build's counts. One fetch, because two would be two answers with no arbiter.
+  let daemonRef: string | undefined;
   if (ref) {
     try {
       const fetchDaemon =
@@ -1292,15 +1298,7 @@ export async function runSessionProbe(deps?: {
           return ((await res.json()) as { build?: string }).build;
         });
       const daemon = await fetchDaemon();
-      // The one place the daemon build is already in hand (ADR 408 inc 4): the same value that
-      // decides build skew also keys the drift cache, so a session that starts against a NEW daemon
-      // re-inspects immediately instead of reporting the previous build's counts for up to its TTL.
-      // Deliberately one fetch feeding both — two would be two answers with no arbiter.
-      try {
-        refreshWorkspaceDrift(deps?.cwd ?? process.cwd(), daemon);
-      } catch {
-        /* a health probe never fails a session start */
-      }
+      daemonRef = daemon;
       if (daemon && !sameCommit(daemon, ref)) {
         process.stdout.write(
           `musterd: your CLI build (${ref.slice(0, 7)}) differs from the daemon (${daemon.slice(0, 7)}) — this checkout's dist is stale. Rebuild it (pnpm build); if your MCP tools also warn, /mcp reload after.\n`,
@@ -1325,6 +1323,15 @@ export async function runSessionProbe(deps?: {
       await post(out.report).catch(() => undefined);
     }
     if (out.line) process.stdout.write(`${out.line}\n`);
+    // AFTER the repair, never before — the cache must hold what REMAINS (ADR 408 inc 4).
+    //
+    // Measured on the live arm 2026-09-16, and the unit tests could not see it: written before the
+    // repair, the cache recorded `guidance: 1` on a workspace the very next line had just healed.
+    // `init --check` read coherent while every inbox check for the next ten minutes would have
+    // warned about drift that no longer existed and prescribed a repair already done — the same
+    // failure class as #1479, a correct fix reported as failing, arriving through the surface built
+    // to prevent it. The repair is the whole point of running first; the report must follow it.
+    (deps?.refreshDrift ?? refreshWorkspaceDrift)(cwd, daemonRef);
   } catch {
     // A health probe never fails a session start, and never invents drift from a folder it cannot read.
   }
