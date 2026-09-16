@@ -73,6 +73,52 @@ screencast frames/s that the 20 fps pump discards. `screencastEveryNthFrame(20)`
 `compositorHz` assumes 30 on Linux; the box composites nearer 27 here. That waste is the next cut
 if Chrome's CPU ever needs to come down; it does not affect what the viewer sees.
 
+## Acking the screencast to the pump is inert, and the numbers that motivated it are room-dependent (2026-09-16 16:2x–16:4xZ; falsify: run the two arms again inside one hour with `MUSTERD_BROADCAST_ACK_GATE`, once on a busy floor and once on a quiet one, and compare) <!-- claim: other -->
+
+The section above ends "that waste is the next cut". It was cut, on the box, and **nothing moved.**
+Two matched 334 s windows, same image, same performance-4x in sjc, 15 minutes apart:
+
+| | gated (ack per emitted frame) | control (`ACK_GATE=off`, ack on arrival) |
+| --- | --- | --- |
+| delivered/s | 15.3 | 15.1 |
+| repeats | 23.6 % | 24.4 % |
+| chrome | 226 % | 219 % |
+| encoded/s | 20.0 | 20.0 |
+| draws/s (median) | 11 | 9 |
+
+Every figure is inside run-to-run noise and the control's Chrome is *lower*, so there is no CPU win
+to trade anything against. Chrome does not throttle its screencast on `Page.screencastFrameAck` in
+any way this workload can observe. PR #1466 was closed unmerged on that result.
+
+**The methodological finding is the one worth keeping.** The gated arm was first measured against
+the 26.9 delivered / 253 % baseline from the section above — taken 13 hours earlier, at 03:45Z — and
+on that comparison it read as a catastrophic regression: 15.3 delivered, 23.6 % repeats, a stutter
+apparently reintroduced from the other end. That reading was **wrong**, and only the same-hour
+control arm killed it. A cross-run baseline cannot separate a change's effect from everything else
+that moved in between, and on a stream whose subject is *a room full of agents working*, what moves
+in between is the room.
+
+**What actually differs between 03:45Z and 16:3xZ is the floor.** draws/s was median 18 overnight
+and is 9–11 now. Chrome composites when the page paints, so a quiet office cannot supply 20 distinct
+frames/s at any ack policy — delivery lands *below* the encode rate and the pump re-sends `latest`
+to hold CFR. On that reading ~24 % repeats on a still scene is correct behaviour and not a defect,
+and the 26.9-delivered / 253 %-Chrome premise the whole cut was built on only exists when the room
+is busy. **So the hypothesis was never tested**: a quiet room delivers below the encode rate, which
+leaves a gate nothing to throttle. Testing it honestly needs a busy floor.
+
+Two hypotheses tested and killed on the way, recorded so nobody re-runs them: lost release credit in
+the gate (replay of the exact logic acks 99 of 100 — the 250 ms sweep catches the stragglers), and
+scene activity as the within-run driver (delivered vs draws correlates −0.22 across the gated
+window, so it does not explain the level *inside* a run even though it appears to explain the
+difference *between* days).
+
+Also settled by this run, and the only part of #1466 worth carrying forward if the gate is ever
+retried: acking at all is safe in both directions. The gate's two earlier hosted failures — an ack
+in flight when the DevTools socket closes exiting 1 where the supervisor expects 75, and a
+stringified `sessionId` that Chrome refused for 6.5 minutes while ffmpeg reported a clean 20 fps —
+are both real traps, both fixed, and both invisible to every counter except `deliveredFps`. If
+delivery reads 0 while the encoder reads healthy, the picture is frozen and nothing else will say so.
+
 ## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream) <!-- claim: defect -->
 
 Within a second of going live, ffmpeg reported against **both** inputs: `Thread message queue
