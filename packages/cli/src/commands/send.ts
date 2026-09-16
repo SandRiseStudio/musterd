@@ -8,6 +8,7 @@ import {
   CLI_REPLY_TO_STYLE,
   type BlockedBy,
   type Envelope,
+  laneVerdictAck,
   makeEnvelope,
   MAX_ELIGIBLE,
   type Recipient,
@@ -254,14 +255,10 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     );
   // ADR 202's consequence, at parity with the MCP reply (lane 01M2GQFJXG): an accept that answered
   // a lane_review ask closed the lane — the sender is told here, not left to find it on the board.
+  // Lane 01M2KYF888: the text is protocol's, not this file's. It used to be written shorter here
+  // and dropped the recovery clause, so a terminal reader learned that a teammate's lane had
+  // closed and not that `decline` would fail to reopen it.
   const verdict = ackBody?.lane_verdict;
-  if (verdict)
-    process.stdout.write(
-      theme.dim(
-        verdict.state === 'done'
-          ? `lane ${verdict.lane} → done: this accept was the acceptance verdict (ADR 202), not an announcement.`
-          : `lane ${verdict.lane} → active: this decline sent the work back to its owner.`,
-      ) + '\n',
-    );
+  if (verdict) process.stdout.write(theme.dim(laneVerdictAck(verdict).guidance) + '\n');
   return 0;
 }

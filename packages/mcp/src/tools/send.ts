@@ -9,6 +9,7 @@ import {
   chooseAutoTarget,
   ELIGIBLE_ACTS,
   eligibleSetRefusal,
+  laneVerdictAck,
   type Envelope,
   makeEnvelope,
   MAX_ELIGIBLE,
@@ -263,14 +264,12 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
         // The verdict's consequence (ADR 202; lane 01M2GQFJXG): an accept answering a lane_review
         // ask CLOSED a lane, and a decline sent one back. Said on the spot, in the reply to the act
         // that did it — a reviewer who meant "taking this review" learns now, not from the board.
-        const laneVerdict = ackBody?.lane_verdict;
-        const verdictGuidance = !laneVerdict
-          ? ''
-          : laneVerdict.state === 'done'
-            ? ` Lane ${laneVerdict.lane} → done: this accept WAS the acceptance verdict (ADR 202), ` +
-              `not an announcement. If you had not reviewed yet, say so — a decline on the same ` +
-              `ask will not reopen it; lane_update {state:'active'} does.`
-            : ` Lane ${laneVerdict.lane} → active: this decline sent the work back to its owner.`;
+        // Lane 01M2KYF888: composed ONCE, into the ack, so it reaches a structured-first client
+        // too. The prose below is built from the same string rather than a parallel copy.
+        const laneVerdict = ackBody?.lane_verdict
+          ? laneVerdictAck(ackBody.lane_verdict)
+          : undefined;
+        const verdictGuidance = laneVerdict ? ` ${laneVerdict.guidance}` : '';
         // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
         const text =

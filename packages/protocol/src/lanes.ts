@@ -35,9 +35,11 @@ export {
   LANE_STATES,
   MERGE_VERIFICATION_TIERS,
   isAwaitingAcceptance,
+  laneVerdictAck,
   type LaneStakes,
   type LaneStakesProvenance,
   type LaneState,
+  type LaneVerdictAck,
   type MergeVerification,
 } from './lanes.wire.js';
 
