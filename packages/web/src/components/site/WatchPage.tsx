@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { TWITCH_CHANNEL, TWITCH_URL, twitchEmbedUrl } from './twitchEmbed';
+import { TWITCH_CHANNEL, TWITCH_URL } from './twitchEmbed';
+import { loadTwitchSdk, subscribeLiveness, type Liveness } from './twitchLiveness';
 import { WATCH_COPY } from './watchCopy';
 import './WatchPage.css';
 
@@ -44,7 +45,14 @@ const LOOKING_AT = [
  */
 export function WatchPage() {
   const hostRef = useRef<HTMLDivElement>(null);
+  const mountRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  /**
+   * `unknown` until the player says otherwise, and it stays `unknown` if the SDK never loads.
+   * The prerendered HTML ships this state, so the copy it selects must be true either way —
+   * the page must never GUESS which of §4.1's two strings applies.
+   */
+  const [liveness, setLiveness] = useState<Liveness>('unknown');
 
   useEffect(() => {
     const host = hostRef.current;
@@ -62,10 +70,57 @@ export function WatchPage() {
     return () => observer.disconnect();
   }, []);
 
+  /**
+   * Construct the player once the box is genuinely on screen, and let it tell us the state.
+   *
+   * Same trigger as the facade it replaces: Twitch refuses muted autoplay unless the player meets
+   * its visibility requirement at load (ADR 302), so construction waits for `visible` exactly as
+   * the hand-built iframe's injection did. The SDK builds the same iframe we did — measured
+   * 2026-09-16, it emits `https://player.twitch.tv/?channel&parent&muted&autoplay`, the same
+   * origin, path and parameters as `twitchEmbedUrl` — and additionally sets `allow="autoplay;
+   * fullscreen"`, which our hand-written iframe did not carry at all.
+   *
+   * Every failure here lands on `unknown`, which is why nothing in this effect reports an error: a
+   * viewer with a content blocker gets the neutral copy and a working page, not a broken one.
+   */
+  useEffect(() => {
+    if (!visible) return;
+    const mount = mountRef.current;
+    if (!mount) return;
+    let cancelled = false;
+    void loadTwitchSdk()
+      .then((twitch) => {
+        if (cancelled) return;
+        const player = new twitch.Player(mount, {
+          channel: TWITCH_CHANNEL,
+          parent: [location.hostname],
+          muted: true,
+          autoplay: true,
+          width: '100%',
+          height: '100%',
+        });
+        subscribeLiveness(player, twitch.Player, (state) => {
+          if (!cancelled) setLiveness(state);
+        });
+      })
+      .catch(() => {
+        /* blocked, offline, or refused — `unknown` is the honest answer and already the state */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
+
   return (
     <>
       <section className="watch-hero shell">
-        <p className="watch-hero__eyebrow mono">{WATCH_COPY.eyebrow}</p>
+        <p className="watch-hero__eyebrow mono">
+          {liveness === 'live'
+            ? WATCH_COPY.eyebrowLive
+            : liveness === 'dark'
+              ? WATCH_COPY.eyebrowDark
+              : WATCH_COPY.eyebrow}
+        </p>
         <h1 className="watch-hero__title">{WATCH_COPY.h1}</h1>
         <p className="watch-hero__lede">
           musterd is built by a team running on musterd. The members you can see are agents and
@@ -90,14 +145,7 @@ export function WatchPage() {
       <section className="watch-player shell">
         <div className="watch-player__frame" ref={hostRef}>
           {visible ? (
-            <iframe
-              className="watch-player__iframe"
-              src={twitchEmbedUrl(TWITCH_CHANNEL, location.hostname)}
-              title="musterd agents live on Twitch"
-              width="100%"
-              height="100%"
-              allowFullScreen
-            />
+            <div className="watch-player__mount" ref={mountRef} />
           ) : (
             <div className="watch-player__facade" aria-hidden="true">
               <span className="watch-player__badge mono">LIVE</span>
@@ -107,12 +155,17 @@ export function WatchPage() {
           )}
         </div>
         <p className="watch-player__state">
-          The team works in sessions, so the channel is dark between them. The work is public
-          either way — every act, decision record and merge is in the{' '}
-          <a href={REPO_URL} target="_blank" rel="noreferrer">
-            repository
-          </a>
-          .
+          {liveness === 'live' ? (
+            WATCH_COPY.stateLive
+          ) : (
+            <>
+              {WATCH_COPY.stateDark}{' '}
+              <a href={REPO_URL} target="_blank" rel="noreferrer">
+                repository
+              </a>
+              .
+            </>
+          )}
         </p>
       </section>
 
