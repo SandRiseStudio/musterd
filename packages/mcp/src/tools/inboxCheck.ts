@@ -7,6 +7,7 @@ import {
   buildSkewOf,
   buildSkewWarning,
   provisioningDriftLine,
+  driftUnreadableOf,
   provisioningDriftOf,
   formatMessage,
   syncWedgeOfClient,
@@ -516,10 +517,16 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         // discriminator, one place a client looks. `provisioningDriftOf` only READS the cache the
         // CLI left in `.musterd/drift.json` — it never inspects the workspace on this seam, which a
         // busy seat takes many times a minute.
+        // The fourth (lane 01M2NYV805) is the one that fires when the THIRD cannot speak:
+        // `provisioningDriftOf` returns null for an absent, unparseable or clean cache alike, so a
+        // seat whose record is missing reads exactly like a seat with nothing wrong. Only one of the
+        // two can be non-null — an unreadable record yields no drift counts — so they never both
+        // render.
         const warnings = [
           await syncWedgeOfClient(client),
           await buildSkewOf(client),
           provisioningDriftOf(client.workspaceDir),
+          driftUnreadableOf(client.workspaceDir),
         ].filter((w): w is ToolWarning => w !== null);
         const text =
           notice +
