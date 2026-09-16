@@ -208,6 +208,14 @@ describe('GovernedTransportManifestSchema (ADR 402)', () => {
     expect(GovernedTransportManifestSchema.parse(manifest)).toEqual(manifest);
   });
 
+  it('allows ordinary values that merely contain credential-related English words', () => {
+    const ordinary = {
+      ...manifest,
+      nodes: [{ node_key: 'tokenizer-box-01', members: ['secretary'] }],
+    };
+    expect(GovernedTransportManifestSchema.parse(ordinary)).toEqual(ordinary);
+  });
+
   it.each([
     ['a wildcard aperture tag', { ...manifest, aperture_tag: 'tag:*' }],
     ['a wildcard tag owner', { ...manifest, tag_owners: ['group:*'] }],
@@ -217,7 +225,7 @@ describe('GovernedTransportManifestSchema (ADR 402)', () => {
       'a duplicated Member on one node',
       { ...manifest, nodes: [{ node_key: 'studio-a', members: ['ada', 'ada'] }] },
     ],
-    ['credential-like text', { ...manifest, nodes: [{ node_key: 'mskey_abc', members: ['ada'] }] }],
+    ['a musterd credential', { ...manifest, nodes: [{ node_key: 'mskey_abc', members: ['ada'] }] }],
   ])('rejects %s', (_name, value) => {
     expect(GovernedTransportManifestSchema.safeParse(value).success).toBe(false);
   });

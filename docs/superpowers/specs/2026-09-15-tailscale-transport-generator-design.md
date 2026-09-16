@@ -47,7 +47,7 @@ transport manifest declares:
 
 Every active agent Member must have one workload ID and one or more declared transport-node keys.
 Human and service Members cannot appear in a transport mapping. Duplicate, stale, broad, or
-credential-like values fail generation.
+Musterd-credential-prefixed values fail generation (ADR 405).
 
 ## Artifacts and command
 
