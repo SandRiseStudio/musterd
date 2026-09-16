@@ -154,6 +154,7 @@ describe('lane commands', () => {
     expect(ready.out).toContain('awaiting_acceptance');
     // Solo team: no eligible acceptor → self-close sanctioned, spelled out.
     expect(ready.out).toContain('self-close sanctioned');
+    expect(ready.out).toContain('no other member is live');
     // The degradation path stays open: the owner can still resolve, nudged as unconfirmed.
     const resolved = await capture(() => laneCommand(parseArgs(['resolve', id])));
     expect(resolved.out).toContain('lane done');

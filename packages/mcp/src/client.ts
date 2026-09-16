@@ -598,6 +598,14 @@ export class MusterdClient {
        *  Absent from an older daemon and from the no-acceptor branch — absent means "no backstop
        *  to rely on", which is the pre-235 advice, so the fallback is the safe one. */
       backstop?: { armed: boolean; grace_ms: number };
+      /** ADR 404: why nobody was asked. Absent on older daemons. */
+      empty_pool?: {
+        kind: 'no_live_member' | 'live_ineligible';
+        live?: Array<{
+          member: string;
+          exclusion: 'busy' | 'not_agent' | 'unknown_grade' | 'same_model' | 'worker_unattested';
+        }>;
+      };
     };
   }> {
     return this.request(

@@ -621,13 +621,24 @@ describe('review_debt (value-layer design)', () => {
     const { db, team } = seed();
     awaiting(db, team.id, 'nobody-asked', 20 * 3_600_000, 'stanley', {
       no_candidate: true,
-      family_posture: { state: 'monoculture' },
+      review_selection: {
+        selected: null,
+        candidates: [
+          { member: 'stanley', exclusion: 'self' },
+          { member: 'miley', exclusion: 'same_model' },
+        ],
+      },
     });
     awaiting(db, team.id, 'routed', 10 * 3_600_000, 'stanley', { reviewer: 'miley' });
     const brief = deriveNext(db, team.id, 'revive', 'nick');
     const byTitle = new Map(brief.review_debt!.map((r) => [r.title, r]));
     expect(byTitle.get('nobody-asked')!.no_candidate).toBe(true);
+    expect(byTitle.get('nobody-asked')!.empty_pool).toEqual({
+      kind: 'live_ineligible',
+      live: [{ member: 'miley', exclusion: 'same_model' }],
+    });
     expect(byTitle.get('routed')!.no_candidate).toBe(false);
+    expect(byTitle.get('routed')!.empty_pool).toBeUndefined();
   });
 
   it('lists the 3 oldest awaiting-acceptance lanes, oldest first', () => {
