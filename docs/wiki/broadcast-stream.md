@@ -103,6 +103,30 @@ wedge at 10 s → watchdog fired at 5.0 s, ffmpeg still printing `fps=19 speed=0
 `MUSTERD_BROADCAST_SUPERVISED=1` → exit **75** ("Asking the supervisor for a relaunch"); and a clean
 90 s run exited 0 with the watchdog silent.
 
+**And verified ON THE BOX** (machine `873ed1b0549138`, 2026-09-16 19:38–19:41Z, image
+`d4abbeafc7a0` built with the wedge, destroyed after): two complete freeze-and-recover cycles.
+ffmpeg reported `fps=20 speed=0.988x` up to the instant of each freeze — the healthy-looking number
+that hid the original incident — the watchdog fired at 5.0 s both times, the process exited 75, and
+`entrypoint.sh` relaunched it. **Wedge to live again was about nine seconds**, against the six and a
+half minutes the same class of failure ran unreported in the morning. The local arms prove the
+predicate; only this one proves the entrypoint actually reruns on 75.
+
+### Every relaunch claimed a deploy it could not know about (2026-09-16; falsify: wedge the screencast on the box and read the entrypoint's line under the watchdog's) <!-- claim: defect -->
+
+`entrypoint.sh` printed `▸ restarting the stream on the rebuilt daemon code` for **every**
+`RESTART_EXIT_CODE`, and 75 has three causes: a daemon rebuild, a lost DevTools socket
+(`socketLossExitCode`), and now a frozen picture. Two of the three were being reported as the
+first. Read on the hosted falsifier above: a deliberately wedged screencast relaunched twice, and
+both relaunches logged as the rebuilt daemon code — which tells an operator scanning the log that a
+deploy landed and there is nothing to investigate.
+
+It predates the watchdog (the socket case was already misreported); the watchdog adds a third cause
+and is what surfaced it. The line now says `▸ relaunching the stream (ran Ns) — reason on the line
+above`, because the stream prints its own reason on stderr immediately before exiting and the
+supervisor genuinely does not know which one fired. **A restart reason the supervisor cannot know is
+one it must not assert** — the same failure as a counter that reads healthy while the picture is
+frozen, one layer up.
+
 ### The 6.5-minute freeze is not reachable on `main`, and that surprised me (2026-09-16; falsify: stringify the ack's `sessionId` on main and watch it die on an unhandled rejection instead of freezing) <!-- claim: other -->
 
 The first falsifier I wrote reproduced the original bug — a stringified `sessionId` — and it did
