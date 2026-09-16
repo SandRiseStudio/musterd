@@ -63,6 +63,17 @@ export function StreamSection() {
             // sizing it measured the pre-layout box and painted a postage stamp in the corner.
             width="100%"
             height="100%"
+            // Autoplay is a DELEGATED permission, and the query string does not delegate it.
+            // `twitchEmbedUrl` sets `autoplay=true&muted=true`, but that asks Twitch's player;
+            // the permission has to come from us. Without this attribute a cross-origin frame is
+            // denied autoplay by our own Permissions Policy — measured 2026-09-16 with a
+            // same-child/different-attribute A/B across two ports: the child reported
+            // `featurePolicy.allowsFeature('autoplay')` false without it and true with it.
+            //
+            // That matters because ADR 302's "a visitor who sees the section counts as a
+            // concurrent Twitch viewer without a click" is the reason the whole deferred-injection
+            // design exists, and it rests on muted autoplay. The precondition was never granted.
+            allow="autoplay; fullscreen"
             allowFullScreen
           />
         ) : (

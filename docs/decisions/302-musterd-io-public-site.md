@@ -90,6 +90,16 @@ this lane.
 - The falsifier for the embed choice: if muted autoplay embeds stop counting toward Twitch
   viewership (a Twitch policy change), the deferred-load design loses its "count everyone" half and
   the click-to-play facade becomes strictly better; revisit then.
+- **This falsifier watched the wrong party, and the other one fired first (2026-09-16).** It names
+  only Twitch's policy. Autoplay in a cross-origin frame is *also* the EMBEDDER's policy, and the
+  iframe shipped with no `allow` attribute — so the permission this design depends on was never
+  granted by us, from the day the section shipped. Measured with a same-child/different-attribute
+  A/B across two ports: the child reported `featurePolicy.allowsFeature('autoplay')` **false**
+  without `allow`, **true** with it. `twitchEmbedUrl`'s `autoplay=true&muted=true` is a request to
+  Twitch's player and does not delegate anything. Fixed by adding `allow="autoplay; fullscreen"`,
+  pinned by a test in `streamSection.test.ts`. The general lesson, which is why this is written here
+  rather than only in a commit: **a falsifier that only watches the other side cannot detect a
+  precondition your own code never met.**
 
 ## Observability & Evaluation
 
