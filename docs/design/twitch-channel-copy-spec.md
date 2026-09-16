@@ -66,6 +66,59 @@ what was rejected teaches nobody:
 > ADR 320 §3 makes the claim **peer, not contractor** — a member can claim work, decline it, and
 > hold another to acceptance — and a title should carry that, not the git noun for it.
 
+### 3.1 Per-session titles — the fixed half stays, the tail changes with the work
+
+**The problem this solves.** Past broadcasts inherit the stream title. The title has never changed,
+so the archive is thirty recordings with one name ([audit](../wiki/twitch-channel-audit.md)). A
+stranger opening Videos sees repetition where there should be a sequence.
+
+**What "per session" can mean here, and what it cannot.** The daemon bounced **15 times on
+2026-09-16** from the auto-refresher alone, before supervisor heals and deliberate restarts — which
+is where thirty recordings came from. So a title per *broadcast* would be thirty titles a day typed
+by hand, and no convention survives that. The title is **sticky**: it persists across restarts
+until someone changes it. So one title per **working session** — a few a day, changed when the
+*work* changes, not when the machine bounces — is inherited by every restart inside that session,
+and the archive reads in blocks rather than as noise.
+
+**Format.** The fixed half is nick's and does not move; only the tail changes:
+
+    Coffee & musterd - <what the team is doing this session>
+
+**Rules for the tail:**
+
+- **Name the work, not the process.** `the Twitch channel audit`, not `docs and review`.
+- **Present tense, lowercase, no end punctuation.** It is a continuation of the line before it.
+- **Under 35 characters**, so the whole title stays near 60 and the directory card does not clip it.
+- **True for the whole session.** If the work turns into something else, that is a new session and
+  a new title — which is exactly the signal the archive should carry.
+- **No names, no counts.** A roster number goes stale mid-session and ADR 158 asks that any claim
+  about who is present be attested rather than typed.
+
+**Worked examples, from sessions that actually ran on 2026-09-16:**
+
+| Session | Title |
+| --- | --- |
+| The channel audit and copy spec | `Coffee & musterd - the Twitch channel audit` |
+| Building /watch from the spec | `Coffee & musterd - building the /watch page` |
+| The SEO and indexing work | `Coffee & musterd - getting musterd.io indexed` |
+| Nothing in particular | `Coffee & musterd - watch musterd agents build the platform live` (the standing title) |
+
+The last row matters: **the standing title is the fallback, not a failure.** A session with no
+single subject keeps it rather than inventing one, for the same reason §2 publishes no schedule.
+
+**The generated alternative, and it is not this role's to build.** The title could be set from what
+musterd already knows at `stream start` — the goal and the lane being worked. It would need a
+short-name field on a lane (lane titles are a paragraph) and the first Twitch API call in the repo:
+grepped 2026-09-16 for `helix`, `channels?broadcaster`, `game_id`, `stream_title` across
+`packages/` and `scripts/` — **zero hits**, so the title is hand-set today and nothing else can set
+it. That is a platform lane. It is worth opening, because a stream about a coordination layer
+titling itself from the coordination layer is the dogfood argument in one line — but it is not
+product-communications' to take, and the convention above works without it.
+
+**Unverified, and worth one check before relying on it:** whether a title changed *mid*-broadcast
+re-titles the recording in progress or only the next one. If only the next one, change the title
+before `stream start`, not after.
+
 ## 4. Tags (all 10)
 
 `Claude` · `AI` · `Coding` · `Programming` · `SoftwareDevelopment` ·
