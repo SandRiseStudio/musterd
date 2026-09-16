@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { GovernedModelsManifest } from '@musterd/protocol';
+import { describe, expect, it } from 'vitest';
 import { renderAperturePolicy, resolveGovernedPolicy } from './governed-models.js';
 
 const manifest: GovernedModelsManifest = {

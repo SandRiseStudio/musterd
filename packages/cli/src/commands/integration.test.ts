@@ -1,7 +1,7 @@
-import { IntegrationDoctorReportSchema } from '@musterd/protocol';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { IntegrationDoctorReportSchema } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { parseArgs } from '../args.js';
 import { CliError } from '../errors.js';

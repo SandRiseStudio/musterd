@@ -1,4 +1,3 @@
-import type { IntegrationCheck } from '@musterd/protocol';
 import {
   existsSync,
   mkdirSync,
@@ -8,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { IntegrationCheck } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
@@ -60,7 +60,9 @@ function atomicWrite(path: string, content: string): void {
     if (existsSync(temporary)) {
       try {
         unlinkSync(temporary);
-      } catch {}
+      } catch {
+        // The temporary path is best-effort cleanup after a failed atomic publication.
+      }
     }
   }
 }
