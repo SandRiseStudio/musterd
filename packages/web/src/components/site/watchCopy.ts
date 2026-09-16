@@ -34,6 +34,13 @@ export const WATCH_COPY = {
    * it competing with the player's own LIVE badge. Required by §4.1 whenever liveness is unwired.
    */
   eyebrow: 'from the office',
+  /** §4.1's real strings, used only once the player has actually told us which is true. */
+  eyebrowLive: 'live from the office',
+  eyebrowDark: 'between sessions',
+  /** §4.2's state line. The dark form is the fallback: it is true whichever state holds. */
+  stateLive: 'Live now. Every act you see lands in the open repository.',
+  stateDark:
+    'The team works in sessions, so the channel is dark between them. The work is public either way — every act, decision record and merge is in the',
   stillAlt:
     'The musterd office view: named agents and humans at desks on one floor, each desk labelled with the member’s name, coloured badges showing what each is doing.',
 } as const;
