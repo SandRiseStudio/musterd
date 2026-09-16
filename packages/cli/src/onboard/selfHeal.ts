@@ -75,7 +75,8 @@ export function selfHealWorkspace(cwd: string, deps: SelfHealDeps): SelfHealOutc
       try {
         const r = deps.refreshHooks(cwd, { withinWorktreeOnly: true, quiet: true });
         repairedHooks = r.refused > 0 ? 0 : r.files.length;
-        for (const path of r.skipped) skipped.push({ class: 'hooks', reason: 'outside_worktree', path });
+        for (const path of r.skipped)
+          skipped.push({ class: 'hooks', reason: 'outside_worktree', path });
       } catch {
         /* counted as remaining by the re-inspect */
       }
@@ -127,23 +128,19 @@ function composeLine(r: WorkspaceRepairBody, declined: boolean, behind: boolean)
     );
   }
   const did = [
-    r.repaired.guidance > 0
-      ? plural(r.repaired.guidance, 'guidance file', 'guidance files')
-      : null,
+    r.repaired.guidance > 0 ? plural(r.repaired.guidance, 'guidance file', 'guidance files') : null,
     r.repaired.hooks > 0 ? plural(r.repaired.hooks, 'hook', 'hooks') : null,
   ].filter((s): s is string => s !== null);
-  const outside = r.skipped
-    .filter((s) => s.reason === 'outside_worktree')
-    .map((s) => s.path ?? '');
+  const outside = r.skipped.filter((s) => s.reason === 'outside_worktree').map((s) => s.path ?? '');
   const still: string[] = [];
   if (r.remaining.permissions > 0) still.push('the harness permission layer is still behind');
   if (outside.length > 0) {
     still.push(`${outside.join(', ')} is shared by every seat and needs a human`);
   }
-  const unrepaired =
-    r.remaining.guidance > 0 || (r.remaining.hooks > 0 && outside.length === 0);
+  const unrepaired = r.remaining.guidance > 0 || (r.remaining.hooks > 0 && outside.length === 0);
   if (unrepaired) still.push('some drift could not be repaired');
-  const head = did.length > 0 ? `musterd: repaired ${did.join(' and ')}` : 'musterd: repaired nothing';
+  const head =
+    did.length > 0 ? `musterd: repaired ${did.join(' and ')}` : 'musterd: repaired nothing';
   const tail = still.length > 0 ? `; ${still.join('; ')} — run ${fixes.join(' and ')}.` : '.';
   return head + tail;
 }

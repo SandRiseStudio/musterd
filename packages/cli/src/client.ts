@@ -311,7 +311,7 @@ export class HttpClient {
   }
 
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
-   
+
   private async request(
     method: string,
     path: string,

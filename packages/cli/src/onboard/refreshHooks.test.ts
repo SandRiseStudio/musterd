@@ -374,7 +374,9 @@ describe('checkoutBehindHooks — ADR 168 downgrade refusal as a predicate (spec
     const newer = `echo hi # musterd-sessionstart-hook e${String(FEATURE_EPOCH + 1)}`;
     writeFileSync(
       globalSettings(),
-      JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: newer }] }] } }),
+      JSON.stringify({
+        hooks: { SessionStart: [{ hooks: [{ type: 'command', command: newer }] }] },
+      }),
     );
     expect(checkoutBehindHooks(cwd)).toBe(true);
   });

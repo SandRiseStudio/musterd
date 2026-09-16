@@ -10,7 +10,13 @@ import { writeJsonAtomic } from '../atomicWrite.js';
 import { isDeclined } from '../declined.js';
 import { primaryCheckoutFor } from '../entryGuard.js';
 import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
-import type { Harness, RefreshHooksOptions, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
+import type {
+  Harness,
+  RefreshHooksOptions,
+  ProvisionPermissions,
+  ProvisionPlan,
+  UnprovisionPlan,
+} from '../harness.js';
 import { loadProvisioning } from '../manifest.js';
 import {
   launchEntryEnv,

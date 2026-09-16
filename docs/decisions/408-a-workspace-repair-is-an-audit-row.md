@@ -118,18 +118,28 @@ decision refuses both.
 
 ## Observability & Evaluation
 
-- **Unit.** `atomicWrite.test.ts` (a failing validator leaves the original byte-identical);
-  `refreshHooks.test.ts` (`withinWorktreeOnly` skips and names the machine-wide settings;
-  `checkoutBehindHooks` true on a newer epoch in either file, false on absent/unparseable);
-  `selfHeal.test.ts` (repairs guidance and hooks, never permissions; declined and checkout-behind
-  repair nothing and say why; an outside-worktree skip is reported and counted as remaining; a
-  throwing refresh never escapes); `doctor.test.ts` (the probe prints the outcome line, posts the
-  row, and exits 0 with the daemon down); `workspace-repair-http.test.ts` (one row per post, 401
-  without a lease, 400 on a malformed body).
-- **Live, before increment 3 merges.** One seat worktree deliberately left one guidance stamp
-  behind; a fresh session; the repair line observed in `SessionStart hook additional context`; the
-  `workspace.repaired` row read back from the daemon; `musterd init --check` clean afterwards.
-  Recorded, dated and seat-named, in `docs/wiki/workspace-self-heal.md`.
-- **Falsifier for the policy line.** Leave a seat's `.claude/settings.local.json` one floor entry
-  short, start a session: the entry must still be absent afterwards and the line must name
-  `--refresh-permissions`. If the entry appears, decision 2 has been crossed.
+**Traces** — one new audit action, `workspace.repaired`, written by `POST /workspace/repair`:
+actor = target = the seat, `detail` = the `WorkspaceRepairBody` (build, counts repaired per class,
+skipped with reasons, remaining). Counts and classes only — the schema has no field for a file's
+contents or path beyond the one skipped outside-worktree file, so a workspace cannot leak through
+its own repair record. The SessionStart line itself is the other trace: one bounded line in model
+context, silent when clean (ADR 171's contract, unchanged).
+
+**Eval** — the measure is the census this ADR was written from. Baseline 2026-09-16: 7 of 9 seat
+worktrees on stale guidance and 5 of 6 with stale or missing hooks, with the repair commands
+printed at every one of their session starts and not run. Success is that number reading 0 of N
+on a later census with nobody having run `--refresh-*` by hand — i.e. the audit log carrying
+`workspace.repaired` rows for the seats that were behind, and `musterd init --check` coherent on
+each. Failure is a seat still stale with no row, which means the probe did not run or its post did
+not land; the line and the daemon log say which.
+
+**Experiment** — the live arm, run before merge (`docs/wiki/workspace-self-heal.md`): one seat
+worktree deliberately left one guidance stamp behind, this branch's dist run exactly as the
+SessionStart hook runs it, the repair line observed, `init --check` coherent after, the post seen
+in the daemon log. It found a contract break the unit tests could not (eleven lines where one was
+promised — fixed) and predicted the lease refusal that decision 4 now avoids. Falsifiers: (1) the
+policy line — leave a seat's `.claude/settings.local.json` one floor entry short, start a session:
+the entry must still be absent and the line must name `--refresh-permissions`; (2) the leaseless
+route — on a real session start after the daemon carries this build, the daemon log must show
+`200` on `POST /workspace/repair`, never `401`; (3) the mutation — strip `withinWorktreeOnly` from
+`selfHealWorkspace`'s hooks call and `refreshHooks.test.ts` must go red on the machine-wide file.

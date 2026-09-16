@@ -1301,8 +1301,7 @@ export async function runSessionProbe(deps?: {
     const cwd = deps?.cwd ?? process.cwd();
     const build = ref ?? 'unstamped';
     const heal =
-      deps?.selfHeal ??
-      ((c: string, b: string) => selfHealWorkspace(c, defaultSelfHealDeps(b)));
+      deps?.selfHeal ?? ((c: string, b: string) => selfHealWorkspace(c, defaultSelfHealDeps(b)));
     const out = heal(cwd, build);
     if (out.report && out.ran) {
       // Attribution (ADR 408) is best-effort and never a gate: a dead daemon is silence.
