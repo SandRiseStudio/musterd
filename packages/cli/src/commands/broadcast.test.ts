@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
 import {
@@ -306,6 +307,39 @@ describe('ffmpegArgs', () => {
   it('no -t when duration is 0 (run until stopped)', () => {
     const forever = parseOptions({ team: 't', out: 'p.mp4' }, 'darwin');
     expect(ffmpegArgs(forever, { kind: 'file', target: 'p.mp4' })).not.toContain('-t');
+  });
+});
+
+describe('the capture hands its tailnet node back on the way out', () => {
+  const entrypoint = () =>
+    readFileSync(
+      fileURLToPath(new URL('../../../../scripts/broadcast/entrypoint.sh', import.meta.url)),
+      'utf8',
+    );
+
+  it('logs out of the tailnet when the script exits', () => {
+    // Measured 2026-09-16: 22 capture nodes on the tailnet, 21 dead, and the entrypoint's own
+    // `tailnet node: musterd-broadcast-N` line climbing once per launch because Tailscale will not
+    // reuse a name a live device record still holds. PARTIAL mitigation — the fix is the ephemeral
+    // key the file's own header already asks for.
+    expect(entrypoint()).toMatch(/trap '.*tailscale logout.*' EXIT/);
+  });
+
+  it('preserves the exit code through the trap, because 75 is load-bearing', () => {
+    // entrypoint keys the machine's whole lifetime off 75-vs-anything-else. A trap whose own
+    // commands set the status would turn every restart into a teardown.
+    expect(entrypoint()).toMatch(/trap 'rc=\$\?;.*exit \$rc' EXIT/);
+  });
+
+  it('traps EXIT only — not INT or TERM', () => {
+    // Trapping signals here would put bash in front of the path the broadcast CLI uses for its own
+    // graceful stop (finalise the container, drain ffmpeg). Tidying a device record is not worth
+    // reordering that.
+    const trapLines = entrypoint()
+      .split('\n')
+      .filter((l) => l.trimStart().startsWith('trap '));
+    expect(trapLines).toHaveLength(1);
+    expect(trapLines[0]).not.toMatch(/\b(INT|TERM|HUP)\b/);
   });
 });
 

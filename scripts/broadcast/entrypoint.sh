@@ -33,6 +33,23 @@ for _ in $(seq 1 30); do
 done
 tailscale status >/dev/null || { echo "✗ tailscale never came up"; tail -20 /tmp/tailscale/tailscaled.log; exit 1; }
 
+# Hand the node back on the way out. PARTIAL MITIGATION, not the fix — the fix is the ephemeral key
+# the header asks for, and measured 2026-09-16 the key in the Fly secret is not one: 22 capture nodes
+# on the tailnet, 21 of them dead, and `▸ tailnet node: musterd-broadcast-N` climbing once per launch
+# because Tailscale will not reuse a name a live device record still holds.
+#
+# This covers only the CLEAN exits — a finished --duration, a stop whose code is not 75, and the
+# config failures above. It cannot cover the common case: `fly machine destroy` and a hard stop
+# SIGKILL the box, and nothing runs then. So it reduces the leak and does not close it.
+#
+# EXIT only, deliberately. Trapping INT/TERM here would put bash in front of the signal path the
+# broadcast CLI uses for its own graceful stop (it finalises the container and drains ffmpeg), and
+# reordering that to tidy a device record would be trading a real behaviour for a cosmetic one.
+#
+# `rc` is captured and re-raised because the trap's own commands must not become the machine's exit
+# status — entrypoint keys its whole lifetime off 75 vs anything else.
+trap 'rc=$?; tailscale logout >/dev/null 2>&1 || true; exit $rc' EXIT
+
 # Say which node we actually became. We ASK for `musterd-broadcast` every run, but the state above is
 # a tmpfs path — so this is a genuinely new node each time, and Tailscale will not hand out a
 # hostname that is still taken: it appends `-1`, `-2`. Paired with an ephemeral auth key that is
