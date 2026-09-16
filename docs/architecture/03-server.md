@@ -26,7 +26,7 @@ src/
     seed.ts           // seedDawn(db) test helper
   store/
     teams.ts          // Team CRUD/policy + scoped bootstrap credential lifecycle, legacy exchange/readiness, transactional cutover (ADR 344/350); restateUnstampedPolicy (ADR 398: one-shot stamp of pre-kind stored policy when the hub has joiners)
-    members.ts        // addMember (issues token), getMember, authMember(token), leaveMember (releases in-flight claims — ADR 196), reapStaleObservers + reapExcessIdleObservers
+    members.ts        // addMember (issues token), getMember, authMember(token), leaveMember (releases in-flight claims — ADR 196), reapStaleObservers + reapExcessIdleObservers; takenHues is live roster only — observers do not occupy the hue floor (ADR 409)
     messages.ts       // insertMessage, listInbox(memberId, since), listTeamMessages
     presence.ts       // attach, heartbeat, detach/release, listPresence, reapStale, reattestModel (ADR 101), reattestSurface (ADR 275) (kind-scoped single-active, ADR 042)
     activity.ts       // resolveActivity: the two-clocks rule → offline/idle/working (v0.2 M2; ADR 140)

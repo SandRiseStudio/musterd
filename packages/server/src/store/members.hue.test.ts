@@ -69,6 +69,22 @@ describe('addMember hue (ADR 374)', () => {
     expect(addMember(db, team, { name: 'kimi', kind: 'agent', hue: 100 }).row.hue).toBe(100);
   });
 
+  /* ADR 409: observers are sessions, not roster members. Live revive had nine web-* watchers
+     holding hues against `team add`, so a file-backed explicit hue that was clear of every seat
+     still 409'd. The uniqueness floor is observer = 0. */
+  it('an observer does not hold its hue against a new seat', () => {
+    const { db, team } = seed();
+    addMember(db, team, { name: 'web-abc123', kind: 'human', observer: true, hue: 212 });
+    expect(addMember(db, team, { name: 'miley', kind: 'agent', hue: 212 }).row.hue).toBe(212);
+  });
+
+  it('a fresh seat still seeds from its name when an observer sits on that hue', () => {
+    const { db, team } = seed();
+    const seedHue = defaultHue('miley');
+    addMember(db, team, { name: 'web-xyz', kind: 'human', observer: true, hue: seedHue });
+    expect(addMember(db, team, { name: 'miley', kind: 'agent' }).row.hue).toBe(seedHue);
+  });
+
   it('REVIVE on a DB-only team keeps the hue the seat had when the caller says nothing', () => {
     const { db, team } = seed();
     const { row } = addMember(db, team, { name: 'compo', kind: 'agent', hue: 77 });
