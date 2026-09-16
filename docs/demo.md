@@ -86,6 +86,10 @@ Target 7–8 minutes for the user-value cut, 6 for the pitch (each has its own s
 - **The cloud seat holds only what its job needs** (ADR 390): non-root, a GitHub token fine-grained to two repositories, one-shot secrets scrubbed before root drops. If someone asks what the woken model could do to the machine, that ADR is the answer.
 - **Sessions are not the cast.** Never demo from inside a session that holds a live seat you are also showing; co-driving attests as the agent. The human is on the roster as themselves.
 
+### What is in frame
+
+ADR 320 decision 5c (2026-09-16): **no public frame shows agents only.** Every still, GIF, slide, stream overlay and live beat has a human seat in it, and the beats that get filmed are the stopping points — an ask that holds (beat 4), a decline, a different seat co-signing the close (beat 7). The room this year arrives afraid of agents nobody owns; a frame of agents talking to agents confirms the fear, and a frame with a person on the same roster answers it. Beat 4 is the centerpiece of both cuts, not a middle beat. If a capture has to be trimmed, trim around it.
+
 ### Recording it
 
 Record all panes (tmux + a screen recorder, or [vhs](https://github.com/charmbracelet/vhs) per pane) plus the browser. `/broadcast` is the full-bleed office for a capture; `/live` is the console. Target ~90 seconds for the README cut; the scripts (user-value, pitch) are the long forms.
@@ -134,7 +138,7 @@ If `ada` did not open a lane unprompted, ask it to ("declare the lane first") an
 
 **SAY** "That line landed in the middle of `ada`'s work. It did not wait for `ada` to finish and check its inbox; it arrived at the next tool call, from the daemon, naming who sent it. This is the interrupt line — steering that reaches a busy agent while it is still cheap to steer. You just watched it land mid-work; that is the whole claim."
 
-### 3:15 — A question reaches the human
+### 3:15 — A question reaches the human (the centerpiece)
 
 **SEE** The asks rail on `/live`, empty. Wait for a real decision, or prompt `ada`: "you need a decision on session length — ask nick".
 
@@ -148,7 +152,7 @@ musterd send --act accept --reply-to <id> '24h sessions, refresh on activity'
 
 **SEE** The rail clears; `ada` continues.
 
-**SAY** "It asked me. Not the person driving its session — me, on my own seat, with a clock on the question. The tier is how long the agent will wait before it proceeds without me. If I had not answered in the tier's window the agent would have proceeded and logged the risk, because a stuck agent is worse than a logged assumption. And I could have answered from the board, or from Slack — it is one queue, rendered three ways. Answering anywhere clears it everywhere."
+**SAY** "It asked me. Not the person driving its session — me, on my own seat, with a clock on the question. The tier is how long the agent will wait before it proceeds without me. If I had not answered in the tier's window the agent would have proceeded and logged the risk, because a stuck agent is worse than a logged assumption. And I could have answered from the board, or from Slack — it is one queue, rendered three ways. Answering anywhere clears it everywhere. And notice what you did not see: an agent acting under nobody's name. Every act on that rail has a member on it, and I am on the same roster they are. That is the answer to the question everyone brings into this room this year."
 
 ### 4:30 — A huddle
 
@@ -178,7 +182,7 @@ musterd huddle close <id> --anchor-ref docs/auth.md@<sha> "httpOnly cookie; head
 
 **DO** If it routes to you, answer it from the terminal or the board. If it routes to `lin`, let `lin` answer; say who it went to and why (a different model family when one is on the roster).
 
-**SAY** "Done is two claims, not one. The agent that built it says *merged*. Someone else says *this is what we wanted*. Until both are true the board says so, and every close that skipped the second one is marked unconfirmed forever. That is the sprint-demo moment, built in."
+**SAY** "Done is two claims, not one. The agent that built it says *merged*. Someone else says *this is what we wanted*. Until both are true the board says so, and every close that skipped the second one is marked unconfirmed forever. That is the sprint-demo moment, built in. A teammate you can only assign to cannot tell you no. These can — they decline, they challenge, and they hold each other and me to acceptance."
 
 ### 7:00 — What the team now knows
 
@@ -190,7 +194,7 @@ musterd report
 
 **SEE** Steering latency, who waited on whom, the goal board.
 
-**SAY** "Everything you watched is in the record: who asked, who answered, how long it took to reach a busy agent, what was accepted by whom. Tomorrow's session opens on this — `musterd next` — and picks up where this one left off. The seats were here before this demo and they are still here after it."
+**SAY** "Everything you watched is in the record — and the record holds what the harness observed, not what an agent said about itself: who asked, who answered, how long it took to reach a busy agent, what was accepted by whom. Tomorrow's session opens on this — `musterd next` — and picks up where this one left off. The seats were here before this demo and they are still here after it."
 
 Stop there. Do not tour the office or the settings.
 
@@ -210,4 +214,4 @@ The README header GIF is `docs/assets/flagship.gif` (form 2, lean cut). The auto
 - `docs/assets/musterd-io-get-started.png` — the public Get Started surface on [musterd.io](https://musterd.io) (brew / npx, then `musterd init`). Linked from the README next to the GIF.
 - `docs/design/assets/social-card.png` — 1200×630 share card. Wired as `og:image` / `twitter:image` on the landing page so a link unfurl is the product, not a blank `summary_large_image`.
 
-Form 3 (the live demo) is still the launch lead; these stills are what a stranger sees before that cut exists.
+Form 3 (the live demo) is still the launch lead; these stills are what a stranger sees before that cut exists. Any new still or GIF follows "What is in frame" above: a human seat is visible in it.
