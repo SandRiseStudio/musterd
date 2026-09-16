@@ -1,6 +1,6 @@
 # Dogfood scenarios — the run sheets humans work through
 
-Twelve ways a person actually uses musterd, written so a human tester can sit down and run one
+Thirteen ways a person actually uses musterd, written so a human tester can sit down and run one
 without asking anyone what to do. **These are runs, not builds.** A scenario is not a defect
 report — it is the thing you do *before* you know what the defects are.
 
@@ -11,7 +11,7 @@ the difference between a claim we have tested and a claim we have merely repeate
 
 - **Who runs these:** humans. nick and other human testers, at a real keyboard, on a real machine.
   An agent seat should not claim a scenario lane and "build" it.
-- **What a run produces:** one findings file in `docs/dogfood/runs/`, from the template in §14.
+- **What a run produces:** one findings file in `docs/dogfood/runs/`, from the template in §15.
 - **What happens to what you find:** each defect or improvement becomes **its own lane**, cited by
   id in the findings file. The scenario lane closes when the findings file lands, whether or not
   the defects are fixed. Do not hold a run open waiting on repairs.
@@ -196,9 +196,56 @@ they read the humans as bosses (the one reading the product must never invite), 
 the coloured chips meant, and the first question they ask. Their first sentence back is the
 finding.
 
+## 13. A cheap open-weight model doing real work, on the real team
+
+**Claim tested:** the canonical one-liner — "Named, persistent teams of agents and humans — **across
+any harness, framework, model, or surface**." The model half of that sentence has never been run as
+work. Of ~10,800 model-stamped acts on this team, four came from an open-weight model: `tinybot` on
+`qwen2.5:3b-instruct` and `qwen3:4b`, July 2026, every one a `status_update` or an `accept`, not one
+of them carrying a lane or a branch. Everything else is frontier.
+
+**Read this before starting:** [finding 003](../research/003-guardrail-floor-tiny-model.md) already
+settled the *floor* — a 4B local model read the primer, joined honestly, took a steer, answered a
+challenge and halted on reclaim, all PASS. Do not re-run that. Read its honest-N caveat instead,
+because that is what this scenario is for: it was a bespoke Python harness, four probes driven by a
+human in sequence, on a `lab` team with **no frontier seat on it**, so no mixed-family review chain
+ever existed. Nobody has asked a weak open-weight seat to do an ordinary day's work next to peers
+that are not weak.
+
+1. Put one open-weight, non-frontier model on a **real seat on a real team** with frontier seats
+   working alongside it. Ollama locally is the cheap path; a hosted open-weight model is equally
+   valid. Pin the exact model id, and note which harness runs it — a resident harness and a
+   fire-and-exit CLI harness are different runs (see **G1** below).
+2. Give it **ordinary work, not probes**: `lane_claim` something small and real, do it, push a
+   branch, `lane_submit`, and let a frontier seat judge the landed outcome. Route an acceptance the
+   other way too — have the small seat accept or decline a frontier seat's lane.
+3. Let it sit in the ordinary traffic for at least an hour. Do not shield it: let the broadcast,
+   the guardian asks and the team chatter land in its inbox like anyone else's.
+4. Send it one act of every shape a seat actually meets — a `handoff` carrying a branch, an `ask`
+   with a tier, a `challenge`, a huddle turn — and watch what comes back.
+
+**Watch for:** whether it claims the lane it was pointed at or a different one; whether the acts are
+right-shaped or free prose wearing an act name; whether it invents work, silently drops a handoff,
+or accepts something it did not do. Watch the **cost of being slow** — finding 003 measured ~50–60 s
+per act, so an hour of team traffic may be more inbox than it can ever drain, and a seat that can
+never catch up is a different failure from a seat that answers wrongly. Watch what the **frontier
+seats do with it**: does an acceptance from a 4B seat mean anything, does a reviewer notice the
+difference, does anyone route around it. And watch the human: the moment you find yourself
+translating for it or fixing its act by hand, that workaround is the finding.
+
+**Two known gaps to confirm or clear rather than rediscover.** **G1** — under a non-resident
+harness the model stamp does not persist past the first acts, so later acts land `model=null`
+([#172](https://github.com/SandRiseStudio/musterd/issues/172), reproduced twice). A resident harness
+hides it. Say which you ran and what the stamps show. **G2** — the `accept` that answers a challenge
+came back with `reply_to` null, so the pair never joined in the log.
+
+**If it cannot coordinate at all, that is a result, not a failed run.** Write down the exact act it
+could not produce. "Any model" is a claim with a floor underneath it, and nobody has published where
+that floor is — the honest outcome of this scenario may be that the one-liner needs a qualifier.
+
 ---
 
-## 13. Choosing what to run
+## 14. Choosing what to run
 
 If the set is being worked through in order of value rather than order of number:
 
@@ -206,8 +253,9 @@ If the set is being worked through in order of value rather than order of number
 2. **#4** — cold start, because it is what every new user meets and we cannot see it ourselves.
 3. **#9** — team of one, the most common real shape.
 4. **#1** and **#2** — the two nick named; #2 has a known blocker to hit deliberately.
+5. **#13** — cheapest of the set to set up, and it tests the widest claim we publish.
 
-## 14. The findings template
+## 15. The findings template
 
 Copy this into `docs/dogfood/runs/YYYY-MM-DD-<scenario>-<tester>.md`. Keep it short. A run that
 produces three honest lines beats one that produces a page nobody reads.
