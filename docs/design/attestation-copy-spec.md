@@ -35,6 +35,9 @@ every open ask.
 
 ## 3. The attestation label
 
+> **Waits on lane `01M2PAFNAS`** (2026-09-16): the roster and audit rows do not yet carry
+> `model_source`, so this section cannot be built until that protocol lane lands. §4 does not wait.
+
 Wherever a member's model is shown (`/live` roster plate and office nameplate detail, `/audit`
 actor column on hover), the model carries one of four labels. Source is the wire's
 `model_source` (`packages/protocol/src/model.ts`, `WIRE_ATTESTATION_SOURCES`) plus its absence.
@@ -89,8 +92,12 @@ Rules:
 
 ## 5. What this spec does not change
 
-- No wire change. Every string derives from fields already on the page (`model_source`, ask
-  `state`, `tier`, `deadline`).
+- No wire change *in this spec*. §4's strings derive from fields already on the page (ask `state`,
+  `tier`, `deadline`). §3's do **not**, yet: `model_source` never reaches `MemberSummarySchema`
+  (the roster `/live` reads carries `model` only) or the audit actor rows, so the label has nothing
+  to derive from until protocol lane `01M2PAFNAS` carries it there. _Corrected 2026-09-16 — the
+  first version of this line claimed `model_source` was on the page; miley checked before building
+  (`01M2P8WKA4`) and it was not. The words in §3 are unchanged; only their precondition is._
 - No new glossary term. "seen", "said", "unattested" are labels, not nouns; ADR 296 gates are
   untouched.
 - The office scene's plate (`office-scene/index.ts`, `plateDetailParts`) gets the same label as the
