@@ -1,4 +1,4 @@
-# 401 — A leaked bootstrap credential is triageable without opening it, and ADR 344's legacy window closes
+# 403 — A leaked bootstrap credential is triageable without opening it, and ADR 344's legacy window closes
 
 - Status: proposed
 - Date: 2026-09-15
