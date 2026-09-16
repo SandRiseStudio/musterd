@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { writeJsonAtomic } from '../atomicWrite.js';
 import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
 import {
   registeredFromEnv,
@@ -57,7 +58,7 @@ function readConfig(path: string): CursorConfig | null {
 
 function writeConfig(path: string, cfg: CursorConfig): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, cfg);
 }
 
 function hasMusterd(path: string): boolean {
@@ -159,7 +160,7 @@ function upsertCursorHook(
   kept.push({ command, ...(matcher ? { matcher } : {}) });
   file.hooks[event] = kept;
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(file, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, file);
   return undefined;
 }
 
@@ -171,7 +172,7 @@ function dropCursorHook(path: string, event: string, marker: string): void {
   if (kept.length > 0) file.hooks[event] = kept;
   else delete file.hooks[event];
   if (file.hooks && Object.keys(file.hooks).length === 0) delete file.hooks;
-  writeFileSync(path, JSON.stringify(file, null, 2) + '\n', 'utf8');
+  writeJsonAtomic(path, file);
 }
 
 /**
@@ -382,7 +383,7 @@ export const cursor: Harness = {
     applies: (dir) => existsSync(projectConfigPath(dir)) || existsSync(projectHooksPath(dir)),
     run: (dir) => {
       const warnings = installMusterdCursorHooks(dir);
-      return { files: [projectHooksPath(dir)], warnings };
+      return { files: [projectHooksPath(dir)], warnings, skipped: [] };
     },
   },
 

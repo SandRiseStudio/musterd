@@ -468,7 +468,7 @@ export const grok: Harness = {
         writeText(projectConfigPath(dir), toml);
         if (sl.warning) warnings.push(sl.warning);
       }
-      return { files: [projectHooksPath(dir), projectConfigPath(dir)], warnings };
+      return { files: [projectHooksPath(dir), projectConfigPath(dir)], warnings, skipped: [] };
     },
     surfaces: () => [
       SURFACE_STATUSLINE,

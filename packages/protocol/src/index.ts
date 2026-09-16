@@ -11,6 +11,7 @@ export * from './audit.js';
 export * from './grants.js';
 export * from './requests.js';
 export * from './residency.js';
+export * from './workspace.js';
 export * from './enforcement.js';
 export * from './loops.js';
 export * from './incident.js';

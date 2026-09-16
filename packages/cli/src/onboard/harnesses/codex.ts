@@ -26,6 +26,7 @@ import {
   codexHooksPath,
   hasNewerCodexHookEpoch,
   inspectCodexHookDrift,
+  codexCommonHooksPath,
   installCodexHooks,
   removeCodexHooks,
 } from './codexHooks.js';
@@ -153,14 +154,16 @@ export const codex: Harness = {
    */
   refreshHooks: {
     applies: (dir) => existsSync(projectConfigPath(dir)) || existsSync(codexHooksPath(dir)),
-    run: (dir) => {
-      const files = installCodexHooks(dir);
+    run: (dir, opts) => {
+      const files = installCodexHooks(dir, opts);
+      const common = opts?.withinWorktreeOnly ? codexCommonHooksPath(dir) : undefined;
+      const skipped = common !== undefined ? [common] : [];
       // A malformed file is left untouched by design (it may be hand-authored), and returns no
       // files — so without this the driver would print "✓ Codex hooks refreshed" over a repair that
       // never happened. Reuse the inspector's own wording rather than inventing a second phrasing.
       const warnings =
         files.length === 0 ? inspectCodexHookDrift(dir).filter((d) => d.includes('malformed')) : [];
-      return { files, warnings };
+      return { files, warnings, skipped };
     },
   },
 

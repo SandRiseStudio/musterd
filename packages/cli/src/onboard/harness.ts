@@ -178,6 +178,10 @@ export interface ProvisionResult {
  * one canonical body into these per-harness shells, so adapters stay thin. A harness with no skill
  * mechanism (Codex) simply omits this and relies on the primer's pointer to `.musterd/skill/SKILL.md`.
  */
+export interface RefreshHooksOptions {
+  withinWorktreeOnly?: boolean;
+}
+
 export interface HarnessGuidance {
   /** Skill file path, relative to the binding folder (e.g. `.claude/skills/musterd/SKILL.md`). */
   skillPath: string;
@@ -279,7 +283,16 @@ export interface Harness {
    */
   refreshHooks?: {
     applies: (dir: string) => boolean;
-    run: (dir: string) => { files: string[]; warnings: string[] };
+    /**
+     * `withinWorktreeOnly` (spec 2026-09-16, workspace self-heal): skip any surface whose path
+     * resolves outside `dir` and return it in `skipped` instead of writing it. A hook that runs in
+     * one seat's session must not rewrite a file every seat shares — the machine-wide Claude Code
+     * settings, Codex's git-common-dir hooks.json. A human's `--refresh-hooks` still writes them.
+     */
+    run: (
+      dir: string,
+      opts?: RefreshHooksOptions,
+    ) => { files: string[]; warnings: string[]; skipped: string[] };
     /**
      * The refusable surfaces (ADR 332 names) this refresh installs. The driver resurrects a
      * tombstone only when some present harness claims its surface — announcing "re-installed" for
