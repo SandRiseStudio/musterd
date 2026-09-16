@@ -4,6 +4,7 @@ import { hostname } from 'node:os';
 import { extname, join, resolve, sep } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import {
+  WorkspaceRepairBodySchema,
   isWireAttestationSource,
   type Act,
   MemberKindSchema,
@@ -5483,6 +5484,24 @@ export async function handleHttp(
       // predicate, and (only when raised) a deduped audit row. Never advances the read cursor: reading
       // is the agent's explicit follow-up (`musterd inbox`). The line is **daemon-composed** from the
       // envelope's structured fields (sender, act, count) — never `env.body` (§4 injection surface).
+      if (method === 'POST' && rest === '/workspace/repair') {
+        // Spec 2026-09-16 (workspace self-heal), ADR 408: the one place a hook-driven repair becomes
+        // attributable. Same auth as interrupt-check — a seat credential AND a live session lease —
+        // because only a live occupancy repairs a workspace. Best-effort on the client; here it is
+        // an ordinary audited write. Counts and classes only: the body schema has no field for a
+        // file's contents, so a workspace cannot leak through its own repair record.
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(WorkspaceRepairBodySchema, await readJson(req));
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'workspace.repaired',
+          target: member.name,
+          result: 'allow',
+          detail: body,
+        });
+        return sendJson(res, 200, { ok: true });
+      }
+
       if (method === 'GET' && rest === '/inbox/interrupt-check') {
         let auth: { team: TeamRow; member: MemberRow };
         try {

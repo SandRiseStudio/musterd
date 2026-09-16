@@ -415,7 +415,9 @@ export type AuditAction =
   // ADR 358: a human seat's set of nodes widened by the explicit trust act from a node already in
   // it (detail: { node, by_node, by_label }). A refused trust is `seat.bound_elsewhere` with
   // detail.act = 'trust' — one row shape for every probe from a machine outside the set.
-  | 'seat.node_trusted';
+  | 'seat.node_trusted'
+  // Spec 2026-09-16 (workspace self-heal), ADR 408: what a SessionStart repair wrote, skipped, left.
+  | 'workspace.repaired';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */
