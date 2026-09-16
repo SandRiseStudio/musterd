@@ -24,6 +24,12 @@ fit; the 9 watchers take the set past full. A file-assigned hue that is clear of
 409s against a watcher. `team add` is locked with no escape hatch, which is the opposite of
 Decision 4.
 
+The brief said those `web-*` seats never release. That was false. The nine names at 14:02 PDT
+(`web-j5dghb`, `web-dyyx9s`, `web-raxb0c`, `web-ucru1t`, `web-vsajeq`, `web-6kljx0`,
+`web-yg99wy`, `web-35abqk`, `web-blqv5y`) were gone but one by 15:05 — ten live watchers, only
+`web-35abqk` still in the table. Reap-by-deletion works; the set refills. The lock is who
+counts, not that a watcher holds a hue forever.
+
 ## Problem
 
 The uniqueness floor treated an observer as a teammate. An observer is a session (ADR 063): hidden
@@ -55,11 +61,17 @@ who counts, not how far apart.
 - File-backed `team add` POSTs the seat-file hue and no longer 409s because a `/live` tab is
   sitting on a nearby colour. The CLI's local `assignHue` already walked only sibling seat files;
   the daemon now uses the same set.
-- Existing `web-*` rows keep their hues; they simply stop blocking. No backfill, no reap, no
-  observer-hue NULL migration.
+- Existing `web-*` rows keep their hues; they simply stop blocking. No hue-NULL migration. They
+  already reap (ADR 064/196) — the 14:02 names were gone an hour later — so the floor does not
+  need a second reap path.
 - Two observers may share a hue with each other and with a later seat. The floor is for the
   people you see.
 - ADR 374's Decision section is frozen; the dated note in its Consequences records the narrowing.
+- 2026-09-16 — file-backed `team add` still 409s an explicit hue on a *saturated roster*
+  (`assertHueClear` has no hatch; revive is one seat from the median 24), and ADR 374 still does
+  not say what happens past that. Who counts is this ADR; degrade-or-override past 30 is a
+  separate lane.
+  Follows-up: 01M2P43WQ7MSBPJF2ZDZVVA732
 
 ## Observability & Evaluation
 
