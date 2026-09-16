@@ -169,7 +169,12 @@ function huddleSummary(h: HuddleView): string {
 }
 
 /** The room: who is in it, what has been said, what it is for, and how to answer. */
-function renderHuddle(h: HuddleView, kindOf: (name: string) => 'agent' | 'human'): string {
+export function renderHuddle(
+  h: HuddleView,
+  kindOf: (name: string) => 'agent' | 'human',
+  /** The reader (ADR 407 inc 3): a turn it was not sent says so. Omitted ⇒ no claim is made. */
+  me?: string,
+): string {
   const out: string[] = [];
   const state = h.closed ? theme.meta('closed') : theme.ok('open');
   out.push(`${theme.accent(`huddle ${h.topic}`)} ${state} ${theme.meta(`· ${budgetLabel(h)}`)}`);
@@ -187,10 +192,27 @@ function renderHuddle(h: HuddleView, kindOf: (name: string) => 'agent' | 'human'
   for (const line of wrapTurn(h.body)) out.push(line);
   for (const t of h.turns) {
     out.push('');
+    // A directed turn names its addressee (ADR 407 inc 3): the room is where it was said, not who
+    // it was said to. A team turn stays bare — the room is that address (ADR 378).
+    const addr =
+      t.eligible && t.eligible.length > 0
+        ? ` ${theme.meta('→ ')}${t.eligible.map((n) => theme.memberName(n, kindOf(n))).join(theme.meta(' | '))}${theme.meta(' ?')}`
+        : t.to.kind === 'member'
+          ? ` ${theme.meta('→ ')}${theme.memberName(t.to.name, kindOf(t.to.name))}`
+          : '';
     out.push(
-      `  ${theme.memberName(t.from, kindOf(t.from))} ${theme.actBadge(t.act)} ${theme.meta(ago(t.ts))}`,
+      `  ${theme.memberName(t.from, kindOf(t.from))} ${theme.actBadge(t.act)}${addr} ${theme.meta(ago(t.ts))}`,
     );
     for (const line of wrapTurn(t.body)) out.push(line);
+    // Sight is not obligation (ADR 407 §2): a bystander is told so where it is reading.
+    if (me !== undefined && t.from !== me) {
+      if (t.eligible && t.eligible.length > 0) {
+        if (!t.eligible.includes(me))
+          out.push(theme.meta(`    ↳ eligible: ${t.eligible.join(' | ')} — not you`));
+      } else if (t.to.kind === 'member' && t.to.name !== me) {
+        out.push(theme.meta(`    ↳ to ${t.to.name} — not addressed to you`));
+      }
+    }
   }
   out.push('');
   if (h.closed) {
@@ -273,7 +295,7 @@ export async function huddleCommand(parsed: Parsed): Promise<number> {
       process.stdout.write(JSON.stringify(view) + '\n');
       return 0;
     }
-    process.stdout.write(renderHuddle(view, kindOf) + '\n');
+    process.stdout.write(renderHuddle(view, kindOf, identity.name) + '\n');
     return 0;
   }
 

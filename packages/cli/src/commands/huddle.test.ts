@@ -7,7 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { CliError } from '../errors.js';
 import { resolve } from './helpers.js';
-import { huddleCommand, layoutRoom, mirrorTurn, parseTopic, parseUntil } from './huddle.js';
+import {
+  huddleCommand,
+  layoutRoom,
+  mirrorTurn,
+  parseTopic,
+  parseUntil,
+  renderHuddle,
+} from './huddle.js';
 import { teamCommand } from './team.js';
 
 /**
@@ -333,5 +340,39 @@ describe('musterd huddle', () => {
         /no huddle/,
       );
     });
+  });
+});
+
+// ADR 407 increment 3 on `musterd huddle show`: the transcript names a directed turn's addressee
+// and tells a bystander the turn was not sent to them. Pure render, no daemon.
+describe('renderHuddle marks a turn the reader was not sent (ADR 407 inc 3)', () => {
+  const kindOf = (n: string) => (n === 'nick' ? 'human' : 'agent') as 'human' | 'agent';
+  const view = {
+    id: 'h1',
+    topic: 'design:marker',
+    room: '',
+    anchor: 'docs/x.md',
+    opener: 'nick',
+    openedAt: Date.now() - 60_000,
+    body: 'why',
+    turns: [
+      {
+        id: 't1',
+        from: 'Ada',
+        act: 'request_help',
+        body: 'Lin, take this',
+        ts: Date.now() - 30_000,
+        to: { kind: 'member', name: 'Lin' },
+      },
+    ],
+    named: ['nick', 'Lin'],
+    spoke: ['nick', 'Ada'],
+  };
+
+  it('a bystander sees the addressee and the marker; the addressee sees neither claim about itself', () => {
+    const bo = renderHuddle(view as never, kindOf, 'Bo');
+    expect(bo).toContain('→ Lin');
+    expect(bo).toContain('not addressed to you');
+    expect(renderHuddle(view as never, kindOf, 'Lin')).not.toContain('not addressed');
   });
 });

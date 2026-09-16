@@ -187,9 +187,19 @@ default should return.
    `confidentialAskSubject` in the protocol, which the SQL read mirrors. `meta.about` gained three
    shape refusals at the boundary — non-empty, member-directed, consult-or-escalate — because a
    confidential ask to the whole team is not a thing. The falsifier's 60-day clock starts here._
-3. **Surfaces** — `musterd messages` / the board / `team_inbox_check` rooms stop hiding third-party
-   turns; a `↳ not addressed to you` marker on a read-not-delivered act so a seat does not mistake
-   sight for an obligation. One lane, after 2.
+3. **Surfaces** — a `↳ not addressed to you` marker on a read-not-delivered act so a seat does not
+   mistake sight for an obligation. One lane, after 2.
+   _Landed 2026-09-16, lane `01M2P2KV3QXX02ENSADXBQ8T1Q`. Two corrections to this line as first
+   written: (i) "stop hiding" needed no work — every surface that reads `GET /messages` showed
+   third-party acts the moment increment 2 landed; (ii) `musterd messages` does not exist. The real
+   surfaces are `musterd huddle show`, `musterd inbox --all` / `--watch --all`, and the
+   `team_inbox_check` room fold; `musterd status` reads the timeline only for roster marks and
+   renders no rows. What was actually missing: a room turn DROPPED its addressee (ADR 378, "the room
+   is the address"), so after increment 2 a directed turn rendered byte-identically for its
+   addressee and for a bystander. The fold (`HuddleTurn`) now carries `to` and `eligible`; a
+   directed room turn names its addressee again; and one renderer per surface adds the marker —
+   silent for the addressee, the sender, a member of the eligible set, any team act, and an unknown
+   reader. Delivery flags (`isActionNeeded`, `openActionNeeded`) untouched._
 
 ## Related
 

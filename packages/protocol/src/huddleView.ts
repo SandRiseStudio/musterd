@@ -27,6 +27,14 @@ export interface HuddleTurn {
   act: Act;
   body: string;
   ts: number;
+  /**
+   * Who the turn was said TO (ADR 407 inc 3). The room is where it was said, not who it was said
+   * to: a reader that can now see every turn on its team (ADR 407) must be able to tell a turn
+   * addressed to it from one it merely may read, and a renderer cannot do that from five fields.
+   */
+  to: Envelope['to'];
+  /** The eligible set, when the turn names one (ADR 254) — the "either of you" it was said to. */
+  eligible?: string[];
 }
 
 export interface HuddleView {
@@ -90,7 +98,18 @@ export function deriveHuddles(messages: Envelope[], me: string): HuddleView[] {
       openedAt: root.ts,
       body: root.body,
       ...(huddle.budget ? { budget: huddle.budget } : {}),
-      turns: turns.map((t) => ({ id: t.id, from: t.from, act: t.act, body: t.body, ts: t.ts })),
+      turns: turns.map((t) => {
+        const eligible = eligibleOf(t.meta as Record<string, unknown> | null | undefined);
+        return {
+          id: t.id,
+          from: t.from,
+          act: t.act,
+          body: t.body,
+          ts: t.ts,
+          to: t.to,
+          ...(eligible && eligible.length > 0 ? { eligible } : {}),
+        };
+      }),
       named: namedAll,
       spoke,
       ...(closer

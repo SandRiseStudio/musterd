@@ -89,7 +89,26 @@ export function renderRoom(h: HuddleView, me: string): string {
   const dropped = h.turns.length - tail.length;
   if (dropped > 0) out.push(`  … ${dropped} earlier turn${dropped === 1 ? '' : 's'} not shown`);
   out.push(`  ${h.opener}: ${clip(h.body)}`);
-  for (const t of tail) out.push(`  ${t.from} [${t.act}]: ${clip(t.body)}`);
+  for (const t of tail) {
+    // A directed turn names its addressee (ADR 407 inc 3); a team turn stays bare (ADR 378).
+    const addr =
+      t.eligible && t.eligible.length > 0
+        ? ` → ${t.eligible.join(' | ')} ?`
+        : t.to.kind === 'member'
+          ? ` → ${t.to.name}`
+          : '';
+    out.push(`  ${t.from} [${t.act}]${addr}: ${clip(t.body)}`);
+    // Sight is not obligation (ADR 407 §2). An agent is the reader most likely to act on a turn it
+    // only saw, so the line goes here, under the turn, not in a footer it may not reach.
+    if (t.from !== me) {
+      if (t.eligible && t.eligible.length > 0) {
+        if (!t.eligible.includes(me))
+          out.push(`    ↳ eligible: ${t.eligible.join(' | ')} — not you`);
+      } else if (t.to.kind === 'member' && t.to.name !== me) {
+        out.push(`    ↳ to ${t.to.name} — not addressed to you`);
+      }
+    }
+  }
 
   if (h.closed) {
     const ref = h.closed.anchorRef;
@@ -125,6 +144,9 @@ export function roomStructured(h: HuddleView): Record<string, unknown> {
       act: t.act,
       body: t.body,
       ts: t.ts,
+      // Who it was said to (ADR 407 inc 3) — the same fact the prose carries, as data.
+      to: t.to,
+      ...(t.eligible ? { eligible: t.eligible } : {}),
     })),
     ...(h.budget ? { budget: h.budget } : {}),
     closed: h.closed

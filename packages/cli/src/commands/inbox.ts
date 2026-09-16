@@ -80,7 +80,8 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
       process.stdout.write(theme.meta('no communication yet') + '\n');
       return 0;
     }
-    for (const m of messages) process.stdout.write(renderMessageRow(m, kindOf) + '\n');
+    for (const m of messages)
+      process.stdout.write(renderMessageRow(m, kindOf, { me: identity.name }) + '\n');
     process.stdout.write(
       theme.meta('musterd inbox --watch --all to follow the firehose live') + '\n',
     );
@@ -476,7 +477,7 @@ async function watchInbox(
       .catch(() => ({ messages: [] as Envelope[] }));
     for (const m of hist.messages) {
       seen.add(m.id);
-      process.stdout.write(renderMessageRow(m, kindOf) + '\n');
+      process.stdout.write(renderMessageRow(m, kindOf, { me: identity.name }) + '\n');
     }
     if (hist.messages.length > 0) process.stdout.write(theme.meta('— live —') + '\n');
   }
@@ -502,7 +503,7 @@ async function watchInbox(
         const flagged = isActionNeeded(env, identity.name);
         if (flagged && bell) process.stdout.write('\u0007');
         const banner = flagged ? theme.actionNeeded() + '\n' : '';
-        process.stdout.write(banner + renderMessageRow(env, kindOf) + '\n');
+        process.stdout.write(banner + renderMessageRow(env, kindOf, { me: identity.name }) + '\n');
       },
       onPresence: (member, status, surface) =>
         process.stdout.write(
