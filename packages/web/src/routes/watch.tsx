@@ -33,6 +33,8 @@ export const Route = createFileRoute('/watch')({
       // 45-character form (§3, with its own length check), so it is stated; `pageTitle` still runs
       // and is now a no-op, which is what the spec's "via pageTitle" asks for.
       title: `${WATCH_COPY.title} — ${SITE_TITLE}`,
+      // Bare on the card, suffixed in the tab — spec §3's two rows differ on purpose.
+      ogTitle: WATCH_COPY.ogTitle,
       description: WATCH_COPY.description,
       path: '/watch',
       // The office, not the wordmark card: this page is about a picture, and the generic card

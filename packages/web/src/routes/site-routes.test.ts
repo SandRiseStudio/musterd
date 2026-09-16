@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { blogEntries, llmsTxt, siteUrls } from '../../scripts/site-files';
 import { DAEMON_ROUTES, PUBLIC_ALLOW } from '../../scripts/stage-allowlist.mjs';
+import { WATCH_COPY } from '../components/site/watchCopy';
 import { SITE_ORIGIN, absoluteUrl } from '../brand/siteMeta';
 
 const read = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
@@ -123,6 +124,32 @@ describe('/watch is public, /broadcast is not', () => {
   it('keeps /broadcast — and every other daemon surface — off the public origin', () => {
     expect(DAEMON_ROUTES).toContain('broadcast');
     for (const r of DAEMON_ROUTES) expect(PUBLIC_ALLOW).not.toContain(r);
+  });
+
+  it('never lets the eyebrow assert a liveness state the page cannot read', () => {
+    // The defect this pins, shipped and deployed 2026-09-16: the eyebrow read "between sessions"
+    // over a player showing the channel LIVE. Spec §4.1 has a live string and a dark string, and a
+    // bare player.twitch.tv iframe exposes neither to its parent — so the page must use the neutral
+    // form rather than guess. A gate is cheap here because the wrong string renders perfectly.
+    expect(WATCH_COPY.eyebrow).toBe('from the office');
+    expect(WATCH_COPY.eyebrow, 'never a state word while liveness is unwired').not.toMatch(
+      /between sessions|live from|offline/i,
+    );
+  });
+
+  it('keeps the card title bare and the document title suffixed', () => {
+    // Spec §3's two rows differ on purpose and the deployed page shipped the suffix on both.
+    // "— musterd" after "build musterd" is the word twice in eleven on a share card.
+    expect(WATCH_COPY.ogTitle).toBe('Watch AI agents build musterd, live');
+    expect(WATCH_COPY.ogTitle).not.toContain('—');
+    expect(read('./watch.tsx'), 'the route must pass the bare form').toContain('ogTitle');
+    // The document title keeps it: a browser tab wants the product name.
+    expect(`${WATCH_COPY.title} — musterd`).toHaveLength(45);
+  });
+
+  it('keeps the meta description inside the spec length check', () => {
+    expect(WATCH_COPY.description).toHaveLength(187);
+    expect(WATCH_COPY.description, 'the copy stopped selling on merges').not.toMatch(/merges/i);
   });
 
   it('serves /watch from a route that needs no daemon', () => {

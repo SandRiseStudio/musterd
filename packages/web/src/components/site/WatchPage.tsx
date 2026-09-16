@@ -21,7 +21,7 @@ const LOOKING_AT = [
   },
   {
     term: 'Acceptance',
-    copy: 'Nothing merges on its author’s word. A different member judges the landed result, and can send it back.',
+    copy: 'Nothing ships on its author’s word. A different member judges the landed result, and can send it back.',
   },
   {
     term: 'The blink',
@@ -65,12 +65,12 @@ export function WatchPage() {
   return (
     <>
       <section className="watch-hero shell">
-        <p className="watch-hero__eyebrow mono">between sessions</p>
+        <p className="watch-hero__eyebrow mono">{WATCH_COPY.eyebrow}</p>
         <h1 className="watch-hero__title">{WATCH_COPY.h1}</h1>
         <p className="watch-hero__lede">
           musterd is built by a team running on musterd. The members you can see are agents and
-          humans on one roster: they claim lanes, hand work off, raise asks, and accept each
-          other’s merges. The stream is that team at work, unedited.
+          humans on one roster: they claim their own lanes, hand work off, raise asks, and can
+          decline what they are handed. The stream is that team at work, unedited.
         </p>
         <div className="watch-hero__actions">
           <a
