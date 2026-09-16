@@ -342,20 +342,30 @@ export async function huddleCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
 
-  const huddleId = parsed.positionals[1];
-  if (!huddleId) throw new CliError(`name the huddle id\n${USAGE}`, 2);
+  const named = parsed.positionals[1];
+  if (!named) throw new CliError(`name the huddle id\n${USAGE}`, 2);
   const body = parsed.positionals.slice(2).join(' ').trim();
   if (!body)
     throw new CliError(
       sub === 'say' ? `say something\n${USAGE}` : `say what landed, or why nothing did\n${USAGE}`,
       2,
     );
+  // Argument shape first, the network second: a bad `--act` or a missing `--anchor-ref` is knowable
+  // without asking the daemon anything, and answering "no huddle X" to a malformed command would
+  // name the wrong problem (it did — it broke the flag test below before this ordering).
+  const actRaw = flagStr(parsed.flags, 'act') ?? 'message';
+  if (sub === 'say' && !TURN_ACTS.has(actRaw as Act))
+    throw new CliError(`--act must be one of ${[...TURN_ACTS].join(', ')} for a turn`, 2);
+  const anchorRef = flagStr(parsed.flags, 'anchor-ref');
+  if (sub === 'close' && !anchorRef)
+    throw new CliError(`--anchor-ref is required: where the output landed, or "none"\n${USAGE}`, 2);
+  // Lane 01M2KSDKVZ: a turn names a room this daemon can SEE. `thread` used to be argv verbatim, so
+  // a typo or a stale id produced a turn no root backs — it persists as an ordinary message, is
+  // never folded into the room, and can never ring the bell. The failure was silence.
+  const huddleId = await resolveRoom(http, team, identity.name, named);
   const board = huddleBoardName(huddleId);
 
   if (sub === 'say') {
-    const actRaw = flagStr(parsed.flags, 'act') ?? 'message';
-    if (!TURN_ACTS.has(actRaw as Act))
-      throw new CliError(`--act must be one of ${[...TURN_ACTS].join(', ')} for a turn`, 2);
     const act = actRaw as Act;
     const { to } = parseRecipients(flagStr(parsed.flags, 'to') ?? '@team');
     let envelope;
@@ -386,9 +396,6 @@ export async function huddleCommand(parsed: Parsed): Promise<number> {
   }
 
   // close
-  const anchorRef = flagStr(parsed.flags, 'anchor-ref');
-  if (!anchorRef)
-    throw new CliError(`--anchor-ref is required: where the output landed, or "none"\n${USAGE}`, 2);
   let envelope;
   try {
     envelope = makeEnvelope({
@@ -424,4 +431,51 @@ function bindOwnThread(team: string, seat: string, thread_id: string): void {
   } catch {
     // the registry is an optimization
   }
+}
+
+/**
+ * Resolve a huddle id against the recent timeline, exactly as `huddle show` does — exact match, else
+ * a prefix — and return the WHOLE id, so `thread` always names a root that exists here.
+ *
+ * WHY THIS IS A CLIENT GUARD AND NOT A DAEMON ONE. A turn legitimately arrives before its root on a
+ * joiner: that is the subject of the cross-machine bell repair, and `fold.ts` must never refuse a
+ * replicated row. `thread` is not huddle-specific either — every threaded act carries one — so a
+ * server-side refusal would reach far past huddles and could wedge a legitimate reply. The daemon
+ * still accepts an unknown thread by design; this closes the hole at the surface a person or an
+ * agent actually types (docs/wiki/cross-machine-huddle-bell.md, 2026-09-04, whose falsifier names
+ * this verb).
+ *
+ * It also fixes a quieter bug: `show` accepted a prefix while `say` resolved nothing, so
+ * `huddle say <prefix>` threaded against a fragment — a root that cannot exist — and mirrored the
+ * turn to a board named after the fragment too.
+ *
+ * DEGRADE, NEVER WEDGE. A timeline that cannot be READ is not evidence the room is absent: an
+ * offline daemon is the case `sendOrEcho` exists for, so an unverifiable id sends as before. Only a
+ * successful read that does not contain the id refuses.
+ */
+async function resolveRoom(
+  // The real client type rather than a hand-written structural one, so this cannot drift from it.
+  http: ReturnType<typeof resolve>['http'],
+  team: string,
+  me: string,
+  named: string,
+): Promise<string> {
+  let huddles: ReturnType<typeof deriveHuddles>;
+  try {
+    const { messages } = await http.messages(team, { limit: TIMELINE_WINDOW });
+    huddles = deriveHuddles(messages, me);
+  } catch {
+    return named;
+  }
+  const hit =
+    huddles.find((h) => h.id === named) ?? huddles.find((h) => h.id.startsWith(named)) ?? null;
+  if (!hit) {
+    throw new CliError(
+      `no huddle ${named} in the recent timeline — either the id is wrong, or this daemon has ` +
+        `not folded it here yet (a joiner sees a room one sync tick late; retry). ` +
+        '`musterd huddle list --all` shows what is there',
+      4,
+    );
+  }
+  return hit.id;
 }
