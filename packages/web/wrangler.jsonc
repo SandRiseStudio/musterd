@@ -13,9 +13,28 @@
   // pointing wrangler at `dist/client` directly.
   "name": "musterd-io",
   "compatibility_date": "2026-08-01",
+  // `html_handling` decides which spelling of a page URL is the one that returns 200, and it must
+  // agree with the spelling the SITE ITSELF advertises — the canonical link, og:url, sitemap.xml and
+  // llms.txt all build their URLs from `absoluteUrl(path)`, which emits no trailing slash.
+  //
+  // The default is "auto-trailing-slash", and under it the prerendered `docs/spec/index.html` was
+  // served at `/docs/spec/` while `/docs/spec` answered 307. So every docs page told Google to
+  // index a URL that redirected, and the page it actually served declared a canonical pointing back
+  // at that redirect. Measured on production 2026-09-16: sitemap.xml listed /docs/spec, which 307'd
+  // to /docs/spec/, whose canonical said /docs/spec. The canonical target was never a 200.
+  //
+  // "drop-trailing-slash" is the half of that pair which needs no URL to change: /docs/spec serves
+  // the page and /docs/spec/ redirects to it, so the thousands of URL strings already emitted — and
+  // already submitted to Search Console — become correct rather than needing a rewrite. Pinned by
+  // site-routes.test.ts against the form `siteUrls()` produces; change one and that test fails.
+  //
+  // This is the same defect class that left the home page unindexed for a month (http:// served 200
+  // beside https://, so Google picked http:// as canonical). Rule: exactly one spelling of a URL
+  // returns 200, and it is the spelling we publish.
   "assets": {
     "directory": "./dist/site",
-    "not_found_handling": "none"
+    "not_found_handling": "none",
+    "html_handling": "drop-trailing-slash"
   },
   "routes": [{ "pattern": "musterd.io", "custom_domain": true }],
   "observability": { "enabled": true }
