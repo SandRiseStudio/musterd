@@ -5,6 +5,7 @@ import {
   type IntegrationCheck,
 } from '@musterd/protocol';
 import JSON5 from 'json5';
+import type { EffectivePolicy } from './governed-models.js';
 
 export interface ApertureObservation {
   host: string;
@@ -19,6 +20,7 @@ const LABELS = {
   'aperture-grants': 'default grants',
   'aperture-quotas': 'quotas',
   'aperture-identities': 'identity prerequisites',
+  'aperture-managed-policy': 'managed policy',
 } as const;
 
 function ok(key: keyof typeof LABELS, detail: string): IntegrationCheck {
@@ -69,8 +71,95 @@ function hasStandardUserRole(capabilities: Array<{ role?: string | undefined }>)
   return roles.length > 0 && roles.every((role) => role === 'user');
 }
 
-export function inspectApertureConfig(observation: ApertureObservation): IntegrationCheck[] {
-  const { config } = observation;
+function managedPolicyCheck(config: ApertureConfig, policy: EffectivePolicy): IntegrationCheck {
+  for (const member of policy.members) {
+    for (const model of member.models) {
+      const provider = model.slice(0, model.indexOf('/'));
+      if (!config.providers?.[provider]?.models.includes(model)) {
+        return fail(
+          'aperture-managed-policy',
+          `provider catalog lacks managed model for ${member.member}`,
+          'Add every exact generated provider/model identifier to the operator-owned provider catalog.',
+        );
+      }
+    }
+  }
+  const grants = config.grants ?? [];
+  const expected = new Map(policy.members.map((member) => [member.principal, member]));
+  for (const [principal, member] of expected) {
+    const matches = grants.filter((grant) => grant.src.length === 1 && grant.src[0] === principal);
+    if (matches.length !== 1) {
+      return fail(
+        'aperture-managed-policy',
+        `managed grant drift for ${member.member}`,
+        'Run musterd integration generate aperture --write, then merge the exact managed grant.',
+      );
+    }
+    const capabilities = matches[0]?.app['tailscale.com/cap/aperture'] ?? [];
+    const models = capabilities
+      .flatMap((cap) => (Array.isArray(cap.models) ? cap.models : cap.models ? [cap.models] : []))
+      .sort();
+    const buckets = capabilities
+      .flatMap((cap) => cap.quotas?.map((quota) => quota.bucket) ?? [])
+      .sort();
+    if (
+      JSON.stringify(models) !== JSON.stringify(member.models) ||
+      JSON.stringify(buckets) !== JSON.stringify([member.memberBucket, member.teamBucket].sort()) ||
+      capabilities.some((cap) => cap.role !== 'user')
+    ) {
+      return fail(
+        'aperture-managed-policy',
+        `managed grant drift for ${member.member}`,
+        'Merge the generated exact models, user role, and both quota buckets.',
+      );
+    }
+  }
+  const quotas = config.quotas ?? {};
+  for (const member of policy.members) {
+    const quota = quotas[member.memberBucket];
+    if (
+      quota?.capacity !== member.memberQuota.capacity ||
+      quota.rate !== member.memberQuota.rate ||
+      quota.on_exceed !== 'reject'
+    ) {
+      return fail(
+        'aperture-managed-policy',
+        `managed quota drift for ${member.member}`,
+        'Merge the generated rejecting per-Member quota bucket.',
+      );
+    }
+  }
+  const team = quotas['musterd-team'];
+  if (
+    team?.capacity !== policy.teamQuota.capacity ||
+    team.rate !== policy.teamQuota.rate ||
+    team.on_exceed !== 'reject'
+  ) {
+    return fail(
+      'aperture-managed-policy',
+      'managed Team quota drift',
+      'Merge the generated rejecting Team quota bucket.',
+    );
+  }
+  return ok('aperture-managed-policy', `${policy.members.length} exact Member grants match`);
+}
+
+export function inspectApertureConfig(
+  observation: ApertureObservation,
+  policy?: EffectivePolicy,
+): IntegrationCheck[] {
+  const config =
+    policy === undefined
+      ? observation.config
+      : {
+          ...observation.config,
+          // In managed mode, unrelated operator grants are intentionally not musterd evidence.
+          grants: (observation.config.grants ?? []).filter(
+            (grant) =>
+              grant.src.length === 1 &&
+              policy.members.some((member) => member.principal === grant.src[0]),
+          ),
+        };
   const checks: IntegrationCheck[] = [
     ok('aperture-config-api', `${observation.host} · hash ${safeConfigHash(observation.hash)}`),
   ];
@@ -170,5 +259,6 @@ export function inspectApertureConfig(observation: ApertureObservation): Integra
         ),
   );
 
+  if (policy) checks.push(managedPolicyCheck(config, policy));
   return checks;
 }

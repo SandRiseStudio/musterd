@@ -89,8 +89,33 @@ export function shouldReleaseOnVerdict(
   lastActivityAt: number,
   now: number,
   heartbeatMs = HEARTBEAT_MS,
+  /** Age of the transcript the verdict was reached on, when the rung carries one (`stale`). */
+  transcriptAgeMs?: number,
 ): boolean {
   if (rung === 'ppid') return true;
+  // A transcript we are visibly NEWER than is not ours (lane 01M2KCG5Z8, measured on seat `izzo`
+  // 2026-09-15). The binding named a session whose transcript had been quiet for an hour while the
+  // harness drove this adapter from a different one, and nothing rewrote `binding.session` — so the
+  // id never changed and no re-adoption guard applied. Being driven more recently than the
+  // transcript was written is a direct contradiction: a harness calling our tools is not the
+  // harness that stopped writing an hour ago. The evidence is therefore about somebody else's
+  // session, and the ladder's standing rule is to fail open on evidence that is not about us.
+  //
+  // The window below cannot carry this on its own: it asks only whether a tool call landed in the
+  // last heartbeat, and a live session is idle far longer than 15s while a human reads or a model
+  // thinks. Without this clause the seat was released on nearly every heartbeat, reaped, and
+  // re-minted by the next tool call — 17 mints and 11 reaps in half an hour, with the interrupt
+  // line refused throughout and `team_join` unable to stick, since the rejoin died the same way.
+  //
+  // A genuinely dormant harness is untouched: the tool call that would contradict the transcript is
+  // precisely what stops arriving, so activity and transcript go quiet together and the crash
+  // backstop still fires.
+  // `lastActivityAt` is 0 until the first tool call, and zero is a sentinel rather than a very old
+  // timestamp: without this guard an adapter that has never been driven would compare epoch-0
+  // against the transcript age and could read as freshly active. No first-hand evidence, no
+  // contradiction — the same trap the pre-activity default carries in the window below.
+  if (transcriptAgeMs !== undefined && lastActivityAt > 0 && now - lastActivityAt < transcriptAgeMs)
+    return false;
   return now - lastActivityAt >= heartbeatMs;
 }
 
@@ -547,7 +572,7 @@ export class MusterdClient {
      *  reader must fall back rather than invent one. `verified: false` alone cannot separate the
      *  by-design exemption from the ADR 172 degradation — that is what `reason` is for. */
     closed?: { verified: boolean; reason: string };
-    /** ADR 169: present when the patch entered ready_for_review — the review routing. */
+    /** ADR 169/192: present when the patch entered `awaiting_acceptance` — the acceptance routing. */
     review?: {
       reviewer?: string;
       route?: string;
@@ -910,7 +935,16 @@ export class MusterdClient {
     if (verdict.verdict === 'live') return false;
     // Activity outranks inference — see shouldReleaseOnVerdict. Without this, the re-arm below only
     // recovers from a wrong verdict every 15s; with it, a working session never gets one.
-    if (!shouldReleaseOnVerdict(verdict.rung, this.lastActivityAt, Date.now())) return false;
+    if (
+      !shouldReleaseOnVerdict(
+        verdict.rung,
+        this.lastActivityAt,
+        Date.now(),
+        HEARTBEAT_MS,
+        verdict.age_ms,
+      )
+    )
+      return false;
     process.stderr.write(
       `musterd: session no longer live (${verdict.rung}) — releasing seat presence\n`,
     );

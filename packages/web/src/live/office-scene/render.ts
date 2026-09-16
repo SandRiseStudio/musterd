@@ -3450,7 +3450,7 @@ function deskDock(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: numbe
   const sn = dir === 'S' || dir === 'N';
   // Cradle and slot are sized to the slab they hold — a dock visibly narrower than its laptop reads
   // as the wrong furniture, so these three numbers move together or not at all.
-  box(ctx, fit, mx, my, sn ? 21 : 12, sn ? 12 : 21, 4, '#7c5230', up); // walnut cradle
+  box(ctx, fit, mx, my, sn ? 21 : DOCK_CRADLE_ALONG, sn ? DOCK_CRADLE_ALONG : 21, 4, '#7c5230', up); // walnut cradle
   box(ctx, fit, mx, my, sn ? 17 : 3, sn ? 3 : 17, 1.5, '#54371f', up + 4); // the slot, dark down its length
   if (!docked) return; // nobody has sat down here to work — the slot is empty, and that is the point
   /*
@@ -3636,6 +3636,10 @@ const LAMP_ACROSS = 42;
  * see render.test.ts, which walks every facing against the widest setup on the floor.
  */
 const DOCK_ALONG = 26;
+
+/** The cradle's footprint along the facing — the piece that must be standing on furniture. Named
+ *  because the bench has to reason about it: `deskDock` drew it as a bare 12 and nothing could ask. */
+export const DOCK_CRADLE_ALONG = 12;
 /* 40 → 38. The dock sits outboard, and `|dockAcross| + DOCK_HALF_ACROSS` must stay within the slab's
    half-width (DESK_W / 2 = 50) or the cradle hangs off the desk edge. When the docked laptop grew from
    20 to 24 across (#1394) that sum went to 52 and the stands started reading as though they were in
@@ -3675,6 +3679,59 @@ export function deskPropSort(dir: Dir, along: number, across: number): number {
   const f = FWD[dir];
   const p: [number, number] = [-f[1], f[0]];
   return f[0] * along + p[0] * across + (f[1] * along + p[1] * across);
+}
+
+/**
+ * Where a bench seat's monitor and dock stand — DERIVED FROM THE COUNTER, because the bench is not a
+ * pod desk and the pod desk's constants do not fit on it.
+ *
+ * `DOCK_ALONG` (26) and `DOCK_ACROSS` (38) are tuned to DESK_D 68 / DESK_W 100, and the comment on
+ * DOCK_ACROSS is explicit that 38 + DOCK_HALF_ACROSS lands on the pod slab's edge "exactly". The
+ * bench counter is BENCH.deep (30) deep and each seat owns BENCH.long / BENCH.seats (75) of the top.
+ * Handed the pod numbers, the dock stood 17 units past the counter's back edge — in the air — and
+ * leaned 12.5 units into the next seat. nick saw it on /live as laptops floating in front of the
+ * monitors, 2026-09-15.
+ *
+ * The monitor already did this right (`BENCH.deep / 2 - 12`); these two put the dock on the same
+ * footing, so both props are functions of the furniture rather than one of each.
+ */
+export function benchMonitorAt(slot: { lx: number; ly: number; dir: Dir }): { lx: number; ly: number } {
+  return benchAt(slot, BENCH.deep / 2 - 12, 0);
+}
+
+export function benchDockAt(slot: { lx: number; ly: number; dir: Dir; id: number }): { lx: number; ly: number } {
+  // As far back as the cradle can stand with its whole footprint on the counter…
+  const along = BENCH.deep / 2 - DOCK_CRADLE_ALONG / 2;
+  // …and outboard to the edge of THIS seat's share, on the side whose sort term subtracts — the same
+  // rule `dockAcross` applies on a pod desk, measured against the width this seat actually has.
+  const room = BENCH.long / BENCH.seats / 2 - DOCK_HALF_ACROSS;
+  const across = Math.sign(dockAcross(slot.dir)) * room;
+  return benchAt(slot, along, across);
+}
+
+/** Desk-relative (along-facing, across-shoulders) → floor, for a bench seat. */
+function benchAt(
+  slot: { lx: number; ly: number; dir: Dir },
+  along: number,
+  across: number,
+): { lx: number; ly: number } {
+  const f = FWD[slot.dir];
+  const p: [number, number] = [-f[1], f[0]];
+  return { lx: slot.lx + f[0] * along + p[0] * across, ly: slot.ly + f[1] * along + p[1] * across };
+}
+
+/** A bench prop's paint key, in floor coords — `deskPropSort` reached through the seat's own frame,
+ *  so the bench and the pod desks order their props by one rule rather than two. */
+export function benchPropSort(
+  slot: { lx: number; ly: number; dir: Dir },
+  at: { lx: number; ly: number },
+): number {
+  const f = FWD[slot.dir];
+  const p: [number, number] = [-f[1], f[0]];
+  const dx = at.lx - slot.lx;
+  const dy = at.ly - slot.ly;
+  // Project the offset back onto (along, across) — the basis is orthonormal, so a dot product each.
+  return deskPropSort(slot.dir, f[0] * dx + f[1] * dy, p[0] * dx + p[1] * dy);
 }
 
 /**
@@ -3830,7 +3887,7 @@ function drawWorkstation(
   const at = (along: number, across: number, fn: (ix: number, iy: number) => void): void => {
     const ix = lx + f[0] * along + p[0] * across;
     const iy = ly + f[1] * along + p[1] * across;
-    props.push({ sum: f[0] * along + p[0] * across + (f[1] * along + p[1] * across), fn: () => fn(ix, iy) });
+    props.push({ sum: deskPropSort(dir, along, across), fn: () => fn(ix, iy) });
   };
 
   // The monitor at the back, then the keyboard + mouse pulled in to where a seated member's hands actually
@@ -3941,17 +3998,25 @@ function benchStation(
   atWork = false,
 ): void {
   const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(slot.id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
-  monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, atWork, DESK_UP, slot.id, t);
-  // A bench seat is a workstation like any other, so it docks like one — same cradle, same rule. The
-  // bench faces N, so the across term subtracts at −DOCK_ACROSS (see the note on the constant).
-  {
-    const f = FWD[slot.dir];
-    const c = dockAcross(slot.dir);
-    const dx = slot.lx + f[0] * DOCK_ALONG - f[1] * c;
-    const dy = slot.ly + f[1] * DOCK_ALONG + f[0] * c;
-    deskDock(ctx, fit, dx, dy, slot.dir, DESK_UP, atWork);
-  }
-  deskKeyboard(ctx, fit, slot.lx, slot.ly - KEYBOARD_ALONG, true, DESK_UP, kbShoulder);
+  /*
+   * Sorted back-to-front, exactly as `drawWorkstation` sorts its own props — it used to be three
+   * sequential calls, so the dock painted over the monitor by CALL ORDER at every facing no matter
+   * where it stood. Geometry decides this now, which is the only way it can stay right when a prop
+   * moves (nick, on /live: "the laptop stands look like they are floating in front of the monitors").
+   */
+  const kbAt = benchAt(slot, KEYBOARD_ALONG, 0); // same frame drawWorkstation uses: `at(KEYBOARD_ALONG, 0)`
+  const props: { sum: number; fn: () => void }[] = [
+    { sum: benchPropSort(slot, benchMonitorAt(slot)), fn: () => {
+      const m = benchMonitorAt(slot);
+      monitor(ctx, fit, m.lx, m.ly, slot.dir, atWork, DESK_UP, slot.id, t);
+    } },
+    { sum: benchPropSort(slot, benchDockAt(slot)), fn: () => {
+      const d = benchDockAt(slot);
+      deskDock(ctx, fit, d.lx, d.ly, slot.dir, DESK_UP, atWork);
+    } },
+    { sum: benchPropSort(slot, kbAt), fn: () => deskKeyboard(ctx, fit, kbAt.lx, kbAt.ly, true, DESK_UP, kbShoulder) },
+  ];
+  for (const prop of props.sort((a, b) => a.sum - b.sum)) prop.fn();
 }
 
 export interface SceneAnchors {
@@ -4115,6 +4180,179 @@ export function actorSortAnchor(
 }
 
 /**
+ * Every depth item one desk station contributes: the slab, the room-side half again at the front
+ * edge, and the chair in two pieces (plus a stepped-away owner's jacket). `renderScene` spreads these
+ * into the floor's single sort, exactly as it does `nookItems` and `receptionItems`.
+ *
+ * It is a FUNCTION rather than inline pushes because /character-sheet needs the same station, and a
+ * fixture that draws its own approximation of a desk is worse than no fixture: it drifts from the room
+ * and then shows the wrong picture confidently. Three defects in two days came from one rule written
+ * down in two places (#1397 slab key vs seated forearms, #1404 dock width vs DOCK_HALF_ACROSS, #1430
+ * deskNeighbourPairs vs deskNeighbours). The sheet's paint order is the room's paint order here by
+ * construction, not by someone having re-read this correctly.
+ *
+ * The body itself is NOT here — it sorts in the pose loop, at `actorDepth`, with its forearms coming
+ * back a second time at `seatedArmsDepth`. Those two keys are exported beside this for the same reason.
+
+ */
+export function deskStationItems(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  slot: DeskSlot,
+  node: OfficeNode | null,
+  opts: {
+    /** The owner's pose, if they are at this desk — decides seated-ness and carries the chair beats. */
+    ownerPose?: Pose | null | undefined;
+    teamName: string;
+    /** A kept, bodiless desk: an offline owner's, or a stepped-away member's (§4). */
+    deskOwned?: boolean | undefined;
+    t?: number | undefined;
+    /** Props currently "in the owner's hand" (the sip mug, the errand's bottle) — skipped this frame. */
+    hide?: Set<PropKind> | undefined;
+    lampsOn?: boolean | undefined;
+  },
+): { items: DepthItem[]; lampLit: boolean } {
+  const out: DepthItem[] = [];
+  const ownerPose = opts.ownerPose ?? undefined;
+  const deskOwned = opts.deskOwned ?? false;
+  const teamName = opts.teamName;
+  const hide = opts.hide;
+  const t = opts.t ?? 0;
+  const env = { lampsOn: opts.lampsOn ?? false };
+  const litLamps = new Set<number>();
+  // The desk comes to life only once its owner has actually walked over and sat down — screen,
+  // dock and the room's typing all off this one fact (`workingAtDesk`). Same `sit > 0.9` the chair
+  // pieces use two blocks below, so it lands on the frame the body settles into the chair, not the
+  // frame the roster changed.
+  const seatedWorking = workingAtDesk(node ?? undefined, ownerPose?.sit);
+  /* Where this desk's own sitter sorts, or null for an empty desk — the one input `deskNearDepth`
+     cannot get from geometry. Same `actorSortAnchor` the member's own item uses, so the desk and
+     the body cannot disagree about where the body is. */
+  const seatedHere = (() => {
+    if (!ownerPose) return null;
+    const a = actorSortAnchor(ownerPose, slot, undefined);
+    return a.seatedAtDesk ? { lx: a.lx, ly: a.ly } : null;
+  })();
+  if (slot.kind === 'bench') {
+    // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
+    // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
+    out.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t, seatedWorking) });
+  } else {
+    if (node && !deskOwned && env.lampsOn) litLamps.add(slot.id);
+    out.push({
+      /* CENTRE, not the near corner. #1394 moved this to `nearDepth` to stop a member standing in
+         front of a desk painting behind it. That reasoning was incomplete: a desk facing N or W puts
+         its CHAIR on the near side, so its own seated member legitimately keys HIGHER than the desk
+         centre and paints in front of it. Pushing the slab 84 units forward beat them, and a sitter
+         at such a desk lost their head and torso into it — not merely their legs, which is the only
+         part a desk is supposed to take (nick, on the broadcast, 2026-09-14).
+
+         A single scalar key per item cannot say both "in front of this desk's front edge" and
+         "behind its back edge" — the passer-by and the sitter want opposite answers out of the same
+         comparison. The fix is to split the desk into front and back items, the way the chair
+         already splits into base and back, not to pick a different constant. Reverted here; the
+         split is not a hotfix and was not attempted here.
+
+       THE SPLIT LANDED (#1410, 129e45e8): it is the `deskNearHalf` item pushed directly below, which
+       redraws the room-side half at the FRONT EDGE's key while never keying past this desk's own
+       sitter. This desk key stays at the CENTRE and that is now the settled answer, not a pending
+       revert — the paragraph above is kept because it is the reasoning, not because anything is owed. */
+      d: depth(slot.lx, slot.ly),
+      fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
+    });
+    // The room-side half again, at the FRONT EDGE's depth — so a member standing in front of this
+    // desk paints in front of it. Additive by construction: the same pixels in the same colours, so
+    // on empty floor the second pass is invisible. It changes the picture only where a body has
+    // landed between the two keys, and there it is the right answer. See `deskNearHalf` for why
+    // the desk's own key cannot simply move (#1394, #1400).
+    out.push({ d: deskNearDepth(slot, seatedHere), fn: () => deskNearHalf(ctx, fit, slot) });
+  }
+  // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
+  // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
+  // the two instead of being swallowed by a single chair box.
+  //
+  // Chair beats move the chair with its sitter: roll-back slides both pieces straight back from the
+  // desk; swivel swings the backrest around the seat centre — the same pure curves the actor system
+  // applies to the body, so chair and member can never drift apart.
+  const f = FWD[slot.dir];
+  const seated = !!ownerPose && ownerPose.sit > 0.9;
+  const shift = seated ? chairShift(ownerPose.gesture, ownerPose.gestureT) : 0;
+  const yaw = seated ? chairYaw(ownerPose.gesture, ownerPose.gestureT) : 0;
+  // A vacant chair at a desk that faces the viewer is parked BEHIND the slab in this projection —
+  // fully hidden, so the desk reads as chairless (nick, 2026-08-31: the kimi desk). Roll it back
+  // far enough to emerge past the desk's far edge, the way a real chair sits pushed out when its
+  // owner is away. Facing is measured on screen, not guessed from the dir name.
+  const fScreen = project(slot.lx + f[0] * 10, slot.ly + f[1] * 10, fit).y - project(slot.lx, slot.ly, fit).y;
+  const vacantPeek = !seated && fScreen > 0 ? 16 : 0;
+  const cx = slot.lx - f[0] * (CHAIR_OFF + shift + vacantPeek);
+  const cy = slot.ly - f[1] * (CHAIR_OFF + shift + vacantPeek);
+  const bdx = -f[0] * CHAIR_BACK_OFF;
+  const bdy = -f[1] * CHAIR_BACK_OFF;
+  const bx = cx + bdx * Math.cos(yaw) - bdy * Math.sin(yaw);
+  const by = cy + bdx * Math.sin(yaw) + bdy * Math.cos(yaw);
+  const chairColor = node ? hslL(node.color, 0.5) : '#4a5560';
+  const chairStyle = chairStyleFor(slot.id);
+  out.push({ d: depth(cx, cy) - 0.2, fn: () => chairBase(ctx, fit, cx, cy, slot.dir, chairColor, chairStyle) });
+  out.push({ d: depth(bx, by), fn: () => chairBack(ctx, fit, bx, by, slot.dir, chairColor, chairStyle) });
+  // Stepped-away texture (§4 lane 4): a jacket in the owner's colour draped over the chair back —
+  // the visual half of the plate's "stepped away"; offline owners get no jacket (they went home).
+  if (deskOwned && node && node.presence !== 'offline') {
+    const jx = bx;
+    const jy = by;
+    const jc = hslL(node.color, 0.42);
+    out.push({
+      d: depth(jx, jy) + 0.01,
+      fn: () => {
+        const b = project(jx, jy, fit);
+        const wJ = 16 * fit.scale;
+        const hJ = 13 * fit.scale;
+        const top = b.y - 30 * fit.scale;
+        ctx.fillStyle = jc;
+        ctx.beginPath();
+        ctx.moveTo(b.x - wJ / 2, top);
+        ctx.lineTo(b.x + wJ / 2, top);
+        ctx.lineTo(b.x + wJ / 2 - 2 * fit.scale, top + hJ);
+        ctx.lineTo(b.x - wJ / 2 + 2 * fit.scale, top + hJ);
+        ctx.closePath();
+        ctx.fill();
+      },
+    });
+  }
+  return { items: out, lampLit: litLamps.has(slot.id) };
+}
+
+/**
+ * Where this desk seats somebody: the chair, one `CHAIR_OFF` back from the desk centre along its
+ * facing. Exported because WHERE A SITTER GOES AT A DESK is the room's knowledge, not its caller's —
+ * /character-sheet deriving it from `CHAIR_OFF` and `FWD` itself would be a second spelling of the
+ * chair's position, which is the drift `deskStationItems` exists to prevent, one value along.
+ *
+ * `actorSortAnchor` reads the same offset to decide a pose is "at their own desk", so a body placed
+ * here is recognised as seated rather than as a walker who happens to be standing nearby.
+ */
+export function deskSeat(slot: { lx: number; ly: number; dir: Dir }): { lx: number; ly: number } {
+  const f = FWD[slot.dir];
+  return { lx: slot.lx - f[0] * CHAIR_OFF, ly: slot.ly - f[1] * CHAIR_OFF };
+}
+
+/**
+ * Where a member's body sorts: their own floor anchor, a hair in front of it. The `+ 0.1` breaks the
+ * tie with anything keyed at the identical point (a queue pad, a rug edge) in the body's favour.
+ */
+export function actorDepth(lx: number, ly: number): number {
+  return depth(lx, ly) + 0.1;
+}
+
+/**
+ * Where a seated member's FOREARMS come back, on top of the desk they rest on. Tracks the slab's own
+ * key one constant away on purpose: when the slab moved and this did not, the desk painted over the
+ * arms resting on it (#1397). Read by the room and by /character-sheet — never spelled out twice.
+ */
+export function seatedArmsDepth(slot: { lx: number; ly: number }): number {
+  return depth(slot.lx, slot.ly) + 0.05;
+}
+
+/**
  * Draw the whole office in painter's order, returning per-member screen anchors. Desks are drawn empty;
  * each present member is drawn as a free actor at its current `poses` entry (home seat when idle, or
  * interpolated mid-walk), so seated and walking members depth-sort against desks the same way.
@@ -4226,99 +4464,16 @@ export function renderScene(
     if (sipping) hidden.push('coffee');
     if (name && fx?.bottleCarriers.has(name)) hidden.push('water');
     const hide = hidden.length ? new Set<PropKind>(hidden) : undefined;
-    // The desk comes to life only once its owner has actually walked over and sat down — screen,
-    // dock and the room's typing all off this one fact (`workingAtDesk`). Same `sit > 0.9` the chair
-    // pieces use two blocks below, so it lands on the frame the body settles into the chair, not the
-    // frame the roster changed.
-    const seatedWorking = workingAtDesk(node ?? undefined, ownerPose?.sit);
-    /* Where this desk's own sitter sorts, or null for an empty desk — the one input `deskNearDepth`
-       cannot get from geometry. Same `actorSortAnchor` the member's own item uses, so the desk and
-       the body cannot disagree about where the body is. */
-    const seatedHere = (() => {
-      if (!ownerPose) return null;
-      const a = actorSortAnchor(ownerPose, slot, undefined);
-      return a.seatedAtDesk ? { lx: a.lx, ly: a.ly } : null;
-    })();
-    if (slot.kind === 'bench') {
-      // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
-      // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
-      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t, seatedWorking) });
-    } else {
-      if (node && !deskOwned && env.lampsOn) litLamps.add(slot.id);
-      items.push({
-        /* CENTRE, not the near corner. #1394 moved this to `nearDepth` to stop a member standing in
-           front of a desk painting behind it. That reasoning was incomplete: a desk facing N or W puts
-           its CHAIR on the near side, so its own seated member legitimately keys HIGHER than the desk
-           centre and paints in front of it. Pushing the slab 84 units forward beat them, and a sitter
-           at such a desk lost their head and torso into it — not merely their legs, which is the only
-           part a desk is supposed to take (nick, on the broadcast, 2026-09-14).
-
-           A single scalar key per item cannot say both "in front of this desk's front edge" and
-           "behind its back edge" — the passer-by and the sitter want opposite answers out of the same
-           comparison. The fix is to split the desk into front and back items, the way the chair
-           already splits into base and back, not to pick a different constant. Reverted here; the
-           split is lane 01M2GP6CZ1's neighbour, not a hotfix. */
-        d: depth(slot.lx, slot.ly),
-        fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
-      });
-      // The room-side half again, at the FRONT EDGE's depth — so a member standing in front of this
-      // desk paints in front of it. Additive by construction: the same pixels in the same colours, so
-      // on empty floor the second pass is invisible. It changes the picture only where a body has
-      // landed between the two keys, and there it is the right answer. See `deskNearHalf` for why
-      // the desk's own key cannot simply move (#1394, #1400).
-      items.push({ d: deskNearDepth(slot, seatedHere), fn: () => deskNearHalf(ctx, fit, slot) });
-    }
-    // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
-    // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
-    // the two instead of being swallowed by a single chair box.
-    //
-    // Chair beats move the chair with its sitter: roll-back slides both pieces straight back from the
-    // desk; swivel swings the backrest around the seat centre — the same pure curves the actor system
-    // applies to the body, so chair and member can never drift apart.
-    const f = FWD[slot.dir];
-    const seated = !!ownerPose && ownerPose.sit > 0.9;
-    const shift = seated ? chairShift(ownerPose.gesture, ownerPose.gestureT) : 0;
-    const yaw = seated ? chairYaw(ownerPose.gesture, ownerPose.gestureT) : 0;
-    // A vacant chair at a desk that faces the viewer is parked BEHIND the slab in this projection —
-    // fully hidden, so the desk reads as chairless (nick, 2026-08-31: the kimi desk). Roll it back
-    // far enough to emerge past the desk's far edge, the way a real chair sits pushed out when its
-    // owner is away. Facing is measured on screen, not guessed from the dir name.
-    const fScreen = project(slot.lx + f[0] * 10, slot.ly + f[1] * 10, fit).y - project(slot.lx, slot.ly, fit).y;
-    const vacantPeek = !seated && fScreen > 0 ? 16 : 0;
-    const cx = slot.lx - f[0] * (CHAIR_OFF + shift + vacantPeek);
-    const cy = slot.ly - f[1] * (CHAIR_OFF + shift + vacantPeek);
-    const bdx = -f[0] * CHAIR_BACK_OFF;
-    const bdy = -f[1] * CHAIR_BACK_OFF;
-    const bx = cx + bdx * Math.cos(yaw) - bdy * Math.sin(yaw);
-    const by = cy + bdx * Math.sin(yaw) + bdy * Math.cos(yaw);
-    const chairColor = node ? hslL(node.color, 0.5) : '#4a5560';
-    const chairStyle = chairStyleFor(slot.id);
-    items.push({ d: depth(cx, cy) - 0.2, fn: () => chairBase(ctx, fit, cx, cy, slot.dir, chairColor, chairStyle) });
-    items.push({ d: depth(bx, by), fn: () => chairBack(ctx, fit, bx, by, slot.dir, chairColor, chairStyle) });
-    // Stepped-away texture (§4 lane 4): a jacket in the owner's colour draped over the chair back —
-    // the visual half of the plate's "stepped away"; offline owners get no jacket (they went home).
-    if (deskOwned && node && node.presence !== 'offline') {
-      const jx = bx;
-      const jy = by;
-      const jc = hslL(node.color, 0.42);
-      items.push({
-        d: depth(jx, jy) + 0.01,
-        fn: () => {
-          const b = project(jx, jy, fit);
-          const wJ = 16 * fit.scale;
-          const hJ = 13 * fit.scale;
-          const top = b.y - 30 * fit.scale;
-          ctx.fillStyle = jc;
-          ctx.beginPath();
-          ctx.moveTo(b.x - wJ / 2, top);
-          ctx.lineTo(b.x + wJ / 2, top);
-          ctx.lineTo(b.x + wJ / 2 - 2 * fit.scale, top + hJ);
-          ctx.lineTo(b.x - wJ / 2 + 2 * fit.scale, top + hJ);
-          ctx.closePath();
-          ctx.fill();
-        },
-      });
-    }
+    const station = deskStationItems(ctx, fit, slot, node, {
+      ownerPose,
+      teamName,
+      deskOwned,
+      t,
+      hide,
+      lampsOn: env.lampsOn,
+    });
+    if (station.lampLit) litLamps.add(slot.id);
+    items.push(...station.items);
   }
 
   // Queue lane: a faint pad under each overflow (strip) member so the entrance line reads as a designated
@@ -4339,7 +4494,7 @@ export function renderScene(
     const spot = pl?.kind === 'leisure' ? LEISURE_SPOTS[pl.spot] : undefined;
     const anchor = actorSortAnchor(pose, slot, spot);
     const seated = anchor.seatedAtDesk && slot;
-    const d = depth(anchor.lx, anchor.ly) + 0.1;
+    const d = actorDepth(anchor.lx, anchor.ly);
     // The desk mug travels with a sipping owner — passed down so the hand mug matches the desk mug.
     const mug = seated && pose.gesture === GESTURE.sip ? deskMugColor(slot.id) : undefined;
     items.push({ d, fn: () => drawActor(ctx, fit, pose, node, t, false, mug) });
@@ -4351,10 +4506,7 @@ export function renderScene(
     // hands into the lap — lap arms painted over the slab would float on the desk.
     if (seated && !handsInLap(pose.gesture, pose.gestureT)) {
       items.push({
-        /* Tracks the slab's key — both are `depth(slot)` again after the #1394 revert. They stay one
-           expression apart by a constant on purpose: when the slab moved and this did not, the desk
-           painted over the forearms that rest on it (#1397). */
-        d: depth(slot.lx, slot.ly) + 0.05,
+        d: seatedArmsDepth(slot),
         fn: () => drawActor(ctx, fit, pose, node, t, true, mug),
       });
     }

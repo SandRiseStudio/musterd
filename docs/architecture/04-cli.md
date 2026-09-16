@@ -39,8 +39,9 @@ src/
   process.ts          // injected synchronous process runner: missing binary → code 127, shared by read-only inspectors
   errors.ts           // CliError(code) -> message + exit code
   exit.ts             // exitAfterFlush: exit only once stdout+stderr have drained — a piped render was cut at 64 KB by a bare process.exit()
-  integrations/       // optional external integration inspectors (ADR 385)
+  integrations/       // optional external integration inspectors and generated-policy support (ADR 385/400)
     aperture.ts        // HuJSON config parsing + secret-safe Aperture retention/provider/grant/quota/identity posture checks
+    governed-models.ts // committed roster + provider-neutral policy resolver and deterministic Aperture artifact renderer
     report.ts          // stable report composition + exact terminal rendering for independent optional postures
     tailscale.ts       // typed Tailscale status/Serve parsing + bounded Host-gate upgrade probe; no mutation commands
   help/               // the structured command catalog behind `musterd help` (ADR 113)

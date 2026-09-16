@@ -16,7 +16,8 @@ receiving — and the thing that feels broken is somewhere else entirely.
 
 ## What already exists, verified 2026-08-05
 
-- **[ADR 191](../decisions/191-review-loop-wake.md) review-loop wake.** `lane_ready` spends a wake on
+- **[ADR 191](../decisions/191-review-loop-wake.md) review-loop wake.** `lane_submit` (spelled
+  `lane_ready` when this was verified; the alias was removed 2026-09-03) spends a wake on
   an enrolled cross-family seat drawn from `wake_pool`, behind two default-off toggles and a loop
   breaker.
 - **It is armed on the dogfood team.** Team policy reads

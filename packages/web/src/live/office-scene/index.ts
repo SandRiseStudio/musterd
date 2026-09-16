@@ -48,7 +48,7 @@ import {
   type Cue,
   type ScenePalette,
 } from './render';
-import { GESTURE } from './skeleton';
+import { GESTURE, isIdleGesture } from './skeleton';
 import type { WallBoard } from './wallboard';
 import {
   enqueueSpeech,
@@ -1332,6 +1332,7 @@ export function mountOffice(
   // capture fps while `ticks` tracks rAF — the gap is the waste the draw-rate cap removes.
   let ticks = 0;
   let draws = 0;
+  let beats = 0; // drift-heartbeat frames — the only counter that moves in a parked room
   const since = performance.now();
   function tick(now: number) {
     ticks++;
@@ -1416,6 +1417,7 @@ export function mountOffice(
         return;
       }
       clock += DRIFT_FRAME_MS / 1000;
+      beats++;
       drawDynamic();
     }, DRIFT_FRAME_MS);
   }
@@ -1427,6 +1429,20 @@ export function mountOffice(
       acc = 0;
       raf = requestAnimationFrame(tick);
     }
+  }
+
+  /** Is anything actually happening right now? One home — two doors used to spell this out separately. */
+  const alive = () => living() || actors.active() || cues.length > 0;
+  /*
+   * Coming back to a room that stopped being watched. There are two doors — the tab becoming visible
+   * again and the panel re-expanding — and they ask the SAME question: the loop if the room is alive,
+   * the slow breath if it is not. #1430 answered it twice and they disagreed; the collapse door
+   * painted one resting frame and left a quiet office frozen for the rest of the session while the
+   * visibility door resumed the breath. So neither door decides any more: they both come here.
+   */
+  function reengage() {
+    if (alive()) ensureLoop();
+    else ensureDrift();
   }
 
   // ── Ambient micro-choreography scheduler (ADR 086 Phase 2) ──────────────────────────────────────────
@@ -1934,8 +1950,7 @@ export function mountOffice(
       stopDrift(); // a hidden tab draws nothing at all, heartbeat included
       return;
     }
-    if (living() || actors.active() || cues.length) ensureLoop();
-    else ensureDrift(); // back on screen with nothing happening: resume the slow breath
+    reengage(); // back on screen: the loop if anything is happening, the slow breath if not
   };
   document.addEventListener('visibilitychange', onVisibility);
 
@@ -1959,7 +1974,7 @@ export function mountOffice(
   return {
     update,
     emit,
-    stats: () => ({ ticks, draws, since }),
+    stats: () => ({ ticks, draws, beats, since }),
     ambientLog: () => [...ambientLog],
     floorSamples: () =>
       [...actors.poses()].map(([name, p]) => ({
@@ -1989,11 +2004,19 @@ export function mountOffice(
         // re-expand; the loop only re-engages if the room is actually alive.
         refreshLightEnv();
         bake();
-        if (living() || actors.active() || cues.length) ensureLoop();
-        else paintResting();
+        // One fresh frame NOW so the re-expand is instant — the heartbeat's first tick is 250ms out,
+        // and a rAF frame is a frame away; neither is soon enough to hide behind.
+        paintResting();
+        reengage();
       }
     },
     pokeGesture: (kind = 1) => {
+      // The only door a gesture id comes through as a plain number — `/office-preview?beat=<n>` hands
+      // it straight from the URL. Everything inside is typed `IdleGesture`; this is where a number
+      // becomes one, or is refused. An errand overlay (browse/fill/eat/pour/call) has no scheduler
+      // window, and before this guard it reached `gestureBeat` with `dur: undefined` and froze that
+      // member for the rest of the session.
+      if (!isIdleGesture(kind)) return null;
       // Same path as the ambient scheduler's gesture beat, but on demand — try idle desk members until
       // one accepts (gestureBeat rejects a small/walking/already-gesturing member).
       for (const who of actors.idleDeskMembers()) {

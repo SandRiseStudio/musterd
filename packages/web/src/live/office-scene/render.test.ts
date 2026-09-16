@@ -1,8 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { homePoses } from './actors';
 import { memberColor } from '../format';
 import { depth, fitFloor, project } from './iso';
-import { CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
+import { BENCH, CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import {
@@ -13,8 +15,16 @@ import {
   CLOCK_NUMERALS,
   coffeeAnchor,
   contactPool,
+  actorDepth,
   deskNearDepth,
   deskPropSort,
+  DOCK_CRADLE_ALONG,
+  benchDockAt,
+  benchMonitorAt,
+  benchPropSort,
+  deskSeat,
+  deskStationItems,
+  seatedArmsDepth,
   DOCK_HALF_ACROSS,
   dockAcross,
   drawCue,
@@ -952,5 +962,165 @@ describe('the desk near half (the correct version of the reverted #1394)', () =>
       const slot = slotAt(dir);
       expect(deskNearDepth(slot, seatOf(dir))).toBeLessThanOrEqual(deskNearDepth(slot, null));
     }
+  });
+});
+
+/**
+ * Lane 01M2K1G140. /character-sheet drew a seated member as a body alone in mid-air, so the one tool
+ * built to judge bodies at 4x could not show a seated beat at all — no slab for forearms to rest on,
+ * no chair for a roll beat to move, and nothing for `handsInLap` to suppress. That is how #1394's
+ * regression (a desk burying a sitter's head and torso at N/W) reached the live broadcast.
+ *
+ * The sheet now draws the real station. These pin the thing that makes that safe rather than merely
+ * nicer-looking: the room and the fixture read ONE set of depth keys. A fixture with its own copy of
+ * the paint order drifts, and a drifted fixture is worse than none — it is confidently wrong, which
+ * is precisely the failure this repo paid for three times in two days (#1397, #1404, #1430).
+ */
+describe('one station, one set of keys — the room and the character sheet', () => {
+  const FACINGS = ['N', 'S', 'E', 'W'] as const;
+  const slotAt = (dir: (typeof FACINGS)[number]) => ({ id: 0, lx: 400, ly: 400, dir, pod: -1, kind: 'pod' as const });
+  const ctx = mockCtx();
+  const FIT = fitFloor(1200, 900);
+
+  it('builds the station every facing needs: slab, near half, and the chair in two pieces', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      const { items } = deskStationItems(ctx, FIT, slot, null, { teamName: 'revive' });
+      expect(items.length, `a ${dir} desk`).toBe(4);
+      // The slab first, its room-side half after it — the whole point of the #1410 split.
+      expect(items[1]!.d).toBeGreaterThan(items[0]!.d);
+    }
+  });
+
+  it('the near half is the same key `deskNearDepth` reports — not a second spelling of it', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      const { items } = deskStationItems(ctx, FIT, slot, null, { teamName: 'revive' });
+      expect(items[1]!.d).toBe(deskNearDepth(slot, null));
+    }
+  });
+
+  /*
+   * My first cut of this asserted the backrest always paints AFTER the cushion, and it went red on S
+   * — correctly. An S-facing member faces the viewer, so their chair is BEHIND them and both pieces
+   * belong in front of nothing; at N the chair stands between viewer and member and the backrest
+   * must cover their back. The claim is not "backrest last", it is that the chair is on the opposite
+   * side of the sitter from their desk, and the backrest is the far end of it. That is facing-general;
+   * "backrest last" was S-shaped thinking dressed up as an invariant.
+   */
+  it('the sitter sits on the cushion at every facing, and the chair runs away from the desk', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      const seat = deskSeat(slot);
+      const { items } = deskStationItems(ctx, FIT, slot, null, { teamName: 'revive' });
+      const [slab, , base, back] = [items[0]!, items[1]!, items[2]!, items[3]!];
+      const body = actorDepth(seat.lx, seat.ly);
+      // You always paint over the cushion you are sitting on — a chair drawn as ONE box swallows the
+      // sitter from the waist down at whichever facing it sorts wrongly on, which is why it is two.
+      expect(body, `${dir}: the sitter must paint over the cushion`).toBeGreaterThan(base.d);
+      // Desk → cushion → backrest runs one way, whichever way the desk faces. If the backrest ever
+      // doubled back toward the desk it would land on the wrong side of the body at that facing.
+      expect(
+        Math.sign(back.d - base.d),
+        `${dir}: the backrest must continue away from the desk, not back toward it`,
+      ).toBe(Math.sign(base.d - slab.d));
+    }
+  });
+
+  it('seated forearms come back on top of the slab, one constant after it — #1397', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      const { items } = deskStationItems(ctx, FIT, slot, null, { teamName: 'revive' });
+      expect(seatedArmsDepth(slot)).toBeGreaterThan(items[0]!.d);
+      // …and still before the near half, which is the desk edge in FRONT of the arms.
+      expect(seatedArmsDepth(slot)).toBeLessThan(items[1]!.d);
+    }
+  });
+
+  it('the character sheet spells no depth key of its own — it asks for the room’s', () => {
+    const sheet = readFileSync(
+      fileURLToPath(new URL('../../routes/character-sheet.tsx', import.meta.url)),
+      'utf8',
+    );
+    // It goes through the shared builder and the shared keys…
+    for (const fn of ['deskStationItems', 'deskSeat', 'actorDepth', 'seatedArmsDepth', 'actorSortAnchor']) {
+      expect(sheet, `the sheet must reach for ${fn}`).toContain(fn);
+    }
+    // …and it honours the overlay's own gate, so a beat that drops the hands into the lap does not
+    // paint lap arms floating on the desk. A sheet that always drew the overlay would HIDE that bug.
+    expect(sheet).toContain('handsInLap');
+    // …and it never computes a sort key OR a chair position itself. Either one in this file is a
+    // second home for something the room already knows, and a fixture that drifts is worse than none.
+    expect(sheet).not.toMatch(/\bdepth\(/);
+    expect(sheet, 'the sheet must not derive the chair from CHAIR_OFF/FWD').not.toMatch(/CHAIR_OFF|\bFWD\b/);
+  });
+});
+
+/**
+ * nick, watching /live 2026-09-15: "in the row of desks on the northeast wall, all the laptop
+ * stands/laptops look like they are floating in front of the monitors." That row is the BENCH — the
+ * four-seat shared counter, the only run of seats against a wall.
+ *
+ * Two independent defects put them there, and a third is why no test said so.
+ *
+ * `benchStation` placed the dock with `DOCK_ALONG`/`DOCK_ACROSS`, which are sized against a POD desk
+ * (DESK_D 68, DESK_W 100). The bench counter is 30 deep and each seat's share of the top is 75, so
+ * the dock stood 17 units past the back edge — in the air — and leaned 12.5 units into its
+ * neighbour's seat. The monitor one line above already derived its own position from `BENCH.deep`;
+ * the dock beside it got the pod constants verbatim. One prop knew what furniture it was standing on.
+ *
+ * And `benchStation` painted monitor → dock → keyboard in CALL ORDER, with no depth sort at all,
+ * while `drawWorkstation` sorts every prop. So the dock painted over the monitor at every facing
+ * regardless of where it was — which is why it read as "in front of" rather than as a near miss.
+ */
+describe('the bench row: a dock has to be standing on the counter it is docked to', () => {
+  const seatShare = BENCH.long / BENCH.seats;
+  const benchSeats = DESK_SLOTS.filter((s) => s.kind === 'bench');
+
+  it('has the four seats this is about', () => {
+    expect(benchSeats).toHaveLength(BENCH.seats);
+  });
+
+  it('every dock stands entirely ON the counter, not out past its back edge', () => {
+    for (const slot of benchSeats) {
+      const { lx, ly } = benchDockAt(slot);
+      // The cradle's own footprint, not just its centre: an overhanging edge is the visible defect.
+      const backEdge = BENCH.ly - BENCH.deep / 2;
+      const frontEdge = BENCH.ly + BENCH.deep / 2;
+      expect(ly - DOCK_CRADLE_ALONG / 2, `seat ${slot.id} hangs off the BACK of the counter`).toBeGreaterThanOrEqual(backEdge);
+      expect(ly + DOCK_CRADLE_ALONG / 2, `seat ${slot.id} hangs off the FRONT of the counter`).toBeLessThanOrEqual(frontEdge);
+      expect(Number.isFinite(lx)).toBe(true);
+    }
+  });
+
+  it('every dock stays inside its own seat’s share of the counter', () => {
+    for (const slot of benchSeats) {
+      const { lx } = benchDockAt(slot);
+      const off = Math.abs(lx - slot.lx) + DOCK_HALF_ACROSS;
+      expect(off, `seat ${slot.id} leans into its neighbour`).toBeLessThanOrEqual(seatShare / 2);
+    }
+  });
+
+  it('the dock paints BEHIND the monitor — by geometry, not by call order', () => {
+    for (const slot of benchSeats) {
+      expect(
+        benchPropSort(slot, benchDockAt(slot)),
+        `seat ${slot.id}: the dock must sort before its monitor`,
+      ).toBeLessThan(benchPropSort(slot, benchMonitorAt(slot)));
+    }
+  });
+
+  /*
+   * `deskPropSort` was exported with the comment "so the dock's 'behind the monitor' claim can be
+   * falsified" — and `drawWorkstation` inlined the identical expression instead of calling it. The
+   * four-facing test below it was therefore checking a COPY of the rule, and would have gone on
+   * passing if the painter's copy drifted. Same trap as #1397, #1404 and #1430, in the one place
+   * that exists to prove this class of thing.
+   */
+  it('the painter asks deskPropSort for its order — it does not keep its own copy of the rule', () => {
+    const src = readFileSync(fileURLToPath(new URL('./render.ts', import.meta.url)), 'utf8');
+    expect(src).toMatch(/sum:\s*deskPropSort\(/);
+    // The inlined spelling must be gone: one home, or the test above proves nothing.
+    expect(src).not.toMatch(/sum:\s*f\[0\] \* along/);
   });
 });

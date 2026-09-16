@@ -67,6 +67,10 @@ export const DATED_RE = /\(20\d\d-\d\d(?:-\d\d)?/;
  *  this gate. Do not read a green run as "no section was eaten". */
 export const HEADING_RE = /^#{1,6}\s/;
 const LINK_RE = /\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g;
+/** Git conflict markers. `<<<<<<<` / `>>>>>>>` are unambiguous; a lone `=======` is also a
+ *  setext H1 underline, so it is not flagged. Measured 2026-09-15: #1431 (925b9e70) landed both
+ *  sides into `cloud-seat-from-inside.md` and `wiki:check` was green. */
+export const CONFLICT_RE = /^(?:<{7}|>{7})(?:\s|$)/;
 
 /** Headings of a page paired with the first non-blank line beneath each — fence-aware, so a
  *  `## <Section>` inside the README's template block is text, not structure, and marker-blind, so
@@ -168,6 +172,11 @@ export function checkWiki(dir: string): string[] {
         return;
       }
       if (line.trim() !== '') pending = null;
+      if (CONFLICT_RE.test(line)) {
+        failures.push(
+          `${name}:${i + 1} — leftover git conflict marker: "${line.trim().slice(0, 80)}"`,
+        );
+      }
       if (DEFECT_RE.test(line) && !DATED_RE.test(line)) {
         failures.push(
           `${name}:${i + 1} — defect-shaped claim needs a date (and a falsifier): "${line.trim().slice(0, 80)}"`,
@@ -238,7 +247,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   process.stdout.write(
-    `✓ wiki clean — index in sync, defect claims in known shapes dated, links live, sections whole${diffChecked ? `, none eaten since ${baseRef}` : ''}\n` +
+    `✓ wiki clean — index in sync, defect claims in known shapes dated, links live, no conflict markers, sections whole${diffChecked ? `, none eaten since ${baseRef}` : ''}\n` +
       `  defect-claim coverage ${cov.covered}/${cov.defects}` +
       ` — ${cov.shapeMisses.length} shape misses (widen DEFECT_RE), ${cov.headingMisses.length} heading misses (never linted)\n`,
   );

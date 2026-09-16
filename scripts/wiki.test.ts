@@ -131,6 +131,25 @@ describe('checkWiki', () => {
     const dir = withIndex({ 'a.md': '# A\n\nSee [gone](missing.md).\n' });
     expect(checkWiki(dir).join('\n')).toMatch(/a\.md.*missing\.md/);
   });
+
+  /* #1431 shipped leftover `<<<<<<< HEAD` / `>>>>>>>` markers into cloud-seat-from-inside.md
+   * (925b9e70). wiki:check was green: it never looked. The production mutant is those two
+   * lines on a live page; `=======` is not flagged on its own (setext underline). */
+  it('fails a leftover git conflict marker, naming file and line', () => {
+    const dir = withIndex({
+      'a.md': '# A\n\nSummary.\n\n<<<<<<< HEAD\nkept\n=======\nincoming\n>>>>>>> ebf56712\n',
+    });
+    const out = checkWiki(dir).join('\n');
+    expect(out).toMatch(/a\.md:5.*conflict/);
+    expect(out).toMatch(/a\.md:9.*conflict/);
+  });
+
+  it('ignores conflict-marker-shaped text inside a fenced code block', () => {
+    const dir = withIndex({
+      'a.md': '# A\n\nSummary.\n\n```\n<<<<<<< HEAD\n```\n',
+    });
+    expect(checkWiki(dir)).toEqual([]);
+  });
 });
 
 describe('checkWiki — orphaned sections', () => {

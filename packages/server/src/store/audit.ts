@@ -115,6 +115,11 @@ export type AuditAction =
   | 'record.tool_calls'
   | 'record.seed_thread'
   | 'record.incident_report'
+  // ADR 399: a relay capture crossing to every node. `detail` carries
+  // `{ relay_id, source, body, captured_at, slack_user_id, by, linked_lane_id, promotion_kind }`,
+  // keyed by `relay_id` for the same reason `seed_thread` is. HUB-minted only — the relay is polled
+  // in one place per team — and the seed's LIFECYCLE never rides along (ADR 371 §3 stands).
+  | 'seed.captured'
   // ADR 101: a harness attested (or re-attested) the model on an occupancy. `detail` carries
   // `{ occupancy, old, new, source: 'claim'|'heartbeat'|'ambient' }` — this append-only trail IS the
   // occupancy's model-switch history (the ADR keeps no history column). `ambient` is ADR 119: a

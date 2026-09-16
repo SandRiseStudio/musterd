@@ -96,3 +96,17 @@ failure — no capacity, bad secrets, a broken entrypoint — stays fatal on the
 retry loop over real errors is how you bill for machines that were never going to run. Same reasoning
 as the prerender crawl's `retryCount: 3`, which exists because one transient fetch failure used to
 fail an entire build.
+
+**The retry reaps before it relaunches (added 2026-09-15).** A `MANIFEST_UNKNOWN` exit is not proof
+that no machine was created — and that is the other half of the sentence the 2026-09-03 note left
+off. `fly machine run` creates the machine and *then* the VM fails to pull the not-yet-published
+digest; the machine keeps trying and comes up on its own once the registry catches up. So the attempt
+being retried may already have produced the very thing being retried for. Observed live 2026-09-15
+starting the hosted broadcast: the "failed" first attempt's machine went `◉ live` 52s later unaided,
+and 3s before that the retry had launched a **second** performance-4x against the same stream key —
+both published, and only Twitch refusing the second publisher kept it to one machine. That is luck
+standing in for a guard, and it is the exact 2026-09-03 duplicate-launch (`supervisor` §above),
+reached through `start`'s own retry rather than the supervisor's crash predicate. `start` now asks
+the same `occupiedMachines` question its top-of-function guard asks *before each relaunch*: if the
+last attempt left an occupying machine, it waits for that machine instead of racing it. The 45s sleep
+was always the right wait; only the second `fly machine run` was wrong.

@@ -704,6 +704,73 @@ describe('deriveHandoffLane (ADR 231) — a handoff act names the lane it hands 
     expect(derived.lane.id).toBe(live.id);
   });
 
+  /*
+   * Lane 01M2KTBDNP, observed on izzo 2026-09-15. I sent a handoff routing a newly opened lane and
+   * the ack came back naming a DIFFERENT one — a lane whose PR had merged minutes earlier and which
+   * was sitting in `awaiting_acceptance`. The candidate filter drops only LANE_TERMINAL_STATES, and
+   * acceptance is not terminal, so a lane whose work has LANDED stayed a handoff candidate.
+   *
+   * There is nothing to hand off in such a lane: the branch is merged, its remote is deleted, and
+   * the only act left is somebody else's accept. Worse, it does not merely annotate the ack — the
+   * route rewrites the envelope's meta with it, so the delivered act permanently carries a pointer
+   * to finished work, and ADR 243's orientation `why` reads exactly that field to tell the recipient
+   * WHICH work this is.
+   *
+   * And it was confident rather than ambiguous: with one such lane held and nothing else, it took
+   * the `length === 1` attach path, so the deliberate "warn and attach nothing" branch never ran.
+   */
+  it('ignores a lane awaiting acceptance — the work landed, there is nothing left to hand over', () => {
+    const { db, team } = seed();
+    const submitted = openLane(db, team.id, 'bravo', 'June', {
+      title: 'merged, waiting on a verdict',
+      project: 'musterd',
+      branch: 'june/landed',
+      claim: true,
+    });
+    updateLane(db, team.id, submitted.id, 'bravo', { state: 'awaiting_acceptance' });
+    // The only lane held is the submitted one: the answer must be `none`, not a confident attach.
+    expect(deriveHandoffLane(db, team.id, 'bravo', 'June').kind).toBe('none');
+
+    const live = openLane(db, team.id, 'bravo', 'June', {
+      title: 'still going',
+      project: 'musterd',
+      claim: true,
+    });
+    const derived = deriveHandoffLane(db, team.id, 'bravo', 'June');
+    expect(derived.kind).toBe('attach');
+    if (derived.kind !== 'attach') throw new Error('unreachable');
+    expect(derived.lane.id).toBe(live.id);
+  });
+
+  it('ignores the legacy spelling of that stage too — `ready_for_review` is the same lane', () => {
+    // ADR 192 kept `ready_for_review` on the wire for fleet skew, and lanes.wire.ts says to read the
+    // stage through `isAwaitingAcceptance` rather than comparing against either name. A fix that
+    // matched only the canonical spelling would leave a skewed daemon's lanes still derivable.
+    const { db, team } = seed();
+    const submitted = openLane(db, team.id, 'bravo', 'June', {
+      title: 'merged under the old name',
+      project: 'musterd',
+      claim: true,
+    });
+    updateLane(db, team.id, submitted.id, 'bravo', { state: 'ready_for_review' });
+    expect(deriveHandoffLane(db, team.id, 'bravo', 'June').kind).toBe('none');
+  });
+
+  it('ignores an awaiting-acceptance lane on the recipient branch as well — same rule, both paths', () => {
+    // The handed-to-recipient branch runs FIRST and carries its own copy of the filter, so a lane
+    // handed over and then submitted would otherwise still be derived by the earlier path and never
+    // reach the held-lane rule below it.
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', {
+      title: 'handed over, then submitted',
+      project: 'musterd',
+      claim: true,
+    });
+    recordHandoff(db, team.id, 'bravo', lane.id, 'June', 'Cleo');
+    updateLane(db, team.id, lane.id, 'bravo', { state: 'awaiting_acceptance' });
+    expect(deriveHandoffLane(db, team.id, 'bravo', 'June', 'Cleo').kind).toBe('none');
+  });
+
   it('ignores lanes owned by someone else — you cannot hand off what you do not hold', () => {
     const { db, team } = seed();
     openLane(db, team.id, 'bravo', 'Cleo', {
