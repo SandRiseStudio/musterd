@@ -2,10 +2,10 @@
 
 - Status: proposed
 - Date: 2026-09-16
-- Relates to: [ADR 171](171-provisioned-workspace-currency.md) (check against the template, not
-  the receipt — and why the SessionStart flag stays `--check-build`), [ADR 168](168-hook-content-drift.md)
+- Relates to: [ADR 171](171-provisioned-workspace-currency.md) (why the SessionStart flag stays
+  `--check-build`), [ADR 168](168-hook-content-drift.md)
   (hooks are content; the two-way epoch verdict this decision inherits), [ADR 161](161-init-defaults-to-the-folders-team.md)
-  (`--refresh-guidance` is safe in a live workspace), [ADR 261](261-role-permission-profiles.md)
+  (`--refresh-guidance` is safe in a live workspace), [ADR 261](261-role-permission-profiles.md) <!-- vocab:ok -->
   (the permission floor this decision refuses to touch), [ADR 152](152-daemon-auto-refresh.md)
   (the auto-refresher, which owns the shared checkout and inherits the shared Codex hooks),
   [ADR 135](135-build-provenance-every-runtime.md) (the build stamp the audit row carries),
@@ -16,7 +16,7 @@
 
 ## Context
 
-Measured 2026-09-16 on the hub laptop (izzo, on nick's word): seven of nine seat worktrees were on
+Measured 2026-09-16 on the hub laptop (izzo, on nick's word): seven of nine seat workspaces were on
 stale guidance — v18 to v22 against a current v23 — and the v23 line they were missing is *"an
 accept on a review ask IS the verdict"*, which had by then closed three lanes unreviewed, one of
 them `stakes: high`. After guidance was refreshed on six seats, five also had stale or missing
@@ -33,7 +33,7 @@ warning was, until #1479, dropped by structured-first harnesses.
 ## Problem
 
 A correction to guidance or a hook lands on `main` and reaches almost nobody, because the last step
-— a human or a seat running `musterd init --refresh-*` in every worktree — is the step nobody takes.
+— a human or a seat running `musterd init --refresh-*` in every workspace — is the step nobody takes.
 The cost is not cosmetic: a seat on stale guidance follows an instruction the team has already
 found to be wrong, and a seat with a stale interrupt hook is deaf on a build the team believes is
 ringing.
@@ -56,12 +56,12 @@ decision refuses both.
    clean, always exit 0, never throws, one bounded line.
 
 2. **What self-heals, and what never does.** Guidance files and marker-owned hooks **inside the
-   seat's own worktree** are repaired. Two classes are not, by policy:
+   seat's own workspace** are repaired. Two classes are not, by policy:
    - **The ADR 261 permission floor.** It is the harness's own security boundary; a floor change
      reviewed once on `main` is not a capability chosen for this seat. It stays exactly as today —
      a line naming `musterd init --refresh-permissions`.
-   - **Any write outside the worktree.** The machine-wide Claude Code settings and Codex's
-     git-common-dir `hooks.json` (which codex-cli reads in a worktree) are one file for every seat.
+   - **Any write outside the workspace.** The machine-wide Claude Code settings and Codex's
+     git-common-dir `hooks.json` (which codex-cli reads from a git workspace) are one file for every seat.
      A hook in one seat's session must not rewrite them. `refreshHooks` gains `withinWorktreeOnly`,
      under which such a write is *skipped and named*, never made. A human's `--refresh-hooks` still
      writes them; the shared Codex copy becomes the auto-refresher's on its bounce (increment 5).
@@ -103,7 +103,7 @@ decision refuses both.
   change on `main` and every seat following it at its next start. Accepted on purpose: the control
   is the same PR review and ADR 109 attribution that governs every other change to `main`, and the
   alternative — the census above — is that corrections reach almost nobody.
-- The human loses a per-seat approval step for guidance and in-worktree hooks, and keeps it for
+- The human loses a per-seat approval step for guidance and in-workspace hooks, and keeps it for
   permissions and every cross-seat write. The audit row means "why did this seat's hooks change" is
   answerable from the log rather than from a transcript.
 - One agent route accepts a seat credential without a lease. Its blast radius is one audit row of
@@ -121,12 +121,12 @@ decision refuses both.
 **Traces** — one new audit action, `workspace.repaired`, written by `POST /workspace/repair`:
 actor = target = the seat, `detail` = the `WorkspaceRepairBody` (build, counts repaired per class,
 skipped with reasons, remaining). Counts and classes only — the schema has no field for a file's
-contents or path beyond the one skipped outside-worktree file, so a workspace cannot leak through
+contents or path beyond the one skipped outside-workspace file, so a workspace cannot leak through
 its own repair record. The SessionStart line itself is the other trace: one bounded line in model
 context, silent when clean (ADR 171's contract, unchanged).
 
 **Eval** — the measure is the census this ADR was written from. Baseline 2026-09-16: 7 of 9 seat
-worktrees on stale guidance and 5 of 6 with stale or missing hooks, with the repair commands
+workspaces on stale guidance and 5 of 6 with stale or missing hooks, with the repair commands
 printed at every one of their session starts and not run. Success is that number reading 0 of N
 on a later census with nobody having run `--refresh-*` by hand — i.e. the audit log carrying
 `workspace.repaired` rows for the seats that were behind, and `musterd init --check` coherent on
@@ -134,7 +134,7 @@ each. Failure is a seat still stale with no row, which means the probe did not r
 not land; the line and the daemon log say which.
 
 **Experiment** — the live arm, run before merge (`docs/wiki/workspace-self-heal.md`): one seat
-worktree deliberately left one guidance stamp behind, this branch's dist run exactly as the
+workspace deliberately left one guidance stamp behind, this branch's dist run exactly as the
 SessionStart hook runs it, the repair line observed, `init --check` coherent after, the post seen
 in the daemon log. It found a contract break the unit tests could not (eleven lines where one was
 promised — fixed) and predicted the lease refusal that decision 4 now avoids. Falsifiers: (1) the
