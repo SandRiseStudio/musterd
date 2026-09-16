@@ -111,6 +111,29 @@ that hid the original incident — the watchdog fired at 5.0 s both times, the p
 half minutes the same class of failure ran unreported in the morning. The local arms prove the
 predicate; only this one proves the entrypoint actually reruns on 75.
 
+### Every capture leaves its tailnet node behind, and the auth key is the drift (2026-09-16; falsify: `musterd stream doctor` — it counts capture nodes and offline ones) <!-- claim: defect -->
+
+22 capture nodes on the tailnet, 21 offline, and the entrypoint's own `▸ tailnet node:
+musterd-broadcast-N` line climbing once per launch (17 → 19 → 20 across one afternoon) because
+Tailscale will not hand out a hostname a live device record still holds.
+
+**This is config drift from a documented design, not a design gap.** `entrypoint.sh`'s header
+already says `TS_AUTHKEY … use an ephemeral, tagged key`, and its tailnet block already says "the
+node is ephemeral by design and must not survive the machine (pair with an ephemeral+reusable auth
+key)". The key in the Fly secret simply is not one. **Ephemeral is a property set when the key is
+minted** — verified, it is not a flag on `tailscale up` — so nothing in this repo can make the
+existing key behave that way. Minting is a human's: it happens in the Tailscale admin console, and
+the value is a credential that should not pass through a transcript.
+
+Mitigated meanwhile by `trap 'rc=$?; tailscale logout …; exit $rc' EXIT`, which hands the node back
+on the way out. **Partial on purpose, and the limit is the common case:** `fly machine destroy` and
+a hard stop SIGKILL the box, and no trap runs then. EXIT only, never INT/TERM — trapping signals
+would put bash in front of the path the broadcast CLI uses for its own graceful stop, and reordering
+that to tidy a device record trades a real behaviour for a cosmetic one. `rc` is captured and
+re-raised because the entrypoint keys the machine's whole lifetime off 75-vs-anything-else, so a
+trap whose own commands set the status would turn every restart into a teardown. Verified with a
+stubbed `tailscale` that 0, 1 and 75 all survive the trap unchanged and the logout runs on each.
+
 ### The ack was the one CDP call nobody awaited, and both of its failures were fixed by the same line — in opposite directions (2026-09-16; falsify: stringify the ack's `sessionId`, run to `--out`, and the log must carry one refusal line and zero stack traces) <!-- claim: defect -->
 
 `Page.screencastFrameAck` was sent with `void` and no `.catch()`, the only fire-and-forget CDP call
