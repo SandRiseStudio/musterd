@@ -73,6 +73,50 @@ screencast frames/s that the 20 fps pump discards. `screencastEveryNthFrame(20)`
 `compositorHz` assumes 30 on Linux; the box composites nearer 27 here. That waste is the next cut
 if Chrome's CPU ever needs to come down; it does not affect what the viewer sees.
 
+## Every health signal the capture had measured the encoder, and the encoder is downstream of the freeze (2026-09-16; falsify: `Page.stopScreencast` mid-run and watch ffmpeg keep reporting a healthy rate) <!-- claim: defect -->
+
+A frozen source keeps ffmpeg perfectly fed, because the pump re-emits `latest` by design. So every
+counter the capture owned read healthy while the picture was stuck: `fps=` and `speed=` clean, and
+the ADR 159 queue watchdog satisfied **because the queue was being drained exactly as it should
+be**. The only counter that knew was `deliveredFps`, which is opt-in behind
+`MUSTERD_BROADCAST_PERF` and therefore off on an ordinary run. One frozen frame went out for six
+and a half minutes (2026-09-16, machine `84e694b2424e38`) and nothing said so.
+
+`makeFrameWatchdog` asks the one question none of those did: **when did a frame last ARRIVE.** Armed
+when the pump starts (Chrome launching and the page loading take a minute and none of it is a
+freeze), swept on the pump's own timer — the tick IS the moment a frozen source is being papered
+over — and disarmed on every deliberate stop.
+
+**The threshold is measured, not chosen.** Two captures on the performance-4x box that day (778 s
+total, a quiet Saturday floor) delivered a worst SECOND of 7 frames and **zero** seconds with no
+frame at all: the office's ambient motion means a healthy capture never goes one second dark. 5 s is
+~5x the coarsest healthy bucket and ~75x the healthy inter-frame gap. Lowering it toward the healthy
+range is how this turns a still room into a restart loop, so a test pins it inside a range.
+
+A freeze borrows `socketLossExitCode`'s judgement rather than the encoder stall's, and the
+distinction is the point: an encoder that stops draining is *this run's* problem and relaunching
+re-runs it, while a screencast that stops arriving is the class a relaunch genuinely fixes.
+
+**Verified locally against `--out`, both arms and the control** (no Fly machine, no Twitch): silent
+wedge at 10 s → watchdog fired at 5.0 s, ffmpeg still printing `fps=19 speed=0.955x`, exit **1**
+("Ending the stream") because the run was under `RESTARTABLE_AFTER_MS`; wedge at 70 s under
+`MUSTERD_BROADCAST_SUPERVISED=1` → exit **75** ("Asking the supervisor for a relaunch"); and a clean
+90 s run exited 0 with the watchdog silent.
+
+### The 6.5-minute freeze is not reachable on `main`, and that surprised me (2026-09-16; falsify: stringify the ack's `sessionId` on main and watch it die on an unhandled rejection instead of freezing) <!-- claim: other -->
+
+The first falsifier I wrote reproduced the original bug — a stringified `sessionId` — and it did
+**not** freeze the stream. It crashed the process. On `main` the ack is `void page.send(...)` with
+no `.catch()`, so Chrome's "Invalid parameters" becomes an unhandled rejection and Node exits. The
+six-and-a-half-minute silent freeze was a property of the closed #1466 branch, whose gate added a
+`.catch()` that swallowed exactly that rejection.
+
+Two things follow. The watchdog is still right, because a refused ack is only ONE way frames stop
+arriving and the others (a wedged compositor, a renderer hang, a silently stopped screencast) raise
+nothing at all — which is why the real falsifier had to be `Page.stopScreencast`, not a bad ack.
+And, noted but **not fixed here**: that unhandled rejection exits 1, so a supervised stream will not
+restart from a recoverable ack failure that `socketLossExitCode` would otherwise call restartable.
+
 ## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream) <!-- claim: defect -->
 
 Within a second of going live, ffmpeg reported against **both** inputs: `Thread message queue
