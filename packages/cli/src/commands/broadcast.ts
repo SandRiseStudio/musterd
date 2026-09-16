@@ -118,6 +118,12 @@ export function parseOptions(
  * there threw away half the frames the box could actually produce: 720p30 delivered 14fps under
  * `everyNthFrame: 2` and 26.5fps under `1`, at identical render cost. Assuming 30 keeps the
  * skip-derivation honest on hardware that never had 60 composited frames to skip.
+ *
+ * Re-measured 2026-09-16 at 1080p20 on the same box class: the page's rAF ran ~19-20Hz (median 19,
+ * max 27) — the compositor is saturated at about the encode rate, not at 30. That does not change
+ * `everyNthFrame` (floor(30/20) and floor(20/20) are both 1) but it does mean the office's own draw
+ * coalescer must not assume it is running faster than the budget; see `coalesceStep` in
+ * packages/web/src/live/office-scene/broadcast.ts for the frame-drop that assumption caused.
  */
 export function compositorHz(platform: NodeJS.Platform = process.platform): number {
   return platform === 'darwin' ? 60 : 30;
