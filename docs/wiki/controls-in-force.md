@@ -13,7 +13,7 @@ Every guard we believe is protecting us carries a date someone last watched it w
 Four unrelated failures on 2026-08-19 were one failure — a control believed to be in force that wasn't:
 
 - The root vitest config's 30s ceiling reached **zero of five packages**, because a package-local config inherits nothing (2026-08-19, #918; falsify: check out the parent of `0aea9d27`, add a test that sleeps 6s, run it under `packages/cli`'s own config — it fails at 5s and passes under the root's). <!-- claim: defect -->
-- ADR 272 cited ADR 227's measured gate as satisfied when it had **never fired** — zero `roster.role_query` rows have ever been written (2026-08-19, #912/#917; falsify: run ADR 227's eval SQL — a non-zero count overturns this). <!-- claim: defect -->
+- ADR 272 cited ADR 227's measured gate as satisfied when it had **never fired** — zero `roster.role_query` rows as of 2026-08-19 (#912/#917). Re-run 2026-09-16: 2 rows (both 2026-08-21); the discovery→send join has still not fired as specified (2026-09-16; falsify: `SELECT count(*) FROM audit WHERE action='roster.role_query'` on the live DB disagreeing with 2, or the ADR 227 join producing a send to the queried role's holders more than once). <!-- claim: defect -->
 - A `daemon_down` probe ate its errors in a bare `catch {}`: 22 raises, one distinct body between them (2026-08-19, #923; falsify: read the pre-#923 probe's catch block). <!-- claim: defect -->
 - A wiki falsifier could not fail (2026-08-19, #925 — this is wiki rule 3, and the page you are reading is bound by it).
 

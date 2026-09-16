@@ -13,7 +13,8 @@
  * - A `daemon_down` probe ate its own errors in a bare `catch {}` — 22 raises, one distinct body,
  *   none diagnosable after the fact (#923).
  * - ADR 272 cited ADR 227's measured reopening gate as satisfied. The gate had **never fired** —
- *   zero `roster.role_query` rows have ever been written (#912, #917).
+ *   zero `roster.role_query` rows as of 2026-08-19 (#912, #917). Re-run 2026-09-16: 2 rows
+ *   (both 2026-08-21); the discovery→send join has still not fired as specified.
  * - A wiki falsifier could not fail: "re-run the named file alone" is satisfied by a real defect
  *   and by harmless noise alike, so it could never distinguish them (#925).
  *
@@ -146,12 +147,12 @@ export const CONTROLS: Control[] = [
       'Role-addressed sends and the routing machinery (ADR 272 §5) stay unbuilt until ADR 227’s measured trigger fires — the role-filtered discovery→directed-send join firing repeatedly on real seats.',
     where: 'docs/decisions/272-*.md §5; the signal is the `roster.role_query` audit row',
     exercise:
-      "Run ADR 227's eval SQL against the live audit table: `SELECT count(*) FROM audit WHERE action = 'roster.role_query'`, then join the hits to directed sends by the same actor within the window. Zero rows means the trigger has not fired; the gate holds. This is what #912 did.",
+      "Run ADR 227's eval SQL against the live audit table: `SELECT count(*) FROM audit WHERE action = 'roster.role_query'`, then join the hits to directed sends by the same actor within 120s. The gate holds unless that join fires repeatedly *and* the send is to the queried role's holders. 2026-09-16: 2 rows, one accidental join (wanderer queried `admin`/nick then `accept`ed to stanley). This is what #912 did at zero, and what wanderer re-ran on 2026-09-16.",
     motivatedBy:
       "2026-08-14: ADR 272's original scope (#851) cited this gate as satisfied and authorized the full registry + routing resolver. The gate had never fired. stanley's challenge (2026-08-19) forced the measurement and the ADR was narrowed in #917 — five days of a decision resting on an unmet precondition.",
     counterfactual:
       'Yes — and that is the sharp part. Running the query is exactly what caught it, five days late. The control was never broken; it was never RUN. That gap between "a gate exists" and "a gate fired" is the reason this registry records exercise dates rather than just listing guards.',
-    lastExercised: '2026-08-19',
+    lastExercised: '2026-09-16',
     everTripped: false,
     staleAfterDays: 120,
     refs: [
