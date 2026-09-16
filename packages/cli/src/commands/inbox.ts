@@ -346,6 +346,23 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
   // even to a seat whose nudges are muted — so this runs before the MUSTERD_NO_NUDGE gate below.
   // One push per session, not per tool call: the slot's `attested_at` stamp is what bounds it.
   await attestSlotIfUnattested();
+  // Spec 2026-09-16 / ADR 408 increment 4: keep `.musterd/drift.json` warm on this cadence, so the
+  // adapter's inbox-check surface can REPORT provisioning drift without inspecting the workspace on
+  // a seam a busy seat takes many times a minute. Bounded by its own TTL — this is a cheap read
+  // almost every time. Runs beside the two local truths above and under the same contract: silent,
+  // self-guarded, never a reason the tool call it rides on fails. The daemon build is not fetched
+  // for it (that would be a round trip per tool call); session start knows the build and passes it.
+  try {
+    // Imported lazily, and that is load-bearing rather than taste: `onboard/doctor.js` reaches the
+    // harness adapters directly, and a STATIC edge from this module puts them in the graph of
+    // everything that imports `inbox.js` — which is how this first landed, breaking an unrelated
+    // suite that mocks `harnesses/index.js` and never expected to load the real one. The interrupt
+    // check is its own short-lived process, so deferring the load costs it nothing.
+    const { refreshWorkspaceDrift } = await import('../onboard/doctor.js');
+    refreshWorkspaceDrift(process.cwd(), undefined);
+  } catch {
+    /* never noise on the interrupt line */
+  }
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
   let seat: string | undefined;
   try {

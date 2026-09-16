@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   MODEL_UNKNOWN,
+  DriftCacheSchema,
+  type DriftCache,
   type Envelope,
   type MemberSummary,
   describeSyncWedge,
@@ -264,7 +268,114 @@ export type SyncWedgeWarningFact = {
   since: number;
 };
 
-export type ToolWarning = BuildSkewWarning | SyncWedgeWarningFact;
+/**
+ * Provisioning drift (spec 2026-09-16, ADR 408 increment 4) — a workspace whose guidance, hooks or
+ * permission floor is behind what this build writes.
+ *
+ * A THIRD member of this union rather than a `structuredContent.workspace` key of its own, and that
+ * is the whole design decision. A field that exists only when something is wrong IS a warning; put
+ * it in a second place and every client that does not know the new key drops it — which is exactly
+ * the defect lane 01M2NRYJEQ fixed one key over, where the prose said "stale tools" and the
+ * structured half said nothing.
+ *
+ * Counts, never paths: this rides into model context at every inbox check, and which file drifted
+ * does not change what the reader types. `repairable_at` is the one judgement the warning makes —
+ * `'session-start'` when the next session will heal it by itself, `'manual'` when it will not.
+ *
+ * The union is deliberately left OPEN to a future `unknown` case: a workspace whose machine-wide
+ * hook was never provisioned runs nothing, so its cache is ABSENT rather than clean, and "I cannot
+ * tell" is a third state that neither `clean` nor these counts can express.
+ */
+export type ProvisioningDriftWarning = {
+  kind: 'provisioning_drift';
+  text: string;
+  guidance: number;
+  hooks: number;
+  permissions: number;
+  /** Whether a new session repairs this by itself, or a human has to type the commands. */
+  repairable_at: 'session-start' | 'manual';
+  /** The `musterd:self-heal` tombstone — drift is real AND self-heal is switched off here. */
+  declined: boolean;
+  /** When the CLI last measured it, so a reader can judge how old these counts are. */
+  inspected_at: number;
+};
+
+export type ToolWarning = BuildSkewWarning | SyncWedgeWarningFact | ProvisioningDriftWarning;
+
+/**
+ * Read `.musterd/drift.json` and say what is behind — the adapter half of workspace self-heal.
+ *
+ * Reads the file directly with `readFileSync` + `safeParse` and imports NOTHING from `@musterd/cli`.
+ * The inspection is three file reads and this surface runs many times a minute on a busy seat, so
+ * the CLI measures on its own cadence (session start, and the interrupt-check probe) and this only
+ * ever reads what it left. A cache it cannot read, cannot parse, or that says nothing is wrong is
+ * silence — the same rule as build skew: an unknown state is never reported as a problem.
+ */
+export function provisioningDriftOf(cwd: string | undefined): ProvisioningDriftWarning | null {
+  if (cwd === undefined) return null;
+  let cache: DriftCache;
+  try {
+    const raw: unknown = JSON.parse(readFileSync(join(cwd, '.musterd', 'drift.json'), 'utf8'));
+    const parsed = DriftCacheSchema.safeParse(raw);
+    if (!parsed.success) return null;
+    cache = parsed.data;
+  } catch {
+    return null;
+  }
+  const { guidance, hooks, permissions, declined } = cache;
+  if (guidance + hooks + permissions === 0) return null;
+
+  // Increment 3 self-heals guidance and in-worktree hooks and NOTHING else: the permission floor is
+  // the harness's own security boundary (ADR 261) and is never written from a hook. So a folder
+  // whose only drift is permissions — or one carrying the tombstone — does not improve by starting
+  // a new session, and saying otherwise sends the reader to a repair that will not happen.
+  const repairable_at = !declined && guidance + hooks > 0 ? 'session-start' : 'manual';
+  const behind = [
+    guidance > 0 ? plural(guidance, 'guidance file', 'guidance files') : null,
+    hooks > 0 ? plural(hooks, 'hook', 'hooks') : null,
+    permissions > 0 ? plural(permissions, 'permission entry', 'permission entries') : null,
+  ].filter((f): f is string => f !== null);
+  const fixes = [
+    guidance > 0 ? '`musterd init --refresh-guidance`' : null,
+    hooks > 0 ? '`musterd init --refresh-hooks`' : null,
+    permissions > 0 ? '`musterd init --refresh-permissions`' : null,
+  ].filter((f): f is string => f !== null);
+  // What the sentence has to get right is WHO acts. The permission floor never self-heals, so a
+  // reader told "the next session start fixes this" would correctly do nothing and stay broken.
+  const tail = declined
+    ? 'self-heal is declined in this folder, so nothing repairs it by itself'
+    : repairable_at === 'manual'
+      ? "the permission floor is never self-healed; it is the harness's security boundary"
+      : permissions > 0
+        ? 'the next session start repairs the guidance and hooks, but the permission floor never is'
+        : 'the next session start repairs this, or you can do it now';
+  return {
+    kind: 'provisioning_drift',
+    guidance,
+    hooks,
+    permissions,
+    repairable_at,
+    declined,
+    inspected_at: cache.inspected_at,
+    text: `⚠ musterd: this workspace is behind on ${list(behind)} — ${tail}; run ${list(fixes)}.`,
+  };
+}
+
+/** The same finding as its prose twin — same source, same wording, same silence. */
+export function provisioningDriftLine(cwd: string | undefined): string {
+  const w = provisioningDriftOf(cwd);
+  return w ? `\n${w.text}` : '';
+}
+
+/** "a", "a and b", "a, b and c" — a sentence a reader scans, not a machine-joined array. */
+function list(parts: string[]): string {
+  if (parts.length <= 1) return parts.join('');
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]!}`;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return `${String(n)} ${n === 1 ? one : many}`;
+}
 
 /** The wedge as a fact beside its sentence — same source, same wording, same silence. */
 export function syncWedgeOf(

@@ -394,7 +394,7 @@ src/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)
     send.ts       // refuses until ready (pending → claim; dormant → join)
-    inboxCheck.ts // refuses until ready (pending → claim; dormant → join); appends the ADR 135 build-skew warning
+    inboxCheck.ts // refuses until ready (pending → claim; dormant → join); appends the ADR 135 build-skew warning, and pushes every warning — skew, wedge, provisioning drift — into ONE `warnings` array (a second structuredContent key is a key unknowing clients drop, #1479); the empty-inbox path carries the same findings as prose, which is its only channel
     huddleRooms.ts // the room an arriving turn came from (ADR 378): folds the timeline with the protocol lens so a turn names its topic and the call that answers it — a FIELD on inbox_check, never a tool (ADR 144 selectability + standing-context cost)
     status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning
     members.ts    // works while dormant/pending
@@ -406,7 +406,7 @@ src/
     teamMemory.ts // team_insight_save + team_insight_search — findings for the whole team, pull-only retrieval (ADR 327)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)
-    format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135)
+    format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135); the ToolWarning union — build_skew, sync_wedge and provisioningDriftOf's provisioning_drift (ADR 408 inc 4), which READS `.musterd/drift.json` from client.workspaceDir (the seat's folder, not process.cwd() — a shared workspace-family entry runs from the family's primary checkout) and never imports @musterd/cli
   bind.ts         // reachability check only (GET /health) — claims no presence
 ```
 

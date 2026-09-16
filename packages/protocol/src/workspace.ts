@@ -30,3 +30,27 @@ export const WorkspaceRepairBodySchema = z.object({
   }),
 });
 export type WorkspaceRepairBody = z.infer<typeof WorkspaceRepairBodySchema>;
+
+/**
+ * `.musterd/drift.json` — the provisioning-drift cache (spec 2026-09-16, ADR 408).
+ *
+ * The drift inspection reads guidance files, a hooks file and a permissions file; the adapter
+ * surface that wants to REPORT drift runs on the inbox-check seam, which a busy seat takes many
+ * times a minute. So the CLI — which already inspects, at session start and on the interrupt-check
+ * cadence — writes what it found here, and the adapter only reads it. Counts, never paths: this
+ * rides into model context, and the repair commands are the same three regardless of which file.
+ *
+ * `build` is the daemon's build at the time of the inspection, or the empty string when the daemon
+ * was unreachable. It is a cache key, not a claim about the workspace — a reader compares it to
+ * decide whether to trust the counts, and nothing else.
+ */
+export const DriftCacheSchema = z.object({
+  inspected_at: z.number().int(),
+  build: z.string(),
+  guidance: z.number().int().min(0),
+  hooks: z.number().int().min(0),
+  permissions: z.number().int().min(0),
+  /** The `musterd:self-heal` tombstone: drift is real AND nothing will repair it by itself. */
+  declined: z.boolean(),
+});
+export type DriftCache = z.infer<typeof DriftCacheSchema>;

@@ -34,6 +34,11 @@ coverage/
 **/.musterd/provisioned.json
 # ADR 326 orient stamp — per-session orientation marker, machine-local, never committed.
 **/.musterd/orient-stamp.json
+# ADR 408 inc 4 drift cache — this workspace's own provisioning measurement, rewritten by the
+# session probe and the interrupt check. Machine-local by definition: committing one seat's counts
+# would hand every other seat a stranger's drift as its own, and the adapter trusts this file. Listed
+# in the SAME change that creates it, per the rule the session-index amendment above exists to teach.
+**/.musterd/drift.json
 **/.musterd/skill/
 # Claude Code local settings + the musterd-provisioned skill/slash-commands (`.claude/skills`,
 # `.claude/commands`) — per-workspace + personal, written by `musterd init` / the harness, never committed.
