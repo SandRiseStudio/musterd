@@ -5486,11 +5486,16 @@ export async function handleHttp(
       // envelope's structured fields (sender, act, count) — never `env.body` (§4 injection surface).
       if (method === 'POST' && rest === '/workspace/repair') {
         // Spec 2026-09-16 (workspace self-heal), ADR 408: the one place a hook-driven repair becomes
-        // attributable. Same auth as interrupt-check — a seat credential AND a live session lease —
-        // because only a live occupancy repairs a workspace. Best-effort on the client; here it is
-        // an ordinary audited write. Counts and classes only: the body schema has no field for a
-        // file's contents, so a workspace cannot leak through its own repair record.
-        const { team, member } = authTouch(ctx, slug, req);
+        // attributable. Seat credential ALONE — no session lease and no presence touch — because the
+        // SessionStart hook posts this BEFORE the session has joined (the ADR 164 window in which
+        // every lease-gated route is refused), and the repair is local: the credential hash proves
+        // whose workspace it was, a lease would add nothing. The single leaseless agent route.
+        // Best-effort on the client; here it is an ordinary audited write. Counts and classes only:
+        // the body schema has no field for a file's contents, so a workspace cannot leak through
+        // its own repair record.
+        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req), undefined, {
+          leaseless: true,
+        });
         const body = parseOrBadRequest(WorkspaceRepairBodySchema, await readJson(req));
         appendAudit(ctx.db, team.id, {
           actor: member.name,

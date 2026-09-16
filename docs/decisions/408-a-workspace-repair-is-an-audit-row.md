@@ -74,12 +74,21 @@ decision refuses both.
    next session start with nobody at the keyboard. And every repair is attributable — decision 4.
 
 4. **The repair is an audit row.** A new route, `POST /teams/:slug/workspace/repair`, authenticated
-   exactly as `/inbox/interrupt-check` is — seat credential *and* live session lease, because only
-   a live occupancy repairs a workspace — records `workspace.repaired` via `appendAudit` with the
+   by the **seat credential alone** — no session lease, no presence touch — records
+   `workspace.repaired` via `appendAudit` with the
    `WorkspaceRepairBody`: the build that did it, counts repaired per class, what was skipped and
    why (`declined` / `checkout_behind` / `outside_worktree` / `policy`), and what remains. Counts
    and classes only; the schema has no field for a file's contents. Best-effort on the client: a
    dead daemon is silence, never a failed session start. This is the design's only protocol edge.
+
+   Leaseless on purpose, and this is the one exception to ADR 337's rule that agent HTTP proof is
+   inseparable from its Presence lease. The SessionStart hook posts this *before* the session has
+   joined — the ADR 164 window in which every lease-gated route is refused, measured on the
+   interrupt probe — so a lease requirement would refuse every real post (the first draft of this
+   decision required one; the live arm's write-up predicted the 401 and nick chose the correction
+   the same evening). The repair is local and the credential hash alone proves whose workspace it
+   was; a lease would prove nothing extra. `authMember` takes `{ leaseless: true }` from exactly
+   this route and nowhere else.
 
 5. **Drift is cached by the CLI and read by the adapter** (increment 4). `.musterd/drift.json` is
    refreshed on the interrupt-check cadence — at most every 10 minutes, or immediately when the
@@ -97,6 +106,8 @@ decision refuses both.
 - The human loses a per-seat approval step for guidance and in-worktree hooks, and keeps it for
   permissions and every cross-seat write. The audit row means "why did this seat's hooks change" is
   answerable from the log rather than from a transcript.
+- One agent route accepts a seat credential without a lease. Its blast radius is one audit row of
+  counts and classes under the seat's own name; it cannot read, send, claim, or move anything.
 - `runRefreshHooks` returns `{ code, files, skipped, refused }` instead of a number and takes
   `quiet`; the CLI command reads `.code`. Every harness's `refreshHooks.run` returns `skipped`.
 - A daemon-side fleet view of drift (approach C in the spec) is deferred; once every repair is an

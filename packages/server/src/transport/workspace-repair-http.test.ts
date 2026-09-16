@@ -4,10 +4,10 @@ import { createServer, type RunningServer } from '../index.js';
 import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
 /**
- * `POST /teams/:slug/workspace/repair` (spec 2026-09-16 workspace self-heal, ADR 408): a seat with
- * a live session lease records what its SessionStart repair wrote, skipped and left, as ONE
- * `workspace.repaired` audit row. Same auth as `/inbox/interrupt-check` — credential AND lease —
- * because only a live occupancy repairs a workspace.
+ * `POST /teams/:slug/workspace/repair` (spec 2026-09-16 workspace self-heal, ADR 408): a seat
+ * records what its SessionStart repair wrote, skipped and left, as ONE `workspace.repaired` audit
+ * row. Seat credential ALONE — the SessionStart hook posts this before the session has joined, so
+ * a lease requirement would refuse every real post (ADR 164). The single leaseless agent route.
  */
 let server: RunningServer;
 let base: string;
@@ -76,14 +76,26 @@ describe('POST /teams/:slug/workspace/repair (ADR 408)', () => {
     expect(rows[0].detail).toEqual(body);
   });
 
-  it('is refused without a session lease, exactly like interrupt-check', async () => {
+  it('is accepted WITHOUT a session lease — SessionStart posts before team_join (ADR 164 / 408)', async () => {
     const r = await post('/teams/dawn/workspace/repair', body, {
       ...adaAuth,
       sessionLease: '',
     });
-    expect(r.status).toBe(401);
+    expect(r.status).toBe(200);
     const audit = await get('/teams/dawn/audit', nickCred);
-    expect((audit.json.audit as any[]).some((e) => e.action === 'workspace.repaired')).toBe(false);
+    const rows = (audit.json.audit as any[]).filter((e) => e.action === 'workspace.repaired');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actor).toBe('Ada');
+  });
+
+  it('is refused on a bad credential; a human seat records under its own name', async () => {
+    const bad = await post('/teams/dawn/workspace/repair', body, { ...adaAuth, key: 'msac_nope' });
+    expect(bad.status).toBe(401);
+    const human = await post('/teams/dawn/workspace/repair', body, nickCred);
+    expect(human.status).toBe(200); // a human seat may record its own repair too — it is its workspace
+    const audit = await get('/teams/dawn/audit', nickCred);
+    const rows = (audit.json.audit as any[]).filter((e) => e.action === 'workspace.repaired');
+    expect(rows.map((r) => r.actor)).toEqual(['nick']);
   });
 
   it('rejects a malformed body and records nothing', async () => {
