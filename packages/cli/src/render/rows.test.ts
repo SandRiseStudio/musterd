@@ -978,3 +978,107 @@ describe('renderMessageRow with an eligible set (ADR 254)', () => {
     expect(out).not.toContain('answered by');
   });
 });
+
+// ADR 407 increment 3. Under ADR 128 every directed act a seat could see was one it was party to;
+// under ADR 407 a seat READS every act on its team, and a row must say when the act it is showing
+// was not sent to the reader — sight is not obligation (§2). The delivery-side flags
+// (`isActionNeeded`, `openActionNeeded`) are untouched; this is a label on a read.
+describe('a read-not-delivered act says so (ADR 407 inc 3)', () => {
+  const ts = Date.UTC(2026, 8, 16, 14, 0);
+  const toLin = env({
+    id: 'r1',
+    from: 'Ada',
+    to: { kind: 'member', name: 'Lin' },
+    act: 'request_help',
+    body: 'need eyes',
+    ts,
+  });
+
+  it('marks a directed act the reader is not party to, naming the addressee', () => {
+    const out = renderMessageRow(toLin, kindOf, { me: 'Bo' });
+    expect(out).toContain('↳ to Lin — not addressed to you');
+  });
+
+  it('is silent for the addressee', () => {
+    expect(renderMessageRow(toLin, kindOf, { me: 'Lin' })).not.toContain('not addressed');
+  });
+
+  it('is silent for the sender — reading your own send is not bystanding', () => {
+    expect(renderMessageRow(toLin, kindOf, { me: 'Ada' })).not.toContain('not addressed');
+  });
+
+  it('is silent on a team act — everyone is addressed', () => {
+    const team = env({ id: 't1', from: 'Ada', to: { kind: 'team' }, act: 'status_update', ts });
+    expect(renderMessageRow(team, kindOf, { me: 'Bo' })).not.toContain('not addressed');
+  });
+
+  it('an eligible-set act says "not you" when the reader is outside the set, nothing when inside', () => {
+    const either = env({
+      id: 'e1',
+      from: 'Ada',
+      to: { kind: 'team' },
+      act: 'request_help',
+      body: 'either of you',
+      ts,
+      meta: { eligible: ['Lin', 'Cy'] },
+    });
+    expect(renderMessageRow(either, kindOf, { me: 'Bo' })).toContain(
+      '↳ eligible: Lin | Cy — not you',
+    );
+    expect(renderMessageRow(either, kindOf, { me: 'Lin' })).not.toContain('not you');
+  });
+
+  it('without a reader the row is byte-identical to before — an unknown reader gets no claim', () => {
+    expect(renderMessageRow(toLin, kindOf, {})).toBe(renderMessageRow(toLin, kindOf));
+    expect(renderMessageRow(toLin, kindOf)).not.toContain('not addressed');
+  });
+
+  it('a room turn directed at one seat shows the addressee again, and marks a bystander', () => {
+    const root = env({
+      id: 'h2',
+      from: 'nick',
+      act: 'message',
+      body: 'why',
+      ts,
+      meta: {
+        huddle: {
+          topic: { kind: 'design', id: 'marker' },
+          room: 'http://127.0.0.1:4851/b/h2',
+          anchor: 'x',
+        },
+      },
+    } as Partial<Envelope>);
+    const turn = env({
+      id: 't2',
+      from: 'Ada',
+      to: { kind: 'member', name: 'Lin' },
+      act: 'request_help',
+      body: 'a turn',
+      thread: 'h2',
+      ts: ts + 1,
+    });
+    const seenByBo = renderInbox([root, turn], kindOf, { cursorTs: 0, now: ts + 1000, me: 'Bo' });
+    const turnLine = seenByBo.split('\n').find((l) => l.includes('in huddle')) ?? '';
+    // ADR 378 dropped the recipient because the room was the address; a directed turn now names
+    // its addressee again — the room is where it was said, not who it was said to.
+    expect(turnLine).toContain('→ Lin');
+    expect(seenByBo).toContain('↳ to Lin — not addressed to you');
+    const seenByLin = renderInbox([root, turn], kindOf, { cursorTs: 0, now: ts + 1000, me: 'Lin' });
+    expect(seenByLin).not.toContain('not addressed');
+    // A team-directed turn keeps ADR 378's rule: no "→ @team" noise on a room turn.
+    const teamTurn = env({
+      id: 't3',
+      from: 'Ada',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'all',
+      thread: 'h2',
+      ts: ts + 2,
+    });
+    const teamLine =
+      renderInbox([root, teamTurn], kindOf, { cursorTs: 0, now: ts + 1000, me: 'Bo' })
+        .split('\n')
+        .find((l) => l.includes('in huddle')) ?? '';
+    expect(teamLine).not.toContain('@team');
+  });
+});

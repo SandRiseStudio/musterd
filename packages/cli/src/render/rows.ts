@@ -79,7 +79,7 @@ export function renderInbox(
   kindOf: KindOf,
   /** ADR 254: `discharged` maps an eligible-set act id → the seat that answered it, so the row can
    *  say so instead of silently retiring it. */
-  opts: { cursorTs: number; now?: number; discharged?: Map<string, Discharge> },
+  opts: { cursorTs: number; now?: number; discharged?: Map<string, Discharge>; me?: string },
 ): string {
   const now = opts.now ?? Date.now();
   const out: string[] = [];
@@ -97,6 +97,7 @@ export function renderInbox(
     const stand = opts.discharged?.get(m.id);
     out.push(
       renderMessageRow(m, kindOf, {
+        ...(opts.me !== undefined ? { me: opts.me } : {}),
         unread: envelopePosition(m) > opts.cursorTs,
         ...(stand ? { discharge: stand } : {}),
         ...(m.thread && topics.has(m.thread) ? { huddleTopic: topics.get(m.thread)! } : {}),
@@ -106,20 +107,51 @@ export function renderInbox(
   return out.join('\n');
 }
 
+/**
+ * The one line a READ surface adds under an act the reader was not sent (ADR 407 inc 3), or null
+ * when there is nothing to say. Under ADR 128 every directed act a seat could see was one it was
+ * party to, so a row never had to say otherwise; under ADR 407 a seat reads every act on its team,
+ * and sight is not obligation (§2). Silent for the addressee, for a member of the eligible set, for
+ * the sender (reading your own send is not bystanding), for any team act, and — deliberately — when
+ * the reader is unknown: a row with no `me` makes no claim rather than a wrong one.
+ *
+ * A label, not a delivery fact: `isActionNeeded` / `openActionNeeded` decide what rings, and they
+ * are untouched. This only stops a reader mistaking what it can see for what it owes.
+ */
+function bystanderNote(
+  env: Envelope,
+  me: string | undefined,
+  eligible: string[] | null | undefined,
+): string | null {
+  if (me === undefined || env.from === me) return null;
+  if (eligible && eligible.length > 0) {
+    return eligible.includes(me) ? null : `↳ eligible: ${eligible.join(' | ')} — not you`;
+  }
+  if (env.to.kind !== 'member' || env.to.name === me) return null;
+  return `↳ to ${env.to.name} — not addressed to you`;
+}
+
 export function renderMessageRow(
   env: Envelope,
   kindOf: KindOf,
   /** ADR 254 / doorbell clause 7: `discharge` says WHY this act is no longer owed, when it is not.
    *  Only `answered` names a seat — (ii) the lane closed and (iv) the seat was shown the act have
-   *  no answerer, and rendering one would invent it. Omitted ⇒ the act is still owed. */
-  opts: { unread?: boolean; discharge?: Discharge; huddleTopic?: string } = {},
+   *  no answerer, and rendering one would invent it. Omitted ⇒ the act is still owed.
+   *  `me` is the reader (ADR 407 inc 3): with it, an act the reader was not sent says so. */
+  opts: { unread?: boolean; discharge?: Discharge; huddleTopic?: string; me?: string } = {},
 ): string {
   const marker = opts.unread ? theme.accent('▌') + ' ' : '  ';
   const eligible = eligibleOf(env.meta as Record<string, unknown> | null | undefined);
-  // A turn says which room it is in, and drops the recipient label: "to the team" is noise for a
-  // huddle turn — the room IS the address (ADR 378).
+  // A turn says which room it is in and drops "→ @team": the room IS where a team turn is said
+  // (ADR 378). A turn said to ONE seat — or to an eligible set — keeps its addressee (ADR 407 inc
+  // 3): the room is where it was said, not who it was said to, and now that every seat can read
+  // the room, that is the fact a bystander needs.
+  const roomAddress =
+    env.to.kind === 'member' || (eligible && eligible.length > 0)
+      ? ` ${toLabel(env.to, kindOf, eligible)}`
+      : '';
   const head = opts.huddleTopic
-    ? `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${theme.meta(`in huddle ${opts.huddleTopic}`)}`
+    ? `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${theme.meta(`in huddle ${opts.huddleTopic}`)}${roomAddress}`
     : `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${toLabel(env.to, kindOf, eligible)}`;
   const indent = '    ';
   const body = wrapText(env.body, termWidth() - indent.length)
@@ -130,7 +162,11 @@ export function renderMessageRow(
   const stood = opts.discharge
     ? `\n${indent}${theme.meta(`↳ ${dischargeReason(opts.discharge)} — you no longer owe this`)}`
     : '';
-  return (env.body ? `${marker}${head}\n${body}` : `${marker}${head}`) + stood;
+  // The read-not-delivered line (ADR 407 inc 3), same shape as the stand-down trace above and for
+  // the same reason: a thing the reader might otherwise act on, said where the reader is looking.
+  const note = bystanderNote(env, opts.me, eligible);
+  const aside = note ? `\n${indent}${theme.meta(note)}` : '';
+  return (env.body ? `${marker}${head}\n${body}` : `${marker}${head}`) + stood + aside;
 }
 
 export interface Health {
