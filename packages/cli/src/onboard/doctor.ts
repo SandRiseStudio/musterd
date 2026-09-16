@@ -8,9 +8,11 @@ import {
   parseContentStamp,
   TOKEN_PREFIXES,
   type Binding,
+  type WorkspaceRepairBody,
 } from '@musterd/protocol';
 import { resolveWorkspace } from '@musterd/protocol/project';
 import { HttpClient, isSessionLeaseRefusal } from '../client.js';
+import { resolveRead } from '../commands/helpers.js';
 import { recoverAgentKey } from '../commands/team.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
 import { type Config, findBinding, loadBinding, loadConfig, readBindingAt } from '../config.js';
@@ -30,6 +32,7 @@ import { inspectSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget } from './primer.js';
 import { defaultHarnessContext } from './reconcile/context.js';
 import { inspectHarnesses, type FragmentInspection } from './reconcile/engine.js';
+import { defaultSelfHealDeps, selfHealWorkspace, type SelfHealOutcome } from './selfHeal.js';
 
 /**
  * `musterd init --check` — provisioning drift detector (ADR 060). A read-only checker, never a
@@ -1266,6 +1269,10 @@ export async function runSessionProbe(deps?: {
   cliRef?: string | undefined;
   daemonBuild?: () => Promise<string | undefined>;
   cwd?: string;
+  /** Spec 2026-09-16 / ADR 408: the repair step; injectable so the probe's contract is testable. */
+  selfHeal?: (cwd: string, build: string) => SelfHealOutcome;
+  /** The audit-row post; best-effort, a rejection is swallowed here. */
+  postRepair?: (body: WorkspaceRepairBody) => Promise<void>;
 }): Promise<number> {
   const ref = deps?.cliRef !== undefined ? deps.cliRef : cliBuild();
   if (ref) {
@@ -1288,30 +1295,31 @@ export async function runSessionProbe(deps?: {
     }
   }
   try {
-    const { guidance, hooks, permissions } = inspectArtifactDrift(deps?.cwd ?? process.cwd());
-    if (guidance.length + hooks.length + permissions.length > 0) {
-      const what = [
-        guidance.length > 0 ? `${String(guidance.length)} guidance file(s)` : null,
-        hooks.length > 0 ? `${String(hooks.length)} hook(s)` : null,
-        // Named as a layer, not a file count (ADR 261): the reader's next question is always
-        // "which of the three denied me", and this line is where that question gets answered.
-        permissions.length > 0 ? 'the harness permission layer' : null,
-      ].filter(Boolean);
-      const fix = [
-        guidance.length > 0 ? '`musterd init --refresh-guidance`' : null,
-        hooks.length > 0 ? '`musterd init --refresh-hooks`' : null,
-        permissions.length > 0 ? '`musterd init --refresh-permissions`' : null,
-      ].filter(Boolean);
-      process.stdout.write(
-        `musterd: this folder's provisioning is behind what this build writes — ${what.join(' and ')} ` +
-          `missing or stale (ADR 171). Run ${fix.join(' and ')} to repair, ` +
-          `or \`musterd init --check\` for the detail.\n`,
-      );
+    // Spec 2026-09-16 / ADR 408: repair, THEN report. Guidance and in-worktree hooks self-heal;
+    // the permission floor and any file outside the worktree never do, and the line says so. The
+    // contract above is unchanged — silent when clean, exit 0, one bounded line.
+    const cwd = deps?.cwd ?? process.cwd();
+    const build = ref ?? 'unstamped';
+    const heal =
+      deps?.selfHeal ??
+      ((c: string, b: string) => selfHealWorkspace(c, defaultSelfHealDeps(b)));
+    const out = heal(cwd, build);
+    if (out.report && out.ran) {
+      // Attribution (ADR 408) is best-effort and never a gate: a dead daemon is silence.
+      const post = deps?.postRepair ?? defaultPostRepair;
+      await post(out.report).catch(() => undefined);
     }
+    if (out.line) process.stdout.write(`${out.line}\n`);
   } catch {
     // A health probe never fails a session start, and never invents drift from a folder it cannot read.
   }
   return 0;
+}
+
+/** The real audit-row post: this folder's seat, over the same authority the interrupt probe uses. */
+async function defaultPostRepair(body: WorkspaceRepairBody): Promise<void> {
+  const { http, team } = resolveRead({});
+  await http.workspaceRepair(team, body);
 }
 
 export async function runInitDoctor(json: boolean, cwd: string = process.cwd()): Promise<number> {

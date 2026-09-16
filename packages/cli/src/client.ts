@@ -48,6 +48,7 @@ import {
   type WakeLeasesResponse,
   type WakeReportBody,
   type WakeTurnBody,
+  type WorkspaceRepairBody,
   type WakeContextPacket,
   type WakeContextRequest,
   type ActDelivery,
@@ -310,7 +311,7 @@ export class HttpClient {
   }
 
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   private async request(
     method: string,
     path: string,
@@ -1105,6 +1106,14 @@ export class HttpClient {
   /** The native loop's per-turn rail (ADR 251 §7) — `POST /teams/:slug/residency/wake-turn`:
    *  one usage/capture row per turn, best-effort from the backend's perspective (a failed post
    *  never aborts the loop). Callers use `.presenceNeutral()` — telemetry must not animate. */
+  /**
+   * Spec 2026-09-16 / ADR 408 — one audit row per SessionStart repair. `POST
+   * /teams/:slug/workspace/repair`, seat credential + session lease, exactly as interrupt-check.
+   */
+  async workspaceRepair(slug: string, body: WorkspaceRepairBody): Promise<{ ok: boolean }> {
+    return (await this.request('POST', `/teams/${slug}/workspace/repair`, body)) as { ok: boolean };
+  }
+
   async wakeTurn(slug: string, body: WakeTurnBody): Promise<{ ok: boolean; turn: number }> {
     return (await this.request('POST', `/teams/${slug}/residency/wake-turn`, body)) as {
       ok: boolean;

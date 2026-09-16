@@ -1904,3 +1904,84 @@ describe('harness hook drift is scoped to harnesses this folder is CONFIGURED fo
     expect(report.drift.some((d) => d.includes('Codex hooks'))).toBe(true);
   });
 });
+
+describe('runSessionProbe self-heal (spec 2026-09-16, ADR 408)', () => {
+  const sha = (c: string): string => c.repeat(40);
+  const report = {
+    build: sha('a'),
+    repaired: { guidance: 2, hooks: 1 },
+    skipped: [{ class: 'permissions' as const, reason: 'policy' as const }],
+    remaining: { guidance: 0, hooks: 0, permissions: 1 },
+  };
+  const line =
+    'musterd: repaired 2 guidance files and 1 hook; the harness permission layer is still behind — run `musterd init --refresh-permissions`.';
+
+  it('repairs, prints the outcome line, posts the audit row, and exits 0 even with the daemon down', async () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation(((c: string) => {
+      lines.push(String(c));
+      return true;
+    }) as never);
+    const bare = mkdtempSync(join(tmpdir(), 'musterd-heal-'));
+    const posted: unknown[] = [];
+    try {
+      const code = await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => sha('a'),
+        cwd: bare,
+        selfHeal: () => ({ ran: true, report, line }),
+        postRepair: async (b) => {
+          posted.push(b);
+        },
+      });
+      expect(code).toBe(0);
+      expect(lines.join('')).toBe(`${line}\n`);
+      expect(posted).toEqual([report]);
+
+      lines.length = 0;
+      const down = await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+        cwd: bare,
+        selfHeal: () => ({ ran: true, report, line }),
+        postRepair: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+      });
+      expect(down).toBe(0);
+      expect(lines.join('')).toContain('repaired 2 guidance files');
+
+      lines.length = 0;
+      // Clean: nothing printed, nothing posted.
+      await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => sha('a'),
+        cwd: bare,
+        selfHeal: () => ({ ran: false, report: null, line: '' }),
+        postRepair: async (b) => {
+          posted.push(b);
+        },
+      });
+      expect(lines.join('')).toBe('');
+      expect(posted).toHaveLength(1);
+
+      // Held (declined / checkout-behind): the line prints, but nothing is posted — no repair happened.
+      lines.length = 0;
+      await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => sha('a'),
+        cwd: bare,
+        selfHeal: () => ({ ran: false, report, line: 'musterd: held' }),
+        postRepair: async (b) => {
+          posted.push(b);
+        },
+      });
+      expect(lines.join('')).toBe('musterd: held\n');
+      expect(posted).toHaveLength(1);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+});
