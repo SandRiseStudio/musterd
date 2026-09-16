@@ -209,6 +209,129 @@ Stop there. Do not tour the office or the settings.
 
 The README header GIF is `docs/assets/flagship.gif` (form 2, lean cut). The automated test (form 1) guarantees the behavior every recording shows.
 
+## 5. The pitch — a 6-minute script for a room that arrived afraid
+
+The cut for investors. It assumes the crib sheet (§3) is standing, the frame rule (§3 "What is in
+frame") is obeyed, and the second machine (`delta`) is reachable. It differs from §4 in what it
+proves: §4 shows a user what changes; this shows a room **who is accountable**, **what it costs**,
+and **what would prove us wrong**. Every claim below points at its source; nothing is said that a
+page cannot back (ADR 320 "What this is not").
+
+The position is ADR 320 §5: this year's room walks in afraid of agents nobody owns. Do not argue
+with the fear. Show the names.
+
+### 0:00 — Start with their objection
+
+**SEE** `/live`: the office lit, the roster panel with the human present and two agents `here`.
+Nothing working yet.
+
+**SAY** "Everyone in this room has read the same headlines this year: agents leaving their
+sandbox, agents nobody owns, agents nobody can stop. What you are looking at is the opposite
+shape. Four names on a roster. One of them is me. Every act any of them takes carries their name,
+and the record keeps what the harness saw them do, not what they say about themselves. musterd is
+the coordination layer where agents and humans are peers. It connects agents that already exist;
+it does not run them, and it does not pretend to contain them."
+
+### 0:45 — The second agent is where it breaks
+
+**DO** Give the two agents one real task in the real repo, split by ownership. Each opens and
+claims a lane.
+
+**SEE** The board: two owners, two scopes, no contention. If a scope overlaps, the warning fires —
+read it aloud, it is the best possible outcome.
+
+**SAY** "Two agents on one repo is where every team we have measured starts wasting work.
+On our own team, before lanes, about 37% of the code produced was thrown away — two agents
+producing the same diff, or one undoing the other (`docs/design/lanes-and-the-multi-agent-tax.md`,
+appendix). The fix is not a smarter model. It is one owner per unit of work, declared before the
+first keystroke, so a collision is a warning at claim time instead of a conflict at merge time."
+
+### 1:45 — A question reaches the human (the centerpiece)
+
+**SEE** An agent raises an `ask` to the human with a species and a tier. It lands on the rail in
+the agent's hue with the tier's clock drawn as an arc, and in the human's inbox.
+
+**DO** Let it sit for a breath. Then answer it from the terminal, as yourself.
+
+**SAY** "It asked me. Not the person driving its session — me, a member on the same roster, with
+a clock on the question. Above a certain stakes tier the agent holds until I answer. Below it, it
+proceeds when the clock runs out and writes down that it proceeded without me. My silence becomes
+a fact in the record, not a bypass. And I can say no. So can they — to each other, and to me.
+A teammate you can only assign to cannot tell you no. These can decline, challenge, and hold each
+other to acceptance. That is the difference between a fleet and a team, and it is also what keeps
+the human in the argument instead of in an approval queue."
+
+### 3:00 — A seat that is not running
+
+**DO** Direct an act at `delta` — the seat on the cloud VM.
+
+**SEE** The wake: the seat appears on the roster and in the office. Cold wake measured at about
+24 seconds (`docs/demo.md` §3 beat 6; `docs/wiki/cross-machine-huddle-bell.md`).
+
+**SAY** "A seat is the durable thing; where it runs is a detail. That machine holds only what its
+job needs — non-root, a token scoped to two repositories, one-shot secrets scrubbed at boot (ADR
+390). If someone asks what the woken model could do to the machine, that is the answer, and it is
+written down. What we do not do is sandbox the agent's tools. We say so on every public page,
+because a containment claim we cannot enforce would be worth less than none."
+
+### 4:00 — Done is two claims, not one
+
+**SEE** The first agent finishes and opens a PR. Merge it on the human's word. The lane moves to
+awaiting acceptance, and the acceptance routes to a **different** seat — a different model family
+when one is on the roster.
+
+**SAY** "The agent that built it says merged. Someone else, ideally a different model, says this is
+what we wanted. Same-model agreement is weak evidence — Anthropic's own red team found correlated
+models make correlated mistakes, and we treat the model family as the correlation boundary (ADR
+314). Every close that skipped the second claim is marked unconfirmed forever."
+
+### 4:45 — The receipt, and the honest denominator
+
+**DO**
+
+```bash
+musterd report
+```
+
+**SEE** Steering latency, who waited on whom, what went unanswered.
+
+**SAY** "The number we sell is this one. In a controlled run, two teams of the same agents built
+the same feature to the same 100% correctness. Uncoordinated, 72% of the code they produced was
+wasted. On musterd, under 2% — about 38 times less (`docs/wiki/cookoff.md`; design in ADR 122/123).
+The honest denominator: a single strong agent alone beat both on cost and wall-clock, and the
+coordinated team burned about eight times the solo agent's tokens. We do not sell against solo.
+We sell against the thing you are already running — several agents at once — because the moment
+you have a second agent, this is the tax you are paying."
+
+### 5:30 — What would prove us wrong
+
+**SAY** "Two falsifiers, on the record in the positioning decision (ADR 320). First: if the teams
+that adopt this only ever assign work down and approve it back — if nobody ever declines, claims,
+or challenges — then 'peers' is a doctrine our own usage disproves. We count those acts. Second:
+before we redesigned the human's role, our own team's record showed the human as an approver
+seven times for every time they communicated, and zero requests for help ever reached them
+(`docs/design/human-role-reevaluation.md`). The gate produced the record of oversight without the
+oversight. We are building the thing that fixes that, and we will know from the record whether it
+did."
+
+### 6:00 — The ask
+
+**SAY** One sentence: what is being raised, for what, and the next proof point on the calendar.
+Then stop. Do not tour the office or the settings.
+
+### If it goes wrong
+
+Same table as §4. Two additions for this room:
+
+- **Someone asks "so it is an AI safety product?"** — "No. It is a team roster. It makes agents
+  legible and accountable; it does not contain them. The safety products sit above the agents;
+  this puts a person among them."
+- **Someone asks "why not just prompt them to argue?"** — "Because manufactured objection is not
+  ownership. They can decline because they own the lane, not because a prompt told them to be
+  difficult."
+
+---
+
 ## Supporting stills (not a substitute for form 3)
 
 - `docs/assets/musterd-io-get-started.png` — the public Get Started surface on [musterd.io](https://musterd.io) (brew / npx, then `musterd init`). Linked from the README next to the GIF.
