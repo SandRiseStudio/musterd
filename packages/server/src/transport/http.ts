@@ -742,6 +742,13 @@ function raiseClass(
  * model can weigh the source. Points at the explicit follow-up (`musterd inbox`) rather than dumping
  * the content. The class noun (`steer` vs `urgent`, ADR 103) describes only `latest`, so a mixed queue
  * isn't mislabeled: the plural line uses the neutral "acts" and names the latest's class inline.
+ *
+ * The follow-up it points at is a BY-ID read (lane 01M2P69FHZ). "run 'musterd inbox'" was an
+ * unbounded read, which is a haystack at the sizes a long-lived seat actually reaches: measured
+ * 2026-09-16 on compo (6,231 unread), nick's steer was delivered verbatim, the model obeyed the
+ * line and read its inbox, and the steer was five lines inside a 32 KB result — rendered, never
+ * acted on. The act id was already in this route's JSON and never on the line, which is the only
+ * part a model sees. Naming the id makes the follow-up one call at any inbox size.
  */
 function composeInterruptLine(
   latest: Envelope,
@@ -757,16 +764,33 @@ function composeInterruptLine(
   const mix = rest && count > 1 ? ` (${describeMix(rest)})` : '';
   // A huddle turn names the room it came from and how to answer in it. `topic` is a structured
   // field, so this keeps the ADR 128 discipline — sender, act and topic, never `env.body`.
+  const read = byIdRead(latest.id);
   if (huddleTopic !== undefined && latest.thread) {
     const more = count > 1 ? ` (+${count - 1} more waiting${mix})` : '';
     return (
       `⚡ musterd: huddle ${huddleTopic} — ${latest.from} took a turn${more} — ` +
-      `read it with 'musterd inbox', answer with 'musterd huddle say ${latest.thread}'.`
+      `${read}, answer with 'musterd huddle say ${latest.thread}'.`
     );
   }
   return count > 1
-    ? `⚡ musterd: ${count} acts waiting (${noun} from ${head}, +${count - 1} more${mix}) — run 'musterd inbox' to read them.`
-    : `⚡ musterd: ${noun} from ${head} — run 'musterd inbox' to read it.`;
+    ? `⚡ musterd: ${count} acts waiting (${noun} from ${head}, +${count - 1} more${mix}) — ${read}.`
+    : `⚡ musterd: ${noun} from ${head} — ${read}.`;
+}
+
+/**
+ * The read that fetches EXACTLY the act this line is about (lane 01M2P69FHZ).
+ *
+ * Both spellings, each carrying the id verbatim so either is copy-pasteable as-is — the daemon
+ * cannot tell which one its reader can call. The tempting tighter version is to let the CLI forward
+ * its `--hook <harness>` so the daemon picks one, but `HOOK_SEAMS` knows only `claude-code` while
+ * Cursor has its own seam and passes no `--hook` at all: a Cursor seat holding musterd MCP tools
+ * would be told to shell out, which is this lane's mismatch moved rather than fixed. An id is 26
+ * characters and the line fires once per raise, so saying both costs a clause the reader skips.
+ *
+ * Still inside the ADR 088 §4 / ADR 128 discipline: an act id is a structured field, never `env.body`.
+ */
+function byIdRead(id: string): string {
+  return `read exactly it: team_inbox_check {ids:["${id}"]} or 'musterd inbox --id ${id}'`;
 }
 
 type RaiseClass = ReturnType<typeof raiseClass>;

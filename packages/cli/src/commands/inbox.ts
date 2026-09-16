@@ -88,6 +88,31 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
 
+  // --id <act_id> (lane 01M2P69FHZ): read exactly one named act, whatever its read state. This is
+  // the spelling the interrupt line points at, and it exists because the line used to point at a
+  // bare `musterd inbox`: for a seat thousands of messages behind, that is an unbounded read in
+  // which the act that rang is five lines of a very large page — measured on compo (6,231 unread)
+  // 2026-09-16, where the steer was rendered and never acted on. A lens like --from/--act: it moves
+  // NO cursor, because being rung about one act is not having read the window behind it.
+  const byId = flagStr(parsed.flags, 'id');
+  if (byId !== undefined) {
+    const res = await http.inbox(team, { ids: [byId] });
+    // The daemon filters by id, but an older one ignores `ids` and answers with an ordinary page —
+    // so filter here too rather than trusting the reply to be the named set (mirrors readMessages).
+    const found = res.messages.filter((m) => m.id === byId);
+    if (parsed.flags['json']) {
+      process.stdout.write(JSON.stringify(found) + '\n');
+      return found.length > 0 ? 0 : 1;
+    }
+    if (found.length === 0) {
+      process.stderr.write(`${theme.err('✗')} no act ${theme.accent(byId)} in this seat's inbox\n`);
+      return 1;
+    }
+    process.stdout.write(`${theme.accent('act')} — ${theme.meta(byId)}\n`);
+    process.stdout.write('\n' + renderInbox(found, kindOf, { cursorTs: 0 }) + '\n');
+    return 0;
+  }
+
   // --deferred (ADR 211 §5): the detail behind the footer count. A lens, like --from/--act: it never
   // advances the read cursor, so inspecting what you postponed cannot consume it.
   if (parsed.flags['deferred']) {

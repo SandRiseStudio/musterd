@@ -4247,6 +4247,115 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(audit[0]!.detail).toContain('steer');
   });
 
+  it('interrupt line (lane 01M2P69FHZ): names the act id and a by-id read, so the follow-up is one call at any inbox size', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+
+    await post(
+      '/teams/dawn/messages',
+      { envelope: urgentEnv('nick', 'Bob', 'u-haystack') },
+      nickTok,
+    );
+    const raised = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(raised.json.raised).toBe(true);
+
+    const line = raised.json.line as string;
+    // The id is the payload: without it on the LINE the reader cannot fetch exactly this act, and
+    // the line is the only part of the reply that reaches a model (the CLI prints `res.line` alone).
+    expect(line).toContain('u-haystack');
+    // Both spellings, each carrying the id verbatim so either is copy-pasteable as-is. A reader that
+    // holds musterd MCP tools and one that holds only the CLI must each find a call it can make.
+    expect(line).toContain('team_inbox_check {ids:["u-haystack"]}');
+    expect(line).toContain('musterd inbox --id u-haystack');
+    // The bare haystack spelling is what this lane removes: it sent a seat with thousands unread to
+    // an unbounded read, and the steer that rang was rendered and never acted on.
+    expect(line).not.toContain("run 'musterd inbox' to read it");
+    expect(line).not.toContain('ping'); // ADR 088 §4 still holds: never the raw body
+  });
+
+  it('interrupt line (lane 01M2P69FHZ): a multi-act queue points the by-id read at the headline act', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+
+    await post('/teams/dawn/messages', { envelope: urgentEnv('nick', 'Bob', 'u-older') }, nickTok);
+    await post(
+      '/teams/dawn/messages',
+      { envelope: { ...urgentEnv('nick', 'Bob', 'u-newer'), ts: Date.now() + 1 } },
+      nickTok,
+    );
+
+    const raised = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(raised.json.count).toBe(2);
+    const line = raised.json.line as string;
+    // The plural line still names ONE act to fetch — the headline the notice is about. Naming the
+    // queue without naming a row is the haystack again, one size smaller.
+    expect(line).toContain(`team_inbox_check {ids:["${raised.json.act.id}"]}`);
+    expect(line).toContain(`musterd inbox --id ${raised.json.act.id}`);
+    expect(line).not.toContain("run 'musterd inbox' to read them");
+  });
+
+  it('interrupt line (lane 01M2P69FHZ): a huddle turn gets the by-id read too, keeping its answer verb', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'human' }, nickTok);
+    const root = {
+      id: 'hh-root',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'opening the room',
+      meta: {
+        eligible: ['Bob', 'Ada'],
+        huddle: {
+          topic: { kind: 'design', id: 'doorbells' },
+          room: 'http://127.0.0.1:4851/b/huddle-hh-root',
+          anchor: 'docs/wiki/huddles.md',
+        },
+      },
+      ts: Date.now(),
+    };
+    await post('/teams/dawn/messages', { envelope: root }, nickTok);
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          ...root,
+          id: 'hh-turn',
+          body: 'a turn nobody should have to poll for',
+          thread: 'hh-root',
+          meta: undefined,
+          ts: Date.now() + 1,
+        },
+      },
+      nickTok,
+    );
+
+    const raised = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    const line = raised.json.line as string;
+    // The room and the answer verb are what make a huddle line useful — they stay.
+    expect(line).toContain('huddle design:doorbells');
+    expect(line).toContain('musterd huddle say hh-root');
+    // …but the READ half was the same haystack as every other class, so it gets the same repair.
+    expect(line).toContain('team_inbox_check {ids:["hh-turn"]}');
+    expect(line).not.toContain("read it with 'musterd inbox'");
+    expect(line).not.toContain('nobody should have to poll'); // never the body
+  });
+
   it('defer act (ADR 111, inc3): re-sequences the Goal, bumps its epoch, and wakes the stale lane owner', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

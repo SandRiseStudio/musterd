@@ -1,6 +1,6 @@
 # 088 — The interrupt line: a tool-boundary inbox check reaches a busy agent
 
-- Status: accepted — increment 1 shipped 2026-07-05 (PR #109); the arc continued in ADR 103 (inc2) + ADR 111 (inc3)
+- Status: accepted — increment 1 shipped 2026-07-05 (PR #109); the arc continued in ADR 103 (inc2) + ADR 111 (inc3); amended 4× (latest 2026-09-16, lane 01M2P69FHZ)
 - Date: 2026-07-03
 
 ## Context
@@ -39,6 +39,7 @@ for this seat?*
 - **No** → exit 0, **zero output**. The common case must be free: no context added, no tokens spent.
 - **Yes** → exactly **one line** to stdout and exit 0, e.g.
   `⚡ musterd: urgent from june (handoff) — run 'musterd inbox' to read it.`
+  _(Amended 2026-09-16: the tail now names the act id and a by-id read. See the amendment below.)_
 
 It reuses the waiting-act predicate ADR 046 built for the per-command nudge — this extends that nudge
 from "musterd commands only" to "every tool call the agent makes." No SPEC bump, no new wire frames.
@@ -133,6 +134,43 @@ leased for an obligation whose lane already closed.
 
 Falsify: on a daemon carrying this, a `lane_review` ask whose lane is `done`, or a steer the
 addressee has been shown by `musterd inbox`, appearing in `interrupt-check`'s `act`.
+
+## Amendment 4 — the follow-up is a by-id read (2026-09-16, lane 01M2P69FHZ)
+
+§1 fixed the line's *shape* and never its *destination*: the tail said `run 'musterd inbox' to read
+it`, which is an unbounded read. That is fine for a seat a few acts behind and a haystack for the
+seats this ADR exists to reach.
+
+Measured 2026-09-16 (izzo, lane 01M2P5B3RE), native wake of compo at 6,231 unread: nick's steer
+`01M2P6211PG002HS91QAVK3DH6` was delivered verbatim into the turn-3 tool result, the model **obeyed
+the line** and called `team_inbox_check {limit:5}`, the daemon marked the steer `inbox.rendered` at
+22:40:43Z — and the model's next act ignored it. The steer was five lines inside a 32 KB result.
+Delivery held; the instruction was wrong for the seat. Note what the discharge rule in Amendment 3
+does here: clause (iv) counts that read as having rendered the act, so the line stops ringing for a
+steer the model never acted on. A wrong follow-up therefore does not merely waste a turn — it
+consumes the obligation.
+
+The act id was already in this route's JSON (`act: {id, from, act}`) and never on the line, which is
+the only part of the reply a model sees.
+
+**Decided:** `composeInterruptLine` names the act id and the read that fetches exactly it, in both
+spellings — `team_inbox_check {ids:["<id>"]}` and `musterd inbox --id <id>` — each carrying the id
+verbatim so either is copy-pasteable as-is. All three branches (single, plural, huddle) take it; the
+huddle line keeps its `musterd huddle say <thread>` answer verb. The plural line names ONE act, the
+headline the notice is about, because naming a queue without naming a row is the same haystack one
+size smaller. `musterd inbox --id` is new and moves **no cursor**: being rung about one act is not
+having read the window behind it.
+
+Both spellings rather than one chosen by surface: the tempting tighter version forwards the CLI's
+`--hook <harness>` and lets the daemon pick, but `HOOK_SEAMS` knows only `claude-code` while Cursor
+has its own seam and passes no `--hook` at all — a Cursor seat holding musterd MCP tools would be
+told to shell out, which is this defect moved rather than fixed. An id is 26 characters and the line
+fires once per raise.
+
+Still inside §4: an act id is a structured field, never `env.body`.
+
+Falsify: a seat with >1000 unread receives a steer and its next tool call after the line is anything
+other than a by-id read of the named act.
 
 ## Observability & Evaluation
 

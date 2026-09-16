@@ -129,6 +129,15 @@ clause-1 seam shipped; mid-loop it now emits the daemon's line verbatim, never a
 And it is where the room found the contract's missing clause, because a notice can be perfectly
 formed, perfectly delivered, and **wrong** — see (7).
 
+**A third way to be wrong, repaired 2026-09-16 (stanley, lane `01M2P69FHZ`).** The headline was
+right, the delivery held, the act was not stale — and the notice still failed, because its tail
+(`run 'musterd inbox' to read it`) named an unbounded read. On compo at 6,231 unread the model
+obeyed it exactly and the steer it was rung about was five lines of a 32 KB result: rendered, never
+acted on, and — by clause 7 (iv) — discharged by that very read. `composeInterruptLine` now names
+the act id and a by-id read in both spellings (`team_inbox_check {ids:["<id>"]}` /
+`musterd inbox --id <id>`), so the follow-up is one call at any inbox size. ADR 088 Amendment 4.
+Not a new clause: what a notice should POINT AT sits inside (6), and this document arms nothing.
+
 ## What the room would change — the clauses reworded
 
 Stated as obligations, not mechanisms (ryder's framing, which the codex and native rows require: a
