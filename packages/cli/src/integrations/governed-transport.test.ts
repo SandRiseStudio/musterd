@@ -3,14 +3,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { GovernedTransportManifest } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
+import { loadGovernedModelsManifest } from './governed-models.js';
 import { loadGovernedTransportManifest, renderTailscaleTransport } from './governed-transport.js';
 
-function workspace(): string {
+function workspace(agentName = 'ada'): string {
   const root = mkdtempSync(join(tmpdir(), 'musterd-transport-'));
   mkdirSync(join(root, '.musterd', 'seats'), { recursive: true });
   mkdirSync(join(root, '.musterd', 'roles'));
   writeFileSync(join(root, '.musterd', 'team.toml'), 'slug = "test"\n');
-  writeFileSync(join(root, '.musterd', 'seats', 'ada.toml'), 'kind = "agent"\n');
+  writeFileSync(join(root, '.musterd', 'seats', `${agentName}.toml`), 'kind = "agent"\n');
   writeFileSync(join(root, '.musterd', 'seats', 'nick.toml'), 'kind = "human"\n');
   writeFileSync(
     join(root, '.musterd', 'governed-models.json'),
@@ -23,7 +24,7 @@ function workspace(): string {
       },
       quota_tiers: [{ id: 'standard', quota: { capacity: '$10', rate: '$5/day' } }],
       roles: {},
-      workloads: { ada: { workload_id: 'a7f3c2' } },
+      workloads: { [agentName]: { workload_id: 'a7f3c2' } },
     }),
   );
   return root;
@@ -102,6 +103,40 @@ describe('Tailscale governed-transport renderer (ADR 402)', () => {
       nodes: [{ node_key: 'tokenizer-box-01', members: ['secretary'] }],
     });
   });
+
+  it('renders when the governed roster includes a Member named secretary', () => {
+    const root = workspace('secretary');
+    expect(() =>
+      renderTailscaleTransport(root, {
+        ...manifest,
+        nodes: [{ node_key: 'tokenizer-box-01', members: ['secretary'] }],
+      }),
+    ).not.toThrow();
+  });
+
+  it.each(['mskey_', 'msgr_', 'mscr_', 'msac_', 'msls_'])(
+    'rejects a governed-model workload key beginning with %s',
+    (prefix) => {
+      const root = workspace();
+      writeFileSync(
+        join(root, '.musterd', 'governed-models.json'),
+        JSON.stringify({
+          version: 1,
+          team: {
+            models: ['anthropic/claude-sonnet-4-6'],
+            quota: { capacity: '$20', rate: '$10/day' },
+            default_tier: 'standard',
+          },
+          quota_tiers: [{ id: 'standard', quota: { capacity: '$10', rate: '$5/day' } }],
+          roles: {},
+          workloads: { [prefix + 'abc']: { workload_id: 'a7f3c2' } },
+        }),
+      );
+      expect(() => loadGovernedModelsManifest(root)).toThrow(
+        'invalid governed-model policy: .musterd/governed-models.json resembles a credential',
+      );
+    },
+  );
 
   it.each([
     [

@@ -9,21 +9,28 @@ ADR 402 introduced the committed governed-transport manifest as a secret-free in
 deterministic policy renderer. Its first implementation guarded this by applying a broad
 case-insensitive substring expression to the raw manifest and rendered artifacts. In addition to
 the Musterd credential prefixes, that expression matched ordinary words such as `token` and
-`secret`.
+`secret`. The transport renderer also consumes the governed-models manifest, whose shared loader
+used the same heuristic.
 
 ## Problem
 
 The guard rejects valid configuration solely because an opaque Member or node key contains an
 ordinary English substring. A Member named `secretary` and a node key named `tokenizer-box-01` both
 fail with an accusation that the source resembles a credential, despite containing no credential.
-That is a false positive in a safety control and prevents a valid least-privilege policy from being
-generated.
+The same false positive remains when `secretary` is the governed-models workload-map key that the
+transport renderer must load. That is a false positive in a safety control and prevents a valid
+least-privilege policy from being generated.
 
 ## Decision
 
 The governed-transport manifest rejects only a value that begins with a concrete Musterd
 credential prefix: `mskey_`, `msgr_`, `mscr_`, `msac_`, or `msls_` (case-insensitive). It applies
 this rule to the parsed manifest's user-provided values, not to raw JSON text or serialized output.
+
+The governed-models loader and resolver use the same prefix-specific rule because that manifest is
+a shared renderer input. They walk parsed field values and record keys, so an ordinary value such
+as `secretary` is accepted while a credential-prefixed workload-map key is rejected. The generated
+Aperture output is checked after parsing its own generated JSON structures.
 
 The renderer produces its policy only from the validated manifest, governed workload identities,
 and fixed structural literals. It does not repeat a separate substring scan over its serialized

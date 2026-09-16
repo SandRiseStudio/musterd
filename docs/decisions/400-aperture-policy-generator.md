@@ -32,7 +32,8 @@ syntax; no renderer registry or provider-interchangeability promise is introduce
 `--write` atomically replaces exactly `.musterd/generated/aperture/policy.hujson` and
 `members.json`. Default mode shows the deterministic result without writing, and `--check`
 requires both tracked files to be byte-current. Invalid mappings, policy widening, unordered
-tiers, broad identifiers, and credential-like source or rendered output fail before a write.
+tiers, broad identifiers, and Musterd-credential-prefixed source or rendered output fail before a
+write (the shared guard semantics are recorded in [ADR 405](405-governed-transport-credential-guard-is-prefix-specific.md)).
 
 When the manifest exists, `integration doctor --aperture` requires current generated output and
 compares only musterd-managed grants, models, buckets, and zero-retention posture. Unmanaged
