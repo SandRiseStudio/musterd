@@ -126,8 +126,15 @@ existing key behave that way. Minting is a human's: it happens in the Tailscale 
 the value is a credential that should not pass through a transcript.
 
 Mitigated meanwhile by `trap 'rc=$?; tailscale logout …; exit $rc' EXIT`, which hands the node back
-on the way out. **Partial on purpose, and the limit is the common case:** `fly machine destroy` and
-a hard stop SIGKILL the box, and no trap runs then. EXIT only, never INT/TERM — trapping signals
+on the way out. ~~Partial, and the limit is the common case: `fly machine destroy` and a hard stop
+SIGKILL the box (2026-09-16)~~ **CORRECTED the same day, and the correction is in the mitigation's
+favour.** `musterd stream stop` does not destroy the machine — it runs `fly machine stop --signal
+SIGINT --timeout 30` (stream.ts), because SIGINT is the broadcast CLI's own graceful stop and `--rm`
+destroys the box once the process ends. And bash **does** run an EXIT trap on an untrapped SIGINT —
+measured directly rather than recalled, with a script carrying only an EXIT trap and a `kill -INT`.
+So the ordinary deliberate stop IS covered. What is not: `fly machine destroy --force`, and the
+SIGKILL that follows if the process outlives the 30s timeout. I under-claimed in the PR that shipped
+this; the shape of the error was assuming a teardown path without reading which signal it sends. EXIT only, never INT/TERM — trapping signals
 would put bash in front of the path the broadcast CLI uses for its own graceful stop, and reordering
 that to tidy a device record trades a real behaviour for a cosmetic one. `rc` is captured and
 re-raised because the entrypoint keys the machine's whole lifetime off 75-vs-anything-else, so a
