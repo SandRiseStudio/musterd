@@ -30,6 +30,8 @@ Same as the /watch spec §2, restated because these strings ship to a stranger w
 | Always Publish VODs | **On**, Excluded Categories empty | Otherwise stored broadcasts sit unpublished and each needs reviewing by hand. |
 | YouTube connection | **Connected and verified** — `twitch.tv/settings/connections` (account settings, not the Creator Dashboard) | Past broadcasts are deleted after **7 days** on this channel ([audit](../wiki/twitch-channel-audit.md)). The connection turns on Export in Video Producer, which is the only way a session survives the week without a manual download. Verify the YouTube account or uploads cap at 15 minutes, shorter than a session. |
 
+**Where these are set.** Category is *not* under Settings — it is stream info, set in **Creator Dashboard → Stream Manager → Edit Stream Info** (`dashboard.twitch.tv/u/sandrise_ai/stream-manager`), which is the same dialog as the title (§3) and the tags (§4). It is sticky between streams and takes effect immediately when edited mid-stream, so all three can be fixed on a live channel without restarting. Everything else in the table above is Creator Dashboard → Settings → Stream, except the YouTube connection, which is account settings. `Cmd+/` opens Dashboard Search if a menu moves.
+
 Two things Twitch states that decide the order: Store Past Broadcasts is **web-only** and must be on *before* going live — an unsaved broadcast cannot be recovered — and **Uploads are Affiliate-only**, so externally edited video cannot live on the channel yet. Clips are stored indefinitely at every tier; the VOD is only the window in which one can be cut.
 
 ## 3. Title
@@ -42,22 +44,72 @@ characters so the directory card does not clip it.
 | --- | --- | --- |
 | Default, any session | `AI agents build their own coordination layer, live — musterd` | 60 |
 | A session with a countable roster | `Watch 9 AI agents review each other's code, live — musterd` | 58 |
-| A session with a specific beat | `AI agents hand work off and accept merges, live — musterd` | 57 |
+| A session with a specific beat | `AI agents claim their own work and turn it down, live — musterd` | 62 |
 
 Notes: the roster number is set by hand at stream start and must match the office at that moment
 (ADR 158 — attested, not declared); if it cannot be kept true, use the default. "Coffee &" is
 dropped: the two words a stranger reads first should be the claim, not the mood. "platform" is
-replaced with "coordination layer", the product's own name for itself (ADR 320).
+replaced with "coordination layer", the product's own name for itself (ADR 320). ~~"AI agents hand
+work off and accept merges" (2026-09-16)~~ REPLACED the same day: merges are this team's incidental
+instance of acceptance, not the claim. ADR 320 §3 makes the claim **peer, not contractor** — a
+member can claim work, decline it, and hold another to acceptance — and a title should carry that,
+not the git noun for it.
 
 ## 4. Tags (all 10)
 
-`AI` · `AIAgents` · `Programming` · `SoftwareDevelopment` · `Coding` · `OpenSource` ·
-`BuildInPublic` · `DevLog` · `MultiAgent` · `English`
+`Claude` · `AI` · `Coding` · `Programming` · `SoftwareDevelopment` ·
+`AIAgents` · `OpenSource` · `BuildInPublic` · `DevLog` · `musterd`
 
-Ten because ten are allowed and unset tags are a discovery input at zero. `English` because the
-language tag is a directory filter. Nothing about a game; nothing that implies a schedule.
+Chosen against measured directories rather than intuition — the counts and the method are on the
+[audit page](../wiki/twitch-channel-audit.md). Two kinds of tag earn a slot and the set needs both:
 
-## 5. About panels (three, in this order)
+- **Volume tags** — `Coding`, `Programming`, `SoftwareDevelopment`. Busy directories; the channel
+  sits mid-pack, but that is where browsing happens.
+- **Ownable tags** — `Claude`, `OpenSource`, `BuildInPublic`, `AIAgents`. Two to seven live
+  channels each, so the channel can be at or near the top of them and stay there. `Claude` is the
+  best single tag available: small enough to rank in, and exactly the audience.
+
+`musterd` does no acquisition work and is kept only because it makes the channel findable by name
+and the tenth slot has no better claimant. `DevLog` is the one unmeasured entry.
+
+Two corrections to the first draft of this section, both the same mistake — spending a slot on
+something Twitch already handles:
+
+- ~~`English`, "because the language tag is a directory filter" (2026-09-16)~~ WRONG the same day:
+  language is its own control in the directory, not a tag slot.
+- **Never add the category name.** Twitch states that the category tag is applied automatically, so
+  `Software and Game Development` as a tag is a wasted slot.
+
+A tag earns its place only if a stranger might filter for it *and* it narrows who arrives. The
+words that fail both tests are the ones describing the medium or the mood — see the audit's verdict
+on the set this replaces.
+
+## 5. The About surface — bio, then panels
+
+### 5.1 Profile bio (the About description, 300-character cap)
+
+Set at `twitch.tv/settings/profile` → **Bio** — account settings, not the Creator Dashboard.
+
+> AI agents and humans on one roster, building the thing that coordinates them. The agents are not assigned work — they claim it, hand it off, and decline it. Peers, not a fleet someone runs. Dark between sessions. github.com/SandRiseStudio/musterd
+
+246 characters. Every clause is load-bearing:
+
+- **"not assigned … claim it … decline it"** is ADR 320 §3 in plain words. Declining is the
+  distinction the whole position rests on, and it is the most watchable thing on the stream.
+- **"Peers, not a fleet someone runs"** carries §1 (ownership is the test) and §2 (humans as
+  members, not approvers) without the jargon, and separates musterd from the console products.
+- **"Dark between sessions"** is the same honesty line as /watch §4.2 and panel 1 below, so all
+  three surfaces say it identically.
+
+No "coordination layer": ADR 320 §4 forbids the bare term, and 300 characters has no room to
+qualify it properly. The position survives without the contested label.
+
+**Alternative, only if a viewer dropping in has a real chance of seeing a decline or a challenge**
+(242 characters) — the last sentence is a promise the stream has to keep:
+
+> A team of AI agents and humans builds the tool that coordinates them. No one is assigned anything: they claim work, hand it off, ask each other for help, and say no. Watch what agents do when they can refuse. github.com/SandRiseStudio/musterd
+
+### 5.2 About panels (three, in this order)
 
 Panel title / body. Verb-first links, outcome named (product-communications skill, UX-copy standards).
 
@@ -94,7 +146,8 @@ continues at github.com/SandRiseStudio/musterd`. Never the word "offline" (reads
 1. Category, VOD storage and clips are set as §2 and the seven old clips are gone — check the public
    `/clips` and `/videos` pages logged out after the next stream: videos non-empty, clips empty or
    ours only.
-2. Title, tags and panels match §3–§5 character for character on the public `/about` page.
+2. Title, tags, bio and panels match §3–§5 character for character on the public `/about` page,
+   and the bio is under the 300-character cap.
 3. `pnpm vocab:check` green on this file.
 4. After the first stream under these settings, record on the audit page what the directory card
    looked like and where it sat in the Software and Game Development listing — the number the audit
