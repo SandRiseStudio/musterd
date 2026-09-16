@@ -20,13 +20,29 @@ are agent-virtual-office, agent-office, Agent Heights, Termi and AgentSee.
 So: one public, prerendered page whose whole job is to be the front door to the stream. It is a
 marketing surface, staged like `/docs`, with no daemon behind it.
 
-**Prerequisite, outside this lane, nick's:** Google's index of `musterd.io/` currently carries a
-Vietnamese gambling title ("BK8 GG … tại musterd.io"). It is not cloaking on our side — a Googlebot
-user agent receives `<title>musterd</title>` and the served page contains no such text — it is a
-stale index from the domain's prior life (Wayback has 2018 and March 2025 snapshots before our
-August 2025 redirect). Search Console: verify the domain, inspect `/`, request reindexing, and check
-Security & Manual Actions. **Do not ship this page until that is clean.** A fresh page on a
-spam-titled domain inherits the domain's standing.
+**Prerequisite: CLEARED 2026-09-16, and it was our defect, not the prior owner's.** The first
+reading of this was wrong and is recorded here so nobody re-derives it. The visible symptom was a
+Vietnamese gambling title on the home page's search result, which looked like a stale index from the
+domain's prior life. Search Console said something better: `https://musterd.io/` was **not indexed at
+all** — "Duplicate without user-selected canonical", with Google's chosen canonical
+`http://musterd.io/` and an "HTTPS is invalid" flag, last crawled 2026-08-18.
+
+The cause was Cloudflare's `always_use_https` being off, so `http://musterd.io/` and
+`http://musterd.io/docs/` answered 200 instead of redirecting. Every page existed at two addresses,
+Google clustered them, and it picked the insecure one. The canonical tag was present and correct on
+both versions; Google overrode it, which is what it does when it crawls the duplicate.
+
+Fixed the same day on nick's authority: `always_use_https` on (HTTP now 301s to HTTPS in one hop),
+HSTS on at `max-age=15552000` without `includeSubDomains` or preload, `sitemap.xml` submitted and
+reading Success with 5 pages, the prior owner's dead `sitemap_index.xml` removed, and indexing
+requested on the home page. Security issues and Manual actions both read "No issues detected" — the
+domain carries **no penalty**, so the gambling title and the r/Scams inbound links are history
+rather than a sanction.
+
+**What this still means for shipping order.** The page may be built now. Before it is deployed,
+confirm the home page has actually been indexed (URL Inspection reports it on Google), because a new
+page on a domain whose root is unindexed inherits that standing. Left open and not blocking:
+`min_tls_version` is 1.0.
 
 ## 2. The rule that governs every string
 
