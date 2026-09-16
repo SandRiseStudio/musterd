@@ -28,7 +28,7 @@ const DESCRIPTION =
   'transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to ' +
   'redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires ' +
   'meta.species and meta.tier. 2–4 to names mean any may answer on message, request_help, or ' +
-  'challenge — not ask (quiet-set fan-out is unshipped, ADR 260).';
+  'challenge — not ask (quiet-set fan-out is unshipped, ADR 260 / ADR 401).';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
@@ -56,7 +56,7 @@ function recipient(to: string): Recipient {
  *
  * `act` is required once arity is 2+: composing the set act-blind (the previous shape) produced a
  * valid-looking team act that the envelope guard then refused, with copy that read as a design
- * principle. `ask` is the parked increment (ADR 260); handoff and the rest are structurally
+ * principle. `ask` is the parked increment (ADR 260 / ADR 401); handoff and the rest are structurally
  * single-target. One-name and empty `to` ignore `act` — they never compose a set.
  */
 export function normalizeTo(

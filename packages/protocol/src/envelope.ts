@@ -26,8 +26,8 @@ export {
  * Why this act cannot carry `meta.eligible`. One home so MCP `normalizeTo` and the envelope
  * guard cannot disagree (lane 01M2HM0K2C).
  *
- * `ask` is refused because quiet-set fan-out is an unshipped increment (ADR 260 increment 2,
- * parked), not because an ask has "one owner". Handoff and the single-target acts keep the
+ * `ask` is refused because quiet-set fan-out is an unshipped increment (ADR 260 increment 2 /
+ * ADR 401), not because an ask has "one owner". Handoff and the single-target acts keep the
  * structural line.
  */
 export function eligibleSetRefusal(act: Act): string {
