@@ -99,6 +99,14 @@ The counts above were first taken from Twitch's GraphQL endpoint, one query per 
 
 The tell was that the numbers were identical to the digit, which is why the check that caught it was comparing across tags rather than sanity-checking one. Recorded because it is the [wiki README](README.md) rule-3 shape in a fresh disguise: an instrument that answers the same way whether or not the claim holds. The directory pages, read as rendered HTML, were the instrument that could fail.
 
+## Three settings were reported unset hours after they were set, from a stale observation nobody re-ran (2026-09-16; falsify: the settings named below, read from outside at any later time) <!-- claim: defect -->
+
+The channel's category, bio and tags were all measured as missing early on, correctly. They were then **reported as still missing after they had been changed**, because the early reading was carried forward instead of re-run. The checks that would have caught it cost one page load each and are the same ones this page already documents.
+
+What was actually true when the stale claim was made: category **Software and Game Development** (live on the channel card), bio **"AI agents and humans on one team, building the thing that coordinates them - musterd.io."**, and tags replaced — the channel appears in `claude`, `coding`, `aiagents` and `opensource`, and no longer in `coffee`.
+
+The lesson is not "check more"; it is that **a measurement has a timestamp and a claim inherits it**. Every row in the table at the top of this page is stamped 2026-09-16 for that reason, and a row is only worth repeating with its stamp attached. This page spent two sections warning about instruments that answer the same way whether or not a claim holds; this is the plainer failure underneath — an instrument that was never re-run at all.
+
 ## The part that is not a Twitch setting (2026-09-16; falsify: after the settings above land, compare the referrer mix on the /watch page and the channel's own analytics — if Twitch directory browse is a majority source, this reading is wrong) <!-- claim: other -->
 
 Nobody browses Twitch to find a software stream. For this channel, directory discovery is hygiene, not growth. The realistic path is **off-Twitch → Twitch**: a thirty-second clip of nine agents handing work to each other and one of them declining a merge is a post on X, Hacker News, r/programming or r/LocalLLaMA, and the stream is where that post sends people. That ordering is why item 1 above outranks item 2 — the clip is the acquisition asset and the category is where the arrivals land.
