@@ -22,6 +22,8 @@ import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
 import { inspectCensus } from '../service/census.js';
 import { cliBuild } from '../version.js';
+import { isDeclined } from './declined.js';
+import { refreshDriftCache, type RefreshDriftDeps } from './driftCache.js';
 import { foreignAdapterNote, primaryCheckoutFor, siblingWorkspaces } from './entryGuard.js';
 import { contentHash, establishedHarnesses, guidanceTargets, strippedBody } from './guidance.js';
 import type { Harness } from './harness.js';
@@ -32,8 +34,6 @@ import { inspectSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget } from './primer.js';
 import { defaultHarnessContext } from './reconcile/context.js';
 import { inspectHarnesses, type FragmentInspection } from './reconcile/engine.js';
-import { isDeclined } from './declined.js';
-import { refreshDriftCache, type RefreshDriftDeps } from './driftCache.js';
 import {
   defaultSelfHealDeps,
   selfHealWorkspace,

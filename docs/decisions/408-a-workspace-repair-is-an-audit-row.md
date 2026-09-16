@@ -90,12 +90,34 @@ decision refuses both.
    was; a lease would prove nothing extra. `authMember` takes `{ leaseless: true }` from exactly
    this route and nowhere else.
 
-5. **Drift is cached by the CLI and read by the adapter** (increment 4). `.musterd/drift.json` is
-   refreshed on the interrupt-check cadence — at most every 10 minutes, or immediately when the
-   daemon's build changes — and the MCP adapter surfaces it as `structuredContent.workspace`
-   beside the `warnings` #1479 made renderable. Mid-session it only *tells*; SessionStart *does*. A
-   running harness cannot hot-swap its own hooks, and a guidance file rewritten under a live
-   session is the hazard ADR 161 already avoids.
+5. **Drift is cached by the CLI and read by the adapter** (increment 4). `.musterd/drift.json`
+   (`DriftCacheSchema`) is refreshed at session start, where the daemon build is already in hand,
+   and on the interrupt-check cadence — at most every 10 minutes, or immediately when the daemon's
+   build changes. An *unknown* daemon build never invalidates: the interrupt probe does not spend a
+   round trip per tool call for one, and treating its silence as a change would re-inspect the
+   workspace at every tool boundary, which is the cost the cache exists to avoid. The adapter only
+   reads the file (`readFileSync` + `safeParse`, no `@musterd/cli` import) and reads it from the
+   **seat's** workspace, not `process.cwd()` — a shared workspace-family MCP entry (ADR 165) runs
+   from the family's primary checkout. Mid-session it only *tells*; SessionStart *does*. A running
+   harness cannot hot-swap its own hooks, and a guidance file rewritten under a live session is the
+   hazard ADR 161 already avoids.
+
+   **Amended 2026-09-16, before increment 4 was built** (stanley's design review). The adapter
+   surfaces drift as a third `ToolWarning` member, `provisioning_drift`, pushed into the **same**
+   `warnings` array as `build_skew` and `sync_wedge` — *not* as a `structuredContent.workspace` key
+   of its own, as this decision first said. A field that exists only when something is wrong is a
+   warning; a second key beside `warnings` is a key every client that does not know it drops
+   silently, which is precisely the defect #1479 had just fixed one key over. One array, one
+   discriminator, one place a client looks. For the same reason the warning carries no build refs:
+   build skew has exactly one home, and two structures carrying the same two refs — one computed at
+   request time, one from a ≤10-minute cache — would disagree with no arbiter. The warning carries
+   `guidance`, `hooks`, `permissions`, `declined`, `inspected_at` and one judgement,
+   `repairable_at: 'session-start' | 'manual'`: `'manual'` whenever the drift is the permission
+   floor (decision 2 — never self-healed) or the folder carries the tombstone, because a reader
+   told the next session start will fix it would correctly do nothing and stay broken. The union is
+   left **open** for an `unknown` case: a workspace whose machine-wide hook was never provisioned
+   runs nothing, so its cache is *absent* rather than clean, and "I cannot tell" is a third state
+   neither `clean` nor these counts can express.
 
 ## Consequences
 
@@ -112,6 +134,21 @@ decision refuses both.
   `quiet`; the CLI command reads `.code`. Every harness's `refreshHooks.run` returns `skipped`.
 - A daemon-side fleet view of drift (approach C in the spec) is deferred; once every repair is an
   audit row, that view is a query, not a new protocol concept.
+- The hooks split by file, and the split is the floor under everything above (verified across the
+  2026-09-16 census, not assumed). Machine-wide `~/.claude/settings.json` carries SessionStart and
+  UserPromptSubmit; the seat-local `.claude/settings.local.json` carries Notification, PostToolUse,
+  PreToolUse, SessionEnd and the SessionStart capture. Every hook the census found stale was
+  seat-local; the machine-wide SessionStart — the carrier of the repair itself — was intact on
+  every seat checked. So the hook that repairs the hooks lives in a different file from the ones
+  that break, and it is exactly the file `withinWorktreeOnly` refuses to touch. The exclusion in
+  decision 2 is not only caution about cross-seat writes: the excluded file is what makes every
+  other repair possible, and a design that let a seat rewrite it could disable its own repair path.
+- What this leaves unanswered, deliberately: a workspace whose machine-wide hook is **absent**
+  — never provisioned, or removed by hand — runs no probe, so `.musterd/drift.json` is absent
+  rather than clean, and the adapter stays silent exactly where it should speak loudest. "Unknown"
+  is a third state, it deserves its own decision about what a client does with it, and the adapter
+  is the one surface that still runs when everything else is broken. Increment 4 leaves the warning
+  union open for it rather than closing the union against it.
 - Not repaired, ever, by this path: the permission floor; the machine-wide Claude Code settings;
   Codex's common-dir hooks; a v2 provisioning manifest (`musterd harness configure` is a choice of
   harness set, not drift).
