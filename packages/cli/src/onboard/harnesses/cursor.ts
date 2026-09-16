@@ -383,7 +383,7 @@ export const cursor: Harness = {
     applies: (dir) => existsSync(projectConfigPath(dir)) || existsSync(projectHooksPath(dir)),
     run: (dir) => {
       const warnings = installMusterdCursorHooks(dir);
-      return { files: [projectHooksPath(dir)], warnings };
+      return { files: [projectHooksPath(dir)], warnings, skipped: [] };
     },
   },
 

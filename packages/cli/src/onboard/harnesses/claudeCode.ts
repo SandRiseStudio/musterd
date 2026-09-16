@@ -10,7 +10,7 @@ import { writeJsonAtomic } from '../atomicWrite.js';
 import { isDeclined } from '../declined.js';
 import { primaryCheckoutFor } from '../entryGuard.js';
 import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
-import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
+import type { Harness, RefreshHooksOptions, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
 import { loadProvisioning } from '../manifest.js';
 import {
   launchEntryEnv,
@@ -558,7 +558,10 @@ function dropHook(path: string, event: string, matches: (m: ClaudeHookMatcher) =
  * Install musterd's Claude Code hooks: the project-local `Notification` hook, and the global
  * self-gating `SessionStart` verify hook (absorbing any hand-pasted recipe). Best-effort per hook.
  */
-export function installMusterdHooks(dir: string = process.cwd()): string[] {
+export function installMusterdHooks(
+  dir: string = process.cwd(),
+  opts: RefreshHooksOptions = {},
+): string[] {
   const warnings: string[] = [];
   // Every project-local hook comes off the one table (ADR 168), so adding an entry there installs it
   // AND health-checks it. Each carries its own marker, so entries sharing an event coexist rather
@@ -577,12 +580,16 @@ export function installMusterdHooks(dir: string = process.cwd()): string[] {
   // The machine-wide hooks — the ones an older checkout could silently downgrade for every folder
   // at once, and so the ones carrying an epoch stamp and a refusal (ADR 168): the SessionStart
   // orientation, and the per-turn UserPromptSubmit boundary/label nudge it hands off to.
-  for (const [event, matches, command] of [
-    ['SessionStart', isMusterdSessionStart, sessionStartHookCommand()],
-    ['UserPromptSubmit', isMusterdPromptSubmit, promptSubmitHookCommand()],
-  ] as const) {
-    const globalWarning = upsertHook(globalSettingsPath(), event, matches, command);
-    if (globalWarning) warnings.push(globalWarning);
+  // Under `withinWorktreeOnly` (self-heal) they are skipped, not written: one seat's session start
+  // must not rewrite the file every folder on the machine reads.
+  if (!opts.withinWorktreeOnly) {
+    for (const [event, matches, command] of [
+      ['SessionStart', isMusterdSessionStart, sessionStartHookCommand()],
+      ['UserPromptSubmit', isMusterdPromptSubmit, promptSubmitHookCommand()],
+    ] as const) {
+      const globalWarning = upsertHook(globalSettingsPath(), event, matches, command);
+      if (globalWarning) warnings.push(globalWarning);
+    }
   }
   // The seat chip rides the same install: it is the human-facing half of what the SessionStart
   // orientation above does for the agent, and shipping one without the other is what left the
@@ -1047,9 +1054,10 @@ export const claudeCode: Harness = {
     // Already provisioned for Claude Code here? A refresh updates what exists; creating a first
     // install is `init`'s job. Same rule --refresh-guidance follows for a folder with no guidance.
     applies: (dir) => existsSync(settingsLocalPath(dir)),
-    run: (dir) => ({
-      files: [settingsLocalPath(dir), globalSettingsPath()],
-      warnings: installMusterdHooks(dir),
+    run: (dir, opts) => ({
+      files: [settingsLocalPath(dir), ...(opts?.withinWorktreeOnly ? [] : [globalSettingsPath()])],
+      warnings: installMusterdHooks(dir, opts),
+      skipped: opts?.withinWorktreeOnly ? [globalSettingsPath()] : [],
     }),
     // installMusterdHooks installs every one of these (the chip rides the same install), so a
     // cleared tombstone for any of them genuinely comes back on this path.

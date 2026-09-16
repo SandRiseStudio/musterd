@@ -29,7 +29,7 @@ export async function initCommand(parsed: Parsed): Promise<number> {
   if (parsed.flags['refresh-guidance']) return runRefreshGuidance();
   // Hook-only refresh (ADR 168), same precedence rule and the same reason: a stale or missing hook
   // is not an identity problem, so its repair must not route through the identity-rewriting flow.
-  if (parsed.flags['refresh-hooks']) return runRefreshHooks();
+  if (parsed.flags['refresh-hooks']) return runRefreshHooks().code;
   // Permissions-only refresh (ADR 261 inc 2), same precedence and the same reason: a seat missing
   // its harness floor is not an identity problem. This is the only repair path for seats that
   // existed before increment 1 armed `musterd agent` — the remaining surface of the ryder incident.
