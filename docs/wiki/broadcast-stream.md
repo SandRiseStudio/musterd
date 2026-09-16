@@ -41,6 +41,26 @@ same bug made `stream stop` during a boot print "nothing live" and walk away fro
 then came up and billed unattended; that path is fixed with it. `status` deliberately still reports
 `started`, because there "live" means *streaming* and a booting machine is not yet.
 
+## A stalled screencast reads as a healthy 20fps stream — the pump re-emits the last frame by design and nothing watches arrivals (2026-09-16; falsify: refuse Chrome's acks and watch `fps=`/`speed=` stay clean while `deliveredFps` reads 0) <!-- claim: defect -->
+
+Machine `84e694b2424e38`, 04:26:58Z–04:33Z: the first hosted run of the ack-gated screencast
+(#1466) stringified `Page.screencastFrameAck`'s integer `sessionId`. Chrome refused every ack as
+invalid params, its in-flight budget (three frames) drained in the first second, and the stream
+carried **one frozen frame for six and a half minutes**. Nothing reported it: ffmpeg's `fps=20
+speed=1.00x` stayed clean because the pump re-emits `latest` on its own clock, the ADR 159 stall
+watchdog is queue-based and the queue was flat, and the ack's rejection was swallowed by the very
+`.catch` added an hour earlier to stop the restart-path crash (`78460d2c55eed8`, exit 1 where the
+supervisor expected 75). Only the perf recorder's `deliveredFps` — dark unless someone set
+`MUSTERD_BROADCAST_PERF` — read 0.0; and only because this run happened to be measured.
+
+Two consequences. The immediate one is in #1466: the session id goes back untouched, and the
+first refused ack is written to stderr. The structural one is unbuilt and worth a lane: **the
+capture has no frame-arrival watchdog.** A screencast that stops delivering while ffmpeg keeps
+consuming is, from every counter the stream exposes, indistinguishable from a parked room. The
+instrument that would tell them apart is "seconds since the last `Page.screencastFrame`", and it
+lives only in the opt-in recorder today (lane 01M2M7Z3836Z, filed 2026-09-16). Same lesson as the rest of
+this page: an instrument that reads the same for working and broken is not an instrument.
+
 ## ffmpeg's `fps=20 speed=1.00x` was padding — the page delivered 15 (2026-09-16; falsify: `MUSTERD_BROADCAST_PERF` on the live box, compare `deliveredFps` to `encodedFps`) <!-- claim: defect -->
 
 nick saw a "tiny bit choppy" on member walks and act bubbles at 1080p20 while every throughput

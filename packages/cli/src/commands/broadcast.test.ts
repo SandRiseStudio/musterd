@@ -357,6 +357,17 @@ describe('makeAckGate (screencast acks follow the encode rate)', () => {
     expect(acked).toEqual(['a', 'b']);
   });
 
+  it('MEASURED 2026-09-16: hands the session id back untouched — Chrome sends an integer and refuses a string', () => {
+    // The first hosted run stringified it, Chrome refused every ack as invalid params, and the
+    // stream carried one frozen frame for six and a half minutes while ffmpeg read a clean 20fps.
+    const acked: unknown[] = [];
+    const gate = makeAckGate<unknown>((id) => acked.push(id));
+    gate.arrived(7);
+    gate.release(1);
+    expect(acked).toEqual([7]);
+    expect(typeof acked[0]).toBe('number');
+  });
+
   it('acks each session exactly once, in arrival order', () => {
     const { acked, gate, advance } = harness(250);
     gate.arrived('a');

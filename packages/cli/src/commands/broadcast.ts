@@ -456,16 +456,16 @@ export const ACK_HOLD_MS = 250;
  * Pure so a test can drive it with no CDP: `arrived` on delivery, `release(n)` after the pump emits
  * `n`, `sweep` on every pump tick.
  */
-export function makeAckGate(
-  ack: (sessionId: string) => void,
+export function makeAckGate<Id>(
+  ack: (sessionId: Id) => void,
   now: () => number = () => performance.now(),
   holdMs: number = ACK_HOLD_MS,
 ): {
-  arrived: (sessionId: string) => void;
+  arrived: (sessionId: Id) => void;
   release: (n: number) => void;
   sweep: () => void;
 } {
-  const pending: { id: string; t: number }[] = [];
+  const pending: { id: Id; t: number }[] = [];
   return {
     arrived: (id) => {
       pending.push({ id, t: now() });
@@ -1347,22 +1347,35 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     const perf = startPerfRecording(page, ffmpeg, chrome, () => emitted);
     // Acks are gated to the pump, not sent on arrival — see makeAckGate for the measured reason.
     //
-    // The rejection is swallowed on purpose. An ack is fire-and-forget, and gating moved the send
-    // from Chrome's delivery moment to the pump's tick — which on the ADR 159 restart path means an
-    // ack can be in flight when the DevTools socket closes. The socket's close rejects every pending
-    // send, and an unobserved rejection is a crash: the first hosted run of this gate (2026-09-16,
-    // 78460d2c55eed8) died with "Uncaught CliError: the Chrome DevTools socket closed" and exit 1
-    // where the supervisor expected 75, so the machine ended instead of restarting.
-    const acks = makeAckGate((sessionId) => {
-      page.send('Page.screencastFrameAck', { sessionId }).catch(() => {
-        /* socket gone mid-teardown — the frame it acked is gone with it */
+    // The session id goes back EXACTLY as Chrome sent it. `Page.screencastFrameAck` takes an integer,
+    // and the first hosted run of this gate (2026-09-16, 84e694b2424e38) stringified it: Chrome
+    // refused every ack as invalid params, its in-flight budget (three frames) drained in the first
+    // second, and the stream carried ONE FROZEN FRAME for six and a half minutes while ffmpeg reported
+    // a clean 20fps — the pump re-emits `latest` by design, so nothing downstream could tell. The
+    // recorder's `deliveredFps` read 0.0 the whole run; the encoder's counters read healthy.
+    //
+    // So a refused ack is not swallowed: the first one is written to stderr, because an ack Chrome
+    // rejects is a stream about to freeze. Only the teardown case is quiet — an ack in flight when
+    // the DevTools socket closes is rejected too, and that one is expected (the first hosted run
+    // before this, 78460d2c55eed8, crashed exit 1 on exactly that unobserved rejection where the
+    // supervisor expected 75).
+    let ackRefused = false;
+    const acks = makeAckGate<unknown>((sessionId) => {
+      page.send('Page.screencastFrameAck', { sessionId }).catch((err: unknown) => {
+        if (stopping || restarting || ackRefused) return;
+        ackRefused = true;
+        process.stderr.write(
+          `${theme.err('✗')} Chrome refused a screencast ack — the picture will freeze: ${String(
+            err instanceof Error ? err.message : err,
+          )}\n`,
+        );
       });
     });
     page.on('Page.screencastFrame', (p) => {
       const frame = Buffer.from(String(p['data']), 'base64');
       perf?.frame(frame.byteLength);
       pump.frame(frame);
-      acks.arrived(String(p['sessionId']));
+      acks.arrived(p['sessionId']);
     });
     // JPEG, and this is load-bearing: Chrome encodes screencast frames on the compositor thread,
     // and 1080p PNG is so expensive there that delivery measured 4.7fps — a slideshow the pump then
