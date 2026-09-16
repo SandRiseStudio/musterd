@@ -111,6 +111,41 @@ that hid the original incident — the watchdog fired at 5.0 s both times, the p
 half minutes the same class of failure ran unreported in the morning. The local arms prove the
 predicate; only this one proves the entrypoint actually reruns on 75.
 
+### The ack was the one CDP call nobody awaited, and both of its failures were fixed by the same line — in opposite directions (2026-09-16; falsify: stringify the ack's `sessionId`, run to `--out`, and the log must carry one refusal line and zero stack traces) <!-- claim: defect -->
+
+`Page.screencastFrameAck` was sent with `void` and no `.catch()`, the only fire-and-forget CDP call
+in the file. `ws.onclose` calls `failAll`, which rejects EVERY pending send with a `CliError`
+carrying the code `socketLossExitCode` already chose — 75 when a supervisor is standing by. Every
+awaited call turns that into a considered exit. The ack turned it into an **unhandled rejection**,
+so Node exited 1 and `entrypoint.sh` ended a machine that was about to be restarted. Which outcome a
+lost socket produced depended on whose rejection surfaced first.
+
+**The first fix caused the second bug, and that is the part worth remembering.** A bare
+`.catch(() => {})` (fd13a04a, on the closed #1466 branch) stopped the crash by swallowing
+everything — including Chrome refusing the ack outright. The very next hosted run carried one frozen
+frame for six and a half minutes with nothing in the log. The silence was that fix working exactly
+as written and exactly as under-specified. **Two different events arrive at the same rejection
+handler:** a socket closing under us during a deliberate teardown, which is expected and must be
+silent, and Chrome rejecting the ack itself, which is a stream about to freeze and must be loud.
+Treating them alike fails in one direction or the other, and we have now done both.
+
+So: quiet while `stopping || restarting`, loud exactly once otherwise. Once because Chrome refuses
+one per delivered frame, and at ~15/s the repeats bury the first line, which is the only one that
+says when it began.
+
+**Measured, three arms, locally against `--out`:**
+
+| arm | exit | stack traces | cause reported | watchdog reached |
+| --- | --- | --- | --- | --- |
+| refusal, no catch (pre-fix) | 1, unhandled rejection | **10** | no | no — the process died first |
+| refusal, with this fix | 1, a considered `forceStop` | **0** | yes, once | yes |
+| clean start and stop | 0 | 0 | no false line | n/a |
+
+The middle row exits 1 rather than 75 and that is correct, not a miss: a stringified `sessionId` is
+refused from the first frame, so the run never reaches `RESTARTABLE_AFTER_MS` and
+`socketLossExitCode` chooses 1 by design. What changed is where the 1 comes from — a considered stop
+instead of a crash — and that the watchdog now gets to run at all.
+
 ### Every relaunch claimed a deploy it could not know about (2026-09-16; falsify: wedge the screencast on the box and read the entrypoint's line under the watchdog's) <!-- claim: defect -->
 
 `entrypoint.sh` printed `▸ restarting the stream on the rebuilt daemon code` for **every**
