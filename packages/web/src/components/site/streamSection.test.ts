@@ -43,3 +43,21 @@ describe('the stream embed is deferred', () => {
     expect(src()).toMatch(/height="100%"/);
   });
 });
+
+describe('the autoplay permission ADR 302 depends on', () => {
+  const src = readFileSync(fileURLToPath(new URL('./StreamSection.tsx', import.meta.url)), 'utf8');
+
+  it('delegates autoplay to the player frame, because the query string cannot', () => {
+    // `twitchEmbedUrl` sets autoplay=true&muted=true, which ASKS Twitch's player. The permission
+    // is a separate thing and only the embedder can grant it. Measured 2026-09-16 with a
+    // same-child/different-attribute A/B across two ports: a cross-origin child reported
+    // featurePolicy.allowsFeature('autoplay') FALSE without this attribute and TRUE with it.
+    // It shipped without one, so ADR 302's muted-autoplay viewer counting rested on a
+    // precondition we never granted.
+    expect(src).toMatch(/allow="autoplay; fullscreen"/);
+  });
+
+  it('keeps allowFullScreen as well — the attribute does not replace it', () => {
+    expect(src).toMatch(/allowFullScreen/);
+  });
+});
