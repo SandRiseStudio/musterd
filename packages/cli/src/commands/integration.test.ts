@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { IntegrationDoctorReportSchema } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { parseArgs } from '../args.js';
@@ -183,5 +186,58 @@ describe('musterd integration doctor (ADR 385)', () => {
       'tailscale serve status --json',
     ]);
     expect(result.requests.every((request) => request.init?.method === 'GET')).toBe(true);
+  });
+});
+
+describe('musterd integration generate aperture (ADR 400)', () => {
+  function workspace() {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-aperture-'));
+    mkdirSync(join(root, '.musterd', 'seats'), { recursive: true });
+    mkdirSync(join(root, '.musterd', 'roles'));
+    writeFileSync(join(root, '.musterd', 'team.toml'), 'slug = "test"\n');
+    writeFileSync(
+      join(root, '.musterd', 'seats', 'agent.toml'),
+      'kind = "agent"\nrole = "security"\n',
+    );
+    writeFileSync(join(root, '.musterd', 'roles', 'security.toml'), 'summary = "security"\n');
+    writeFileSync(
+      join(root, '.musterd', 'governed-models.json'),
+      JSON.stringify({
+        version: 1,
+        team: {
+          models: ['anthropic/claude-sonnet-4-6'],
+          quota: { capacity: '$20', rate: '$10/day' },
+          default_tier: 'standard',
+        },
+        quota_tiers: [{ id: 'standard', quota: { capacity: '$10', rate: '$5/day' } }],
+        roles: {},
+        workloads: { agent: { workload_id: 'a7f3c2' } },
+      }),
+    );
+    return root;
+  }
+
+  it('previews, atomically writes, and byte-checks the two managed artifacts', async () => {
+    const root = workspace();
+    const preview = await run(['generate', 'aperture'], { cwd: () => root });
+    expect(preview.code).toBe(0);
+    expect(preview.text).toContain('policy.hujson');
+    const write = await run(['generate', 'aperture', '--write'], { cwd: () => root });
+    expect(write.text).toBe('Aperture policy is current\n');
+    const policy = join(root, '.musterd', 'generated', 'aperture', 'policy.hujson');
+    expect(readFileSync(policy, 'utf8')).toContain('tag:musterd-member-a7f3c2');
+    const check = await run(['generate', 'aperture', '--check'], { cwd: () => root });
+    expect(check.code).toBe(0);
+    writeFileSync(policy, 'stale\n');
+    expect((await run(['generate', 'aperture', '--check'], { cwd: () => root })).code).toBe(1);
+  });
+
+  it('rejects mutually exclusive generator modes', async () => {
+    await expect(
+      integrationCommand(parseArgs(['generate', 'aperture', '--write', '--check']), {
+        ...harness().deps,
+        cwd: workspace,
+      }),
+    ).rejects.toMatchObject({ exitCode: 2 });
   });
 });
