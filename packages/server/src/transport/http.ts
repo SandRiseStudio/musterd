@@ -43,6 +43,7 @@ import {
   type AskTier,
   askContract,
   eligibleOf,
+  emptyPoolFromCandidates,
   LANE_TERMINAL_STATES,
   isAwaitingAcceptance,
   makeEnvelope,
@@ -137,6 +138,7 @@ import {
   lanesForGoal,
   noGoalWarning,
   listLanes,
+  emptyPoolFromSubmitAudit,
   openLane,
   updateLane,
 } from '../store/lanes.js';
@@ -5223,8 +5225,13 @@ export async function handleHttp(
             // The sanction carries the posture so the degradation is legible at the point it is
             // read: not just "nobody was eligible" but what the team looked like and who could be
             // woken to change it (ADR 172). One bounded line — this lands in the worker's context.
+            const empty_pool = emptyPoolFromCandidates(
+              peerSelection.snapshot.selected,
+              peerSelection.snapshot.candidates,
+            );
             review = {
               self_close_sanctioned: true,
+              ...(empty_pool ? { empty_pool } : {}),
               ...(breakerTripped ? { breaker_tripped: true } : {}),
               ...(posture
                 ? { family_posture: posture, posture_hint: describeFamilyPosture(posture) }
@@ -5354,11 +5361,16 @@ export async function handleHttp(
           // it: what the ready edge actually recorded, marked `standing` so no consumer mistakes a
           // report of the existing state for a fresh routing decision.
           const standing = standingAcceptance(ctx.db, team.id, lane.id);
+          const empty_pool = emptyPoolFromSubmitAudit(ctx.db, team.id, lane.id);
           review = standing
             ? { standing: true, ...standing }
             : // Nothing standing to report — the original submit found no candidate (or predates
               // recording). The sanction was and remains honest here: nobody was ever asked.
-              { standing: true, self_close_sanctioned: true };
+              {
+                standing: true,
+                self_close_sanctioned: true,
+                ...(empty_pool ? { empty_pool } : {}),
+              };
         }
         // Lane 01M1QYHJFY, the durable half. `acceptor` was named, validated, and the lane is
         // awaiting acceptance — so exactly one of the arms above must have minted (or found

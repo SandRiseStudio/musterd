@@ -9,7 +9,12 @@ import type { Database } from 'better-sqlite3';
 import { handoffNamedLaneOutOfPlay, handoffNamesNoLane } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
 import { incidentPolicy, openIncidents } from './incidents.js';
-import { acceptanceEnteredAt, listLanes, readyForReviewHadNoCandidate } from './lanes.js';
+import {
+  acceptanceEnteredAt,
+  emptyPoolFromSubmitAudit,
+  listLanes,
+  readyForReviewHadNoCandidate,
+} from './lanes.js';
 import { getMemberByRole } from './members.js';
 import { annotateClose, closeVerdicts } from './review.js';
 import { openSeedsForBrief } from './seeds.js';
@@ -286,24 +291,29 @@ export function deriveNext(
     .filter((l) => isAwaitingAcceptance(l.state) && l.owner_seat !== member)
     .map((l) => ({ lane: l, entered: acceptanceEnteredAt(db, teamId, l) }))
     .sort((a, b) => a.entered - b.entered);
-  const review_debt = waiting.slice(0, 3).map(({ lane, entered }) => ({
-    id: lane.id,
-    title: lane.title,
-    owner: lane.owner_seat,
-    waited_ms: Math.max(0, now - entered),
-    // Whether ANYONE was asked. `pickReviewCounterpart` returns null on a same-model monoculture —
-    // ADR 188/253 refuse `same_model` and ungradeable seats on purpose — and the submit records
-    // `no_candidate: true` and then says nothing more. The lane sits in this list looking exactly
-    // like one whose named reviewer is merely slow, and a seat reading the brief cannot tell the
-    // difference. Measured 2026-08-15: three of five waiting lanes had never been routed to anyone,
-    // all three on an all-claude roster. Reporting it does not change the routing doctrine — it
-    // stops the silence from reading as health.
-    no_candidate: readyForReviewHadNoCandidate(db, teamId, lane.id),
-    // Merge-verified submit: an attestation without a SHA means nothing landed — the wait is
-    // on the author's merge, not a reviewer. New submits can't reach this state (refused
-    // seat-side); this badge covers grandfathered lanes and older clients.
-    unlanded: lane.merged?.sha === undefined,
-  }));
+  const review_debt = waiting.slice(0, 3).map(({ lane, entered }) => {
+    const no_candidate = readyForReviewHadNoCandidate(db, teamId, lane.id);
+    const empty_pool = no_candidate ? emptyPoolFromSubmitAudit(db, teamId, lane.id) : null;
+    return {
+      id: lane.id,
+      title: lane.title,
+      owner: lane.owner_seat,
+      waited_ms: Math.max(0, now - entered),
+      // Whether ANYONE was asked. `pickReviewCounterpart` returns null on a same-model monoculture —
+      // ADR 188/253 refuse `same_model` and ungradeable seats on purpose — and the submit records
+      // `no_candidate: true` and then says nothing more. The lane sits in this list looking exactly
+      // like one whose named reviewer is merely slow, and a seat reading the brief cannot tell the
+      // difference. Measured 2026-08-15: three of five waiting lanes had never been routed to anyone,
+      // all three on an all-claude roster. Reporting it does not change the routing doctrine — it
+      // stops the silence from reading as health. ADR 404 adds *why* (empty room vs live-ineligible).
+      no_candidate,
+      ...(empty_pool ? { empty_pool } : {}),
+      // Merge-verified submit: an attestation without a SHA means nothing landed — the wait is
+      // on the author's merge, not a reviewer. New submits can't reach this state (refused
+      // seat-side); this badge covers grandfathered lanes and older clients.
+      unlanded: lane.merged?.sha === undefined,
+    };
+  });
   // The TOTAL, not the shown count. A cap with no total is a queue that looks as deep as its
   // window: clear the three on offer and the next three appear, with nothing having said they were
   // there. Same 2026-08-15 session — three cleared, two more surfaced.

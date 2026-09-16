@@ -206,6 +206,29 @@ describe('empty states name the next action', () => {
       expect(out).toContain('self-close sanctioned');
     });
 
+    it('no acceptor asked, empty room — names that, not the historical sentence (ADR 404)', async () => {
+      const out = await run({
+        self_close_sanctioned: true,
+        empty_pool: { kind: 'no_live_member' },
+      });
+      expect(out).toContain('no other member is live');
+      expect(out).not.toContain('no eligible acceptor is live');
+      expect(out).toContain('self-close sanctioned');
+    });
+
+    it('no acceptor asked, live-ineligible — names the exclusions (ADR 404)', async () => {
+      const out = await run({
+        self_close_sanctioned: true,
+        empty_pool: {
+          kind: 'live_ineligible',
+          live: [{ member: 'miley', exclusion: 'same_model' }],
+        },
+      });
+      expect(out).toContain('live seats were ineligible');
+      expect(out).toContain('same_model: miley');
+      expect(out).toContain('self-close sanctioned');
+    });
+
     it('no review at all — abstains, and never sanctions self-close on silence', async () => {
       // The 2026-08-05 defect: a repeat submit returns no fresh routing decision, and this client
       // read the silence as "no eligible acceptor is live" against two lanes whose acceptor had a

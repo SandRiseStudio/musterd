@@ -49,3 +49,54 @@ export const MERGE_VERIFICATION_TIERS = [
   'unattested',
 ] as const;
 export type MergeVerification = (typeof MERGE_VERIFICATION_TIERS)[number];
+
+/**
+ * Why an acceptance submit asked nobody (ADR 404). The historical sentence "no eligible acceptor
+ * is live" named both an empty room and a room full of busy / same-model / human-only seats.
+ */
+export const EMPTY_POOL_KINDS = ['no_live_member', 'live_ineligible'] as const;
+export type EmptyPoolKind = (typeof EMPTY_POOL_KINDS)[number];
+
+/** Exclusions that mean the seat WAS live and still was not asked. */
+export const EMPTY_POOL_LIVE_EXCLUSIONS = [
+  'busy',
+  'not_agent',
+  'unknown_grade',
+  'same_model',
+  'worker_unattested',
+] as const;
+export type EmptyPoolLiveExclusion = (typeof EMPTY_POOL_LIVE_EXCLUSIONS)[number];
+
+export type EmptyPoolLiveSeat = { member: string; exclusion: EmptyPoolLiveExclusion };
+export type EmptyPool = {
+  kind: EmptyPoolKind;
+  live?: EmptyPoolLiveSeat[] | undefined;
+};
+
+const NOT_A_LIVE_PEER = new Set(['self', 'service_or_observer', 'no_live_presence']);
+
+function isLiveExclusion(ex: string): ex is EmptyPoolLiveExclusion {
+  return (EMPTY_POOL_LIVE_EXCLUSIONS as readonly string[]).includes(ex);
+}
+
+/**
+ * Derive the empty-pool kind from a picker snapshot. `null` when someone was selected.
+ * A candidate whose exclusion is not "not live" counts as live-ineligible even if the
+ * exclusion string is one this build does not list (older snapshot, newer exclusion).
+ */
+export function emptyPoolFromCandidates(
+  selected: { reviewer: string } | null | undefined,
+  candidates: ReadonlyArray<{ member: string; exclusion?: string }>,
+): EmptyPool | null {
+  if (selected) return null;
+  const live: EmptyPoolLiveSeat[] = [];
+  let sawLive = false;
+  for (const c of candidates) {
+    const ex = c.exclusion;
+    if (!ex || NOT_A_LIVE_PEER.has(ex)) continue;
+    sawLive = true;
+    if (isLiveExclusion(ex)) live.push({ member: c.member, exclusion: ex });
+  }
+  if (!sawLive) return { kind: 'no_live_member' };
+  return live.length > 0 ? { kind: 'live_ineligible', live } : { kind: 'live_ineligible' };
+}

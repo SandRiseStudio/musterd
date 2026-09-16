@@ -2,11 +2,13 @@ import {
   ACCEPTANCE_STALE_MS,
   compareGoals,
   DEFAULT_PROJECT,
+  emptyPoolFromCandidates,
   globToRegExp,
   isAwaitingAcceptance,
   LANE_CONTENDING_STATES,
   LANE_TERMINAL_STATES,
   resolveStakesDefault,
+  type EmptyPool,
   type Goal,
   type Lane,
   type LaneState,
@@ -811,7 +813,8 @@ export function acceptanceEnteredAt(db: Database, teamId: string, lane: Lane): n
  * Was this lane's acceptance stage entered with NOBODY asked to review it?
  *
  * `pickReviewCounterpart` returns null when the live roster offers no gradeable counterpart — on a
- * same-model monoculture, which ADR 188/253 refuse to route, that is every seat. The submit records
+ * same-model monoculture, which ADR 188/253 refuse to route, that is every seat. Busy live peers are
+ * not in that set (ADR 404): they are asked when no quiet peer exists. The submit records
  * `no_candidate: true` on its `lane.ready_for_review` row and the lane then waits exactly like one
  * whose reviewer is simply slow. Reading it back is what lets the brief say which it is.
  *
@@ -836,6 +839,40 @@ export function readyForReviewHadNoCandidate(
     return (JSON.parse(row.detail) as { no_candidate?: unknown }).no_candidate === true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * ADR 404: why the submit asked nobody, derived from the ready-row snapshot so historical
+ * `no_candidate` rows still classify (busy vs empty room) without a new audit field.
+ */
+export function emptyPoolFromSubmitAudit(
+  db: Database,
+  teamId: string,
+  laneId: string,
+): EmptyPool | null {
+  const row = db
+    .prepare<[string, string], { detail: string | null }>(
+      `SELECT detail FROM audit
+        WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+        ORDER BY ts DESC LIMIT 1`,
+    )
+    .get(teamId, laneId);
+  if (!row?.detail) return null;
+  try {
+    const d = JSON.parse(row.detail) as {
+      no_candidate?: unknown;
+      review_selection?: {
+        selected?: { reviewer: string } | null;
+        candidates?: Array<{ member: string; exclusion?: string }>;
+      };
+    };
+    if (d.no_candidate !== true) return null;
+    const sel = d.review_selection;
+    if (!sel?.candidates) return null;
+    return emptyPoolFromCandidates(sel.selected ?? null, sel.candidates);
+  } catch {
+    return null;
   }
 }
 
