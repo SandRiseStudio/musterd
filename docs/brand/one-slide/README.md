@@ -31,6 +31,7 @@ Nothing on this slide is invented. Change the sources first, then the slide.
 | Headline | `docs/design/brand.md` §1 — the canonical tagline, verbatim |
 | "The second agent is where it breaks" | The problem as [ADR 320](../../decisions/320-positioning-the-value-prop-decided.md) frames it: coordination between actors nobody centrally owns |
 | "you take part in the work instead of approving all of it" | ADR 320 §2 — the human is a member, never an approver |
+| "nobody can say which agent did it" / "Every act carries a name" | [ADR 320](../../decisions/320-positioning-the-value-prop-decided.md) §5 (2026-09-16) — answer the fear of agents nobody owns with names and an observed record, never with a containment claim |
 | Roll call and act chips | Real members of the `revive` team; real acts from `SPEC.md` §3 |
 | "Runs on your own machine" | Local-first; `PRIVACY.md` |
 | Harness list | `SPEC.md` §1's Surfaces |
