@@ -163,6 +163,10 @@ the same seeded envelopes (Ada→Lin DM, Bo→Ada DM, Lin→team broadcast) plus
 and the broadcast and **not** the `about`-tagged ask; a public observer returns the broadcast only; an
 admin returns all; a non-party's inbox and cursor are unchanged by any of it.
 
+**Experiment** — n/a — a visibility default is a binary boundary, not a tunable; there is no A/B in
+which half the team can read the record. The falsifier below is the evaluation, run once, on the
+calendar.
+
 **Falsifier** — the claim this ADR rests on is that reviewer blindness is *costing decisions*. If,
 sixty days after enforcement, the crossed-handoff rate (ADR 225's measure: two `handoff`/`accept`
 acts on one lane within 15 minutes from different seats) has not fallen, and no acceptance cites a
