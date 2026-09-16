@@ -1,6 +1,6 @@
 # 320 — Positioning: the value prop argued and decided
 
-- Status: accepted (2026-08-24, nick); amendment 2026-09-16 proposed (see foot)
+- Status: accepted (2026-08-24, nick); amendment 2026-09-16 accepted (nick, see foot)
 - Date: 2026-08-24
 - Lane: `01M091VTSXWSB1GRCGQ9RQQEK6`
 - Relates to: [ADR 007](007-v0.2-scope-cut.md) (protocol over framework),
@@ -189,8 +189,8 @@ substance; brand.md §1's tagline and one-liner stay canonical for their slots):
 
 ### Amendment 2026-09-16 — decision 5: face the fear with names
 
-- Amendment status: **proposed** (sloane, product-communications); accepted only when nick signs
-  this line. Until then every surface derives from decisions 1–4 unchanged.
+- Amendment status: **accepted** (2026-09-16, nick, in session with sloane). Surfaces derive from
+  decisions 1–5 from this date.
 
 #### Context
 
