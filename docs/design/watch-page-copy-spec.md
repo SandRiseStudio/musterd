@@ -59,7 +59,16 @@ Corollaries:
 - No hype (brand.md §4): no "revolutionary", "magic", "first", "10x". Search terms go in the
   title, H1 and description **because they are what the page is**, not repeated for weight.
 - Honest about the dark channel. The team works in sessions and the channel is dark between them.
-  We publish no schedule because we keep none; the page must not invent one.
+  We publish no schedule because we keep none; the page must not invent one. A string that is only
+  true in one state may never be the fallback for an unknown state — see §4.1's neutral eyebrow.
+- **Never sell the product on merges.** ADR 320 §3's claim is peer, not contractor: a member can
+  claim work, decline it, and hold another to acceptance. Merges are this team's incidental
+  instance of that, because this team happens to build software; a reader's team may not. Copy that
+  leads with the git noun describes our hobby instead of the product's claim. Acceptance and
+  declining are the general words and they are the ones that carry.
+  ~~The meta description, og:description and hero lede all led with "accept each other's merges"
+  (2026-09-16)~~ CORRECTED the same day, on nick's rejection of the same phrasing in the channel
+  bio — it had already reached the deployed page's search snippet and share card.
 - ADR 296 Not-column words stay out: not "room" (Team), not "swarm", not "session" for Presence.
   "office" and "the office scene" are the product's own names for the window and are fine.
 
@@ -69,7 +78,7 @@ Corollaries:
 | --- | --- |
 | Route | `/watch` — prerendered, staged via `PUBLIC_ALLOW`, no daemon |
 | `<title>` | `Watch AI agents build musterd, live — musterd` (via `pageTitle`) |
-| `meta description` | `A team of AI agents and humans builds musterd on a public stream. Watch them claim work, hand it off and accept each other's merges — in the office, live, and in the open repository between sessions.` |
+| `meta description` | `A team of AI agents and humans builds musterd on a public stream. Watch them claim their own work, hand it off, and turn each other's down — peers on one roster, not a fleet someone runs.` |
 | `og:title` | `Watch AI agents build musterd, live` |
 | `og:description` | same as meta description |
 | `og:type` | `website` |
@@ -77,8 +86,14 @@ Corollaries:
 | `og:image:alt` | §7 alt text |
 | canonical | `https://musterd.io/watch` |
 
-Length check: title 45 characters, description 199 characters (Google clips near 160; the first
-sentence carries the claim on its own, which is why it comes first).
+Length check: title 45 characters *including* the `— musterd` suffix, description 187 characters
+(Google clips near 160; the first sentence carries the claim on its own, which is why it comes
+first).
+
+**`og:title` is the BARE form** — `Watch AI agents build musterd, live`, no suffix. The table above
+is exact and the two rows differ on purpose: on a share card, "— musterd" after "build musterd" is
+the word twice in eleven. The deployed page shipped the suffix on both (2026-09-16, lane
+01M2M75BQH); the row was read as if `pageTitle` governed both, and it does not.
 
 ## 4. The page, top to bottom
 
@@ -86,12 +101,21 @@ sentence carries the claim on its own, which is why it comes first).
 
 - **Eyebrow (mono, small):** `live from the office` when the channel is live; `between sessions`
   when it is dark. Never the word "offline" — it reads as broken.
+
+  **Neutral form, required when liveness is not wired:** `from the office`. True in either state,
+  reads as a dateline rather than a status, and lets the H1 carry "live" instead of competing with
+  the player's own badge. ~~The two states above shipped with no fallback (2026-09-16)~~ CORRECTED
+  the same day: the §4.2 else-branch below is about the *state line*, whose dark form is true in
+  both states, and it does not transfer here — "between sessions" is emphatically not. Without this
+  line an implementer reasonably reached for the dark string, and the deployed page told strangers
+  the channel was dark over a player showing it live (miley, lane 01M2M75BQH). An implementer must
+  never pick between §4.1's two strings by guessing; if the state is unknown, this is the string.
 - **H1:** `Watch AI agents build musterd, live`
 - **Lede (one paragraph):**
 
   > musterd is built by a team running on musterd. The members you can see are agents and
-  > humans on one roster: they claim lanes, hand work off, raise asks, and accept each other's
-  > merges. The stream is that team at work, unedited.
+  > humans on one roster: they claim their own lanes, hand work off, raise asks, and can decline
+  > what they are handed. The stream is that team at work, unedited.
 
 - **Primary action:** `Watch on Twitch` → `https://twitch.tv/sandrise_ai` (opens new tab).
 - **Secondary action:** `See what they are building` → `/docs`.
@@ -123,7 +147,7 @@ A short definition list. Each term is a glossary noun (brand.md §5) used exactl
 | **The office** | Every member on the roster has a desk. A member at a desk is present; an empty desk is a member who is not. Agents and humans sit in the same office. |
 | **A lane** | One unit of work with one owner. When you see a member move to a desk, they have usually just claimed one. |
 | **An act** | Every message between members says what it is for — a handoff, an ask, a status update, an acceptance. That is what the badges are. |
-| **Acceptance** | Nothing merges on its author's word. A different member judges the landed result, and can send it back. |
+| **Acceptance** | Nothing ships on its author's word. A different member judges the landed result, and can send it back. |
 | **The blink** | When a build lands, the stream restarts for a moment and comes back on its own. You are watching the platform that is streaming you get deployed. |
 
 ### 4.4 Who is in the office
@@ -197,12 +221,15 @@ labelled with the member's name, coloured badges showing what each is doing.`
    the network log (ADR 132 line holds; `curl -sL https://musterd.io/watch | grep -ac cloudflareinsights`
    → 1 like every other public page, and `/live` still 404).
 2. Every string on the page is in this spec, character for character. Reviewer diffs the rendered
-   text against §3–§7.
-3. `pnpm vocab:check` green. `pnpm --filter @musterd/web test` green, including a `site-routes`
+   text against §3–§7, and checks `og:title` separately from `<title>` because they differ.
+3. The eyebrow is never a state the page has not established. With liveness wired, §4.1's two
+   strings; without it, the neutral form. A reviewer opens the page **while the channel is live**
+   and confirms the eyebrow does not contradict the player.
+4. `pnpm vocab:check` green. `pnpm --filter @musterd/web test` green, including a `site-routes`
    case pinning `/watch` public and `/broadcast` daemon-only.
-4. Home `<title>` is the tagline form; `/watch` `<title>` is §3's; both share-card previews (Slack,
+5. Home `<title>` is the tagline form; `/watch` `<title>` is §3's; both share-card previews (Slack,
    X) render the right title and image.
-5. Shipped only after nick confirms the Search Console index of `/` is clean (§1).
+6. Shipped only after nick confirms the Search Console index of `/` is clean (§1).
 
 ## 9. Non-goals
 
