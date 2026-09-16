@@ -27,8 +27,9 @@ const DESCRIPTION =
   'Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to ' +
   'transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to ' +
   'redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires ' +
-  'meta.species and meta.tier. 2–4 to names mean any may answer on message, request_help, or ' +
-  'challenge — not ask (quiet-set fan-out is unshipped, ADR 260 / ADR 401).';
+  'meta.species and meta.tier; handoff names its lane in meta.lane_handoff {lane, branch} or one ' +
+  'is derived. 2–4 to names mean any may answer on message, request_help, or challenge — not ask ' +
+  '(quiet-set fan-out is unshipped, ADR 260 / ADR 401).';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
