@@ -76,7 +76,7 @@ Facts, each with where it was read:
 |---|---|---|---|
 | 1–2 | Sep 17 – Sep 30 | **Install truth + demo from day one** | A machine that is not nick's goes from musterd.io to first agent online in ≤10 min, twice, on two harnesses. The 2-minute demo exists and has been given at ≥2 events. `agent-whiteboard` is on npm in its own repo. |
 | 3–6 | Oct 1 – Oct 28 | **Hand-to-hand** | 2–3 events a week. 10–20 installs done on the other person's laptop. 3–5 still active a week later, measured. Every quote in the quotes file. Weekly fix cycle. Startup Grind demo (Oct 7). |
-| 6–7 | Oct 28 – Nov 2 | **Public launch** | Blog post live, Show HN, X, Reddit — carrying real quotes and numbers. YC W27 application in by Nov 2, 8pm PT, with the same numbers. |
+| 6–7 | Oct 28 – Nov 2 | **Public launch** | Blog post live, Show HN, X, Reddit — carrying real quotes and numbers. YC W27 application in by Nov 2, 8pm PT, with the same numbers; a16z speedrun by Nov 1 if nick says so. |
 | 8–9 | Nov 2 – Nov 20 | **Conversations + hand-over to async** | ≥3 investor / lab / company threads with a next step dated in Q1. Everything that must run without nick is running. |
 | — | Nov 20 → May 2027 | **Async from home** | Small-things track continues; dataset gate; cohort applications; Q1 conversations. Sequenced in its own doc later, written from what the nine weeks taught. |
 
@@ -88,6 +88,7 @@ into," not a quiet fortnight.
 Two flags. The launch sits three weeks before the due date, so a one-week slip is fine and a
 two-week slip is not — week 5 carries a go/no-go (§13). And YC's on-time deadline (Nov 2) falls
 *inside* the window, not after it; late applications are still read, but without the Dec 11 decision.
+a16z speedrun's priority window (Oct 12 – Nov 1) sits beside it (§12).
 
 ## 5. Weeks 1–2 — install truth, and the demo
 
@@ -152,7 +153,7 @@ audience (same story, different register) and a follow-up notes form.
   as ordinary lanes — the one research artifact ADR 056 puts first, and the kind of work that fits
   broken nights;
 - the research radar as a weekly digest to nick's inbox;
-- cohort applications (SPC, HF0, EF spring) and the Q1 follow-ups on one dated list.
+- cohort applications (the §12 table) and the Q1 follow-ups on one dated list.
 
 The post-Nov-20 track gets its own sequencing doc, written from what these nine weeks taught.
 
@@ -243,16 +244,36 @@ team is "your users already run two of these at once."
 13% think their governance is adequate): sourced at events, not cold. Any team that says "we have
 agents and nobody can say who did what" goes on the list with the date.
 
-## 12. YC W27 and the cohorts
+## 12. YC W27, a16z speedrun, and the cohorts
+
+Two applications fall inside the window, off the same numbers:
 
 - **YC W27**: on-time deadline **Nov 2, 8pm PT**; decision by Dec 11; batch Jan–Mar 2027 in SF
   ([apply](https://ycombinator.com/apply)). Apply on time, with the §6 numbers and launch-day
   numbers as of that morning; the video is the 2-minute demo. The batch overlaps the newborn months
   — that decision is nick's and can wait for the Dec 11 answer; the application is not harmed by
   deciding later.
-- **Others**, on the post-Nov-20 list: South Park Commons (spring cohort), HF0 (rolling;
-  repeat-founder bias), Entrepreneur First SF (spring intake); a16z speedrun's next window is
-  spring. None of these has a deadline inside the nine weeks.
+- **a16z speedrun**: $500K–$1M plus credits, SF; applications are read year-round but the
+  **priority window is Oct 12 – Nov 1** ([a16z](https://a16z.com/applications-for-a16z-speedrun-sr007-are-now-open/)).
+  Same numbers, same video, one day earlier. Whether to run both is nick's call — added
+  2026-09-16 after the cohort survey below.
+
+**The rest**, on the post-Nov-20 list (dates read 2026-09-16 from each program's page or a dated
+listing — verify before applying):
+
+| Program | Terms | Timing | Read |
+|---|---|---|---|
+| Conviction Embed | $250K grant + credits; 10 AI startups per cohort | rolling; SF retreat; the page's dates are unclear | strong fit — AI-native, small ([embed.conviction.com](https://embed.conviction.com/)) |
+| Neo Residency | $750K uncapped + ~$450K credits; 12–15 teams | 3 months SF + 2 weeks Oregon | check the next cohort's dates |
+| South Park Commons Founder Fellowship | $1M terms | spring application ~Feb 1; bootcamp Mar–May | fall 2026 closed Aug 2 ([SPC](https://www.southparkcommons.com/news/f26-founder-fellowship/)) |
+| Sequoia Arc | $500K–$1M | spring open call ~Feb, if run | no 2026 call announced as of this survey ([arc](https://sequoiacap.com/arc)) |
+| OpenAI Grove | $50K credits; ~15 founders; 5 weeks SF | cohort 2 closed Jan 2026; expect early 2027 | pre-idea / early; Codex-adjacent |
+| PearX · AI Grant | $250K–$2M / $250K uncapped + credits | rolling | lightweight paths |
+| HF0 | $1M / 5% uncapped; ~10 teams | rolling, unpublished | repeat-founder bias — long shot |
+| Mozilla Builders | open-source grants / incubator | between cohorts; rolling review | matches the open-source track ([programs](https://builders.mozilla.org/programs/)) |
+| Google for Startups Accelerator | equity-free; 12 weeks; cloud credits | about twice a year | later |
+| Claude for Startups | credits + priority limits | open | needs institutional equity — after a raise ([programs/startups](https://claude.com/programs/startups)) |
+| Techstars SF · Antler SF · Alchemist · 500 Global | generalist | various | fallbacks |
 
 ## 13. Measures — what tells us the plan is failing, week by week
 
@@ -266,7 +287,7 @@ Each number is a diagnostic, not a target to game — the same rule
 | Sep 30 | 2-minute demo given at ≥2 events | Fewer → the calendar (§10) is wrong for nick's week; re-pick. |
 | Oct 14 | ≥5 hand installs; ≥2 events/week; ≥2 skills shipped | <3 installs → the demo works and the ask does not; change the ask, not the product. |
 | Oct 28 | ≥10 installs; ≥3 active a week later; ≥5 quotes | <3 active → **launch go/no-go**: launch with honest numbers, or slip one week — never two. |
-| Nov 2 | Launch out; YC in | — |
+| Nov 2 | Launch out; YC in (speedrun by Nov 1 if chosen) | — |
 | Nov 20 | ≥3 conversations with a dated Q1 next step; the §8 list running | <2 → the post-baby plan leads with conversations, not the dataset. |
 
 ## 14. Lanes and ownership
@@ -298,3 +319,6 @@ count, what broke, quotes added, conversations opened, measures hit or missed. D
 
 - **2026-09-16** — plan agreed and written. Lane `01M2PA5TY9` opened. Baseline: 0 stars, 7 uniques/14d,
   5 followers, run 4 unrun, whiteboard unpublished, launch post at v0.3.
+- **2026-09-16** (later) — plan merged (#1527, a61f1eac); child lanes open. Cohort survey added to §12:
+  a16z speedrun's priority window (Oct 12 – Nov 1) is inside the window, beside YC. One-page visual
+  of the plan published for nick as a claude.ai artifact.
