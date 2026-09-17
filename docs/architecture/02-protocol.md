@@ -105,12 +105,42 @@ Base `http://localhost:4849`. JSON in/out. Auth via `Authorization: Bearer <memb
 | `POST` | `/teams/:slug/presence`                      | `{ "surface","status?" }`                                           | `{ "presence" }`                                                  | stateless presence ping                                                                                                                                                                                                                                                         |
 | `POST` | `/teams/:slug/availability`                  | `{ "status","until?" }`                                             | `{ <member summary> }`                                            | set your own availability axis (ADR 044)                                                                                                                                                                                                                                        |
 | `POST` | `/teams/:slug/residency/wake-progress`       | `{ lease_id }`                                                      | `{ ok, lease_id, spawned_at }`                                    | host exec ack; does not settle (ADR 262)                                                                                                                                                                                                                                        |
+| `POST` | `/teams/:slug/governed/policy`               | governed policy                                                     | `{ policy, updated_at }`                                          | admin-only server-owned policy replacement; `enforcement` defaults to `off` (ADR 411)                                                                                                                               |
+| `GET`  | `/teams/:slug/governed/policy`               | —                                                                   | `{ policy, updated_at }`                                          | admin-only policy read; absent policy returns `policy:null`                                                                                                                     |
+| `POST` | `/teams/:slug/governed/launches`             | `{ member,node_id,correlation,context,ttl_ms? }`                    | `{ authorization, token }`                                        | human-started, one-shot `msla_` handoff; token is shown once                                                                                                                 |
+| `POST` | `/teams/:slug/governed/launches/consume`     | `{ token,launch_id,presence_id,member,node_id,correlation }`        | structured allow/deny                                             | enrolled node consumes the matching launch handoff exactly once                                                                                                            |
+| `DELETE` | `/teams/:slug/governed/launches/:id`        | —                                                                   | `{ ok:true }`                                                     | admin-only revocation                                                                                                                           |
+| `POST` | `/teams/:slug/governed/authorize`            | `{ launch_id,presence_id,correlation,member,node_id,provider,model }` | structured allow/deny                                          | enrolled node asks for Aperture authorization; denial is a 200 decision, not an HTTP error                                                                           |
 
 Roster projections also carry optional `working_hours`. A Team schedule is inherited by Members
 without their own schedule; a Member schedule replaces it wholesale. The value is recurring and
 informational—no Presence or schedule enforcement is performed (ADR 206).
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
+
+## Governed model authorization (Increment 3, ADR 411)
+
+The governed contract is additive to the existing `musterd/0.3` message protocol and is exported by
+`@musterd/protocol`. Every policy, launch body, consumption body, and authorization body is strict and
+parsed at the HTTP boundary. The Team policy is server-owned and secret-free:
+`{ version: 1, enforcement: "off"|"required", team: { models, quota? }, members: { [member]: { models, quota? } } }`.
+Member model sets may only narrow the Team model set; model identifiers are exact lowercase
+`provider/model` values. `off` is the default and does not alter unmanaged Presence or claim behavior;
+this increment does not activate `required` enforcement.
+
+An active human Member issues a bounded authorization for an active agent Member already bound to one
+enrolled machine node. The server returns a one-shot `msla_` token, stores only its SHA-256 hash, and
+records a correlation plus exactly one work context: an active owned Lane, an unresolved directed Act,
+or a short-lived human-created orientation allowance. The matching agent Presence consumes the token
+once; expiry, revocation, replay, Member/node/correlation mismatch, and a missing or held Presence are
+refusals. The public authorization projection never contains the token.
+
+The Aperture decision endpoint authenticates the enrolled node, then checks the consumed launch, live
+Presence, durable Member↔node binding, work context, and server-owned model policy. It returns a
+structured allow or stable refusal code. Audit rows contain IDs, category, policy version, and requested
+provider/model only; launch tokens, node credentials, prompts, responses, and provider payloads never
+cross the response, audit, or request-log boundary. Launcher adapters and a future `required` cutover
+remain later work.
 
 ## Shared Seeds (ADR 291, unreleased)
 
@@ -182,7 +212,7 @@ The governed successor to `hello` — **additive schemas, not yet wired into `WS
 - `OccupiedFrame` (server→client) — `{ type:'occupied', seat:Member, presence_id, server_time, charter?, memory:MemoryEnvelope|null }`. `memory` is the seat-scoped continuity envelope (ADR 093) — `MemoryEnvelope = { headline (≤120), saved_at, size_bytes }` (`.strict()`, so the body never rides the frame) — or `null` when nothing is saved; the body is fetched on demand via `GET /teams/:slug/memory`.
 - `RefusedFrame` (server→client) — `{ type:'refused', code:RefusedCode, message, claimable:[…], hint }`. `RefusedCode` = `claim_conflict|forbidden|not_found|disabled|banned|expired_grant` (A.8; `disabled`/`banned` surface the seat's account state — HTTP maps those to `forbidden` 403).
 - `PendingFrame` (server→client) — `{ type:'pending', request_id, message }`. The WS stays open; the server pushes the terminal `occupied`/`refused` when an admin decides (spec-gap 3, no client polling).
-- `P3_AUDIT_ACTIONS` — a reference tuple naming the P3 audit verbs (`grant.issue/use/revoke`, `claim.occupy/refused`, `request.decide`, `key.rotate`, `policy.change`, `account_status.change`) for naming consistency; `AuditEntry.action` stays an **open string** (ADR 074).
+- `P3_AUDIT_ACTIONS` — a reference tuple naming the P3 audit verbs (`grant.issue/use/revoke`, `claim.occupy/refused`, `request.decide`, `key.rotate`, `policy.change`, `account_status.change`, and `governed.*`) for naming consistency; `AuditEntry.action` stays an **open string** (ADR 074).
 
 ## `@musterd/protocol` exports (the executable contract)
 
@@ -212,7 +242,7 @@ export const WSServerFrame = z.discriminatedUnion('type', [ Welcome, Subscribed,
 export const ErrorCode = z.enum(['bad_request','validation','unauthorized','forbidden','not_found','conflict','member_busy','superseded','version_mismatch','server_error','claim_conflict','expired_grant']);  // ADR 078 adds the two P3 codes
 export const AuditEntry = z.object({ id, ts, actor:string|null, action:string, target:string|null, result:z.enum(['allow','deny']), detail:record|null });  // ADR 071/074 — `action` is an OPEN string (P3 adds verbs); the audit-log wire contract
 export const AuditResponse = z.object({ audit: AuditEntry[] });
-export const P3_AUDIT_ACTIONS = ['grant.issue','grant.use','grant.revoke','claim.occupy','claim.refused','request.decide','key.rotate','policy.change','account_status.change'] as const;  // ADR 078 — reference vocabulary; action stays OPEN
+export const P3_AUDIT_ACTIONS = ['grant.issue','grant.use','grant.revoke','claim.occupy','claim.refused','request.decide','key.rotate','policy.change','account_status.change','governed.policy.change','governed.launch.issue','governed.launch.consume','governed.launch.refused','governed.launch.revoke','governed.request.allow','governed.request.deny'] as const;  // ADR 078/411 — reference vocabulary; action stays OPEN
 // ADR 078 (P3, SPEC A.3) — the claim handshake frames. Additive; NOT yet in WSClientFrame/WSServerFrame (Cleo's P3.2 cutover wires them).
 export const ClaimTarget = z.union([ z.object({seat:string}), z.object({role:string}), z.object({observe:z.literal(true)}) ]);
 export const RefusedCode = z.enum(['claim_conflict','forbidden','not_found','disabled','banned','expired_grant']);
@@ -251,4 +281,4 @@ export const ContinuityRegistry = z.object({ version:1, team, seat, bindings:Con
 
 `actMetaRules` is the single place encoding the per-act `meta` requirements from the table above; both server and clients import it so validation is identical everywhere. **Changing any of these schemas requires an ADR** (`00-overview.md` hard rule).
 
-`AuditEntry`/`AuditResponse` (ADR 071/074) are the wire contract for the admin-only `GET /teams/:slug/audit` governance log. `action` is deliberately an **open string** rather than an enum: ADR 071 shapes the table for P3 verbs (`grant.*`, `claim.*`, `account_status.change`, `key.rotate`, `policy.change`, `request.decide`) that add rows not schema, and the CLI renders unknown verbs plainly instead of rejecting them. The server's internal `AuditAction` union (in `@musterd/server`) is the enumerated write-side type; this protocol schema is the permissive read-side contract.
+`AuditEntry`/`AuditResponse` (ADR 071/074) are the wire contract for the admin-only `GET /teams/:slug/audit` governance log. `action` is deliberately an **open string** rather than an enum: ADR 071 shapes the table for P3 verbs (`grant.*`, `claim.*`, `account_status.change`, `key.rotate`, `policy.change`, `request.decide`, `governed.*`) that add rows not schema, and the CLI renders unknown verbs plainly instead of rejecting them. The server's internal `AuditAction` union (in `@musterd/server`) is the enumerated write-side type; this protocol schema is the permissive read-side contract.

@@ -20,8 +20,8 @@ describe('SURFACES (ADR 352)', () => {
   });
 });
 
-describe('FEATURE_EPOCH (Codex doorbell model seam, ADR 397)', () => {
-  it('is 20 — an old checkout cannot rewrite the supported Codex hook command set', () => {
-    expect(FEATURE_EPOCH).toBe(20);
+describe('FEATURE_EPOCH (governed model authorization, ADR 411)', () => {
+  it('is 21 — an old checkout cannot issue governed launch handoffs', () => {
+    expect(FEATURE_EPOCH).toBe(21);
   });
 });

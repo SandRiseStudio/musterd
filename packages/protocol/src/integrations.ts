@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GovernedEnforcementModeSchema } from './governed.js';
 
 const ExactModelSchema = z
   .string()
@@ -20,6 +21,17 @@ const DollarQuotaSchema = z.object({
 const WorkloadIdSchema = z
   .string()
   .regex(/^[a-z0-9]{6,64}$/, 'workload_id must be lowercase opaque alphanumeric text');
+const MUSTERD_CREDENTIAL_PREFIX = /^(?:mskey_|msgr_|mscr_|msac_|msls_|msla_)/i;
+
+function containsCredential(value: unknown): boolean {
+  if (typeof value === 'string') return MUSTERD_CREDENTIAL_PREFIX.test(value);
+  if (Array.isArray(value)) return value.some(containsCredential);
+  if (value !== null && typeof value === 'object')
+    return Object.entries(value).some(
+      ([key, child]) => containsCredential(key) || containsCredential(child),
+    );
+  return false;
+}
 
 /**
  * Secret-free, provider-neutral policy input for the governed-model generator (ADR 400).
@@ -28,6 +40,7 @@ const WorkloadIdSchema = z
 export const GovernedModelsManifestSchema = z
   .object({
     version: z.literal(1),
+    enforcement: GovernedEnforcementModeSchema.default('off'),
     team: z.object({
       models: z.array(ExactModelSchema).min(1),
       quota: DollarQuotaSchema,
@@ -53,6 +66,12 @@ export const GovernedModelsManifestSchema = z
   })
   .strict()
   .superRefine((manifest, ctx) => {
+    if (containsCredential(manifest)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'governed model manifest must not contain a musterd credential',
+      });
+    }
     const modelSet = new Set(manifest.team.models);
     if (modelSet.size !== manifest.team.models.length) {
       ctx.addIssue({
@@ -107,7 +126,6 @@ export type GovernedModelsManifest = z.infer<typeof GovernedModelsManifestSchema
 const TailscaleTagSchema = z.string().regex(/^tag:[a-z0-9][a-z0-9-]*$/);
 const TransportNodeKeySchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/);
 const TransportMemberSchema = z.string().min(1);
-const MUSTERD_CREDENTIAL_PREFIX = /^(?:mskey_|msgr_|mscr_|msac_|msls_)/i;
 
 export const GovernedTransportManifestSchema = z
   .object({

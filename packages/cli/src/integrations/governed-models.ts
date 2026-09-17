@@ -11,7 +11,7 @@ import {
   type SeatFile,
 } from '@musterd/protocol';
 
-const MUSTERD_CREDENTIAL_PREFIX = /^(?:mskey_|msgr_|mscr_|msac_|msls_)/i;
+const MUSTERD_CREDENTIAL_PREFIX = /^(?:mskey_|msgr_|mscr_|msac_|msls_|msla_)/i;
 const MANIFEST_PATH = '.musterd/governed-models.json';
 
 export interface GovernedSeat {
