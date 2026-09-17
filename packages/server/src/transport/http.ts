@@ -258,6 +258,7 @@ import {
   pickWakeReviewer,
   REVIEW_LOOP_BREAKER_N,
   reviewLoopBounceCount,
+  heldAcceptances,
   selectReviewCounterpart,
   workerFamily,
   teamFamilyPosture,
@@ -1207,6 +1208,88 @@ function deliverLaneAskAct(
  * it discharged, and the seat reads WHY in the body instead of finding the lane closed under them.
  * The body is composed here from structured fields, never from a client string.
  */
+/**
+ * Re-route every acceptance a departing seat still holds (lane 01M2RNBRGRWCSD89JTE1BVQ3QG).
+ *
+ * Measured 2026-09-17: an ask was routed to delta at 16:11:47 and delta's session ended at
+ * 16:14:11. Nothing reacted, so the ask waited on a seat that was gone until
+ * `staleAcceptanceWarning` fired 12h later and downgraded it to "any seat may answer" — 22h.
+ *
+ * This reuses the hand re-route's machinery exactly (`lane.review_rerouted` + a superseded notice
+ * + a fresh ask), because the hard part is already decided there: the old ask goes inert, a late
+ * verdict on it cannot move the lane, and the seat that held it is told where the acceptance went.
+ * What differs is only who decided — a goodbye rather than a caller naming a seat — so the audit
+ * row records `route: 'departed'` and the departing seat as `actor`.
+ *
+ * No wake is leased, matching the named path: the ask waits in an inbox, as it does at submit.
+ * If the picker finds nobody, nothing is minted and the lane keeps the ask it has — a re-route with
+ * no destination would strand the acceptance worse than leaving it for `staleAcceptanceWarning`.
+ */
+function rerouteDepartedAcceptances(ctx: Ctx, team: TeamRow, departing: MemberRow): void {
+  for (const held of heldAcceptances(ctx.db, team.id, departing.name)) {
+    const lane = getLane(ctx.db, team.id, held.lane, team.slug);
+    if (!lane) continue;
+    const worker = lane.owner_seat ?? departing.name;
+    const selection = selectReviewCounterpart(
+      ctx.db,
+      team.id,
+      lane,
+      worker,
+      ctx.config.presenceTimeoutMs,
+      { departing: departing.name },
+    );
+    const pick = selection.pick;
+    if (!pick || pick.reviewer === departing.name) continue;
+    const humanRequired = lane.risk.length > 0;
+    const acceptanceTier: AskTier = 'standard';
+    appendLaneEventRequired(ctx.db, team.id, {
+      actor: departing.name,
+      action: 'lane.review_rerouted',
+      target: lane.id,
+      result: 'allow',
+      detail: {
+        lane: lane.id,
+        owner: worker,
+        stakes: lane.stakes,
+        stakes_provenance: lane.stakes_provenance,
+        ...(lane.merged ? { merged: lane.merged } : {}),
+        reviewer: pick.reviewer,
+        route: 'departed',
+        review_grade: pick.grade,
+        from_reviewer: departing.name,
+        superseded_ask: held.ask,
+        human_required: humanRequired,
+        ask_tier: acceptanceTier,
+        ask_timeout_ms: askContract(acceptanceTier).timeout_ms,
+      },
+    });
+    deliverLaneAskSuperseded(ctx, team, departing, departing.name, held.ask, lane, pick.reviewer);
+    const priorOwners = laneOwnerHistory(ctx.db, team.id, lane.id);
+    deliverLaneAskAct(
+      ctx,
+      team,
+      departing,
+      pick.reviewer,
+      acceptanceAskBody(lane.title, {
+        overlapNotice: priorOwnerNotice(pick.reviewer, priorOwners),
+        noGoalNotice: noGoalNotice(lane.goal_id),
+      }),
+      {
+        species: 'approve',
+        tier: acceptanceTier,
+        lane_review: {
+          lane: lane.id,
+          title: lane.title,
+          branch: lane.branch,
+          ...(lane.merged ? { merged: lane.merged } : {}),
+          route: 'departed',
+          grade: pick.grade,
+        },
+      },
+    );
+  }
+}
+
 function deliverLaneAskSuperseded(
   ctx: Ctx,
   team: TeamRow,
@@ -3328,7 +3411,13 @@ export async function handleHttp(
         // Presence-honesty §2.3 carve-out: `end` is the daemon's only clean-exit goodbye, so it
         // stamps the sticky reason — nothing else here moves; presence rows stay untouched, so
         // the route's presence-neutrality (comment above) holds.
-        if (body.event === 'end') markSessionEnded(ctx.db, target.id);
+        if (body.event === 'end') {
+          markSessionEnded(ctx.db, target.id);
+          // An acceptance must not leave with the session that was holding it (lane
+          // 01M2RNBRGRWCSD89JTE1BVQ3QG). Presence-neutrality above is untouched: this moves asks
+          // and audit rows, never a presence row.
+          rerouteDepartedAcceptances(ctx, team, target);
+        }
         appendAudit(ctx.db, team.id, {
           actor: null,
           action: body.event === 'start' ? 'residency.session_captured' : 'residency.session_ended',
