@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { homePoses } from './actors';
 import { memberColor } from '../format';
 import { depth, fitFloor, project } from './iso';
-import { BENCH, CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, KEYBOARD_ALONG, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
+import { BENCH, BOOKSHELVES, CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, KEYBOARD_ALONG, LOUNGE, NOOK, PLANTS, WORKING_HOURS_CALENDAR } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import {
@@ -31,6 +31,13 @@ import {
   drawCue,
   drawDog,
   drawWorkstation,
+  benchCounter,
+  bookshelf,
+  drawEntrance,
+  drawPlant,
+  DARK_PALETTE,
+  paletteKey,
+  setScenePalette,
   ownedDeskWarmAlpha,
   workstationKey,
   glassColor,
@@ -1370,5 +1377,56 @@ describe('workstation phases (sprite cache)', () => {
     expect(ownedDeskWarmAlpha({ ...offline, last_seen_at: now - 7_200_000 }, true, now)).toBe('');
     const away: OfficeNode = { ...owner, presence: 'away', last_seen_at: now };
     expect(ownedDeskWarmAlpha(away, true, now)).toBe('0.108');
+  });
+});
+
+describe('static furniture sprites', () => {
+  const fit = fitFloor(1920, 1080);
+  it('plants, shelves, the entrance and the bench counter each carry one sprite part', () => {
+    const { placements, byName, poses } = fullRoom();
+    const keys: string[] = [];
+    const census: SpriteCache = {
+      get: (key, _box, draw) => {
+        keys.push(key);
+        draw(recordingCtx().ctx);
+        return {} as CanvasImageSource;
+      },
+      size: () => 0,
+      clear: () => {},
+    };
+    const r = recordingCtx();
+    renderScene(r.ctx, fit, placements, byName, poses, 3, 'revive', computeLightEnv(21, true), null, undefined, null, null, null, {
+      sprites: census,
+      dpr: 1,
+      stage: { w: 1920, h: 1080 },
+    });
+    const count = (kind: string) => keys.filter((k) => k.startsWith(`${kind}·`)).length;
+    expect(count('plant')).toBe(PLANTS.length);
+    expect(count('shelf')).toBe(BOOKSHELVES.length);
+    expect(count('entrance')).toBe(1);
+    expect(count('bench')).toBe(1);
+    expect(new Set(keys).size).toBe(keys.length); // no two items share a key
+  });
+  it('each one sets every state it reads, so a sprite starting from the 2D defaults is equivalent', () => {
+    const draws: [string, (c: CanvasRenderingContext2D) => void][] = [
+      ['plant snake', (c) => drawPlant(c, fit, PLANTS[0]!.lx, PLANTS[0]!.ly, 'snake')],
+      ['plant fiddle', (c) => drawPlant(c, fit, PLANTS[0]!.lx, PLANTS[0]!.ly, 'fiddle')],
+      ['shelf', (c) => bookshelf(c, fit, BOOKSHELVES[0]!, 0)],
+      ['entrance', (c) => drawEntrance(c, fit)],
+      ['bench', (c) => benchCounter(c, fit)],
+    ];
+    for (const [label, draw] of draws) {
+      const r = recordingCtx();
+      draw(r.ctx);
+      expect(r.ops.length, label).toBeGreaterThan(5);
+      expect(readsBeforeWrites(r.ops), label).toEqual([]);
+    }
+  });
+  it('a sprite key follows the palette, so a theme flip cannot reuse the old raster', () => {
+    const before = paletteKey();
+    setScenePalette({ ...DARK_PALETTE, wood: '#123456' });
+    expect(paletteKey()).not.toBe(before);
+    setScenePalette(DARK_PALETTE);
+    expect(paletteKey()).toBe(before);
   });
 });

@@ -2182,7 +2182,7 @@ function shelfDecor(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf): void
   }
 }
 
-function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf, si: number): void {
+export function bookshelf(ctx: CanvasRenderingContext2D, fit: Fit, s: Bookshelf, si: number): void {
   const f = FWD[s.dir];
   const sn = f[1] !== 0; // S/N run along x; E/W run along y
   const wx = sn ? s.long : s.deep;
@@ -2224,7 +2224,7 @@ function drawCountPill(ctx: CanvasRenderingContext2D, at: Pt, text: string, scal
   ctx.fillText(text, at.x, at.y);
 }
 
-function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
+export function drawEntrance(ctx: CanvasRenderingContext2D, fit: Fit): void {
   const { lx, ly } = ENTRANCE;
   const s = fit.scale;
   const H = 96;
@@ -2323,7 +2323,7 @@ const SOIL_UP = POT.h + POT.rimH;
  * A fiddle-leaf fig gets the bare woody trunk it has in life; a snake plant's blades rise straight from the
  * soil. Either way, every green thing traces back to the pot it is standing in.
  */
-function drawPlant(
+export function drawPlant(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   lx: number,
@@ -4189,7 +4189,7 @@ export function workstationKey(k: {
  * counter, because a long box sorted at its centre would otherwise paint over the gear at its ends —
  * the couch/`depthAt` problem, solved the same way.
  */
-function benchCounter(ctx: CanvasRenderingContext2D, fit: Fit): void {
+export function benchCounter(ctx: CanvasRenderingContext2D, fit: Fit): void {
   const B = BENCH;
   // Legs at the ends and thirds, then the top with a small overhang — a worktop, not a slab wall.
   for (const along of [-B.long / 2 + 8, -B.long / 6, B.long / 6, B.long / 2 - 8]) {
@@ -4635,14 +4635,31 @@ export function renderScene(
   const bases = new Map<string, Pt>();
 
   const items: DepthItem[] = [];
+  /* Every static item's key ends with the same three facts: where the pixel grid is, how dense it
+     is, and what the theme resolved to. A resize or a theme flip is one cold frame, then cached. */
+  const statKey = `${fitKey(fit)}·${opts.dpr ?? 1}·${paletteKey()}`;
 
-  for (const plant of PLANTS) {
-    items.push({ d: depth(plant.lx, plant.ly), fn: () => drawPlant(ctx, fit, plant.lx, plant.ly, plant.species) });
-  }
+  PLANTS.forEach((plant, pi) => {
+    items.push({
+      d: depth(plant.lx, plant.ly),
+      fn: () => drawPlant(ctx, fit, plant.lx, plant.ly, plant.species),
+      parts: [
+        {
+          kind: 'sprite',
+          key: `plant·${pi}·${plant.species}·${statKey}`,
+          draw: (c) => drawPlant(c, fit, plant.lx, plant.ly, plant.species),
+        },
+      ],
+    });
+  });
   BOOKSHELVES.forEach((s, si) => {
     // The index is the book seed — it is what makes shelf 0 and shelf 2 hold different books
     // despite being the same size.
-    items.push({ d: depth(s.lx, s.ly), fn: () => bookshelf(ctx, fit, s, si) });
+    items.push({
+      d: depth(s.lx, s.ly),
+      fn: () => bookshelf(ctx, fit, s, si),
+      parts: [{ kind: 'sprite', key: `shelf·${si}·${statKey}`, draw: (c) => bookshelf(c, fit, s, si) }],
+    });
   });
   // Rugs are flat floor paint — draw them right after the floor (before every solid/actor), so a member
   // standing anywhere on a rug is never over-painted by it. Solid pieces self-sort at their footprints.
@@ -4666,14 +4683,22 @@ export function renderScene(
   }
   items.push(...receptionItems(ctx, fit, recep, t));
   items.push({ d: depth(PRINTER.lx, PRINTER.ly), fn: () => printer(ctx, fit) });
-  items.push({ d: depth(ENTRANCE.lx, ENTRANCE.ly), fn: () => drawEntrance(ctx, fit) });
+  items.push({
+    d: depth(ENTRANCE.lx, ENTRANCE.ly),
+    fn: () => drawEntrance(ctx, fit),
+    parts: [{ kind: 'sprite', key: `entrance·${statKey}`, draw: (c) => drawEntrance(c, fit) }],
+  });
 
   // The office dog sorts with everything else at its own floor position (behaviour lives in pet.ts).
   if (pet) items.push({ d: depth(pet.lx, pet.ly) + 0.08, fn: () => drawDog(ctx, fit, pet, t) });
 
   // The bench's shared counter, once — its seats' gear rides per-slot below.
   // 300 long: the widest footprint on the floor, so the centre-vs-edge error is largest here.
-  items.push({ d: depth(BENCH.lx, BENCH.ly), fn: () => benchCounter(ctx, fit) });
+  items.push({
+    d: depth(BENCH.lx, BENCH.ly),
+    fn: () => benchCounter(ctx, fit),
+    parts: [{ kind: 'sprite', key: `bench·${statKey}`, draw: (c) => benchCounter(c, fit) }],
+  });
 
   // Desks whose lamp is switched on: a real sitter's desk, after dark. Filled from the same three facts
   // `drawWorkstation` uses to draw the lit shade (a node, not a bench seat, not an offline owner's kept
