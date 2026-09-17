@@ -3,6 +3,7 @@ import type { WorkingHours } from '@musterd/protocol';
 import type { Appearance } from './appearance';
 import { drawCharacter } from './character';
 import { depth, FLOOR, KX, KY, project, THICK, WALL_H, type Fit, type Pt } from './iso';
+import { deviceBox, measureBounds, type SpriteCache } from './sprite-cache';
 import { STRIDE, type PetState } from './pet';
 import { RECEPTIONIST_WAKE_S, type ReceptionistState } from './receptionist';
 import {
@@ -1820,12 +1821,37 @@ function ctable(ctx: CanvasRenderingContext2D, fit: Fit, lx: number, ly: number)
   ellipse(ctx, { x: s.x + 11 * fit.scale, y: s.y - 22 * fit.scale }, 3 * fit.scale, 2 * fit.scale, '#f4cf52');
 }
 
+/**
+ * One piece of an item's cached form (sprite cache, spec 2026-09-17). A `sprite` part is rasterized
+ * once per `key` by `SpriteCache` and blitted; its `draw` receives the OFFSCREEN context. A `live`
+ * part paints on the stage every frame and closes over the stage context. Parts run in order, in the
+ * item's one depth slot — so a working desk is sprite (slab, legs, props up to the monitor casing) →
+ * live (the screen face, which reads `t` and blooms additively) → sprite (the props after it).
+ */
+export type SpritePart =
+  | { kind: 'sprite'; key: string; draw: (ctx: CanvasRenderingContext2D) => void }
+  | { kind: 'live'; draw: () => void };
+
 /** One depth-sortable draw call. The nook/huddle used to paint as single blobs anchored at their
  * centre, which over-painted any member standing on the north half of their rugs — each solid piece is
  * now its own item at its own footprint depth, and flat rugs paint with the floor (see renderScene). */
-interface DepthItem {
+export interface DepthItem {
   d: number;
+  /** The direct draw — the whole item, unchanged. */
   fn: () => void;
+  /** The same pixels as `fn`, as sprite/live parts in order. Used only when `renderScene` is given a
+   * `SpriteCache`; absent on items that stay live (actors, the pet, anything that reads `t` all over). */
+  parts?: SpritePart[];
+}
+
+/** Per-call rendering options — everything here is opt-in and absent on the baked path. */
+export interface RenderOpts {
+  /** The per-item sprite cache. Absent → every item paints direct, exactly as before. */
+  sprites?: SpriteCache | undefined;
+  /** Device pixel ratio of `ctx`'s transform — sprite boxes are in device px. Default 1. */
+  dpr?: number | undefined;
+  /** The stage size in CSS px — the background layer is one full-stage sprite. Required with `sprites`. */
+  stage?: { w: number; h: number } | undefined;
 }
 
 /** The break-nook lounge, as depth items: the rug flat on the floor, every solid piece self-sorted. */
@@ -4468,6 +4494,7 @@ export function renderScene(
   wallBoard: WallBoard | null = null,
   /** Optional Team schedule for the wall sign. */
   teamWorkingHours: WorkingHours | null = null,
+  opts: RenderOpts = {},
 ): SceneAnchors {
   // Grounds the diorama on the panel surface before anything else paints (the floor covers its middle).
   drawGroundShadow(ctx, fit);
@@ -4487,11 +4514,7 @@ export function renderScene(
   const heads = new Map<string, Pt>();
   const bases = new Map<string, Pt>();
 
-  interface Item {
-    d: number;
-    fn: () => void;
-  }
-  const items: Item[] = [];
+  const items: DepthItem[] = [];
 
   for (const plant of PLANTS) {
     items.push({ d: depth(plant.lx, plant.ly), fn: () => drawPlant(ctx, fit, plant.lx, plant.ly, plant.species) });
@@ -4610,7 +4633,29 @@ export function renderScene(
   }
 
   items.sort((a, b) => a.d - b.d);
-  for (const it of items) it.fn();
+  const cache = opts.sprites;
+  const dpr = opts.dpr ?? 1;
+  for (const it of items) {
+    if (!cache || !it.parts) {
+      it.fn();
+      continue;
+    }
+    for (const part of it.parts) {
+      if (part.kind === 'live') {
+        part.draw();
+        continue;
+      }
+      const bounds = measureBounds(part.draw);
+      if (!bounds) continue; // drew nothing — nothing to blit
+      const box = deviceBox(bounds, dpr);
+      const sprite = cache.get(part.key, box, part.draw);
+      // Integer device coordinates under the identity transform: a straight copy, no resampling.
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(sprite, box.x, box.y);
+      ctx.restore();
+    }
+  }
 
   // Interior lighting: veil the room to the night level, then let occupied desks' lamps glow through.
   drawInteriorLight(ctx, fit, env, poses, byName, litLamps);

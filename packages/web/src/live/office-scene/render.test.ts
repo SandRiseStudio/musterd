@@ -42,6 +42,8 @@ import {
 import { assignSeats } from './seating';
 import type { OfficeNode, Pose } from './types';
 import { projectWallBoard, STICKY_CAP, type WallBoard } from './wallboard';
+import { fmtOps, recordingCtx, type RecordedOp } from './recording-ctx';
+import type { SpriteCache } from './sprite-cache';
 import type { Lane, LaneState, WorkingHours } from '@musterd/protocol';
 
 /** A minimal lane for wall-board fixtures — only id and state matter to the wall. */
@@ -1200,5 +1202,55 @@ describe('desk props stand on the desk', () => {
         }
       }
     }
+  });
+});
+
+/**
+ * Sprite cache (spec 2026-09-17): the standing invariant. With a cache supplied, renderScene must
+ * emit exactly the direct path's ops in the direct path's order — the blit bookkeeping aside.
+ * `passthroughCache` draws straight onto the caller's recording context (no offscreen), so the ops
+ * a sprite part emits land in the same stream as the live parts, in the order the loop ran them.
+ */
+function passthroughCache(ctx: CanvasRenderingContext2D): SpriteCache {
+  return {
+    get: (_key, _box, draw) => {
+      draw(ctx);
+      return {} as CanvasImageSource;
+    },
+    size: () => 0,
+    clear: () => {},
+  };
+}
+const BLIT_OPS = new Set(['save', 'restore', 'setTransform', 'drawImage']);
+const sceneOps = (ops: RecordedOp[]): string[] => fmtOps(ops.filter((o) => !BLIT_OPS.has(o.name)));
+
+/** A full room: 24 members across pods, bench, window desks and the overflow strip, working and idle. */
+function fullRoom(): { placements: ReturnType<typeof assignSeats>; byName: Map<string, OfficeNode>; poses: Map<string, Pose> } {
+  const names = ['ada', 'bo', 'cy', 'di', 'ed', 'fay', 'gus', 'hal', 'ivy', 'jo', 'kim', 'lou', 'mo', 'ned', 'oz', 'pat', 'quin', 'rae', 'sy', 'ty', 'uma', 'vic', 'wes', 'xi'];
+  const nodes = names.map((n, i) => node(n, i % 3 === 0 ? 'working' : i % 3 === 1 ? 'active' : 'offline'));
+  const byName = new Map(nodes.map((n) => [n.name, n]));
+  const placements = assignSeats(nodes);
+  return { placements, byName, poses: homePoses(placements, byName) };
+}
+
+describe('sprite parts', () => {
+  const fit = fitFloor(1920, 1080);
+  const env = computeLightEnv(21, true); // night: veil up, lamps on — the busiest paint
+  const schedule: WorkingHours = { timezone: 'America/Los_Angeles', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '17:00' };
+  const wallFixture = (): WallBoard =>
+    projectWallBoard({ lanes: [laneFix('a', 'open'), laneFix('b', 'active'), laneFix('c', 'blocked')], warnings: [] })!;
+
+  it('with a cache, renderScene emits the direct path’s ops in the same order (blit bookkeeping aside)', () => {
+    const { placements, byName, poses } = fullRoom();
+    const a = recordingCtx();
+    renderScene(a.ctx, fit, placements, byName, poses, 3, 'revive', env, null, undefined, null, wallFixture(), schedule);
+    const b = recordingCtx();
+    renderScene(b.ctx, fit, placements, byName, poses, 3, 'revive', env, null, undefined, null, wallFixture(), schedule, {
+      sprites: passthroughCache(b.ctx),
+      dpr: 1,
+      stage: { w: 1920, h: 1080 },
+    });
+    expect(sceneOps(b.ops)).toEqual(sceneOps(a.ops));
+    expect(a.ops.length).toBeGreaterThan(1000); // the fixture actually painted a room
   });
 });
