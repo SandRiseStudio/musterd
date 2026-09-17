@@ -74,8 +74,8 @@ Facts, each with where it was read:
 
 | Weeks | Dates | Phase | Done means |
 |---|---|---|---|
-| 1–2 | Sep 17 – Sep 30 | **Install truth + demo from day one** | A machine that is not nick's goes from musterd.io to first agent online in ≤10 min, twice, on two harnesses. The 2-minute demo exists and has been given at ≥2 events. `agent-whiteboard` is on npm in its own repo. |
-| 3–6 | Oct 1 – Oct 28 | **Hand-to-hand** | 2–3 events a week. 10–20 installs done on the other person's laptop. 3–5 still active a week later, measured. Every quote in the quotes file. Weekly fix cycle. Startup Grind demo (Oct 7). |
+| 1–2 | Sep 17 – Sep 30 | **Install truth + demo from day one** | A machine that is not nick's goes from musterd.io to first agent online in ≤10 min, twice, on two harnesses. The 2-minute demo exists and has been given at ≥2 events. The skills sweep is done; `agent-whiteboard` is on npm in its own repo and one more skill has shipped. |
+| 3–6 | Oct 1 – Oct 28 | **Hand-to-hand** | 2–3 events a week, 20–30 logged conversations a week, 3–5 install attempts a week — which should yield 10–20 installs and 3–5 active a week later (§6 funnel). Every quote in the quotes file. Weekly fix cycle. Startup Grind demo (Oct 7). A skill every 3–4 days. |
 | 6–7 | Oct 28 – Nov 2 | **Public launch** | Blog post live, Show HN, X, Reddit — carrying real quotes and numbers. YC W27 application in by Nov 2, 8pm PT, with the same numbers; a16z speedrun by Nov 1 if nick says so. |
 | 8–9 | Nov 2 – Nov 20 | **Conversations + hand-over to async** | ≥3 investor / lab / company threads with a next step dated in Q1. Everything that must run without nick is running. |
 | — | Nov 20 → May 2027 | **Async from home** | Small-things track continues; dataset gate; cohort applications; Q1 conversations. Sequenced in its own doc later, written from what the nine weeks taught. |
@@ -114,10 +114,44 @@ At each event: demo → ask *"do you run more than one agent session?"* → if y
 laptop then and there → watch, and do not help until they are stuck → write down where they got
 stuck. That last line is the product research; the install is the excuse for it.
 
-Targets: 10–20 installs; 3–5 still active a week later, **measured** (their `/audit` or a one-line
-check-in a week on — never guessed); every quote recorded in one file, `docs/design/quotes.md`, with
-name, date, event, and what they were doing. Weekly: fix what broke, re-run run 4. The quotes file
-is the launch post's evidence and the YC application's traction section, written as it happens.
+**Where the install numbers come from.** The plan's install and active counts are not targets to
+hit; they are what the inputs nick controls should produce, and the inputs are the plan. The
+product has no usage analytics ([PRIVACY.md](../../PRIVACY.md)), so installs and "active a week
+later" are hand-counted from conversations, with three passive proxies read every Sunday:
+npm weekly downloads (baseline 2026-09-16: `@musterd/cli` 5, `@musterd/mcp` 16 — that is the
+team), GitHub stars and unique visitors (0 and 7), and musterd.io Get Started page views (beacon
+live since 2026-09-14).
+
+The funnel, per event, with the numbers a night at a demo event actually yields:
+
+| Step | What nick does | Per event | Per week (2–3 events) |
+|---|---|---|---|
+| Conversations | demo the 2-minute cut to anyone who will stand still; ask *"do you run more than one agent session?"* | 8–12 | 20–30, logged (name, event, answer) |
+| Qualified | the ones who said yes to the question — solo devs on 2+ harnesses, small teams with agents | 2–4 | 6–10 |
+| Install attempt | laptop out, `npx @musterd/cli init`, watch, don't help until stuck | 1–2 | 3–5 |
+| Installed | first agent online on their machine, in the log with harness and what broke | 1–2 | 3–5 |
+| Active a week later | one-line check-in on day 7 (text, DM, or their own `/audit` if they show it) | — | 1–2 of the previous week's |
+
+Four weeks of that is 12–20 installs and 4–8 active — which is where the plan's 10–20 / 3–5 come
+from. Anyone who does not qualify gets the card (musterd.io and one skill repo) and no install;
+anyone who qualifies but has no laptop gets a calendar slot for the first hour, within 48 hours.
+
+**Channels beyond the room**, so the funnel is not only nick's evenings: the four skills' READMEs
+each end with the same line pointing at musterd (a skill installed is a doorway, and skills travel
+without nick); the Twitch stream and the `/watch` page for people who found the repo; the Startup
+Grind demo (Oct 7) and any demo-night slot; the people nick has already met at SF events since
+June, messaged one at a time with the 2-minute recording; **LinkedIn**, in three moves — a
+week-1 post to the whole network saying what nick is building and the one question (*"do you run
+more than one agent session?"*), targeted messages to connections at tier-1/2 companies (§16)
+picked from LinkedIn's own data export (Settings → Data privacy → *Get a copy of your data* →
+Connections CSV: name, company, title — filtered locally against the target list, ≤10 messages a
+week, no scraping and no automation on the logged-in session, which LinkedIn's terms forbid and
+which would put the account at risk), and the launch-day post; and Show HN on launch day, whose
+installs land in weeks 7–9, not 3–6.
+
+Every quote goes in one file, `docs/design/quotes.md`, with name, date, event, and what they were
+doing. Weekly: fix what broke, re-run run 4. The quotes file is the launch post's evidence and the
+YC application's traction section, written as it happens.
 
 The ask that closes each conversation is small and the same every time: *"try it with your team
 for two weeks; I'll sit with you for the first hour."*
@@ -161,23 +195,27 @@ The post-Nov-20 track gets its own sequencing doc, written from what these nine 
 
 Each is a musterd *practice* that works with no daemon, and each is honest in its README about what
 it cannot do without one — which is the doorway. Ordered by cheapness × reach; one lane each.
+**Cadence (nick, 2026-09-16): the sweep first, in week 1, then 3–4 days per skill** — the four
+below land by about Oct 5, and the sweep's next four by launch.
 
 1. **`agent-whiteboard`** — exists, extraction-tested. Own repo, npm, README. Days.
 2. **`cross-family-review`** skill — before merge, a review by a model of a different family than
    the author; the four-question verdict (intent / principles / usable / feel); accept is the
    verdict ([ADR 202](../decisions/202-the-verdict-moves-the-lane.md)). Pure SKILL.md, any
    harness. Its stated limit: nothing attests the reviewer's model actually differed — that is what
-   the daemon records. Days.
+   the daemon records. 3–4 days.
 3. **`board-loop`** skill + a minimal board — claim before you build, one owner per surface, submit
    → acceptance. The minimal board is a `LANES.md` convention plus a small script that renders and
-   validates it. About a week.
+   validates it. 3–4 days.
 4. **`harness-inbox`** — the acts vocabulary and the loop (inbox at task boundaries,
    `status_update`, `ask` with tiers) over a shared file between two sessions on one machine. The
    closest to the product itself; ships as "the protocol, minimally," with the roster and
-   attestation limits spelled out, so it reads as a taste rather than a substitute. Last.
+   attestation limits spelled out, so it reads as a taste rather than a substitute. Last of the
+   four; 3–4 days.
 
-Plus one sweep, first week, sloane: **walk musterd end to end and list every practice that ships as
-a skill** — there will be more than four.
+Plus one sweep, **first — Sep 17–20**, sloane: **walk musterd end to end and list every practice
+that ships as a skill** — there will be more than four, and at 3–4 days each the list is the
+October schedule.
 
 Distribution for all of them: one `SandRiseStudio` repo each (or one `musterd-skills` repo with a
 directory per skill — decide at #2), a Claude Code plugin marketplace listing, the skills
@@ -278,15 +316,20 @@ listing — verify before applying):
 ## 13. Measures — what tells us the plan is failing, week by week
 
 Each number is a diagnostic, not a target to game — the same rule
-[ADR 056](../decisions/056-research-as-first-class-practice.md) puts on published metrics.
+[ADR 056](../decisions/056-research-as-first-class-practice.md) puts on published metrics. The
+inputs are the ones nick can act on in a given week; the outputs say whether the inputs are the
+right ones. Passive proxies (npm weekly downloads, stars, Get Started views) are read alongside,
+never instead.
 
 | By | Measure | Failing looks like |
 |---|---|---|
 | Sep 30 | Run 4 on a foreign machine ≤10 min, two harnesses | Any step needs nick in the room → hand-to-hand slips a week; demoing continues. |
-| Sep 30 | `agent-whiteboard` on npm in its own repo | Not published → the parallel track has no cadence; fix the cadence before adding skills. |
+| Sep 20 | Skills sweep done; list ordered | Not done → the skills track has no schedule; do it before anything else on that track. |
+| Sep 30 | `agent-whiteboard` on npm in its own repo; ≥1 more skill shipped | Not published → the parallel track has no cadence; fix the cadence before adding skills. |
 | Sep 30 | 2-minute demo given at ≥2 events | Fewer → the calendar (§10) is wrong for nick's week; re-pick. |
-| Oct 14 | ≥5 hand installs; ≥2 events/week; ≥2 skills shipped | <3 installs → the demo works and the ask does not; change the ask, not the product. |
-| Oct 28 | ≥10 installs; ≥3 active a week later; ≥5 quotes | <3 active → **launch go/no-go**: launch with honest numbers, or slip one week — never two. |
+| weekly, from Oct 1 | **Inputs:** ≥2 events; ≥20 logged conversations; ≥6 qualified; ≥3 install attempts | Conversations high, qualified low → wrong rooms; qualified high, attempts low → the ask is wrong; attempts high, installs low → the product broke — run 4 again. |
+| Oct 14 | ≥5 installs; ≥4 skills shipped | <3 installs with the inputs met → the demo works and the ask does not; change the ask, not the product. |
+| Oct 28 | ≥10 installs; ≥3 active a week later; ≥5 quotes; ≥8 skills | <3 active → **launch go/no-go**: launch with honest numbers, or slip one week — never two. |
 | Nov 2 | Launch out; YC in (speedrun by Nov 1 if chosen) | — |
 | Nov 20 | ≥3 conversations with a dated Q1 next step; the §8 list running | <2 → the post-baby plan leads with conversations, not the dataset. |
 
@@ -390,3 +433,6 @@ count, what broke, quotes added, conversations opened, measures hit or missed. D
 - **2026-09-16** (later) — plan merged (#1527, a61f1eac); child lanes open. §16 PM track added. Cohort survey added to §12:
   a16z speedrun's priority window (Oct 12 – Nov 1) is inside the window, beside YC. One-page visual
   of the plan published for nick as a claude.ai artifact.
+- **2026-09-16** (later still) — nick's review of the visual: install counts made derivable (§6 funnel,
+  input measures in §13; passive proxies baselined: npm cli 5 / mcp 16 per week, 0 stars, 7 uniques);
+  skills cadence set at 3–4 days each with the sweep first (§9).
