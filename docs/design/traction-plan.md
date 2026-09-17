@@ -416,8 +416,41 @@ watch GitHub, Factory, Multica, Band, xpander, or Nous.
   Check parental-leave eligibility on any offer — most employers gate it on tenure; California PFL
   applies regardless.
 
-**Measures:** by Sep 30, the case study is live and Ring's tier-1 channel exists; by Oct 28, ≥3
-tier-1/2 teams know nick is open, in writing; by Nov 20, ≥1 active loop or a dated January list.
+**How this track actually makes traction.** PM hiring at AI companies in 2026 runs on referrals;
+a cold application to a tier-1 company answers under 2% of the time, a referred one gets a screen
+most of the time. So the mechanism is the same funnel as §6 with a different last step, and the
+thing that converts is the thing nick already does at every event: **a PM who can demo a live
+multi-agent product he built, in two minutes, is rare, and every demo is a screening interview in
+disguise.** The gap since VMware reads as *built a product* the moment the case study exists.
+
+| Step | What nick does | Per week |
+|---|---|---|
+| Warm outreach | 5 messages to connections at tier-1/2 companies (from the LinkedIn export), each with the 2-minute recording and one question: *"what does the agents PM team look like where you are?"* | 5 |
+| Informational chats | 20 minutes, no ask for a job; the ask is *"who should I be talking to?"* and *"try it with your team"* | 1–2 |
+| Referral | when a chat goes well, ask for the referral into an open or upcoming req — Ring is what tells you a tier-1 req opened, so the warm path is timed | as they come |
+| Cold application | only a tier-1 open req with no warm path, ≤1 a week, never a generic form | ≤1 |
+| Screen → loop | the launch numbers and the case study are the story; the STAR points are refreshed | — |
+
+Nine weeks of that is ~40 messages, ~12 chats, 3–5 referrals, 1–3 loops — the plan's Nov 20
+measure. Ring's job in this shape is not to generate applications; it is to say *when* a tier-1
+req opens so a warm path can be used the week it matters.
+
+**What converts, prepared once (sloane, weeks 1–2):** the musterd case study on sandrise.io; the
+resume's top line reframed from "Independent Product Development" to what it is — *Founder & PM,
+musterd (open source)* — with three shipped-and-measured bullets; the LinkedIn headline to match;
+the STAR points at 0.4.2 / ADR 320; a one-page "decisions I made and why" reading list for an
+interviewer (ADR 320, the lanes tax, the cookoff, the human-role re-evaluation); and the
+two-sentence answer to "why the gap" that nick already has in his notes (family, then building).
+
+**Two flags for any offer.** Every employer's IP-assignment agreement will reach for musterd
+unless it is listed as a prior invention and carved out in writing — do that before signing, not
+after. And parental-leave eligibility is usually tenure-gated; ask, and know that California PFL
+applies regardless.
+
+**Measures:** by Sep 30, the case study is live, the resume and headline are reframed, and Ring's
+tier-1 channel exists; weekly from Oct 1, ≥5 warm messages and ≥1 chat, logged; by Oct 28, ≥3
+tier-1/2 teams know nick is open, in writing, and ≥1 referral; by Nov 20, ≥1 active loop or a
+dated January list.
 
 **Ownership:** applications, interviews, and the Ring config are nick's (his repo — changes here
 are proposed, not made). The case study, the story paragraph, the resume lines, and a one-page
