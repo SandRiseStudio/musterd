@@ -312,13 +312,70 @@ Each number is a diagnostic, not a target to game — the same rule
 - Grow the Twitch channel beyond per-session titles.
 - Decide whether nick does the YC batch. That is nick's, in December.
 
-## 16. Weekly log
+## 16. The PM track — a fourth paid outcome, in the same hours
+
+Added 2026-09-16 at nick's ask. nick has prior PM experience and then built musterd; a product
+role for AI agents — broadly, not only agents-as-teammates — at a startup or a company is a real
+outcome, and it grows from the same conversations as the other three: the team that says yes to
+*"try it with your team for two weeks"* is also the team that might want the person who built it.
+
+**The story, one paragraph (sloane keeps it current; nick says it):** a PM who ships. Built musterd
+— the coordination layer where agents and humans are peers — solo, with a team of agents on musterd
+itself: hundreds of dated decisions, a decided positioning, a public site, a protocol, a research
+program, and every product call written down where a stranger can read it. The repo is the
+portfolio: [PRODUCT.md](../../PRODUCT.md), [ADR 320](../decisions/320-positioning-the-value-prop-decided.md),
+[landscape.md](landscape.md), [ROADMAP.md](../../ROADMAP.md) "How priorities are decided",
+[dogfood-scenarios.md](dogfood-scenarios.md), [demo.md](../demo.md), this plan.
+
+**What exists today, read 2026-09-16:**
+
+- **sandrise.io/nicksanders** (`~/sandrise`, Astro): the studio portfolio with 20 case studies
+  (ring, izzocam, techflow… ) and Exploring Next, the daily AI-hosted podcast with its own API and
+  MCP server. **No musterd case study.** That is the gap that matters most.
+- **Ring** (`~/ring`): a PM-role alert agent, running under launchd, texting matches to the phone
+  from ~270 boards (Greenhouse, Ashby, Lever, SmartRecruiters, Workable, Workday, Microsoft, Amazon,
+  Google, Apple; 3-day window; Slack on). Broad net; nobody is reading it.
+- `~/lab/ai-training`: the AI training material nick has run for groups — a second proof of the
+  "explains agents to people" skill.
+
+**Targets, three tiers.** Tier 1 is where musterd's problem *is* the roadmap: Anthropic (Claude
+Code, Managed Agents), OpenAI (Codex as a platform), Cursor, GitHub (Copilot agents), Cognition,
+LangChain (Deep Agents), Replit, Sourcegraph, Factory, Warp, Nous Research — and the adjacent
+startups where the role is PM #1 or #2: Multica, Band, xpander. Tier 2 is agent products with PM
+roles broadly: Vercel, Supabase, PostHog, Linear, Notion, Perplexity, Modal, Together, Fireworks,
+Anyscale, Cohere, Mistral, Scale, Sierra, Decagon, Glean, Harvey, Writer, Zapier, Retool, Hugging
+Face. Tier 3 is Ring's net. Ring already watches every tier-2 name and most of tier 1; it does not
+watch GitHub, Factory, Multica, Band, xpander, or Nous.
+
+**In the window:**
+
+- *Weeks 1–2:* the musterd case study on sandrise.io (sloane writes it in the portfolio's register;
+  nick ships it); the one-paragraph story on LinkedIn and the resume; Ring gains the six missing
+  tier-1 boards and a "tier 1" Slack channel so those alerts are read, with the rest as a weekly
+  digest; a 15-minute Sunday triage, logged here.
+- *Weeks 3–6:* warm before cold. Every tier-1/2 conversation carries one extra sentence — *"and I'd
+  build this inside a team, if the team were right."* Cold applications only to open tier-1 roles,
+  at most five in the window, timed so first rounds land late October.
+- *Weeks 7–9:* interviews if they come; the launch numbers are the interview story.
+- *After Nov 20:* PM loops run 6–10 weeks and are mostly remote-friendly; January is the natural
+  cold-application month (budgets reset), offers by March, a start before income ends in May.
+  Check parental-leave eligibility on any offer — most employers gate it on tenure; California PFL
+  applies regardless.
+
+**Measures:** by Sep 30, the case study is live and Ring's tier-1 channel exists; by Oct 28, ≥3
+tier-1/2 teams know nick is open, in writing; by Nov 20, ≥1 active loop or a dated January list.
+
+**Ownership:** applications, interviews, and the Ring config are nick's (his repo — changes here
+are proposed, not made). The case study, the story paragraph, the resume lines, and a one-page
+"what I decided and why" reading list for interviewers are sloane's.
+
+## 17. Weekly log
 
 Appended each Sunday: events attended, demos given, installs (name/date/harness), active-a-week-later
 count, what broke, quotes added, conversations opened, measures hit or missed. Dated entries only.
 
 - **2026-09-16** — plan agreed and written. Lane `01M2PA5TY9` opened. Baseline: 0 stars, 7 uniques/14d,
   5 followers, run 4 unrun, whiteboard unpublished, launch post at v0.3.
-- **2026-09-16** (later) — plan merged (#1527, a61f1eac); child lanes open. Cohort survey added to §12:
+- **2026-09-16** (later) — plan merged (#1527, a61f1eac); child lanes open. §16 PM track added. Cohort survey added to §12:
   a16z speedrun's priority window (Oct 12 – Nov 1) is inside the window, beside YC. One-page visual
   of the plan published for nick as a claude.ai artifact.
