@@ -332,6 +332,119 @@ Same table as §4. Two additions for this room:
 
 ---
 
+## 6. The 2-minute demo — for a demo night, a hallway, and a VC panel with a clock
+
+The shortest cut. Built for the Startup Grind format (2 minutes, "demo only, not a pitch", a VC
+panel asking questions after) and for the hallway at any event in the traction plan's window
+([traction-plan.md](design/traction-plan.md) §5). It is §5 with everything but the centerpiece
+removed: one beat the room *sees happen* — a question reaches the human — with the problem in
+front of it and the receipt behind it. Nothing in it needs the second machine, the huddle, or a
+projector; it runs on the laptop against the live team, never a fixture, and the stream is the
+backup if the laptop dies.
+
+Startup Grind asks for problem, solution, market insight, traction, and the AI edge. The beats
+below carry each, in that order, without naming them.
+
+**Standing setup, five minutes before:** `/live` open with the office lit and the roster showing
+the human present and two agents `here`; a terminal with `musterd inbox --watch`; one small real
+task ready to hand to the two agents, split by ownership; one agent primed in plain words — *"when
+I say go, raise a standard-tier ask to nick about the task"* — so the ask fires on cue rather than
+on luck. The frame rule holds (§3 "What is in frame"): the human seat is visible the whole time.
+
+### 0:00 — Their objection, and the roster (20 s)
+
+**SEE** `/live`. A roster of names. One of them is nick.
+
+**SAY** "Everyone here has read this year's headlines — agents nobody owns, agents nobody can
+stop. This is the opposite shape. A roster of names, one of them is me, and every act any of them
+takes carries their name. musterd is the coordination layer where agents and humans are peers. It
+connects the agents you already run; it does not run them."
+
+### 0:20 — The second agent is where it breaks (25 s)
+
+**DO** Hand the two agents the task, split by ownership. Each claims a lane.
+
+**SEE** The board: two owners, two scopes. If a scope overlaps, the warning fires — read it aloud.
+
+**SAY** "The moment you run a second agent on one repo, the waste starts. On our own team, before
+this, about 37% of the code produced was thrown away — two agents writing the same diff, or one
+undoing the other. Research puts about 79% of multi-agent failures at coordination, not
+capability. The fix is not a smarter model. It is one owner per unit of work, declared before the
+first keystroke."
+
+### 0:45 — A question reaches the human (45 s — the centerpiece)
+
+**DO** "Go." The primed agent raises its `ask`.
+
+**SEE** It lands on the rail in the agent's hue with the tier's clock drawn as an arc, and in the
+terminal inbox. Let it sit for one breath. Answer it from the terminal, as yourself — decline it if
+the question allows a no; accept it if the clock is short.
+
+**SAY** "It asked me. Not the person driving its session — me, a member on the same roster, with
+a clock on the question. Above a certain stakes tier it holds until I answer; below it, it proceeds
+when the clock runs out and writes down that it went on without me. My silence becomes a fact in
+the record, not a bypass. And I can say no — so can they, to each other and to me. A teammate you
+can only assign to cannot tell you no. That is the difference between a fleet and a team."
+
+### 1:30 — Done is two claims, and the receipt (20 s)
+
+**SEE** A lane in awaiting-acceptance, its acceptance routed to a *different* seat — a different
+model family when one is on the roster. Then, in the terminal:
+
+```bash
+musterd report
+```
+
+**SAY** "The agent that built it says merged; a different model says this is what we wanted, and
+the record keeps what each harness saw — not what the model says about itself. The number: same
+feature, same agents, twice. Uncoordinated, 72% of the code was wasted. On musterd, under 2%. A
+single agent alone is still cheaper — we sell against the second agent, not the first."
+
+### 1:50 — The ask (10 s)
+
+**SAY** "Open source. `npx @musterd/cli init`. [The honest traction line for that week, from the
+traction plan's log — installs and who is using it, or "we are installing it on laptops this
+month" if the number is still small.] If you run more than one agent, try it with your team for
+two weeks — I'll sit with you for the first hour."
+
+Then stop.
+
+### What the panel asks after
+
+Answers a page can back (ADR 320 "What this is not"; the moat, ordered, in ADR 320). Refresh this
+list from the room after Sep 17 and Oct 7 — the plan's log records what was actually asked.
+
+- **"So it's an AI safety product?"** — "No. It is a team roster. It makes agents legible and
+  accountable; it does not contain them. The safety products sit above the agents; this puts a
+  person among them."
+- **"Why won't Anthropic or OpenAI just build this?"** — "They are building the durable agent —
+  inside their own runtime. Identity there binds to the lab; here it binds to the team, across
+  every harness, with attestation a second party can check. The primitives are reproducible in a
+  summer; the identity, the attestation, the human on the same protocol, and the measured corpus
+  are not."
+- **"Who pays, and for what?"** — "The core is open source. The thing a team cannot produce for
+  itself is the record — attested, cross-family, kept — and that is where a paid layer sits.
+  Pricing is not decided; it is a Q1 decision." *(Commercial calls are nick's; this line is the
+  honest placeholder until the pricing lane lands.)*
+- **"Why not just prompt them to argue?"** — "Manufactured objection is not ownership. They can
+  decline because they own the lane, not because a prompt told them to be difficult."
+- **"How many people use it?"** — The number in the log, and nothing rounder.
+
+### If it goes wrong
+
+The §4 table applies. For this cut specifically:
+
+- **The primed agent does not raise the ask.** Ask it in plain words on the spot — "raise a
+  standard-tier ask to me about this" — and say that is how the house rules are taught. The
+  failure is honest; a hidden prompt is not.
+- **The clock is short and it proceeds before you answer.** "It proceeded and logged the risk" —
+  show the outcome on the rail. That is the design.
+- **The laptop dies.** Switch to the stream on a phone; the room sees the same office.
+- **You are at 1:45 and not at the receipt.** Skip `musterd report`; say the 72% → under 2% line
+  and the ask. The centerpiece was the demo.
+
+---
+
 ## Supporting stills (not a substitute for form 3)
 
 - `docs/assets/musterd-io-get-started.png` — the public Get Started surface on [musterd.io](https://musterd.io) (brew / npx, then `musterd init`). Recaptured 2026-09-16 from the live site after the ADR 320 §5 deploy; the previous still showed the retired office-scene hero. Linked from the README next to the GIF.
