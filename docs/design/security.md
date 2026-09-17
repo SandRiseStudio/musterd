@@ -74,6 +74,7 @@ Credentials decide _who_; capabilities decide _what_ and _what's visible_. Both 
 | ------------------- | ---------------------------------------- | ------------------------------------------------ |
 | Claim authorization | **live admin approval** per claim        | team policy `allow_pre_issued_grants` (admin)    |
 | Session activation  | **dormant** (tools available, no occupy) | `MUSTERD_AUTOCLAIM` per harness                  |
+| Governed model access | **off** (no required enforcement) | human-issued, one-shot launch handoff + server policy |
 | Observers           | **off** unless role permits              | admin grants observer-permitting role to a human |
 | Grant lifetime      | short, expiring                          | admin sets longer TTL for a stable harness       |
 
@@ -87,9 +88,7 @@ Aperture is optional model governance for supported musterd-launched Surfaces. T
 [ADR 385](../decisions/385-optional-tailscale-aperture-doctor.md) can verify the reference configuration,
 including the ADR 394 requirement that every ready workload grant name one exact lowercase opaque
 Member tag and carry only Aperture's standard `user` role. Readiness does not manage devices, sandbox
-Members, cover unrelated harnesses, or activate enforcement. The
-[paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md) defines the
-later governed-launch boundary.
+Members, cover unrelated harnesses, or activate enforcement.
 
 [ADR 400](../decisions/400-aperture-policy-generator.md) adds a local, deterministic generator for the
 musterd-managed policy fragment. Its committed input is secret-free, exact provider/model policy and
@@ -100,8 +99,14 @@ Generation or a matching doctor result remains configuration evidence, not enfor
 generator. It derives only explicit workload-tag owners, exact workload-to-Aperture HTTPS ACLs, and
 opaque Member-to-transport-node-key mappings from committed policy. The generated files contain no
 credentials, node IDs, machine paths, or runtime configuration; they neither call Tailscale nor prove
-that a declared node key identifies a live machine. A later authorization protocol must establish that
-runtime binding before governed launch can rely on it.
+that a declared node key identifies a live machine. [ADR 410](../decisions/410-governed-model-authorization-substrate.md)
+adds that runtime binding: a server-owned, secret-free policy; a human-issued, one-shot `msla_` launch
+handoff; and an Aperture decision that checks the enrolled node, target agent Member, consumed launch,
+live Presence, bounded Lane/Act/orientation context, and exact model policy. The mode remains `off` by
+default, so the substrate is available for explicit governed launches without claiming to enforce every
+request. The handoff credential is shown once and stored only as a hash; audit and request logs contain
+metadata and model identifiers, never credentials or prompt/response bodies. Launcher adapters, live
+Tailscale/Aperture changes, and a future `required` cutover remain separate work.
 
 ## Out of scope (roadmap, named so we don't design into a corner)
 

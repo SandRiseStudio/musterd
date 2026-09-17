@@ -143,7 +143,15 @@ describe('IntegrationDoctorReportSchema', () => {
   it('round-trips a report containing no credential-like or body fields', () => {
     const parsed = IntegrationDoctorReportSchema.parse(report);
     const json = JSON.stringify(parsed);
-    for (const forbidden of ['api_key', 'authorization', 'prompt', 'response', 'mskey_', 'msgr_']) {
+    for (const forbidden of [
+      'api_key',
+      'authorization',
+      'prompt',
+      'response',
+      'mskey_',
+      'msgr_',
+      'msla_',
+    ]) {
       expect(json).not.toContain(forbidden);
     }
     expect(parsed).toEqual(report);
@@ -168,6 +176,15 @@ describe('GovernedModelsManifestSchema (ADR 400)', () => {
 
   it('accepts exact provider/model intent and a strictly narrowing quota ladder', () => {
     expect(GovernedModelsManifestSchema.parse(manifest)).toMatchObject(manifest);
+  });
+
+  it('rejects launch credentials in model manifests', () => {
+    expect(
+      GovernedModelsManifestSchema.safeParse({
+        ...manifest,
+        roles: { msla_bad: {} },
+      }).success,
+    ).toBe(false);
   });
 
   it.each([

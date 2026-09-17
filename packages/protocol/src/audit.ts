@@ -60,5 +60,12 @@ export const P3_AUDIT_ACTIONS = [
   'agent_session_lease.minted',
   'agent_session_lease.renewed',
   'agent_session_lease.revoked',
+  'governed.policy.change',
+  'governed.launch.issue',
+  'governed.launch.consume',
+  'governed.launch.refused',
+  'governed.launch.revoke',
+  'governed.request.allow',
+  'governed.request.deny',
 ] as const;
 export type P3AuditAction = (typeof P3_AUDIT_ACTIONS)[number];

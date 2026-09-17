@@ -1589,6 +1589,42 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 410: governed model authorization is separate from seat-claim grants. The policy is the
+    // server-owned, secret-free effective ceiling; launch credentials are one-shot handoffs whose
+    // hashes are durable so replay/expiry/revocation remain race-safe across daemon restarts.
+    version: 67,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS governed_policies (
+          team_id    TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          policy     TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS governed_launch_authorizations (
+          id                  TEXT PRIMARY KEY,
+          team_id             TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id           TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          node_id             TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+          token_hash          TEXT NOT NULL,
+          correlation          TEXT NOT NULL,
+          work_context         TEXT NOT NULL,
+          issued_by_member_id TEXT REFERENCES members(id),
+          created_at           INTEGER NOT NULL,
+          expires_at           INTEGER NOT NULL,
+          consumed_at         INTEGER,
+          revoked_at          INTEGER,
+          presence_id         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_governed_launch_token
+          ON governed_launch_authorizations(team_id, token_hash);
+        CREATE INDEX IF NOT EXISTS idx_governed_launch_member
+          ON governed_launch_authorizations(team_id, member_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_governed_launch_correlation
+          ON governed_launch_authorizations(team_id, correlation);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

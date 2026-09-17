@@ -46,3 +46,4 @@ export * from './autoTarget.js';
 export * from './tool-telemetry.js';
 export * from './memory.js';
 export * from './integrations.js';
+export * from './governed.js';

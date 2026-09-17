@@ -2,13 +2,14 @@
 
 > **Where we are now**, kept short and mostly derived. The decision record is `docs/decisions/` (the ADRs — the *why* and the per-change detail); what's next is `ROADMAP.md`; the protocol contract is `SPEC.md`. See AGENTS.md → “Where each doc lives” for how the docs fit together. Update this file only when the **milestone state** changes — not per PR (git + the ADRs are the per-change record).
 
-## Status — 2026-06-23
+## Status — 2026-09-16
 
-- **Product:** v0.2 scope **complete** — the minimal trust model (explicit activation; single-active *newest-wins* + 45s reclaim grace; self-reported `working` status), plus observability **Layer 1** and a long dogfood-driven onboarding/diagnostics hardening pass.
-- **Protocol:** `SPEC.md` is **`musterd/0.3`** — the terminal **`resolve` act** (thread-close → the open-vs-done axis) shipped over v0.2 (ADR 025). The full **shared-teams governance** set (seats/roles, agent key + grants, approval lane, capabilities, audit, notification tiers, observers) is **designed but not specified** (`SPEC.md` Appendix A; rationale in `docs/design/membership-model.md`) and **not built** — trigger: the daemon stops being localhost-only.
+- **Product:** v0.2 behavior remains stable; Increment 3 now adds the governed model authorization substrate without changing unmanaged Team or Presence behavior.
+- **Protocol:** `SPEC.md` remains **`musterd/0.3`**; feature epoch 21 and Appendix A.12 define the strict governed policy, one-shot launch handoff, work contexts, and structured decisions from ADR 410.
+- **Server:** schema migration 67 stores the server-owned governed policy and hash-only launch authorizations. Policy sync, human issuance, node consumption, revocation, and Aperture authorization are implemented and tested; `enforcement: off` remains the default.
 - **Published:** `@musterd/*@0.2.0` on npm (git tag `v0.2.0`).
-- **Quality:** `pnpm -r build && pnpm test` green; coverage gates wired (ADR 013), all packages at their documented targets — cli/mcp reached the **75%** line target (onboarding-wizard + MCP tool-handler tests) and the floors were ratcheted up to match.
-- **Open:** post the launch (a human action); the optional **real 3-pane demo** recording (unblocked — ADRs 012 + 021).
+- **Quality:** Focused protocol and server tests pass; the full protocol/server milestone suites plus repository gates are the completion checks for this increment.
+- **Open:** launcher adapters, live Tailscale/Aperture configuration, and a future `required` cutover remain separate work; the optional **real 3-pane demo** recording remains unblocked.
 
 ## The original plan (recap)
 

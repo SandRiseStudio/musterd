@@ -87,6 +87,12 @@ import {
   SyncPushRequestSchema,
   SyncPushResponseSchema,
   wakeabilityFromFacts,
+  GovernedAuthorizationRequestSchema,
+  GovernedDecisionSchema,
+  GovernedLaunchAuthorizationConsumeSchema,
+  GovernedLaunchAuthorizationIssueSchema,
+  GovernedPolicySchema,
+  GovernedPolicyReadResponseSchema,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -119,6 +125,15 @@ import { deferralFold } from '../store/deferralFold.js';
 import { actDelivery, crossedBySeen, handoffNamedLaneOutOfPlay } from '../store/delivery.js';
 import { latestFootprint } from '../store/footprint.js';
 import { listGoals } from '../store/goals.js';
+import {
+  authorizeGovernedRequest,
+  authenticateGovernedNode,
+  consumeGovernedLaunch,
+  issueGovernedLaunch,
+  getGovernedPolicy,
+  revokeGovernedLaunch,
+  setGovernedPolicy,
+} from '../store/governed.js';
 import {
   consumeGrant,
   issueGrant,
@@ -2754,6 +2769,176 @@ export async function handleHttp(
           policy: getPolicy(ctx.db, team.id),
           stored: getStoredPolicy(ctx.db, team.id),
         });
+      }
+
+      // Governed model authorization (ADR 410). This substrate is deliberately separate from the
+      // seat-claim policy above: a human starts one bounded agent launch, and the node later redeems
+      // it without ever receiving a human credential. Nothing here activates required enforcement.
+      if (method === 'POST' && rest === '/governed/policy') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const policy = parseOrBadRequest(GovernedPolicySchema, await readJson(req));
+        const applied = setGovernedPolicy(ctx.db, team.id, policy);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'governed.policy.change',
+          target: null,
+          result: 'allow',
+          detail: {
+            version: policy.version,
+            enforcement: policy.enforcement,
+            updated_at: applied.updated_at,
+          },
+        });
+        return sendJson(res, 200, applied);
+      }
+
+      if (method === 'GET' && rest === '/governed/policy') {
+        const { team } = authAdmin(ctx, slug, req);
+        const stored = getGovernedPolicy(ctx.db, team.id);
+        return sendJson(
+          res,
+          200,
+          GovernedPolicyReadResponseSchema.parse(stored ?? { policy: null, updated_at: null }),
+        );
+      }
+
+      if (method === 'POST' && rest === '/governed/launches') {
+        const { team, member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
+        const input = parseOrBadRequest(
+          GovernedLaunchAuthorizationIssueSchema,
+          await readJson(req),
+        );
+        const mint = issueGovernedLaunch(ctx.db, team.id, member, input);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'governed.launch.issue',
+          target: mint.authorization.member,
+          result: 'allow',
+          detail: {
+            launch_id: mint.authorization.id,
+            node_id: mint.authorization.node_id,
+            correlation: mint.authorization.correlation,
+            context: mint.authorization.context.kind,
+            expires_at: mint.authorization.expires_at,
+          },
+        });
+        return sendJson(res, 201, mint);
+      }
+
+      if (method === 'POST' && rest === '/governed/launches/consume') {
+        const input = parseOrBadRequest(
+          GovernedLaunchAuthorizationConsumeSchema,
+          await readJson(req),
+        );
+        const node = authenticateGovernedNode(ctx.db, requireTeam(ctx.db, slug).id, bearer(req));
+        const decision = !node
+          ? GovernedDecisionSchema.parse({
+              decision: 'deny',
+              reason: 'denied_node_unknown',
+              launch_id: input.launch_id,
+              correlation: input.correlation,
+            })
+          : node.revoked
+            ? GovernedDecisionSchema.parse({
+                decision: 'deny',
+                reason: 'denied_node_revoked',
+                launch_id: input.launch_id,
+                correlation: input.correlation,
+                node_id: input.node_id,
+                member: input.member,
+              })
+            : node.id !== input.node_id
+              ? GovernedDecisionSchema.parse({
+                  decision: 'deny',
+                  reason: 'denied_node_binding',
+                  launch_id: input.launch_id,
+                  correlation: input.correlation,
+                  node_id: input.node_id,
+                  member: input.member,
+                })
+              : (() => {
+                  const team = requireTeam(ctx.db, slug);
+                  const consumed = consumeGovernedLaunch(ctx.db, team.id, input);
+                  return consumed.ok
+                    ? GovernedDecisionSchema.parse({
+                        decision: 'allow',
+                        reason: 'allowed',
+                        launch_id: input.launch_id,
+                        correlation: input.correlation,
+                        member: input.member,
+                        node_id: input.node_id,
+                      })
+                    : GovernedDecisionSchema.parse({
+                        decision: 'deny',
+                        reason: consumed.reason,
+                        launch_id: input.launch_id,
+                        correlation: input.correlation,
+                        member: input.member,
+                        node_id: input.node_id,
+                      });
+                })();
+        const team = requireTeam(ctx.db, slug);
+        appendAudit(ctx.db, team.id, {
+          actor: null,
+          action:
+            decision.decision === 'allow' ? 'governed.launch.consume' : 'governed.launch.refused',
+          target: input.member,
+          result: decision.decision,
+          detail: {
+            launch_id: input.launch_id,
+            node_id: input.node_id,
+            correlation: input.correlation,
+            reason: decision.reason,
+          },
+        });
+        return sendJson(res, decision.decision === 'allow' ? 200 : 403, decision);
+      }
+
+      if (method === 'DELETE' && rest.match(/^\/governed\/launches\/[^/]+$/)) {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const launchId = decodeURIComponent(rest.slice('/governed/launches/'.length));
+        if (!revokeGovernedLaunch(ctx.db, team.id, launchId))
+          throw new MusterdError('not_found', `no active governed launch "${launchId}"`);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'governed.launch.revoke',
+          target: launchId,
+          result: 'allow',
+          detail: { launch_id: launchId },
+        });
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (method === 'POST' && rest === '/governed/authorize') {
+        const team = requireTeam(ctx.db, slug);
+        const input = parseOrBadRequest(GovernedAuthorizationRequestSchema, await readJson(req));
+        const decision = authorizeGovernedRequest(ctx.db, team.id, bearer(req), input, {
+          livePresenceMs: ctx.config.presenceTimeoutMs,
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: null,
+          action:
+            decision.decision === 'allow' ? 'governed.request.allow' : 'governed.request.deny',
+          target: input.member,
+          result: decision.decision,
+          detail: {
+            launch_id: input.launch_id,
+            presence_id: input.presence_id,
+            node_id: input.node_id,
+            correlation: input.correlation,
+            provider: input.provider,
+            model: input.model,
+            policy_version: getGovernedPolicy(ctx.db, team.id)?.policy.version ?? null,
+            reason: decision.reason,
+          },
+        });
+        return sendJson(res, 200, decision);
       }
 
       // ── PreToolUse enforcement gates (ADR 150 — structural inducement) ──────────────────────────

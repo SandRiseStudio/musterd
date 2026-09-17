@@ -428,3 +428,43 @@ or finalizes; posting a question is the only transition into `needs_clarificatio
 Member answers. Promotion atomically creates one ordinary, unowned
 Lane and links it to the Seed; retries return the existing linked Lane. No raw body, Slack user id, or
 thread body appears in logs, telemetry, or audit details.
+
+## A.12 Governed model authorization substrate (Increment 3 — ADR 410)
+
+This additive server/protocol slice establishes the runtime boundary for the optional Aperture paved
+road. It does not add a new Act, alter the `musterd/0.3` Envelope, launch a harness, configure
+Tailscale/Aperture, or activate Team-wide enforcement. Its schemas are strict and versioned in
+`@musterd/protocol`; its server implementation is migration 67 in `@musterd/server`.
+
+The server-owned policy is:
+
+```jsonc
+{
+  "version": 1,
+  "enforcement": "off", // or "required"; omitted means "off"
+  "team": { "models": ["provider/exact-model"], "quota": { "capacity": "$10", "rate": "$1/hour" }? },
+  "members": { "Ada": { "models": ["provider/exact-model"], "quota": { "capacity": "$5", "rate": "$1/hour" }? } }
+}
+```
+
+Model identifiers are exact lowercase `provider/model` values; floating names such as `latest` and
+`default`, duplicate Team models, credential-like values, and Member model widening are rejected.
+`enforcement` defaults to `off`, which leaves unmanaged Member and Presence behavior unchanged. The
+`required` value is reserved for a later activation slice.
+
+An active human Member may issue an authorization for an active agent Member only when that Member has
+exactly one enrolled machine-node residence in `seat_nodes`. Issuance binds the Team, target Member,
+node, launch correlation, expiry, and one of these contexts: an active owned Lane, an unresolved
+directed Act, or a short-lived human-created orientation allowance. The server returns one opaque
+`msla_` credential, stores only its SHA-256 hash, and records no credential in the public projection,
+audit log, or request log. The matching agent Presence consumes the handoff exactly once; expiry,
+revocation, replay, mismatch, and missing or held Presence are refusals.
+
+The HTTP surfaces are admin-only policy replacement/read, human-authenticated launch issuance,
+node-authenticated one-shot consumption, admin revocation, and node-authenticated
+`/governed/authorize`. The final decision checks enrolled active node identity, the consumed launch and
+live Presence, the durable Member↔node binding, the bounded work context, and the server-owned model
+ceiling. It returns `decision: "allow"` or `decision: "deny"` with stable refusal codes such as
+`denied_node_binding`, `denied_launch_expired`, `denied_presence_stale`, `denied_context_lane`, and
+`denied_model`. Refusal status is structured and metadata-only; prompts, responses, provider payloads,
+and machine-local secrets never cross this boundary.

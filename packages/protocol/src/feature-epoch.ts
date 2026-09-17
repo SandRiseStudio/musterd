@@ -97,5 +97,7 @@
 // Epoch 20 — ADR 397: Codex's marker-owned project hooks now deliver a raised interrupt line at
 // the supported PostToolUse model boundary. The epoch keeps an older checkout from rewriting the
 // exact command set and dropping that delivery seam during hook refresh.
-export const FEATURE_EPOCH = 20 as const;
+// Epoch 21 — ADR 410: governed model authorization protocol and server substrate. Older clients keep
+// the unmanaged/off behavior; they cannot issue or redeem governed launch handoffs.
+export const FEATURE_EPOCH = 21 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;
