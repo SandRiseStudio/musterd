@@ -82,6 +82,15 @@ Measured on the cloud seat `/data/musterd-delta`, 2026-09-06. But the mitigation
 gated behind `isPackagedCliInstall`, and every seat on this laptop is a source checkout, so none of
 them receive it.
 
+### Why this stayed invisible
+
+`composeLine` has a `behind` state — "a hook here was written by a NEWER musterd — this checkout is
+behind" — which would have caught a stale repair. It cannot fire here. On this laptop every seat is
+repaired by the same linked global dist, so when that dist is stale **all seats are stale together
+and consistently**, and `checkoutBehindHooks` compares each seat against the very build that made it
+stale. A guard that detects disagreement is blind to uniform error. That near-miss is the reason the
+defect survived ADR 408 review, and it belongs in the ADR's Context.
+
 ### The answer exists and is computed where nobody is looking
 
 `buildSkewNotes` (`doctor.ts:1170`) already performs both comparisons — this CLI's dist stamp vs the
@@ -100,9 +109,34 @@ acts get decided.**
 
 ### The precedent that makes it urgent
 
-Auto-refresh was silently latched off for six days — 86 refusals — because an untracked backup file
-sat in `/Users/nick/agents` and `service refresh` correctly refuses to discard work (ghost's lane
-`01M2REEQC36M0KWPMTMGNZR6N0`). Throughout, every seat's self-heal would have reported `repaired`.
+Auto-refresh refuses to advance when the daemon checkout is dirty, and it says so only in its log
+(ghost's lane `01M2REEQC36M0KWPMTMGNZR6N0`). Throughout such a refusal, every seat's self-heal
+reports `repaired`.
+
+**Corrected count, and the correction matters more than the number.** This spec first cited "86
+refusals across six days", inherited from that lane. Both figures are wrong, and stanley found the
+cause (insight `01M2RRRVDVFZ`): `grep -c "uncommitted changes"` counts 86, but 34 of those lines are
+the *notification* lines, which quote the refusal text back into the log. Re-derived here
+independently: **52 real refusals**, of which 41 carry a resolvable timestamp — the log's first
+~10,300 lines predate timestamping. Those 41 span **2026-08-05 to 2026-09-17 (42 days)**, in
+episodes grouped by a >1h gap:
+
+| episode | refusals | duration |
+| --- | --- | --- |
+| 2026-08-19 15:31 | 16 | 3h11m (longest) |
+| 2026-08-27 12:18 | 5 | 1h28m |
+| 2026-09-17 11:46 | 2 | 49m |
+| 2026-08-05 17:54 | 7 | 27m |
+| 2026-09-01 14:09 | 2 | 20m |
+| 5 further | 1 each | instantaneous |
+
+**No daemon was ever pinned for six days by a dirty checkout.** The longest outage was ~3 hours and
+every episode resolved the same day. (stanley grouped into 5 episodes rather than 10 and reports a
+2h45m and a 7h06m that my >1h grouping does not produce; the boundary rule differs. The agreed facts
+are the ones that matter here: not 86, not 6 days, longest episode ~3h.)
+
+This *weakens* the urgency argument and is recorded rather than quietly dropped. The design still
+stands on the mechanism, not on the size of any past outage.
 
 **Honest negative, recorded so nobody over-claims this design:** that outage did not in fact strand a
 guidance change. `guidance.ts` changed twice in ten days — `8626ed88` (2026-09-14 13:30) and
@@ -126,6 +160,12 @@ particular outage did not fire it.
   trusting a writer that silently died. That is `docs/wiki/the-instrument-discharges-the-act.md`
   applied one layer up.
 
+**And it asks a better question than `buildSkewNotes` does.** That compares the CLI build to
+`origin/main` in *commits behind*, which is a proxy that fails in both directions: a build 50 commits
+behind may contain every guidance change, and a build 1 commit behind may be missing the only one
+that matters. `main_guidance_epoch` is the question the reader actually has. This is the strongest
+argument for approach C and it is not an implementation detail.
+
 ### Relationship to the self-heal spec's deferred approach C
 
 `2026-09-16-workspace-self-heal-design.md` considered "seats attest a provisioning generation on
@@ -144,7 +184,7 @@ Written by the auto-refresh tick on **every** tick — success *and* refusal. Tw
 
 | half | fields | meaning |
 | --- | --- | --- |
-| **observed** | `fetched_at`, `main_sha`, `main_guidance_epoch`, `main_guidance_subject` | what `origin/main` says |
+| **observed** | `fetched_at`, `main_sha`, `main_guidance_epoch`, `main_guidance_summary` | what `origin/main` says |
 | **applied** | `build_sha`, `build_guidance_epoch`, `blocked_reason` (when they differ) | what this machine runs |
 
 Writing on refusal is the point. A receipt that appeared only on success would go quiet exactly when
@@ -152,25 +192,75 @@ things break, and silence is the failure being fixed. Writing on refusal lets th
 at epoch 24, this machine is at 23, and I could not advance it because the checkout has untracked
 work"* — ghost's outage, stated at the moment it starts, by the thing that noticed.
 
-`main_guidance_subject` is the subject line of the newest commit touching `guidance.ts`, read by the
-tick from the fresh checkout, capped at 80 characters. It exists because a stale seat cannot render
-the text it is missing — its build is what is stale. It is the author's own prose and therefore a
-pointer, not a guarantee, and the reader's line must not present it as more than that.
+`main_guidance_summary` is **an author-written line living beside `GUIDANCE_CONTENT_VERSION` in
+`guidance.ts`**, not a commit subject. It exists because a stale seat cannot render the text it is
+missing — its build is what is stale.
 
-### Freshness cannot be inferred from presence
+The first draft used the newest commit subject touching `guidance.ts`, capped at 80 chars. ryder
+measured the last 15 such commits and killed it: **9 of 15 subjects exceed 80 characters** (max 172),
+several truncating mid-clause — `8626ed88` lands on "…orient stops prescribing i" — and several of
+those commits touched `guidance.ts` *incidentally*, so the subject names an unrelated refactor rather
+than the rule a stale seat is missing (`ef3e9b05`: "remove the deprecated aliases…"). A carrier that
+is truncated 60% of the time and sometimes describes the wrong change is not a carrier.
 
-The receipt carries `fetched_at` from the writer; the reader judges age itself. Threshold **15
-minutes** — roughly seven missed ticks at the live `StartInterval` of 120s on
-`studio.sandrise.musterd-autorefresh.plist`. A receipt that is unparseable, or whose `fetched_at` is
-in the future, is treated as **absent, not as fresh**: ADR 135's doctrine that every consumer
-degrades to silence rather than a guessed ref.
+The authored line is versioned with the rule, written for this reader, never truncated, and never
+about an unrelated refactor. A snapshot test already fails when the guidance body changes without the
+constant moving; the same mechanism requires the summary line to move with it. The "pointer, not a
+guarantee" hedge is then unnecessary and is dropped.
+
+### Freshness cannot be inferred from presence — and age is not the measure
+
+The receipt carries `fetched_at` from the writer; the reader judges staleness itself. A receipt that
+is unparseable, or whose `fetched_at` is in the future, is treated as **absent, not as fresh**: ADR
+135's doctrine that every consumer degrades to silence rather than a guessed ref.
+
+**A wall-clock age threshold is the wrong measure, and the data on this machine says so.** The first
+draft used 15 minutes (~7 missed ticks at the live `StartInterval` of 120s). Measured over
+`~/.musterd/autorefresh/refresh.log` — 20,884 timestamped ticks across 44.1 days:
+
+| | |
+| --- | --- |
+| gap between ticks | p50 121s, p90 122s, p95 126s, p99 406s, **max 83.9h** |
+| share of WALL-CLOCK time inside a gap > 15 min | **35.75%** |
+| same, > 60 min | 32.79% |
+
+The tick is extremely regular, so the threshold is insensitive to its exact value — but roughly **a
+third of all wall-clock time** sits inside a gap long enough for a naive reader to call the refresher
+dead. The longest gaps name the cause: `2026-09-10 Thu 21:04 → 09-14 Mon 08:59` (83.9h, a weekend),
+`09-01 Tue 22:42 → 09-02 Wed 09:16`, `08-10 Mon 22:48 → 08-11 Tue 06:47`. **The laptop was asleep.**
+
+So state 3 would fire on about a third of session starts, disproportionately at the first session of
+the morning — precisely when a human sits down to read it. That is the permanent-noise failure this
+design claims to avoid, and it would train readers to skip the line, which is the sloane precedent
+this spec cites as the reason increment 1 is weak. The measure would have manufactured the very
+failure it exists to prevent.
+
+**Root cause is one conflation:** `fetched_at` age answers *"how long since a tick"* when the question
+is *"how many ticks were missed while the machine was awake"*. A sleeping laptop is not a stopped
+refresher.
+
+**The repair reuses a musterd invariant rather than inventing one.** The presence reaper already
+separates "was the host there?" from "did the thing run?": `HOST_SUSPEND_GAP_MS`
+(`server/src/store/residency.ts:72`) and the `residency.host_suspended` audit row (ADR 236,
+`presence/reaper.ts:45`). The reader takes the same discipline — **a receipt gap that spans a suspend
+is unattributable, not evidence.** Cheapest sufficient form: suppress state 3 when the host woke more
+recently than the threshold. `docs/wiki/cannot-separate-two-causes.md` is the same shape one layer
+down (ten degrade ticks, three attributable, seven permanently not), and the plan should reuse its
+vocabulary.
 
 ### Machines with no refresher
 
-A receipt that never exists must not become permanent noise on cloud seats and baked images. The
-reader checks whether a refresher is installed at all; if it is not, it stays silent. That population
-is already served by the packaged-install ceiling note (`runtime.ts:83`). The "refresher has stopped"
-state fires only where a refresher is expected.
+A receipt that never exists must not become permanent noise on cloud seats and baked images.
+
+**Do not add a second predicate.** The first draft proposed a fresh "is a refresher installed?"
+check. `isPackagedCliInstall` already partitions exactly this population and is already load-bearing
+for the ceiling note, so a second check would drift against it and nobody would know which is
+authoritative when they disagree. "A refresher is expected here" is defined as
+`!isPackagedCliInstall(...)`, and the ADR states that `isPackagedCliInstall` wins.
+
+Silence for that population is not a gap — it is the correct division of labour, because they already
+receive `packagedInstallNotes` (`runtime.ts:83`). The ADR should say so, so the next reader does not
+re-open it.
 
 ## 2 — The reader
 
@@ -189,8 +279,16 @@ currency by saying `repaired`. After this, `repaired` never appears unqualified 
 | 3 | absent or old (refresher installed) | `musterd: repaired 1 guidance file, but this machine last checked main 6 days ago — the auto-refresher has stopped.` |
 
 Quiet in state 1 is correct, because there it is true. The existing discipline holds: one line,
-bounded by construction, counts not file lists. The single named thing is the rule subject, capped —
+bounded by construction, counts not file lists. The single named thing is the authored rule summary —
 and that is the point, since the lane measured an unnamed rule as unactionable.
+
+**State ordering must be decided, not discovered.** `composeLine` already returns EARLY on its
+`declined` and `behind` branches, before the repaired/head branch. So as written, state 2 can never
+print for a seat that is also hook-behind. The ADR states the precedence explicitly: `declined` >
+`behind` > currency states 2/3 > state 1. The rationale is that `behind` and `declined` both mean
+*this build is not the authority here*, which makes a currency claim about that build meaningless —
+so they must win, and the reader must be told they suppress the currency line rather than discovering
+it from a silent seat.
 
 **The honest limit.** This is still a warning. The lane records sloane's own SessionStart hook
 printing a correct ADR 171 drift line, which sloane then proceeded past — the instrument worked and
@@ -210,9 +308,17 @@ capability rather than a fact.
 That single field makes the lane's acceptance a query. Main's epoch at any past timestamp is
 recoverable from git history, so the seat never needs to carry it.
 
-**Deliberately omitted:** a second field for whether the seat *knew* it was behind (the receipt's
-verdict). A gate would need it — "you were told and proceeded" is a different act from "nobody told
-you" — but nothing consumes it today. It arrives with increment 3 or not at all.
+**Deliberately omitted, and the cost is accepted knowingly:** a second field for whether the seat
+*knew* it was behind (the receipt's verdict). A gate would need it — "you were told and proceeded" is
+a different act from "nobody told you" — so omitting it guarantees a SECOND wire change when the gate
+is built. ryder raised this as a tradeoff to decide here rather than leave to the increment-3 author.
+
+**Decision: omit it, and accept the second wire change.** Not on the usual "don't ship unconsumed
+fields" ground, which would be the weaker argument, but because the field's *meaning* depends on the
+receipt's verdict being trustworthy — and the threshold finding above proved it is not yet. Shipping
+`seat_knew_it_was_behind` today would mean shipping a field whose semantics we would have to redefine
+once the suspend-aware reader lands. A second protocol change is a real cost; a field that attests
+something we cannot yet define correctly is a worse one.
 
 **The limit, stated plainly:** this is self-reported. A seat says what epoch it ran and nothing proves
 it — the same limitation `model_source: 'observed'` already carries. It is honest bookkeeping, not an
@@ -261,11 +367,16 @@ tests: current / stuck / dead / unparseable / `fetched_at` in the future / no re
 writer follows the existing tick pattern — injected runner, temp dir, no real `launchctl`. Guards are
 mutation-tested. TDD throughout.
 
-**The end-to-end falsifier is the part that matters.** Induce the outage on this machine — leave
-untracked work in the daemon checkout, exactly as happened on 2026-09-17 — and confirm a seat's next
-session start prints the state-2 line naming the reason. Then stop the refresher and confirm state 3.
-That is the infra seat's charter, and it is the difference between testing the code and testing the
-claim.
+**The end-to-end falsifier is the part that matters, and it has to distinguish sleep from death.**
+Induce the outage on this machine — leave untracked work in the daemon checkout, exactly as happened
+on 2026-09-17 — and confirm a seat's next session start prints the state-2 line naming the reason.
+Then stop the refresher and confirm state 3.
+
+That second half is not sufficient on its own: **an induced outage and a closed laptop lid are the
+same observation to a naive reader**, so a falsifier that only stops the refresher passes for the
+wrong reason. The suppression case is therefore a required third arm — suspend the host across the
+threshold, confirm state 3 does NOT fire, then stop the refresher with the host continuously awake and
+confirm it does. Only the pair proves the reader distinguishes them.
 
 Two known traps, from prior sessions: rebuild `packages/protocol` before trusting any `packages/cli`
 typecheck (local dist goes stale the moment another lane merges a protocol change), and commit before
@@ -273,14 +384,22 @@ typecheck (local dist goes stale the moment another lane merges a protocol chang
 
 ## Increments
 
-Sections above are numbered by component; increments bundle them. The mapping is explicit so the two
-numberings are never confused:
+Sections above are numbered by component; increments bundle them. **The order is deliberately not
+the section order** — ryder's review reversed it, and the reason is the threshold finding.
 
-1. **Sections 1 + 2** — receipt writer, reader, and the line. CLI-local, with its ADR. Ships value alone.
-2. **Section 3** — `guidance_epoch` through the handshake and heartbeat onto the member; the census
-   becomes a query. Own ADR (protocol change).
-3. **Section 4** — *deferred, unscheduled* — the gate, only once increment 2 has produced
+1. **Section 3 — the attestation.** `guidance_epoch` through the handshake and heartbeat onto the
+   member; the census becomes a query. Own ADR (protocol change).
+2. **Sections 1 + 2 — the receipt, reader, and line.** CLI-local, with its ADR.
+3. **Section 4** — *deferred, unscheduled* — the gate, only once the attestation has produced
    false-positive data.
+
+**Why the attestation goes first.** It carries no threshold, no false-positive surface, and no
+dependency on the receipt — and it is the increment that actually delivers the amended acceptance
+(the census as a query). The receipt's line is the part carrying the noise risk that finding 1
+exposed, and the part whose own precedent (sloane reading a correct line and proceeding) says it may
+not change behaviour at all. Shipping a noisy line first would burn the reader's attention before the
+measurement that would justify a gate even exists. At minimum the attestation must not be gated on
+the receipt.
 
 ## Contention
 
