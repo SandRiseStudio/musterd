@@ -68,7 +68,7 @@ With one correction this session supplies: **a reconnect can revoke callability 
 | --- | --- | --- |
 | claude-code | **defers, re-defers, and can mute outright** | tools arrive deferred (`ToolSearch` per schema); a mid-session MCP drop reports every tool "no longer available … ToolSearch will return no match" and `/mcp` fails with `CONNECT_TIMEOUT` — no in-conversation recovery, 65 min observed. Grant, credentials, presence and daemon all healthy throughout; the CLI channel answered the whole time (dolly, session `8a006b8a`, 2026-09-14) |
 
-Not applied here: the contract doc and the wake brief belong to stanley's lane `01M2GP25R3` (the fix). This page is the evidence that lane needs.
+**Applied** to the contract 2026-09-14 (lane `01M2H1FTB6`), once stanley's fix lane `01M2GP25R3` had landed (#1418) and released the surface. The row there carries both modes — ryder's recoverable re-deferral and the permanent mute measured here — because the difference between them is a tax versus an outage, and what decides which one a session gets is still unmeasured.
 
 ## Related
 
