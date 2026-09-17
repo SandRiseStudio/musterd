@@ -26,6 +26,7 @@ import {
   DEFAULT_APP,
   digestPath,
   findRepoRoot,
+  readDigestRecord,
   parsePushedDigest,
   readDigest,
   REGION,
@@ -650,11 +651,15 @@ async function ensureVerb(
   // machine read as absent is the 2026-09-03 duplicate-launch, where the supervisor put a second
   // performance-4x beside a healthy start and Twitch killed one of them.
   const liveCount = occupiedMachines(machineListJson(a.exec, a.app)).length;
+  // Both halves of the same question: WHAT the checkout holds, and WHEN it was written. The second
+  // is what keeps another checkout's older file from reading as this run's rebuild.
+  const recorded = readDigestRecord(a.repoRoot);
   const d = decideEnsure({
     state,
     liveCount,
     now: a.now(),
-    recordedDigest: readDigest(a.repoRoot),
+    recordedDigest: recorded?.digest ?? null,
+    recordedDigestAt: recorded?.at ?? null,
   });
   switch (d.action) {
     case 'noop':
@@ -685,7 +690,13 @@ async function ensureVerb(
       // hard-broken stream converges on stand-down instead of retrying forever.
       writeStreamState(a.statePath, d.state);
       a.out(`${theme.warn('↻')} ${d.note}\n`);
-      const { digest, addr } = launchPreconditions(a);
+      // Relaunch the image the DECISION settled on, never whatever this checkout happens to hold.
+      // `.image-digest` is per-checkout and streamwatch runs from the main one, so reading it here
+      // is how a worktree-started stream came back 14 days old (2026-09-17). `d.state.image` is the
+      // running image on a crash and the new one on a proven deploy; `launchPreconditions` stays
+      // the fallback for legacy state with no `image`, and still supplies the tailnet address.
+      const { digest: checkoutDigest, addr } = launchPreconditions(a);
+      const digest = d.state.image ?? checkoutDigest;
       const team = d.state.team ?? process.env['MUSTERD_TEAM'] ?? 'revive';
       const { code, output } = await a.launch(launchArgs({ app: a.app, digest, addr, team }));
       if (code !== 0) {

@@ -95,6 +95,39 @@ describe('decideEnsure', () => {
     expect(d.state.restarts).toEqual(recent);
   });
 
+  // A digest that predates the run is not a deploy — it is another checkout's file (2026-09-17).
+  // `.image-digest` is gitignored and per-checkout, and streamwatch reads the MAIN checkout's while
+  // the stream may have been started from a worktree. Measured that day: main held a 14-day-old
+  // digest, the live machine ran a 1-day-old one, and every crash would have been classified a
+  // deploy — relaunching older capture code, free of the flap budget, and saying "deploy" in the log.
+  it('a recorded digest OLDER than the run is not a deploy — it is another checkout’s file', () => {
+    const d = decideEnsure({
+      state: live({ image: 'sha256:' + 'a'.repeat(64) }),
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: 'sha256:' + 'b'.repeat(64),
+      recordedDigestAt: NOW - 120_000, // written BEFORE the stream started (state.at = NOW - 60_000)
+    });
+    expect(d.action).toBe('restart');
+    expect(d.note).not.toMatch(/deploy/i);
+    expect(d.state.restarts).toEqual([NOW]); // charged to the budget, like any crash
+    expect(d.state.image).toBe('sha256:' + 'a'.repeat(64)); // the running image, not the stale one
+  });
+
+  it('a recorded digest NEWER than the run is still a deploy (a real rebuild)', () => {
+    const d = decideEnsure({
+      state: live({ image: 'sha256:' + 'a'.repeat(64) }),
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: 'sha256:' + 'b'.repeat(64),
+      recordedDigestAt: NOW - 1_000, // built AFTER the stream started
+    });
+    expect(d.action).toBe('restart');
+    expect(d.note).toMatch(/deploy/i);
+    expect(d.state.restarts).toEqual([]);
+    expect(d.state.image).toBe('sha256:' + 'b'.repeat(64));
+  });
+
   it('machine gone with the SAME image recorded → a crash, charged as before', () => {
     const same = 'sha256:' + 'a'.repeat(64);
     const d = decideEnsure({
