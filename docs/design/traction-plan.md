@@ -337,6 +337,13 @@ portfolio: [PRODUCT.md](../../PRODUCT.md), [ADR 320](../decisions/320-positionin
   Google, Apple; 3-day window; Slack on). Broad net; nobody is reading it.
 - `~/lab/ai-training`: the AI training material nick has run for groups — a second proof of the
   "explains agents to people" skill.
+- `~/pminterview`: the interview kit — resume (VMware Cloud PM 2021–24: launched a $300M ARR SaaS
+  subscription with three engineering teams; AWS PM intern; Fannie Mae developer-tools tech lead;
+  UT Austin MBA), STAR talking points for MoveTrail and musterd, JD-specific prep from earlier loops
+  (Arize AI, ServiceNow AIOps, Snowflake Intelligence, Authorium), and two demo builds
+  (Observability/AIOps, Agent Frameworks). **The musterd talking points are a version and a
+  positioning behind** — they say v0.2, six tools, "v0.3 in design"; the product is 0.4.2 with ADR
+  320 decided. Refreshing them is sloane's, in week 1.
 
 **Targets, three tiers.** Tier 1 is where musterd's problem *is* the roadmap: Anthropic (Claude
 Code, Managed Agents), OpenAI (Codex as a platform), Cursor, GitHub (Copilot agents), Cognition,
@@ -344,13 +351,17 @@ LangChain (Deep Agents), Replit, Sourcegraph, Factory, Warp, Nous Research — a
 startups where the role is PM #1 or #2: Multica, Band, xpander. Tier 2 is agent products with PM
 roles broadly: Vercel, Supabase, PostHog, Linear, Notion, Perplexity, Modal, Together, Fireworks,
 Anyscale, Cohere, Mistral, Scale, Sierra, Decagon, Glean, Harvey, Writer, Zapier, Retool, Hugging
-Face. Tier 3 is Ring's net. Ring already watches every tier-2 name and most of tier 1; it does not
+Face — plus the agent-observability and eval cluster nick has already interviewed in (Arize,
+Langfuse, Braintrust, Datadog LLM Observability, Weights & Biases, ServiceNow AIOps), where
+musterd's telemetry and coordination-observability work is the direct story. Tier 3 is Ring's
+net. Ring already watches every tier-2 name and most of tier 1; it does not
 watch GitHub, Factory, Multica, Band, xpander, or Nous.
 
 **In the window:**
 
 - *Weeks 1–2:* the musterd case study on sandrise.io (sloane writes it in the portfolio's register;
-  nick ships it); the one-paragraph story on LinkedIn and the resume; Ring gains the six missing
+  nick ships it); the one-paragraph story on LinkedIn and the resume; the musterd talking points in
+  `~/pminterview` refreshed to 0.4.2 and ADR 320; Ring gains the six missing
   tier-1 boards and a "tier 1" Slack channel so those alerts are read, with the rest as a weekly
   digest; a 15-minute Sunday triage, logged here.
 - *Weeks 3–6:* warm before cold. Every tier-1/2 conversation carries one extra sentence — *"and I'd
