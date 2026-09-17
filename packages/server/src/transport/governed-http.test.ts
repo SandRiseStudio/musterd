@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
+import { openLane } from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
 import { bindNode, bindSeatToNode } from '../store/nodes.js';
 import { attach } from '../store/presence.js';
@@ -64,6 +65,15 @@ describe('governed authorization HTTP routes (ADR 411)', () => {
       (await request('POST', '/teams/governed/governed/policy', policy, bearer(nickCredential)))
         .status,
     ).toBe(200);
+    const team = getTeamBySlug(server.db, 'governed')!;
+    const lane = openLane(
+      server.db,
+      team.id,
+      team.slug,
+      'ada',
+      { title: 'governed HTTP work', claim: true },
+      Date.now(),
+    );
     const issued = await request(
       'POST',
       '/teams/governed/governed/launches',
@@ -71,14 +81,13 @@ describe('governed authorization HTTP routes (ADR 411)', () => {
         member: 'ada',
         node_id: 'node-a',
         correlation: 'corr-http',
-        context: { kind: 'orientation', allowance_id: 'allow-http' },
+        context: { kind: 'lane', lane_id: lane.id },
       },
       bearer(nickCredential),
     );
     expect(issued.status).toBe(201);
     expect(issued.json.token).toMatch(/^msla_/);
 
-    const team = getTeamBySlug(server.db, 'governed')!;
     const ada = getMemberByName(server.db, team.id, 'ada')!;
     const presence = attach(server.db, ada.id, 'claude-code', 'conn-1');
     const consumed = await request(
@@ -119,6 +128,61 @@ describe('governed authorization HTTP routes (ADR 411)', () => {
       .prepare<[], { detail: string | null }>('SELECT detail FROM audit')
       .all();
     expect(JSON.stringify(auditDetails)).not.toContain(issued.json.token);
+  });
+
+  it('returns a structured denial for an orientation allowance that has no backing record', async () => {
+    const policy = {
+      version: 1,
+      team: { models: ['anthropic/claude-sonnet-4-6'] },
+      members: { ada: { models: ['anthropic/claude-sonnet-4-6'] } },
+    };
+    await request('POST', '/teams/governed/governed/policy', policy, bearer(nickCredential));
+    const issued = await request(
+      'POST',
+      '/teams/governed/governed/launches',
+      {
+        member: 'ada',
+        node_id: 'node-a',
+        correlation: 'corr-orientation-http',
+        context: { kind: 'orientation', allowance_id: 'never-issued' },
+      },
+      bearer(nickCredential),
+    );
+    const team = getTeamBySlug(server.db, 'governed')!;
+    const ada = getMemberByName(server.db, team.id, 'ada')!;
+    const presence = attach(server.db, ada.id, 'claude-code', 'conn-orientation');
+    const consumed = await request(
+      'POST',
+      '/teams/governed/governed/launches/consume',
+      {
+        token: issued.json.token,
+        launch_id: issued.json.authorization.id,
+        presence_id: presence.id,
+        member: 'ada',
+        node_id: 'node-a',
+        correlation: 'corr-orientation-http',
+      },
+      bearer('msnode_node-a'),
+    );
+    expect(consumed.status).toBe(200);
+    const denied = await request(
+      'POST',
+      '/teams/governed/governed/authorize',
+      {
+        launch_id: issued.json.authorization.id,
+        presence_id: presence.id,
+        correlation: 'corr-orientation-http',
+        member: 'ada',
+        node_id: 'node-a',
+        provider: 'anthropic',
+        model: 'anthropic/claude-sonnet-4-6',
+      },
+      bearer('msnode_node-a'),
+    );
+    expect(denied).toMatchObject({
+      status: 200,
+      json: { decision: 'deny', reason: 'denied_context_orientation' },
+    });
   });
 
   it('returns a structured denial for a node-bound identity mismatch', async () => {

@@ -233,11 +233,19 @@ describe('governed authorization store (ADR 411)', () => {
   it('distinguishes a revoked node and a model outside the server-owned policy', () => {
     const { db, team, human, agent, presence } = fixture();
     setGovernedPolicy(db, team.id, policy);
+    const lane = openLane(
+      db,
+      team.id,
+      team.slug,
+      agent.name,
+      { title: 'model refusal context', claim: true },
+      Date.now(),
+    );
     const mint = issueGovernedLaunch(db, team.id, human, {
       member: agent.name,
       node_id: 'node-a',
       correlation: 'corr-node',
-      context: { kind: 'orientation', allowance_id: 'allow-node' },
+      context: { kind: 'lane', lane_id: lane.id },
       ttl_ms: 60_000,
     });
     expect(
@@ -362,14 +370,53 @@ describe('governed authorization store (ADR 411)', () => {
     db.close();
   });
 
+  it('denies an orientation context because allowance records are not issued yet', () => {
+    const { db, team, human, presence } = fixture();
+    setGovernedPolicy(db, team.id, policy);
+    const launch = issueGovernedLaunch(db, team.id, human, {
+      member: 'ada',
+      node_id: 'node-a',
+      correlation: 'corr-orientation',
+      context: { kind: 'orientation', allowance_id: 'never-issued' },
+      ttl_ms: 60_000,
+    });
+    expect(
+      consumeGovernedLaunch(db, team.id, {
+        token: launch.token,
+        launch_id: launch.authorization.id,
+        presence_id: presence.id,
+        member: 'ada',
+        node_id: 'node-a',
+        correlation: 'corr-orientation',
+      }).ok,
+    ).toBe(true);
+    expect(
+      authorizeGovernedRequest(
+        db,
+        team.id,
+        'msnode_node-a',
+        requestFor(launch.authorization.id, presence.id, { correlation: 'corr-orientation' }),
+      ),
+    ).toMatchObject({ decision: 'deny', reason: 'denied_context_orientation' });
+    db.close();
+  });
+
   it('refuses a held Presence and a model outside the effective Member ceiling', () => {
     const { db, team, human, agent, presence } = fixture();
     setGovernedPolicy(db, team.id, policy);
+    const lane = openLane(
+      db,
+      team.id,
+      team.slug,
+      agent.name,
+      { title: 'held Presence context', claim: true },
+      Date.now(),
+    );
     const launch = issueGovernedLaunch(db, team.id, human, {
       member: agent.name,
       node_id: 'node-a',
       correlation: 'corr-stale',
-      context: { kind: 'orientation', allowance_id: 'allow-stale' },
+      context: { kind: 'lane', lane_id: lane.id },
       ttl_ms: 60_000,
     });
     release(db, presence.id, 60_000);
@@ -389,7 +436,7 @@ describe('governed authorization store (ADR 411)', () => {
       member: agent.name,
       node_id: 'node-a',
       correlation: 'corr-model',
-      context: { kind: 'orientation', allowance_id: 'allow-model' },
+      context: { kind: 'lane', lane_id: lane.id },
       ttl_ms: 60_000,
     });
     expect(

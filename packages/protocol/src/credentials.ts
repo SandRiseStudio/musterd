@@ -42,6 +42,12 @@ export const TOKEN_PREFIXES = {
 } as const;
 export type TokenKind = keyof typeof TOKEN_PREFIXES;
 
+/** Return whether a value begins with any registered musterd credential namespace. */
+export function isMusterdCredential(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return Object.values(TOKEN_PREFIXES).some((prefix) => normalized.startsWith(prefix));
+}
+
 /** `POST /teams/:slug/agent-key/rotate` response — the new team agent key, shown **once**. */
 export const AgentKeyMintSchema = z.object({ agent_key: z.string() });
 export type AgentKeyMint = z.infer<typeof AgentKeyMintSchema>;

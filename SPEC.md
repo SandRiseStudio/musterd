@@ -454,8 +454,10 @@ Model identifiers are exact lowercase `provider/model` values; floating names su
 
 An active human Member may issue an authorization for an active agent Member only when that Member has
 exactly one enrolled machine-node residence in `seat_nodes`. Issuance binds the Team, target Member,
-node, launch correlation, expiry, and one of these contexts: an active owned Lane, an unresolved
-directed Act, or a short-lived human-created orientation allowance. The server returns one opaque
+node, launch correlation, expiry, and one of these currently authorizable contexts: an active owned
+Lane or an unresolved directed Act. The protocol also parses an `orientation` context for forward
+compatibility, but Increment 3 has no allowance record or issuance path for it; the server refuses it
+with `denied_context_orientation` until a later ADR adds that authority. The server returns one opaque
 `msla_` credential, stores only its SHA-256 hash, and records no credential in the public projection,
 audit log, or request log. The matching agent Presence consumes the handoff exactly once; expiry,
 revocation, replay, mismatch, and missing or held Presence are refusals.
@@ -465,6 +467,7 @@ node-authenticated one-shot consumption, admin revocation, and node-authenticate
 `/governed/authorize`. The final decision checks enrolled active node identity, the consumed launch and
 live Presence, the durable Member↔node binding, the bounded work context, and the server-owned model
 ceiling. It returns `decision: "allow"` or `decision: "deny"` with stable refusal codes such as
-`denied_node_binding`, `denied_launch_expired`, `denied_presence_stale`, `denied_context_lane`, and
-`denied_model`. Refusal status is structured and metadata-only; prompts, responses, provider payloads,
-and machine-local secrets never cross this boundary.
+`denied_node_binding`, `denied_launch_expired`, `denied_presence_stale`,
+`denied_context_lane`, `denied_context_orientation`, and `denied_model`. Refusal status is structured
+and metadata-only; prompts, responses, provider payloads, and machine-local secrets never cross this
+boundary.

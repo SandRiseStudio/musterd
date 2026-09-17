@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isMusterdCredential } from './credentials.js';
 
 /**
  * Increment 3 governed model authorization (ADR 411). This is deliberately a separate contract from
@@ -45,7 +46,7 @@ const GovernedPolicyMemberSchema = z
   .strict();
 
 function containsCredential(value: unknown): boolean {
-  if (typeof value === 'string') return /^(?:mskey_|msgr_|mscr_|msac_|msls_|msla_)/i.test(value);
+  if (typeof value === 'string') return isMusterdCredential(value);
   if (Array.isArray(value)) return value.some(containsCredential);
   if (value !== null && typeof value === 'object')
     return Object.entries(value).some(

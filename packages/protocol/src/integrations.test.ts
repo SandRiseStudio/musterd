@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TOKEN_PREFIXES } from './credentials.js';
 import {
   ApertureConfigResponseSchema,
   ApertureConfigSchema,
@@ -233,6 +234,18 @@ describe('GovernedTransportManifestSchema (ADR 402)', () => {
     expect(GovernedTransportManifestSchema.parse(ordinary)).toEqual(ordinary);
   });
 
+  it.each(Object.values(TOKEN_PREFIXES))(
+    'rejects a transport node key beginning with the registered credential prefix %s',
+    (prefix) => {
+      expect(
+        GovernedTransportManifestSchema.safeParse({
+          ...manifest,
+          nodes: [{ node_key: `${prefix}node`, members: ['ada'] }],
+        }).success,
+      ).toBe(false);
+    },
+  );
+
   it.each([
     ['a wildcard aperture tag', { ...manifest, aperture_tag: 'tag:*' }],
     ['a wildcard tag owner', { ...manifest, tag_owners: ['group:*'] }],
@@ -242,7 +255,6 @@ describe('GovernedTransportManifestSchema (ADR 402)', () => {
       'a duplicated Member on one node',
       { ...manifest, nodes: [{ node_key: 'studio-a', members: ['ada', 'ada'] }] },
     ],
-    ['a musterd credential', { ...manifest, nodes: [{ node_key: 'mskey_abc', members: ['ada'] }] }],
   ])('rejects %s', (_name, value) => {
     expect(GovernedTransportManifestSchema.safeParse(value).success).toBe(false);
   });

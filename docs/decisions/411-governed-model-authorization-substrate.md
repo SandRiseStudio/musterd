@@ -54,12 +54,14 @@ consumption, revocation, and Aperture authorization. The Aperture-facing decisio
 enrolled `msnode_` credential and the previously consumed launch authorization. The server resolves the
 Member and node from stored bindings, cross-checks any caller assertions, and refuses mismatches.
 
-The decision engine evaluates all four checks independently:
+The decision engine evaluates all four checks independently. In this increment, the orientation
+context shape is retained for forward compatibility, but its allowance authority is not implemented;
+the server refuses that context rather than treating an unverified identifier as proof:
 
 1. enrolled, active node identity and exact Member-to-node binding;
 2. live, unexpired, unrevoked launch authorization with matching Presence correlation;
-3. an active owned Lane, an unresolved directed Act bounded by its resolution/expiry, or a short-lived
-   human-created orientation allowance that cannot self-refresh; and
+3. an active owned Lane or an unresolved directed Act bounded by its resolution/expiry; orientation
+   contexts receive `denied_context_orientation` until a later ADR adds a server-owned allowance; and
 4. the server-owned Team model ceiling plus narrower Role/Member policy, with no caller-side widening.
 
 Decisions return stable allow/refusal results and append metadata-only audit rows. Refusal details name
