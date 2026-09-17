@@ -47,8 +47,10 @@ import {
   setScenePalette,
   toneColor,
   type Cue,
+  type RenderOpts,
   type ScenePalette,
 } from './render';
+import { makeSpriteCache } from './sprite-cache';
 import { GESTURE, isIdleGesture } from './skeleton';
 import type { WallBoard } from './wallboard';
 import {
@@ -63,7 +65,7 @@ import {
   type SpeechMarking,
   type SpeechToken,
 } from './speech';
-import type { AmbientLogEntry, OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
+import type { AmbientLogEntry, OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose, SpriteParity } from './types';
 
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, OfficeStats } from './types';
 
@@ -267,6 +269,14 @@ export interface OfficeOptions {
    * renders it (WorkStack's header) and the scene only says what the moment is (nick, 2026-08-31).
    */
   onCaption?: (caption: Caption | null) => void;
+  /**
+   * Rasterize the static furniture once per state and blit it, instead of redrawing the whole room
+   * every frame (spec 2026-09-17). Dark by default: `/broadcast` turns it on with `&sprites=1`, and
+   * the default flips only once the pixel gate is byte-equal and the box measures under 25 ms/draw.
+   * The baked idle frame never uses it — keeping `bake()` byte-identical is what makes the gate's
+   * reference honest.
+   */
+  sprites?: boolean;
 }
 
 export function mountOffice(
@@ -291,6 +301,10 @@ export function mountOffice(
   const platesOpen = interactiveLabels && platesOpenMode();
   const showWorkCues = options.showWorkCues !== false;
   const dpr = officeDpr(broadcast, DPR_CAP);
+  /* The per-item sprite cache, or undefined — `renderScene` with no cache paints exactly as it
+     always has, so this flag is the whole blast radius. Cleared on resize (every key carries the
+     fit, so stale entries would only waste memory) and on dispose. */
+  const sprites = options.sprites === true ? makeSpriteCache({ dpr }) : undefined;
 
   const canvas = document.createElement('canvas');
   canvas.style.display = 'block';
@@ -505,6 +519,8 @@ export function mountOffice(
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
     fit = fitFloor(width, height);
+    // Every sprite key carries the fit, so a resize only strands the old rasters — drop them.
+    sprites?.clear();
   }
 
   /** Read the office surface tokens (`--floor`, `--floor-2`, `--wood`, `--couch`) the active theme
@@ -1287,6 +1303,7 @@ export function mountOffice(
       recep,
       wallBoard,
       teamWorkingHours,
+      { sprites, dpr },
     );
     drawCues();
     positionLabels(anchors.heads);
@@ -1980,12 +1997,79 @@ export function mountOffice(
     }
   }, LIGHT_TICK_MS);
 
+  /**
+   * Render the CURRENT scene state twice into two fresh offscreen canvases — once direct, once
+   * through a fresh sprite cache — and compare the bytes. The gate
+   * (`scripts/perf/scene-pixel-check.mjs`) drives this over CDP; the app never calls it.
+   *
+   * Both renders read the same poses, the same clock and the same lighting synchronously, so `t` is
+   * not a confound: any difference is the cache's doing.
+   */
+  function spriteParity(): SpriteParity {
+    const paint = (c: CanvasRenderingContext2D, o: RenderOpts = {}): void => {
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, width, height);
+      renderScene(
+        c,
+        fit,
+        placements,
+        actors.nodes(),
+        actors.poses(),
+        clock,
+        teamName,
+        lightEnv,
+        pet,
+        actors.sceneFx(),
+        recep,
+        wallBoard,
+        teamWorkingHours,
+        o,
+      );
+    };
+    const surface = (): CanvasRenderingContext2D => {
+      const c = document.createElement('canvas');
+      c.width = canvas.width;
+      c.height = canvas.height;
+      return c.getContext('2d')!;
+    };
+    const direct = surface();
+    const cached = surface();
+    setScenePalette(resolveScenePalette());
+    paint(direct);
+    paint(cached, { sprites: makeSpriteCache({ dpr }), dpr });
+    const da = direct.getImageData(0, 0, canvas.width, canvas.height).data;
+    const db = cached.getImageData(0, 0, canvas.width, canvas.height).data;
+    const histogram = new Array<number>(256).fill(0);
+    let differing = 0;
+    let maxDelta = 0;
+    let first: SpriteParity['first'] = null;
+    for (let i = 0; i < da.length; i += 4) {
+      let d = 0;
+      for (let k = 0; k < 4; k++) d = Math.max(d, Math.abs(da[i + k]! - db[i + k]!));
+      if (d === 0) continue;
+      differing++;
+      histogram[d] = (histogram[d] ?? 0) + 1;
+      if (d > maxDelta) maxDelta = d;
+      if (!first) {
+        const px = i / 4;
+        first = {
+          x: px % canvas.width,
+          y: Math.floor(px / canvas.width),
+          direct: [...da.slice(i, i + 4)],
+          sprite: [...db.slice(i, i + 4)],
+        };
+      }
+    }
+    return { equal: differing === 0, total: da.length / 4, differing, maxDelta, histogram, first };
+  }
+
   ensureLoop(); // a room with anyone working is alive from the first frame (no-op under reduced-motion)
 
   return {
     update,
     emit,
     stats: () => ({ ticks, draws, beats, since }),
+    spriteParity,
     ambientLog: () => [...ambientLog],
     floorSamples: () =>
       [...actors.poses()].map(([name, p]) => ({
@@ -2065,6 +2149,7 @@ export function mountOffice(
     },
     dispose: () => {
       disposed = true;
+      sprites?.clear();
       cancelAnimationFrame(raf);
       stopDrift(); // the heartbeat outlives nothing
       clearInterval(lightTimer); // stop the PST lighting clock

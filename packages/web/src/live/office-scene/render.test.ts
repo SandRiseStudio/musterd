@@ -1260,7 +1260,6 @@ describe('sprite parts', () => {
     renderScene(b.ctx, fit, placements, byName, poses, 3, 'revive', env, null, undefined, null, wallFixture(), schedule, {
       sprites: passthroughCache(b.ctx),
       dpr: 1,
-      stage: { w: 1920, h: 1080 },
     });
     expect(sceneOps(b.ops)).toEqual(sceneOps(a.ops));
     expect(a.ops.length).toBeGreaterThan(1000); // the fixture actually painted a room
@@ -1400,7 +1399,6 @@ describe('static furniture sprites', () => {
     renderScene(r.ctx, fit, placements, byName, poses, 3, 'revive', computeLightEnv(21, true), null, undefined, null, null, null, {
       sprites: census,
       dpr: 1,
-      stage: { w: 1920, h: 1080 },
     });
     const count = (kind: string) => keys.filter((k) => k.startsWith(`${kind}·`)).length;
     expect(count('plant')).toBe(PLANTS.length);

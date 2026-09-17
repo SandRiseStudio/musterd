@@ -503,6 +503,10 @@ function OfficePreviewPage() {
         const reduced = search.has('reduced');
         const handle = mountOffice(host, labelHost, reduced, {
           interactiveLabels: true,
+          /* `?sprites` — paint the static furniture from the sprite cache (spec 2026-09-17). This
+             route is where the pixel gate runs, and `__office.spriteParity()` compares the two
+             paths on demand whatever this flag says; the flag is for looking at the cached room. */
+          sprites: search.has('sprites'),
           // The narration is chrome now, so the scene only says what the moment is and the fixture's
           // own overlay renders it — the same wiring `/live` and `/broadcast` use.
           onCaption: (next) => setCaption(next),

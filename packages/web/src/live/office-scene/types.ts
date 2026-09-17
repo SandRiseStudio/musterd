@@ -201,6 +201,21 @@ export type OfficeEvent =
     };
 
 /** The imperative handle the `OfficeScene` component drives the mounted scene through. */
+/** The byte comparison behind the sprite cache's pixel gate. */
+export interface SpriteParity {
+  equal: boolean;
+  /** Pixels compared. */
+  total: number;
+  /** Pixels differing in any channel. */
+  differing: number;
+  /** The largest per-channel difference — 1 means 8-bit rounding, more means a real fault. */
+  maxDelta: number;
+  /** How many differing pixels at each delta, indexed by delta (0 unused). */
+  histogram: number[];
+  /** The first differing pixel, for a human to go and look at. */
+  first: { x: number; y: number; direct: number[]; sprite: number[] } | null;
+}
+
 export interface OfficeHandle {
   update: (data: OfficeData) => void;
   emit: (ev: OfficeEvent) => void;
@@ -222,6 +237,11 @@ export interface OfficeHandle {
    * were equal (full rAF waste). Two integer increments per frame; not gated, because gating costs
    * more than it saves. */
   stats: () => OfficeStats;
+  /**
+   * Dev + gate only: render this exact scene state twice, direct and through a fresh sprite cache,
+   * and compare the bytes (`scripts/perf/scene-pixel-check.mjs`). Never called by the app.
+   */
+  spriteParity: () => SpriteParity;
   /** The shared ambient beat log (E1 spec §5): one entry per fired slot — slot number, whose beat,
    * and whether this browser played it. Two visible viewers of the same team over the same interval
    * must agree on everything but `played`. Capped at the last 200 entries. */

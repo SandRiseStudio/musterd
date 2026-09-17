@@ -1891,8 +1891,6 @@ export interface RenderOpts {
   sprites?: SpriteCache | undefined;
   /** Device pixel ratio of `ctx`'s transform — sprite boxes are in device px. Default 1. */
   dpr?: number | undefined;
-  /** The stage size in CSS px — the background layer is one full-stage sprite. Required with `sprites`. */
-  stage?: { w: number; h: number } | undefined;
 }
 
 /** The break-nook lounge, as depth items: the rug flat on the floor, every solid piece self-sorted. */
