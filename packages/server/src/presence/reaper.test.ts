@@ -5,6 +5,7 @@ import { resolveConfig, type ResolvedConfig } from '../config.js';
 import type { Ctx } from '../context.js';
 import { openDb } from '../db/open.js';
 import { appendAudit, listAudit } from '../store/audit.js';
+import { openLane, updateLane } from '../store/lanes.js';
 import { addMember } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
 import { attach, presenceById, release } from '../store/presence.js';
@@ -385,5 +386,99 @@ describe('startReaper', () => {
       expect(rows(teamId, 'residency.wake_failed')).toHaveLength(0);
       expect(rows(teamId, 'residency.wake_deferred')).toHaveLength(1);
     });
+  });
+});
+
+/**
+ * Lane 01M2RQ8W0RR838P2KW3SP6SYGV — the silent departure.
+ *
+ * ADR 412 re-routes an acceptance when a seat says goodbye. A reaped seat says nothing: it emits
+ * `presence.detached` with reason 'reaped' and no `residency.session_ended`, so 412's trigger never
+ * fires. On revive, where `loops.sweep` is not armed, such an ask waits forever — the 12h
+ * `stale_acceptance` warning is advisory and ADR 229's 24h close never runs.
+ */
+describe('startReaper — an acceptance held by a seat that vanished without a goodbye', () => {
+  let db: Database;
+  let hub: Hub;
+  let config: ResolvedConfig;
+  let ctx: Ctx;
+  let stop: (() => void) | undefined;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    db = openDb(':memory:');
+    hub = new Hub();
+    config = resolveConfig();
+    ctx = { db, hub, config, rosterRoots: [] };
+  });
+
+  afterEach(() => {
+    stop?.();
+    stop = undefined;
+    vi.useRealTimers();
+    db.close();
+  });
+
+  function laneHeldByADepartedSeat() {
+    const team = createTeam(db, { slug: 'dawn' });
+    const worker = addMember(db, team, { name: 'Kim', kind: 'agent' }).row;
+    const gone = addMember(db, team, { name: 'delta', kind: 'agent' }).row;
+    const live = addMember(db, team, { name: 'Lin', kind: 'agent' }).row;
+    // Lin is here and says what she is running; the picker routes on the live occupancy (ADR 101).
+    attach(db, live.id, 'cli', 'conn-lin', { model: 'gpt-5.6-sol' });
+    // delta held a presence and it went stale — the reap, not a goodbye.
+    const stale = attach(db, gone.id, 'cli', 'conn-delta', { model: 'claude-opus-5' });
+    db.prepare('UPDATE presence SET last_seen_at = ? WHERE id = ?').run(
+      Date.now() - config.presenceTimeoutMs - 1,
+      stale.id,
+    );
+    const lane = openLane(db, team.id, team.slug, 'Kim', { title: 'kim lane', claim: true });
+    updateLane(db, team.id, lane.id, team.slug, { state: 'awaiting_acceptance' });
+    insertMessage(
+      db,
+      team.id,
+      worker.id,
+      gone.id,
+      makeEnvelope({
+        id: 'ask-vanished',
+        team: team.slug,
+        from: 'Kim',
+        to: { kind: 'member', name: 'delta' },
+        act: 'ask',
+        body: '[lane] acceptance requested',
+        meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+        ts: 1_000,
+      }),
+    );
+    return { team, lane };
+  }
+
+  const rerouted = (teamId: string) =>
+    listAudit(db, teamId).filter((r) => r.action === 'lane.review_rerouted');
+
+  it('re-routes the acceptance to a live seat once the holder has been reaped', () => {
+    const { team, lane } = laneHeldByADepartedSeat();
+
+    stop = startReaper(ctx);
+    // The loop judges nobody until it has listened for a full timeout window (lane 01M1HNY302).
+    vi.advanceTimersByTime(config.presenceTimeoutMs + config.reaperIntervalMs * 2);
+
+    const rows = rerouted(team.id);
+    expect(rows).toHaveLength(1);
+    const detail = JSON.parse(rows[0]!.detail as string);
+    expect(detail.lane).toBe(lane.id);
+    expect(detail.from_reviewer).toBe('delta');
+    expect(detail.superseded_ask).toBe('ask-vanished');
+    expect(detail.reviewer).toBe('Lin');
+    expect(detail.route).toBe('reaped');
+  });
+
+  it('re-routes a lane at most once, however many ticks pass', () => {
+    const { team } = laneHeldByADepartedSeat();
+
+    stop = startReaper(ctx);
+    vi.advanceTimersByTime(config.presenceTimeoutMs + config.reaperIntervalMs * 20);
+
+    expect(rerouted(team.id)).toHaveLength(1);
   });
 });

@@ -1,5 +1,6 @@
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
+import { sweepReapedAcceptances } from '../protocol/laneReroute.js';
 import { announceIncidentRouted } from '../protocol/route.js';
 import { appendAudit } from '../store/audit.js';
 import { routeUnclaimedIncidents } from '../store/incidents.js';
@@ -170,6 +171,17 @@ export function startReaper(ctx: Ctx): () => void {
         } catch (err) {
           log.warn({ msg: 'incident_route_announce_failed', lane: lane.id, err: String(err) });
         }
+      }
+    }
+
+    // Lane 01M2RQ8W0RR838P2KW3SP6SYGV: an acceptance whose reviewer was REAPED has no goodbye for
+    // ADR 412 to hear, so the reaper notices on its behalf. Ungated, unlike the ADR 229 backstop
+    // below: this never closes a lane and never invents a verdict, it only moves an ask to a seat
+    // that is actually there. Runs BEFORE the backstop so a lane gets a live reviewer offered
+    // before it can be closed unreviewed on a team that armed the sweep.
+    for (const team of listActiveTeams(ctx.db)) {
+      for (const lane of sweepReapedAcceptances(ctx, team)) {
+        log.info({ msg: 'reroute_reaped_acceptance', team: team.slug, lane });
       }
     }
 

@@ -46,7 +46,6 @@ import {
   eligibleOf,
   emptyPoolFromCandidates,
   LANE_TERMINAL_STATES,
-  ACCEPTANCE_MOVES_NOTICE,
   isAwaitingAcceptance,
   makeEnvelope,
   type Envelope,
@@ -106,6 +105,14 @@ import { log } from '../log.js';
 import { saveNodeEnrollment } from '../node/state.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
+import {
+  acceptanceAskBody,
+  deliverLaneAskAct,
+  deliverLaneAskSuperseded,
+  noGoalNotice,
+  priorOwnerNotice,
+  rerouteDepartedAcceptances,
+} from '../protocol/laneReroute.js';
 import { deliveryHintFor } from '../protocol/nudge.js';
 import { announceIncidentResolved, routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
@@ -258,7 +265,6 @@ import {
   pickWakeReviewer,
   REVIEW_LOOP_BREAKER_N,
   reviewLoopBounceCount,
-  heldAcceptances,
   selectReviewCounterpart,
   workerFamily,
   teamFamilyPosture,
@@ -1169,210 +1175,15 @@ function deliverLaneAct(
 // previously hand-mirrored the store's private TERMINAL set, a drift hazard three copies deep.
 
 /**
- * Outcome-acceptance ask (ADR 192): a directed `ask` act from the worker to the picked acceptor —
- * unlike {@link deliverLaneAct} this is act `ask`, so it rides the whole ask-stream machinery
- * (tier contract, reachability, ask-span telemetry) with no new act kind. Best-effort like every
- * lane delivery: a failed compose never fails the verb (the degradation path is self-close anyway).
- */
-function deliverLaneAskAct(
-  ctx: Ctx,
-  team: TeamRow,
-  from: MemberRow,
-  to: string,
-  body: string,
-  meta: Record<string, unknown>,
-): boolean {
-  try {
-    const env = makeEnvelope({
-      id: ulid(),
-      team: team.slug,
-      from: from.name,
-      to: { kind: 'member', name: to },
-      act: 'ask',
-      body,
-      meta,
-    });
-    routeEnvelope(ctx, team, from, env, undefined, true);
-    return true;
-  } catch {
-    /* advisory only — the lane verb already succeeded. The boolean is for the one caller that
-       must NOT treat it as advisory: a hand-named acceptor whose ask failed to mint is the silent
-       limbo lane 01M1QYHJFY closed, and the submit handler fails loudly on `false`. */
-    return false;
-  }
-}
-
-/**
  * Close a standing acceptance ask on the seat that held it (lane 01M1QYHJFY): a daemon-composed
  * `resolve` on the ask's own thread, so the ADR 088 interrupt line and the open-loops gauge both see
  * it discharged, and the seat reads WHY in the body instead of finding the lane closed under them.
  * The body is composed here from structured fields, never from a client string.
  */
-/**
- * Re-route every acceptance a departing seat still holds (lane 01M2RNBRGRWCSD89JTE1BVQ3QG).
- *
- * Measured 2026-09-17: an ask was routed to delta at 16:11:47 and delta's session ended at
- * 16:14:11. Nothing reacted, so the ask waited on a seat that was gone until
- * `staleAcceptanceWarning` fired 12h later and downgraded it to "any seat may answer" — 22h.
- *
- * This reuses the hand re-route's machinery exactly (`lane.review_rerouted` + a superseded notice
- * + a fresh ask), because the hard part is already decided there: the old ask goes inert, a late
- * verdict on it cannot move the lane, and the seat that held it is told where the acceptance went.
- * What differs is only who decided — a goodbye rather than a caller naming a seat — so the audit
- * row records `route: 'departed'` and the departing seat as `actor`.
- *
- * No wake is leased, matching the named path: the ask waits in an inbox, as it does at submit.
- * If the picker finds nobody, nothing is minted and the lane keeps the ask it has — a re-route with
- * no destination would strand the acceptance worse than leaving it for `staleAcceptanceWarning`.
- */
-function rerouteDepartedAcceptances(ctx: Ctx, team: TeamRow, departing: MemberRow): void {
-  for (const held of heldAcceptances(ctx.db, team.id, departing.name)) {
-    const lane = getLane(ctx.db, team.id, held.lane, team.slug);
-    if (!lane) continue;
-    const worker = lane.owner_seat ?? departing.name;
-    const selection = selectReviewCounterpart(
-      ctx.db,
-      team.id,
-      lane,
-      worker,
-      ctx.config.presenceTimeoutMs,
-      { departing: departing.name },
-    );
-    const pick = selection.pick;
-    if (!pick || pick.reviewer === departing.name) continue;
-    const humanRequired = lane.risk.length > 0;
-    const acceptanceTier: AskTier = 'standard';
-    appendLaneEventRequired(ctx.db, team.id, {
-      actor: departing.name,
-      action: 'lane.review_rerouted',
-      target: lane.id,
-      result: 'allow',
-      detail: {
-        lane: lane.id,
-        owner: worker,
-        stakes: lane.stakes,
-        stakes_provenance: lane.stakes_provenance,
-        ...(lane.merged ? { merged: lane.merged } : {}),
-        reviewer: pick.reviewer,
-        route: 'departed',
-        review_grade: pick.grade,
-        from_reviewer: departing.name,
-        superseded_ask: held.ask,
-        human_required: humanRequired,
-        ask_tier: acceptanceTier,
-        ask_timeout_ms: askContract(acceptanceTier).timeout_ms,
-      },
-    });
-    deliverLaneAskSuperseded(ctx, team, departing, departing.name, held.ask, lane, pick.reviewer);
-    const priorOwners = laneOwnerHistory(ctx.db, team.id, lane.id);
-    deliverLaneAskAct(
-      ctx,
-      team,
-      departing,
-      pick.reviewer,
-      acceptanceAskBody(lane.title, {
-        overlapNotice: priorOwnerNotice(pick.reviewer, priorOwners),
-        noGoalNotice: noGoalNotice(lane.goal_id),
-      }),
-      {
-        species: 'approve',
-        tier: acceptanceTier,
-        lane_review: {
-          lane: lane.id,
-          title: lane.title,
-          branch: lane.branch,
-          ...(lane.merged ? { merged: lane.merged } : {}),
-          route: 'departed',
-          grade: pick.grade,
-        },
-      },
-    );
-  }
-}
-
-function deliverLaneAskSuperseded(
-  ctx: Ctx,
-  team: TeamRow,
-  from: MemberRow,
-  to: string,
-  askId: string,
-  lane: Lane,
-  newAcceptor: string,
-): void {
-  try {
-    const env = makeEnvelope({
-      id: ulid(),
-      team: team.slug,
-      from: from.name,
-      to: { kind: 'member', name: to },
-      act: 'resolve',
-      thread: askId,
-      body:
-        `[lane] acceptance of "${lane.title}" re-routed to ${newAcceptor} by ${from.name} — ` +
-        `the ask you held is closed and nothing is owed on it. A verdict sent on it now binds to nothing.`,
-      meta: { lane_review_superseded: { lane: lane.id, ask: askId, reviewer: newAcceptor } },
-    });
-    routeEnvelope(ctx, team, from, env, undefined, true);
-  } catch {
-    /* advisory — the re-route itself is recorded in the audit and the new ask is what binds */
-  }
-}
-
-/**
- * The overlap line (ADR 192, lane 01KYX6QY5N). The picker excludes the lane's CURRENT owner and
- * nobody else, so a lane that changed hands can route its acceptance to a previous owner — an
- * author of the very artifact being judged. Rather than exclude them (which would narrow a pool
- * that already finds nobody on most attempts, to close a hole seen on 3 lanes ever), the ask NAMES
- * the overlap and leaves the call to the acceptor: recusal is a judgment, not a computation.
- *
- * Phrased as a fact plus the two honest options, never as an accusation — the acceptor may well be
- * the right judge (ADR 192 acceptance is intent-vs-brief, and a brief's author knows the brief).
- */
-function priorOwnerNotice(reviewer: string, priorOwners: string[]): string {
-  return priorOwners.includes(reviewer)
-    ? ' NOTE — you previously owned this lane, so you are named on the artifact you are judging. ' +
-        'That is allowed and may even make you the best judge of intent, but it is yours to weigh: ' +
-        'accept if you can judge it independently, or decline and say "recusing — I authored this" ' +
-        'so it routes to someone else.'
-    : '';
-}
 
 /** goals-front-door design: close-time attribution nudge — appended, never blocking. */
-function noGoalNotice(goalId: string | null): string {
-  if (goalId !== null) return '';
-  return ' This lane is on no goal — if it advanced one, link it (lane_update {goal_id}) before resolving.';
-}
 
 /** ADR 192 acceptor checklist — judge the landed outcome, not the diff. */
-function acceptanceAskBody(
-  title: string,
-  opts: {
-    human?: boolean;
-    peerFindings?: string;
-    overlapNotice?: string;
-    noGoalNotice?: string;
-  } = {},
-): string {
-  const checklist =
-    'Judge the LANDED OUTCOME (not a code review): ' +
-    '(1) Intent — matches the lane brief? ' +
-    '(2) Principles — project/musterd hard rules? ' +
-    '(3) Usable — exercise the path enough to say it works? ' +
-    '(4) Feel — only if UI/copy/brand is in surface, else N/A. ' +
-    'Accept → move the lane to done; reject → send it back to active with a concrete note.' +
-    // Lane 01M2P2E2H6: the acceptor learns what `accept` DOES before they send one, not from the
-    // ack afterwards. Appended to the checklist so both the peer and human bodies below carry it.
-    ACCEPTANCE_MOVES_NOTICE;
-  const overlap = (opts.overlapNotice ?? '') + (opts.noGoalNotice ?? '');
-  if (opts.human && opts.peerFindings !== undefined) {
-    return (
-      `[lane] human acceptance required: "${title}" — peer accepted with: "${opts.peerFindings}". ` +
-      checklist +
-      overlap
-    );
-  }
-  return `[lane] acceptance requested: "${title}" — ${checklist}${overlap}`;
-}
 
 /**
  * Broadcast a lane lifecycle event (open/resolve) to the whole team — same ordinary `message` envelope
