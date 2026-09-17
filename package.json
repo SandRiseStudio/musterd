@@ -31,6 +31,7 @@
     "wiki:probe": "node --disable-warning=ExperimentalWarning scripts/wiki-probe.ts",
     "perf:check": "node --disable-warning=ExperimentalWarning scripts/perf/check-budgets.ts",
     "a11y:contrast": "node scripts/a11y/contrast-sweep.mjs",
+    "scene:pixel-check": "node scripts/perf/scene-pixel-check.mjs",
     "a11y:check": "node scripts/a11y/contrast-gate.mjs",
     "context:check": "node --disable-warning=ExperimentalWarning scripts/context/check-budgets.ts",
     "guidance:check": "node --disable-warning=ExperimentalWarning scripts/check-guidance.ts",

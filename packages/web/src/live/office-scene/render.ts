@@ -1117,16 +1117,20 @@ function wallHanger(
 /**
  * Which slice of the walls to paint (sprite cache, spec 2026-09-17).
  *
- * Three fixtures on the right-hand wall are NOT static: the clock reads the office hour, the
- * working-hours sign reads `t`, and the lane board reads the live board. They are lifted out of the
- * background sprite and painted in the same position in the sequence they occupy today — which is
- * why there are two static slices rather than one. `before` is both walls up to those fixtures,
- * `after` is the bulb strand that hangs over them on that wall. Painting `after` ahead of `live`
- * would put the strand's glows under the clock instead of over it.
+ * `static` is the cacheable wall: faces, windows, art, and the LEFT wall's bulb strand. `live` is
+ * what has to paint on the stage every frame, in the order it already paints in — the clock (it
+ * reads the office hour), the working-hours sign (it reads `t`), the lane board (it reads the live
+ * board), and then the RIGHT wall's bulb strand.
  *
- * `before` ++ `live` ++ `after` emits exactly the ops `all` does, in the same order.
+ * The strand is in the live half for a different reason from the other three, and it is the reason
+ * the first cut of this failed the pixel gate 10/10 states at 14% of pixels: its glows composite
+ * with `lighter`, which ADDS to whatever is already on the canvas. Rasterized into its own sprite it
+ * added to transparency instead of to the wall, and blitting that back source-over replaced the wall
+ * rather than brightening it. An additive pass cannot be separated from what it adds to — so it
+ * stays on the stage, over the blitted wall. The left wall's strand is safe because its wall face is
+ * inside the SAME sprite it adds to.
  */
-export type WallSlice = 'all' | 'before' | 'live' | 'after';
+export type WallSlice = 'all' | 'static' | 'live';
 
 export function drawWalls(
   ctx: CanvasRenderingContext2D,
@@ -1144,7 +1148,9 @@ export function drawWalls(
    * u 0.36 (the bookshelves' height) or inside a window's `t` span.
    */
   const wantsStatic = slice !== 'live';
-  const wantsFixtures = slice === 'all' || slice === 'live';
+  const wantsFixtures = slice !== 'static';
+  /* The right wall's strand belongs to whichever half its wall face does NOT: see `WallSlice`. */
+  const wantsRightCable = slice === 'all' || slice === 'live';
 
   const dress = (edge: (t: number) => [number, number], wallIndex: 0 | 1): void => {
     // Nothing goes high near the back corner: that is where the wall is tallest on screen and the canvas
@@ -1231,16 +1237,10 @@ export function drawWalls(
   };
   // Two faces at slightly different shades so the back corner reads (like box()'s side faces).
   // back-left wall (lx=0 edge) is a touch darker — more edge-on to the implied upper-left light.
-  // The LEFT wall carries no live fixture, so it belongs whole to the `before` slice.
-  if (slice === 'all' || slice === 'before') {
-    wall(WALL_EDGES[0]!, 0.9, { shell: true, dress: true, cable: true });
-  }
+  // It carries no live fixture, so the `live` slice skips it entirely.
+  if (wantsStatic) wall(WALL_EDGES[0]!, 0.9, { shell: true, dress: true, cable: true });
   // back-right wall (ly=0 edge) catches more of that light — and carries the clock, sign and board.
-  wall(WALL_EDGES[1]!, 0.99, {
-    shell: slice === 'all' || slice === 'before',
-    dress: slice !== 'after',
-    cable: slice === 'all' || slice === 'after',
-  });
+  wall(WALL_EDGES[1]!, 0.99, { shell: wantsStatic, dress: true, cable: wantsRightCable });
 }
 
 /**
@@ -1891,6 +1891,12 @@ export interface RenderOpts {
   sprites?: SpriteCache | undefined;
   /** Device pixel ratio of `ctx`'s transform — sprite boxes are in device px. Default 1. */
   dpr?: number | undefined;
+  /**
+   * Cache ONLY the sprites whose key CONTAINS this string; everything else paints live. The
+   * pixel gate uses it to bisect a difference down to one item class instead of reasoning about
+   * which of thirty items moved a pixel — which is how the additive-pass fault was found.
+   */
+  spriteOnly?: string | undefined;
 }
 
 /** The break-nook lounge, as depth items: the rug flat on the floor, every solid piece self-sorted. */
@@ -4640,7 +4646,12 @@ function blitSprite(
   key: string,
   dpr: number,
   draw: (c: CanvasRenderingContext2D) => void,
+  only?: string | undefined,
 ): void {
+  if (only !== undefined && !key.includes(only)) {
+    draw(ctx); // excluded from this pass — paint it live, exactly as an uncached scene would
+    return;
+  }
   const bounds = measureBounds(draw);
   if (!bounds) return; // drew nothing — nothing to blit
   const box = deviceBox(bounds, dpr);
@@ -4744,14 +4755,16 @@ export function renderScene(
      item, and the flat rugs (drawn with the floor so a member standing on one is never over-painted
      by it). All of it is static per lighting step — so with a cache it is two sprites around the
      three live wall fixtures, and with none it paints exactly as it always has. */
-  const shellBefore = (c: CanvasRenderingContext2D): void => {
+  const shell = (c: CanvasRenderingContext2D): void => {
     drawGroundShadow(c, fit);
     drawFloor(c, fit);
-    drawWalls(c, fit, env, teamWorkingHours, wallBoard, t, cache ? 'before' : 'all');
+    drawWalls(c, fit, env, teamWorkingHours, wallBoard, t, cache ? 'static' : 'all');
+    if (!cache) drawWindowBeams(c, fit, env);
+    if (!cache) rugs(c);
   };
-  const shellAfter = (c: CanvasRenderingContext2D): void => {
-    if (cache) drawWalls(c, fit, env, teamWorkingHours, wallBoard, t, 'after');
-    drawWindowBeams(c, fit, env);
+  /* Flat floor paint, drawn with the floor (before every solid and every actor) so a member standing
+     anywhere on a rug is never over-painted by it. Solid pieces self-sort at their footprints. */
+  function rugs(c: CanvasRenderingContext2D): void {
     for (const pod of PODS) {
       const ns = pod.axis === 'ns';
       const dims = pod.size === 1 ? POD_RUG_SOLO : pod.size === 2 ? POD_RUG_DUO : POD_RUG;
@@ -4762,15 +4775,18 @@ export function renderScene(
     drawRug(c, fit, MEETING.rug, MEETING.lx, MEETING.ly, MEETING.rug.w, MEETING.rug.d);
     drawRug(c, fit, RECEPTION.rug, RECEPTION.rug.lx, RECEPTION.rug.ly, RECEPTION.rug.w, RECEPTION.rug.d);
     nook.rug(c);
-  };
+  }
   if (cache) {
     const bg = backgroundKey(fit, env, dpr);
-    blitSprite(ctx, cache, `${bg}·a`, dpr, shellBefore);
+    blitSprite(ctx, cache, bg, dpr, shell, opts.spriteOnly);
+    // On the stage, in their existing order: three fixtures that are not static, then the right
+    // wall's additive strand, then the additive daylight beams. See `WallSlice`.
     drawWalls(ctx, fit, env, teamWorkingHours, wallBoard, t, 'live');
-    blitSprite(ctx, cache, `${bg}·b`, dpr, shellAfter);
+    drawWindowBeams(ctx, fit, env);
+    // Source-over floor paint, so it caches cleanly on top of the beams it is painted over.
+    blitSprite(ctx, cache, `${bg}·rugs`, dpr, rugs, opts.spriteOnly);
   } else {
-    shellBefore(ctx);
-    shellAfter(ctx);
+    shell(ctx);
   }
   items.push({ d: depth(MEETING.lx, MEETING.ly), fn: () => meetingTable(ctx, fit) });
   for (const c of MEETING.chairs) {
@@ -4886,7 +4902,7 @@ export function renderScene(
         part.draw();
         continue;
       }
-      blitSprite(ctx, cache, part.key, dpr, part.draw);
+      blitSprite(ctx, cache, part.key, dpr, part.draw, opts.spriteOnly);
     }
   }
 

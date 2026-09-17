@@ -1438,11 +1438,11 @@ describe('background layer (sprite cache)', () => {
   const board = (): WallBoard =>
     projectWallBoard({ lanes: [laneFix('a', 'open'), laneFix('b', 'active')], warnings: [] })!;
 
-  it('before ++ live ++ after emits exactly what the whole wall emits, in order', () => {
+  it('static ++ live emits exactly what the whole wall emits, in order', () => {
     const all = recordingCtx();
     drawWalls(all.ctx, fit, env, schedule, board(), 3, 'all');
     const split = recordingCtx();
-    for (const slice of ['before', 'live', 'after'] as const) {
+    for (const slice of ['static', 'live'] as const) {
       drawWalls(split.ctx, fit, env, schedule, board(), 3, slice);
     }
     expect(fmtOps(split.ops)).toEqual(fmtOps(all.ops));
@@ -1450,13 +1450,11 @@ describe('background layer (sprite cache)', () => {
   });
 
   it('the static slices read neither t nor the office hour — only the live fixtures do', () => {
-    for (const slice of ['before', 'after'] as const) {
-      const a = recordingCtx();
-      drawWalls(a.ctx, fit, computeLightEnv(9, true), schedule, board(), 1, slice);
-      const b = recordingCtx();
-      drawWalls(b.ctx, fit, { ...computeLightEnv(9, true), hours: 16.5 }, schedule, board(), 9, slice);
-      expect(fmtOps(a.ops), slice).toEqual(fmtOps(b.ops));
-    }
+    const a = recordingCtx();
+    drawWalls(a.ctx, fit, computeLightEnv(9, true), schedule, board(), 1, 'static');
+    const b = recordingCtx();
+    drawWalls(b.ctx, fit, { ...computeLightEnv(9, true), hours: 16.5 }, schedule, board(), 9, 'static');
+    expect(fmtOps(a.ops)).toEqual(fmtOps(b.ops));
     const live1 = recordingCtx();
     drawWalls(live1.ctx, fit, { ...env, hours: 9 }, schedule, board(), 3, 'live');
     const live2 = recordingCtx();
@@ -1484,10 +1482,8 @@ describe('background layer (sprite cache)', () => {
   });
 
   it('the shell sets every state it reads, so its sprite can start from the 2D defaults', () => {
-    for (const slice of ['before', 'after'] as const) {
-      const r = recordingCtx();
-      drawWalls(r.ctx, fit, env, schedule, board(), 3, slice);
-      expect(readsBeforeWrites(r.ops), slice).toEqual([]);
-    }
+    const r = recordingCtx();
+    drawWalls(r.ctx, fit, env, schedule, board(), 3, 'static');
+    expect(readsBeforeWrites(r.ops)).toEqual([]);
   });
 });
