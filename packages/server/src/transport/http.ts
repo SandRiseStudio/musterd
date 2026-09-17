@@ -209,7 +209,7 @@ import {
   touchAmbientPresence,
 } from '../store/presence.js';
 import {
-  lastActionByActor,
+  lastActionBySubject,
   quietestBusyMs,
   resolveQuiescence,
   QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
@@ -1569,7 +1569,7 @@ function summarize(
   // Quiescence (ADR 219): the decision-grade busy read, beside — never folded into — the
   // display fields below. One audit read for the whole roster; a seat with no evidence is absent
   // from the map and reports `unknown` rather than borrowing the shape of quiet.
-  const lastAction = lastActionByActor(ctx.db, teamId);
+  const lastAction = lastActionBySubject(ctx.db, teamId);
   const quiescenceNow = Date.now();
   return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
     // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update — plus

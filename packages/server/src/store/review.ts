@@ -16,7 +16,7 @@ import type { Database } from 'better-sqlite3';
 import { getMemberByName, listMembers } from './members.js';
 import { hasLivePresence } from './presence.js';
 import {
-  lastActionByActor,
+  lastActionBySubject,
   resolveQuiescence,
   QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
 } from './quiescence.js';
@@ -270,7 +270,7 @@ export function teamFamilyPosture(
   // for reasons other than going away, and a seat whose audit trail shows it acting seconds ago is
   // not idle, it is mid-something with a stale heartbeat. Waking it is not a remedy, it is a
   // duplicate. Read once for the whole roster; the per-seat lookup below is a Map hit.
-  const lastAction = lastActionByActor(db, teamId);
+  const lastAction = lastActionBySubject(db, teamId);
   const now = Date.now();
   let attesting = 0;
   let unattested = 0;
@@ -570,7 +570,7 @@ export function selectReviewCounterpart(
   worker: string,
   presenceTimeoutMs: number,
 ): ReviewSelection {
-  const lastWork = lastActionByActor(db, teamId, {
+  const lastWork = lastActionBySubject(db, teamId, {
     // Claims, credentials, and leases establish authority/Presence; none is work that should make
     // a counterpart busy. This keeps review selection orthogonal to the lease-bound HTTP authority.
     excludeActions: [

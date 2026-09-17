@@ -423,6 +423,209 @@ export type AuditAction =
   // Spec 2026-09-16 (workspace self-heal), ADR 408: what a SessionStart repair wrote, skipped, left.
   | 'workspace.repaired';
 
+/**
+ * ADR 410 — whose row is this? `'actor'` and `'target'` name the column holding **the seat that
+ * acted**; `'none'` says no seat acted at all.
+ *
+ * **Which question this answers.** The audit table carries five conventions for which column holds
+ * the seat a row concerns (census: `docs/wiki/audit-row-attribution.md`), and "who is this row
+ * about" and "who acted" are not the same question. They diverge on exactly one convention —
+ * counterparty-as-actor — and this map answers the SECOND, because that is what its three readers
+ * ask (`lastActionBySubject`, `quietestBusyMs`, `selectReviewCounterpart`: is this seat working
+ * right now?). So `grant.issue` is `'actor'`: the row is ABOUT the grantee and was ACTED by the
+ * admin, and crediting the grantee with work would be the live defect mirrored rather than fixed.
+ *
+ * `interrupt.raised` is the one action where the acting seat is in `target`, and it is why this map
+ * exists: the row is stamped when the RECIPIENT's tool-boundary probe fires, while `actor` holds
+ * the seat that sent the act — measured mean 4.6 h earlier, max 35 days. A probe firing IS the
+ * recipient working, so the row is real evidence pointed at the wrong seat.
+ *
+ * `'none'` is not "no seat is named". `residency.woke` names a seat in `target` and that seat did
+ * not act — the host reported on it, `actor` is null, and the seat's own first action lands as its
+ * own row moments later. Crediting it here would ADD attribution where there is none today, which
+ * is the opposite of the repair.
+ *
+ * **Replicated rows are out of scope.** `sync/fold.ts` inserts peer rows verbatim, carrying
+ * whatever convention their origin node used. This map describes rows THIS daemon writes. A reader
+ * folding a federated timeline cannot rely on it, and {@link auditSubjectSql} deliberately falls
+ * back to `actor` for an action it does not know — the behaviour every reader has today.
+ */
+export type AuditSubject = 'actor' | 'target' | 'none';
+
+/**
+ * Exhaustive over {@link AuditAction} by type, so a new verb cannot be added to the union without
+ * saying whose row it is — and {@link assertAuditSubjectDeclared} catches the ones that reach a
+ * writer as a plain string. Decision 2 of ADR 410: the map alone rots.
+ */
+export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject> = {
+  'urgent.flagged': 'actor',
+  'urgent.denied': 'actor',
+  'send.denied': 'actor',
+  'member.reclaim': 'actor',
+  'member.remove': 'actor',
+  'observe.denied': 'actor',
+  'infra.touch.warned': 'actor',
+  'grant.issue': 'actor',
+  'grant.revoke': 'actor',
+  'key.rotate': 'actor',
+  'policy.change': 'actor',
+  'account_status.change': 'actor',
+  'roster.role_query': 'actor',
+  'claim.occupied': 'actor',
+  'claim.refused': 'none',
+  'claim.pending': 'none',
+  'claim.failed': 'none',
+  'claim.reseated': 'actor',
+  'claim.duplicate_workspace': 'actor',
+  'claim.superseded': 'actor',
+  'agent_seat_credential.minted': 'actor',
+  'agent_seat_credential.rotated': 'actor',
+  'bootstrap_credential.minted': 'actor',
+  'bootstrap_credential.rotated': 'actor',
+  'bootstrap_credential.used': 'none',
+  'bootstrap_credential.refused': 'none',
+  'bootstrap_credential.expired': 'none',
+  'bootstrap_credential.revoked': 'actor',
+  'bootstrap_credential.migrated': 'actor',
+  'bootstrap_credential.migration_replaced': 'actor',
+  'bootstrap_credential.cutover': 'actor',
+  'agent_session_lease.revoked': 'actor',
+  'agent_session_lease.minted': 'actor',
+  'agent_session_lease.renewed': 'actor',
+  'request.decide': 'actor',
+  'request.expired': 'none',
+  'interrupt.raised': 'target',
+  'interrupt.refused': 'actor',
+  'inbox.rendered': 'actor',
+  'memory.save': 'actor',
+  'memory.clear': 'actor',
+  'continuity.memory_saved': 'actor',
+  'continuity.memory_cleared': 'actor',
+  'continuity.cursor_advanced': 'actor',
+  'record.tool_calls': 'actor',
+  'record.seed_thread': 'actor',
+  'record.incident_report': 'actor',
+  'seed.captured': 'actor',
+  'occupancy.model_attested': 'actor',
+  'presence.attached': 'actor',
+  'presence.detached': 'actor',
+  'presence.reattested': 'actor',
+  'git.pr_merged': 'actor',
+  'lane.ready_for_review': 'actor',
+  'lane.closed': 'actor',
+  'lane.review_sent_back': 'actor',
+  'lane.review_peer_confirmed': 'actor',
+  'lane.review_acknowledged': 'actor',
+  'lane.review_rerouted': 'actor',
+  'lane.released': 'actor',
+  'lane.claimed': 'actor',
+  'lane.updated': 'actor',
+  'lane.state_changed': 'actor',
+  'lane.opened': 'actor',
+  'seed.ingested': 'actor',
+  'seed.claimed': 'actor',
+  'seed.clarification_asked': 'actor',
+  'seed.clarification_answered': 'actor',
+  'seed.brief_submitted': 'actor',
+  'seed.completed': 'actor',
+  'seed.promoted': 'actor',
+  'handoff.lane_derived': 'actor',
+  'handoff.lane_ambiguous': 'actor',
+  'incident.opened': 'actor',
+  'incident.report_appended': 'actor',
+  'incident.duplicate_replied': 'actor',
+  'incident.routed': 'none',
+  'incident.route_unfilled': 'none',
+  'residency.enrolled': 'actor',
+  'residency.revoked': 'actor',
+  'residency.wake_leased': 'none',
+  'residency.woke': 'none',
+  'residency.wake_failed': 'none',
+  'residency.wake_exhausted': 'none',
+  'residency.wake_deferred': 'none',
+  'residency.host_suspended': 'none',
+  'residency.session_captured': 'none',
+  'residency.session_ended': 'none',
+  'nudge.decision': 'actor',
+  'residency.wake_cost': 'none',
+  'residency.wake_report_rejected': 'none',
+  'residency.context_read': 'actor',
+  'inbox.deferred': 'actor',
+  'mcp.surface_rendered': 'actor',
+  'ask.raised': 'actor',
+  'ask.deferred': 'actor',
+  'ask.held': 'actor',
+  'ask.risk_accepted': 'actor',
+  'ask.stranded': 'actor',
+  'ask.surfaced': 'actor',
+  'lane.gate': 'actor',
+  'action.gate': 'actor',
+  'actor.subagent_write': 'actor',
+  'actor.subagent_spawn': 'actor',
+  'actor.session_message': 'actor',
+  'credential.rotate': 'actor',
+  'signin.handoff_staged': 'actor',
+  'signin.handoff_redeemed': 'actor',
+  'signin.handoff_missed': 'none',
+  'team.archive': 'actor',
+  'footprint.reaped': 'actor',
+  'node.invited': 'actor',
+  'node.enrolled': 'none',
+  'node.enrollment_refused': 'none',
+  'node.rotated': 'actor',
+  'node.revoked': 'actor',
+  'seat.bound': 'actor',
+  'seat.bound_elsewhere': 'actor',
+  'seat.unbound': 'actor',
+  'seat.node_trusted': 'actor',
+  'workspace.repaired': 'actor',
+};
+
+/** The actions whose acting seat is in `target`, and those where no seat acted. */
+const TARGET_SUBJECT_ACTIONS = Object.keys(AUDIT_SUBJECT).filter(
+  (a) => AUDIT_SUBJECT[a as AuditAction] === 'target',
+);
+const NO_SUBJECT_ACTIONS = Object.keys(AUDIT_SUBJECT).filter(
+  (a) => AUDIT_SUBJECT[a as AuditAction] === 'none',
+);
+
+/**
+ * Armed outside production. A missing entry is a programming error a test or a dev run must not be
+ * able to walk past — but `appendAudit` is best-effort observability and never a gate (ADR 071), so
+ * a production daemon warns and still writes the row rather than failing the request it is
+ * recording. The row is worth more than the refusal; the refusal is worth more than the silence.
+ */
+const AUDIT_SUBJECT_ARMED = process.env.NODE_ENV !== 'production';
+
+/** Decision 2: a new audit action cannot be added without saying whose row it is. */
+export function assertAuditSubjectDeclared(action: string): void {
+  if (AUDIT_SUBJECT[action as AuditAction] !== undefined) return;
+  const msg =
+    `audit action '${action}' has no AUDIT_SUBJECT entry — declare whose row it is in ` +
+    `store/audit.ts (ADR 410), 'actor' | 'target' | 'none'`;
+  if (AUDIT_SUBJECT_ARMED) throw new Error(msg);
+  log.warn({ msg: 'audit_subject_undeclared', action });
+}
+
+/**
+ * The SQL expression naming the seat that acted, for a generic reader that must not care which
+ * convention an action uses. Yields NULL for a `'none'` action, so the row drops out of a GROUP BY
+ * key or a members join without the caller writing a second predicate.
+ *
+ * An action absent from the map — a replicated row from a peer running a newer build — falls back
+ * to `actor`. That is exactly what every one of these readers does today, so an unknown verb is no
+ * worse off than before this landed, and decision 5's out-of-scope line is kept honestly rather
+ * than by pretending the map covers the wire.
+ */
+export function auditSubjectSql(alias = 'a'): string {
+  const list = (xs: string[]) => xs.map((x) => `'${x}'`).join(', ');
+  return (
+    `CASE WHEN ${alias}.action IN (${list(NO_SUBJECT_ACTIONS)}) THEN NULL` +
+    ` WHEN ${alias}.action IN (${list(TARGET_SUBJECT_ACTIONS)}) THEN ${alias}.target` +
+    ` ELSE ${alias}.actor END`
+  );
+}
+
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */
   actor: string | null;
@@ -463,6 +666,7 @@ export interface AuditRow {
  * would be a transition the origin holds and no peer ever sees — exactly the hole this closes.
  */
 export function appendReplicatedEvent(db: Database, teamId: string, entry: AuditEntry): void {
+  assertAuditSubjectDeclared(entry.action);
   db.transaction(() => {
     const node = localNodeForTeam(db, teamId);
     const seq = db
@@ -535,6 +739,7 @@ export const REPLICATED_LEDGER_VERBS = new Set([
 
 /** Insert an audit row and surface failure when the caller's transaction requires the evidence. */
 export function appendAuditRequired(db: Database, teamId: string, entry: AuditEntry): void {
+  assertAuditSubjectDeclared(entry.action);
   const now = Date.now();
   const row: AuditRow = {
     id: ulid(),
@@ -560,6 +765,10 @@ export function appendAuditRequired(db: Database, teamId: string, entry: AuditEn
  * swallowed so it can never break the request path it is recording.
  */
 export function appendAudit(db: Database, teamId: string, entry: AuditEntry): void {
+  // Before the try, deliberately: the undeclared-action refusal is a programming error, and the
+  // catch below exists to swallow STORAGE failures so observability can never break a request path.
+  // Inside it, decision 2 would be logged and walked past — which is the decay it exists to stop.
+  assertAuditSubjectDeclared(entry.action);
   if (REPLICATED_LEDGER_VERBS.has(entry.action)) {
     try {
       appendReplicatedEvent(db, teamId, entry);

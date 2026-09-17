@@ -1,5 +1,6 @@
 import type { Quiescence } from '@musterd/protocol';
 import type { Database } from '../db/open.js';
+import { auditSubjectSql } from './audit.js';
 
 /**
  * Quiescence — the decision-grade "is this seat busy right now" read (2026-08-03 design; spec in
@@ -61,10 +62,23 @@ export function resolveQuiescence(
 const NOT_PRESENCE_SQL = "a.action NOT LIKE 'presence.%'";
 
 /**
- * Per-seat newest audited action for one team: `actor name → ts`. One query for the whole roster —
+ * ADR 410: the seat that ACTED on a row, whichever column its action puts it in — `actor` for the
+ * four subject-as-actor conventions, `target` for `interrupt.raised`, NULL for a machine-written
+ * row where no seat acted. Both readers below key by seat NAME, so this expression drops straight
+ * into a GROUP BY and a members join.
+ *
+ * Before this, both read `a.actor` flat. That credited the SENDER of an interrupting act at the
+ * moment the RECIPIENT's probe fired — mean 4.6 h after the send, max 35 days, and seven rows in
+ * the table's history where that row alone set a seat's "last acted"
+ * (`docs/wiki/audit-row-attribution.md`).
+ */
+const SUBJECT_SQL = auditSubjectSql('a');
+
+/**
+ * Per-seat newest audited action for one team: `subject seat name → ts` (ADR 410). One query for the whole roster —
  * the caller renders every member, and a per-member query would turn a roster read into N of them.
  *
- * An actor with no audited action inside the lookback is **absent from the map**, never present
+ * A seat with no audited action inside the lookback is **absent from the map**, never present
  * with a zero or a floor value. Absence is how `unknown` survives the trip to the caller: a `Map`
  * miss is unambiguous in a way a sentinel number is not, and the ADR 169/189 discipline only works
  * if "I have no evidence" cannot be mistaken for "I have evidence of quiet".
@@ -74,7 +88,7 @@ const NOT_PRESENCE_SQL = "a.action NOT LIKE 'presence.%'";
  * renders humans too — and the wake pool, which reads only the offline seats it was already
  * considering. Filtering belongs to whoever knows why.
  */
-export function lastActionByActor(
+export function lastActionBySubject(
   db: Database,
   teamId: string,
   opts: { now?: number; lookbackMs?: number; excludeActions?: string[] } = {},
@@ -86,19 +100,21 @@ export function lastActionByActor(
     exclude.length === 0
       ? db
           .prepare<[string, number], { actor: string; last_ts: number }>(
-            `SELECT a.actor AS actor, MAX(a.ts) AS last_ts
+            `SELECT ${SUBJECT_SQL} AS actor, MAX(a.ts) AS last_ts
                FROM audit a
               WHERE a.team_id = ? AND a.ts > ? AND ${NOT_PRESENCE_SQL}
-              GROUP BY a.actor`,
+                AND ${SUBJECT_SQL} IS NOT NULL
+              GROUP BY ${SUBJECT_SQL}`,
           )
           .all(teamId, now - lookback)
       : db
           .prepare<[string, number, ...string[]], { actor: string; last_ts: number }>(
-            `SELECT a.actor AS actor, MAX(a.ts) AS last_ts
+            `SELECT ${SUBJECT_SQL} AS actor, MAX(a.ts) AS last_ts
                FROM audit a
               WHERE a.team_id = ? AND a.ts > ? AND ${NOT_PRESENCE_SQL}
+                AND ${SUBJECT_SQL} IS NOT NULL
                 AND a.action NOT IN (${exclude.map(() => '?').join(', ')})
-              GROUP BY a.actor`,
+              GROUP BY ${SUBJECT_SQL}`,
           )
           .all(teamId, now - lookback, ...exclude);
   return new Map(rows.map((r) => [r.actor, r.last_ts]));
@@ -125,7 +141,7 @@ export function quietestBusyMs(
     .prepare<[number, number], { last_ts: number | null }>(
       `SELECT MAX(a.ts) AS last_ts
        FROM audit a
-       JOIN members m ON m.team_id = a.team_id AND m.name = a.actor
+       JOIN members m ON m.team_id = a.team_id AND m.name = ${SUBJECT_SQL}
        WHERE a.ts > ? AND ${NOT_PRESENCE_SQL}
          AND m.kind = 'agent'
          AND EXISTS (

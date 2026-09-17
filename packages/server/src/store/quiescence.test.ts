@@ -6,7 +6,7 @@ import { attach } from './presence.js';
 import {
   resolveQuiescence,
   quietestBusyMs,
-  lastActionByActor,
+  lastActionBySubject,
   QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
 } from './quiescence.js';
 import { createTeam } from './teams.js';
@@ -65,7 +65,7 @@ describe('quietestBusyMs (db read for /health)', () => {
   }
   const act = (db: any, teamId: string, actor: string, at: number) => {
     vi.setSystemTime(at);
-    appendAudit(db, teamId, { actor, action: 'x.did', target: null, result: 'allow' });
+    appendAudit(db, teamId, { actor, action: 'roster.role_query', target: null, result: 'allow' });
   };
 
   it('returns the age of the most recent action across LIVE agent seats', () => {
@@ -126,7 +126,7 @@ describe('quietestBusyMs (db read for /health)', () => {
   });
 });
 
-describe('lastActionByActor (per-seat read for the roster + wake pool, ADR 219)', () => {
+describe('lastActionBySubject (per-seat read for the roster + wake pool, ADR 219)', () => {
   function seed() {
     const db = openDb(':memory:');
     const team = createTeam(db, { slug: 'revive' });
@@ -137,10 +137,10 @@ describe('lastActionByActor (per-seat read for the roster + wake pool, ADR 219)'
   }
   const act = (db: any, teamId: string, actor: string, at: number) => {
     vi.setSystemTime(at);
-    appendAudit(db, teamId, { actor, action: 'x.did', target: null, result: 'allow' });
+    appendAudit(db, teamId, { actor, action: 'roster.role_query', target: null, result: 'allow' });
   };
 
-  it('maps each actor to its NEWEST action, and omits actors with none', () => {
+  it('maps each subject to its NEWEST action, and omits seats with none', () => {
     vi.useFakeTimers();
     try {
       const { db, team } = seed();
@@ -149,7 +149,7 @@ describe('lastActionByActor (per-seat read for the roster + wake pool, ADR 219)'
       act(db, team.id, 'ada', now - 20_000); // newest wins
       act(db, team.id, 'nick', now - 1_000);
       vi.setSystemTime(now);
-      const seen = lastActionByActor(db, team.id, { now });
+      const seen = lastActionBySubject(db, team.id, { now });
       expect(seen.get('ada')).toBe(now - 20_000);
       // Humans are included here (unlike /health): the roster renders every seat, and the
       // agents-only narrowing is the WAKE consumer's, not this read's.
@@ -171,10 +171,10 @@ describe('lastActionByActor (per-seat read for the roster + wake pool, ADR 219)'
       act(db, team.id, 'ada', now - 3 * 60 * 60_000); // stale evidence is no evidence
       act(db, other.id, 'lin', now - 5_000); // another team's seat, same daemon
       vi.setSystemTime(now);
-      const seen = lastActionByActor(db, team.id, { now, lookbackMs: 60 * 60_000 });
+      const seen = lastActionBySubject(db, team.id, { now, lookbackMs: 60 * 60_000 });
       expect(seen.has('ada')).toBe(false);
       expect(seen.has('lin')).toBe(false);
-      expect(lastActionByActor(db, other.id, { now }).get('lin')).toBe(now - 5_000);
+      expect(lastActionBySubject(db, other.id, { now }).get('lin')).toBe(now - 5_000);
     } finally {
       vi.useRealTimers();
     }
@@ -186,7 +186,12 @@ describe('lastActionByActor (per-seat read for the roster + wake pool, ADR 219)'
       const { db, team } = seed();
       const now = 10_000_000;
       vi.setSystemTime(now - 60_000);
-      appendAudit(db, team.id, { actor: 'ada', action: 'x.did', target: null, result: 'allow' });
+      appendAudit(db, team.id, {
+        actor: 'ada',
+        action: 'roster.role_query',
+        target: null,
+        result: 'allow',
+      });
       vi.setSystemTime(now);
       appendAudit(db, team.id, {
         actor: 'ada',
@@ -194,8 +199,8 @@ describe('lastActionByActor (per-seat read for the roster + wake pool, ADR 219)'
         target: 'ada',
         result: 'allow',
       });
-      const all = lastActionByActor(db, team.id, { now });
-      const work = lastActionByActor(db, team.id, {
+      const all = lastActionBySubject(db, team.id, { now });
+      const work = lastActionBySubject(db, team.id, {
         now,
         excludeActions: ['occupancy.model_attested'],
       });
