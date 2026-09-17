@@ -180,16 +180,16 @@ export function registerLanes(
     {
       description:
         'The lane board: who owns what, in what state, with live contention warnings. Pull at ' +
-        'task start and before picking up new work. On a seat with history, pass state (e.g. ' +
-        '["claimed", "active"]) — without it, done rows bury the live ones.',
+        'task start and before picking up new work.',
       inputSchema: {
         project: z.string().optional().describe('filter to one project'),
         mine: z.boolean().optional().describe('only lanes I own'),
         open: z.boolean().optional().describe('only unowned/claimable lanes'),
-        state: z
-          .array(z.enum(LaneStateSchema.options))
-          .optional()
-          .describe('only lanes in these states, e.g. ["claimed", "active"]'),
+        // Plain strings, not z.enum(LaneStateSchema.options): the 8 enum values cost ~100 B
+        // of standing context and broke context:check (lane 01M2R988GK). The server re-validates
+        // against LaneStateSchema at the boundary and its 400 names the valid values, so a typo
+        // still gets a useful answer — validation lives in one place, not two.
+        state: z.array(z.string()).optional().describe('only these states'),
       },
     },
     async (args) => {
