@@ -82,17 +82,34 @@ no tier. It is the third field that mirror had resolved-then-dropped, after `wor
 
 ## Observability & Evaluation
 
-- **Falsifier for decision 1:** claim three seats over the WS frame with `observed`, `binding`,
-  and no tier; `GET /teams/:slug/members` must show `model_source` of `observed`, `binding`, and
-  `null` on the respective occupancy. Pinned in `integration.test.ts` and `store.test.ts`.
-- **Falsifier for decision 2:** attach a seat attesting `observed`, write an audit row naming it,
-  re-attest a different model, write another; the first row must keep the first model. Pinned in
-  `store.test.ts`. Each of the six new tests was run red with the stamp and the projection removed.
-- **Falsifier for decision 3:** `POST /claim` with `model` and `model_source: 'observed'`; the
-  presence row and the `claim.occupied` audit row must both carry `observed`. Pinned in
-  `claim-http.test.ts`.
-- **Eval, at the first post-merge read of `/audit` on the live daemon:** the share of rows with a
-  non-null `actor` and a null `actor_model` since migration 68. Agent seats with a live attestation
-  should stamp; a high share among agent-actor rows means the by-name lookup is missing rows it
-  should find (a seat renamed, a presence that expired between the action and the write) and the
-  stamp should read the request's own attestation instead.
+**Traces.** Every audit row written from now on carries `actor_model` and `actor_model_source`,
+which is itself the trace: the columns say, per row, what the acting seat was attesting. The
+existing `occupancy.model_attested` row still records each change of attestation, so the two read
+together — the model-attested row says when a seat's claim changed, and every row between two of
+them carries the value that held at the time. No new verb.
+
+**Eval.** Six tests, each mutation-controlled (neutralise the production line; exactly the claimed
+tests go red, the rest stay green — verified 2026-09-17, all six red with `stampFor` and the
+presence projection removed):
+
+- The roster projection carries `model_source` for `observed`, for `binding`, and `null` for a
+  model attested with no tier (`store.test.ts`, `integration.test.ts` over `GET /members`).
+- An audit row naming an attesting actor is stamped; one naming a seat with no live attestation,
+  and one naming no actor at all, are both null/null (`store.test.ts`).
+- The stamp is frozen at write time: a re-attestation between two rows leaves the first row alone
+  (`store.test.ts`).
+- A replicated entry that arrives carrying its own stamp keeps it (`store.test.ts`).
+- `POST /claim` with a tier lands it on the occupancy and on the `claim.occupied` row
+  (`claim-http.test.ts`).
+
+Baseline: on `origin/main` at `bab32e20`, every one of those reads is absent or null — the dataset
+is the six cases above, and the pre-change value of each is "the field does not exist".
+
+**Experiment.** At the first post-merge read of `/audit` on the live daemon, measure the share of
+rows with a non-null `actor` and a null `actor_model`, among rows written after migration 68 whose
+actor is an agent seat. The prediction is that the share is small: agent seats that act are
+usually seats that attested at claim. A large share falsifies the by-name-lookup design — it would
+mean the write edge routinely cannot find the actor's presence (a seat renamed, a presence expired
+between the action and the write), and the stamp should read the request's own attestation header
+instead of the presence table. No threshold is pre-registered because the base rate of
+attesting-vs-not among acting seats has never been measured; this read establishes it.
