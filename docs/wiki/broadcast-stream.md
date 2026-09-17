@@ -152,7 +152,33 @@ Every armed counter read healthy, for the same reason as the claim above and one
 
 **Sized from measurement:** 12/s sits ~33 % under the healthy median (18) and 50 % over the observed failure (8.06), judged over a 60 s window because the fault is sustained and the office's own bursts move the instantaneous rate far more than the fault does. The probe is a CDP read of `window.__office.stats()` every 10 s and is **always on** — the whole finding of the day was that the instrument which could have seen this (`deliveredFps`, behind `MUSTERD_BROADCAST_PERF`) was opt-in, so on an ordinary run nothing was watching.
 
-**Not yet answered by this:** *why* the per-frame draw got dearer. The CPU profile on the live page is 50.4 % `(program)` — native Skia raster under canvas 2D gradients, fills and text, on a box with no GPU (`--use-angle=swiftshader-webgl`) — with the scene's own JS at ~6 % of samples. Whether that is more content than the baseline run had, or a draw path that got dearer per unit of content, is open.
+**Why the picture was at half speed is answered in the next claim, and the answer is not a regression.** The CPU profile on the live page is 50.4 % `(program)` — native Skia raster under canvas 2D gradients, fills and text, on a box with no GPU (`--use-angle=swiftshader-webgl`) — with the scene's own JS at ~6 % of samples. The floor stands on its own either way: whatever the cause, a half-rate picture must say so.
+
+## The office never had headroom on the capture box, and two identical boxes differ by ~20 % — which is the whole "regression" (2026-09-17; falsify: run `/broadcast` at 1920x1080 on a fresh performance-4x with nothing else on it and read blocked-ms-per-draw; anything near 20 draws/s falsifies this) <!-- claim: other -->
+
+Chasing the half-rate picture above produced two suspects, and **measurement killed both**.
+
+**Occupancy is not it.** `/office-preview?quiet&n=<count>` on a dedicated performance-4x (nothing else running), 30 s per point after a 12 s settle, `beats` 0 at every point so the loop never parked. The metric is blocked main-thread ms per draw, not draws/s — a fuller room is also a busier room, and a rate alone cannot separate "each frame costs more" from "there is more to animate":
+
+| n | 1 | 2 | 4 | 8 | 12 | 16 | 24 |
+|---|---|---|---|---|---|---|---|
+| msPerDraw | 39.1 | 40.0 | 39.8 | 40.8 | 42.3 | 42.7 | 43.1 |
+| drawFps | 19.30 | 19.89 | 20.40 | 19.53 | 19.53 | 18.93 | 18.65 |
+
+**24x the members buys +10 % per-frame cost.** The cost is the room — floor, walls, lighting, gradients — not who is standing in it.
+
+**The props commit is innocent, and it looked guilty.** `1db0152a` ("Desks get three more things on them", 2026-09-16 16:41Z) took `PROP_KINDS` from five to eight and added per-desk notebooks, pens and books: +105 lines in `office-scene/render.ts`, landing *after* the healthy 03:45Z baseline and *before* the degradation, and per-*desk* rather than per-member, which even explained why the occupancy sweep came out flat. It is still not the cause. Interleaved A/B/A/B on one box, 40 s per arm, `?quiet&n=8`, both bundles built from this repo and served side by side:
+
+| arm | old (`1db0152a^`) | new (HEAD) | old | new |
+|---|---|---|---|---|
+| msPerDraw | 50.2 | 54.0 | 47.4 | 47.2 |
+| drawFps | 16.24 | 14.62 | 17.09 | 16.93 |
+
+Each bundle's own two runs disagree by as much as the bundles disagree with each other. The interleaving is what makes that readable: box drift shows up *within* an arm instead of *between* arms.
+
+**What is actually true.** The real `/broadcast` page costs **56.1 ms per draw and reaches 15.35 draws/s on an idle box** — no ffmpeg, no screencast, nothing competing. It cannot hold 20 fps before the capture pipeline takes its share, so the live 8.06 is what this hardware does with this page, not a fault that appeared. And **box-to-box variance is ~20 % on identical work** (40.8 ms at n=8 on one machine, 47-54 ms on another, same spec, same hour), which is large enough to account for "18 draws/s on 2026-09-16, 15.35 today" with no code change at all. A single-box before/after across days is not evidence here; only an interleaved A/B on one box is.
+
+**So the open question is a budget, not a bug:** cheaper scene (the ~39 ms fixed cost is the static room re-rastered every frame — caching that layer is the obvious cut), a bigger box, or a smaller stage. The stage is **not** a flag: ADR 157 fixes it at 1920x1080, and a capture launched with `--window-size=1280,720` merely clips the viewport while the canvas stays 1080p (measured: 99.9 % blocked, gapP50 95.6 — the signature of a clipped 1080p canvas, not a cheaper one).
 
 ## Every health signal the capture had measured the encoder, and the encoder is downstream of the freeze (2026-09-16; falsify: `Page.stopScreencast` mid-run and watch ffmpeg keep reporting a healthy rate) <!-- claim: defect -->
 
