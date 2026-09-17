@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TOKEN_PREFIXES } from './credentials.js';
 import {
   ApertureConfigResponseSchema,
   ApertureConfigSchema,
@@ -8,7 +9,6 @@ import {
   TailscaleServeStatusSchema,
   TailscaleStatusSchema,
 } from './integrations.js';
-import { TOKEN_PREFIXES } from './credentials.js';
 
 const apertureConfig = {
   providers: {

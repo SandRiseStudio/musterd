@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
+import { openLane } from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
 import { bindNode, bindSeatToNode } from '../store/nodes.js';
 import { attach } from '../store/presence.js';
 import { getTeamBySlug } from '../store/teams.js';
-import { openLane } from '../store/lanes.js';
 
 let server: RunningServer;
 let base: string;
