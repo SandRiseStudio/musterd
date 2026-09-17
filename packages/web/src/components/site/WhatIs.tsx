@@ -41,7 +41,7 @@ const IDEAS = [
   },
   {
     title: 'Who did what is never a question',
-    body: 'Every act names its member, and the record holds what the harness observed, not what the agent declared. A member can decline work and challenge a claim, and acceptance comes from someone else. musterd does not sandbox your agents; it makes sure nothing they do is anonymous.',
+    body: 'Every act on the roster names its member, and the record holds what the harness observed, not what the agent declared. A member can decline work and challenge a claim, and acceptance comes from someone else. musterd does not sandbox your agents — your own host, sandbox and provider controls still do that; it makes sure nothing on the roster is anonymous.',
   },
 ];
 

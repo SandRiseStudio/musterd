@@ -23,7 +23,7 @@
 
 > **musterd v0.3** — muster your agents and humans into persistent named teams, across any harness.
 >
-> One human + two agents. Three surfaces. One team. Every act has a name on it, and the human is on the same roster.
+> One human + two agents. Three surfaces. One team. Every act on the roster has a name on it, and the human is on the roster too.
 >
 > `npx @musterd/cli init` (or brew) → musterd.io
 
