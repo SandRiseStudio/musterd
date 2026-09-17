@@ -34,7 +34,7 @@ identity, and it was pruned the same day.
 Two faults, independent of each other.
 
 **The rule names the wrong cause.** Both channels resolve a seat from the same
-`.musterd/binding.json`, so in a seat's own worktree they agree by construction. What decides the
+`.musterd/binding.json`, so in a seat's own Workspace they agree by construction. What decides the
 seat is the working directory. Measured 2026-09-17 against daemon build `76b4b16`:
 
 | cwd | `musterd whoami` |
@@ -44,7 +44,7 @@ seat is the working directory. Measured 2026-09-17 against daemon build `76b4b16
 | `~` (unbound) | `nick on revive (cli · config)  (read-only)` |
 
 So the rule forbade a safe thing and stayed silent about a dangerous one: run the CLI from a
-teammate's worktree and you act as them.
+teammate's Workspace and you act as them.
 
 **The rule forbids what we prescribe.** `renderOrientSkill` — in the same file as the rule —
 ends orientation on `musterd session orient-stamp`, a CLI write. The MCP surface is `lane_*` and
@@ -65,7 +65,7 @@ then the guidance told it that leaving was the error.
    has them. The `musterd` CLI is the right route where no tool exists, and using both is not a
    fault.
 2. **The identity warning names the working directory.** The CLI acts as the seat bound to the
-   folder it runs in; from a teammate's worktree it acts as them, and from an unbound folder it
+   folder it runs in; from a teammate's Workspace it acts as them, and from an unbound folder it
    falls back to a read-only config identity. `musterd whoami` is the check.
 3. **Guidance may not forbid what the team's own skills prescribe.** Where a shipped skill
    instructs a command, the standing context must permit it. `session orient-stamp` is named
@@ -96,5 +96,5 @@ each verified red before the change. Failure is any future edit that reintroduce
 only", "do not drive both", or a claim that the registration carries a second identity.
 
 **Experiment** — n/a. The claim is falsifiable by direct observation, not by traffic: run
-`musterd whoami` from two sibling seat worktrees. If both name the same member, the cwd does not
+`musterd whoami` from two sibling seat Workspaces. If both name the same member, the cwd does not
 decide identity and Decision 2 is wrong.
