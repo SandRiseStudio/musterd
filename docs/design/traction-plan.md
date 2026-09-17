@@ -118,9 +118,19 @@ stuck. That last line is the product research; the install is the excuse for it.
 hit; they are what the inputs nick controls should produce, and the inputs are the plan. The
 product has no usage analytics ([PRIVACY.md](../../PRIVACY.md)), so installs and "active a week
 later" are hand-counted from conversations, with three passive proxies read every Sunday:
-npm weekly downloads (baseline 2026-09-16: `@musterd/cli` 5, `@musterd/mcp` 16 — that is the
-team), GitHub stars and unique visitors (0 and 7), and musterd.io Get Started page views (beacon
-live since 2026-09-14).
+
+- **npm downloads — the current version only**, via `pnpm npm:downloads`. Baseline 2026-09-17:
+  8–11 downloads a week of `0.4.2` per package, and days at zero. *Do not quote the headline
+  number.* `downloads/point/last-month` answered **223** for the CLI against a true floor of 0–3 a
+  day, because registry mirrors walk the whole `@musterd` scope: the bursts move all five packages
+  in near-lockstep (339 / 307 / 356 / 326 in the week of Aug 3) and, in one quiet week, the CLI was
+  fetched across **eight versions including 0.0.0 and 0.0.1**. Roughly 40× inflation, in the
+  direction that flatters us. The script prints the current-version column and names the lockstep
+  days. *Falsify: a burst day where the CLI leads its own dependencies and the downloads land on
+  the current version is a real install spike, not a mirror — which is what a launch should look
+  like.*
+- **GitHub** stars and unique visitors (0 and 7 on 2026-09-16).
+- **musterd.io** Get Started page views (beacon live since 2026-09-14).
 
 The funnel, per event, with the numbers a night at a demo event actually yields:
 
