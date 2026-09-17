@@ -634,6 +634,7 @@ export class MusterdClient {
       mine?: boolean | undefined;
       open?: boolean | undefined;
       goal?: string | undefined;
+      state?: string[] | undefined;
     } = {},
   ): Promise<{ lanes: Lane[]; warnings: LaneWarning[] }> {
     const params = new URLSearchParams();
@@ -641,6 +642,7 @@ export class MusterdClient {
     if (q.mine) params.set('mine', '1');
     if (q.open) params.set('open', '1');
     if (q.goal) params.set('goal', q.goal);
+    for (const s of q.state ?? []) params.append('state', s);
     const qs = params.toString();
     return this.request('GET', `/teams/${this.config.team}/lanes${qs ? `?${qs}` : ''}`);
   }

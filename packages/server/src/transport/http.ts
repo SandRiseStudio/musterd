@@ -46,11 +46,13 @@ import {
   eligibleOf,
   emptyPoolFromCandidates,
   LANE_TERMINAL_STATES,
+  LaneStateSchema,
   ACCEPTANCE_MOVES_NOTICE,
   isAwaitingAcceptance,
   makeEnvelope,
   type Envelope,
   type Lane,
+  type LaneState,
   type LaneWarning,
   type MemberSummary,
   type Provenance,
@@ -4680,6 +4682,24 @@ export async function handleHttp(
 
       if (method === 'GET' && rest === '/lanes') {
         const { team, member } = authTouch(ctx, slug, req);
+        // Repeatable `?state=` — validated against the canonical state enum at the boundary,
+        // so `?state=bogus` is a 400 naming the value, never a silent empty board.
+        const states: LaneState[] = [];
+        for (const raw of url.searchParams.getAll('state')) {
+          const parsed = LaneStateSchema.safeParse(raw);
+          if (!parsed.success) {
+            return sendJson(res, 400, {
+              error: {
+                code: 'bad_request',
+                message:
+                  `unknown lane state ${JSON.stringify(raw)} — want one of: open, claimed, ` +
+                  `active, blocked, awaiting_acceptance, ready_for_review, done, abandoned ` +
+                  `(repeat ?state= per value)`,
+              },
+            });
+          }
+          states.push(parsed.data);
+        }
         const lanes = listLanes(ctx.db, team.id, team.slug, {
           ...(url.searchParams.get('project') !== null
             ? { project: url.searchParams.get('project')! }
@@ -4689,6 +4709,7 @@ export async function handleHttp(
           ...(url.searchParams.get('goal') !== null
             ? { goalId: url.searchParams.get('goal')! }
             : {}),
+          ...(states.length > 0 ? { states } : {}),
         });
         // Contention warnings (ADR 083) + staleness warnings (ADR 111 §5), one board read. Staleness is
         // team-wide (a Goal's epoch is a team fact); intersect it with the lanes this filtered view shows

@@ -5500,6 +5500,28 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(brief.json.why.from).toBe('nick');
     expect(brief.json.why.goal_id).toBe('orientation-spine');
   });
+
+  it('board ?state= filters by lane state; unknown state is a 400 naming the value (lane 01M2R988GK)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const live = await post('/teams/dawn/lanes', { title: 'live work', claim: true }, ada);
+    await req('PATCH', `/teams/dawn/lanes/${live.json.lane.id}`, { state: 'active' }, ada);
+    const old = await post('/teams/dawn/lanes', { title: 'old work', claim: true }, ada);
+    await req('PATCH', `/teams/dawn/lanes/${old.json.lane.id}`, { state: 'done' }, ada);
+
+    // mine alone returns both — the overflow this lane fixes.
+    const mine = await get('/teams/dawn/lanes?mine=1', ada);
+    expect(mine.json.lanes).toHaveLength(2);
+    // mine + state returns only the live one.
+    const filtered = await get('/teams/dawn/lanes?mine=1&state=claimed&state=active', ada);
+    expect(filtered.json.lanes.map((l: { id: string }) => l.id)).toEqual([live.json.lane.id]);
+    // Unknown state is a 400 naming the value, never a silent empty board.
+    const bad = await get('/teams/dawn/lanes?state=bogus', ada);
+    expect(bad.status).toBe(400);
+    expect(bad.json.error.message).toMatch(/bogus/);
+  });
 });
 
 describe('two-stage close (ADR 169)', () => {

@@ -180,11 +180,16 @@ export function registerLanes(
     {
       description:
         'The lane board: who owns what, in what state, with live contention warnings. Pull at ' +
-        'task start and before picking up new work.',
+        'task start and before picking up new work. On a seat with history, pass state (e.g. ' +
+        '["claimed", "active"]) — without it, done rows bury the live ones.',
       inputSchema: {
         project: z.string().optional().describe('filter to one project'),
         mine: z.boolean().optional().describe('only lanes I own'),
         open: z.boolean().optional().describe('only unowned/claimable lanes'),
+        state: z
+          .array(z.enum(LaneStateSchema.options))
+          .optional()
+          .describe('only lanes in these states, e.g. ["claimed", "active"]'),
       },
     },
     async (args) => {
