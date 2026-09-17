@@ -233,9 +233,11 @@ const evaluate = async (expression) => {
 const waitForScene = async (ms = 20000) => {
   const until = Date.now() + ms;
   while (Date.now() < until) {
-    const ready = await evaluate('!!(window.__office && window.__office.stats().draws > 0)').catch(
-      () => false,
-    );
+    /* `spriteParity` exists in DEV builds only — a production bundle drops it (ADR 151's total-JS
+       budget), so pointing this gate at a built site reports a harness failure, never a pass. */
+    const ready = await evaluate(
+      '!!(window.__office && window.__office.spriteParity && window.__office.stats().draws > 0)',
+    ).catch(() => false);
     if (ready) return true;
     await new Promise((r) => setTimeout(r, 250));
   }
@@ -252,13 +254,13 @@ for (const state of MATRIX) {
   if (state.theme) {
     // Navigation is async; wait for the scene first, then set the theme and let a frame pass.
     if (!(await waitForScene())) {
-      harnessFailure = `${state.name}: the office never mounted at ${url}`;
+      harnessFailure = `${state.name}: no dev office with spriteParity at ${url} (needs vite dev, not a built site)`;
       break;
     }
     await evaluate(`document.documentElement.dataset.theme = ${JSON.stringify(state.theme)}`);
     await new Promise((r) => setTimeout(r, 400));
   } else if (!(await waitForScene())) {
-    harnessFailure = `${state.name}: the office never mounted at ${url}`;
+    harnessFailure = `${state.name}: no dev office with spriteParity at ${url} (needs vite dev, not a built site)`;
     break;
   }
   /* The room settles: `?still` plays its script once and stops, so give it a moment to arrive at

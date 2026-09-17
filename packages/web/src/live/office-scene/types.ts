@@ -249,12 +249,14 @@ export interface OfficeHandle {
    * more than it saves. */
   stats: () => OfficeStats;
   /**
-   * Dev + gate only: render this exact scene state twice, direct and through a fresh sprite cache,
-   * and compare the bytes (`scripts/perf/scene-pixel-check.mjs`). Never called by the app.
+   * DEV BUILDS ONLY (absent in production — ADR 151's total-JS budget): render this exact scene
+   * state twice, direct and through a fresh sprite cache, and compare the pixels. The gate
+   * `scripts/perf/scene-pixel-check.mjs` drives it over CDP against `vite dev`.
    */
-  spriteParity: (only?: string) => SpriteParity;
-  /** Debug: magnified PNG crops of one region, painted direct and through a cache. */
-  spriteCrops: (cx: number, cy: number, r: number, zoom?: number) => Record<string, string>;
+  spriteParity?: (only?: string) => SpriteParity;
+  /** DEV BUILDS ONLY: magnified PNG crops of one region, painted direct and through a cache — what
+   * turns "maxDelta 88" into something a person can look at. */
+  spriteCrops?: (cx: number, cy: number, r: number, zoom?: number) => Record<string, string>;
   /** The shared ambient beat log (E1 spec §5): one entry per fired slot — slot number, whose beat,
    * and whether this browser played it. Two visible viewers of the same team over the same interval
    * must agree on everything but `played`. Capped at the last 200 entries. */

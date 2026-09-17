@@ -2002,6 +2002,11 @@ export function mountOffice(
    * through a fresh sprite cache — and compare the bytes. The gate
    * (`scripts/perf/scene-pixel-check.mjs`) drives this over CDP; the app never calls it.
    *
+   * DEV ONLY. It is gate machinery, and a viewer must not carry it — the ADR 151 total-JS budget
+   * caught exactly that, 0.3 KB over, the first time this shipped. `import.meta.env.DEV` is static
+   * in a production build, so the whole body and `spriteCrops` below drop out of the bundle. The
+   * gate therefore runs against `vite dev`, which paints with the same code.
+   *
    * Both renders read the same poses, the same clock and the same lighting synchronously, so `t` is
    * not a confound: any difference is the cache's doing.
    */
@@ -2143,11 +2148,10 @@ export function mountOffice(
   ensureLoop(); // a room with anyone working is alive from the first frame (no-op under reduced-motion)
 
   return {
-    spriteCrops,
+    ...(import.meta.env.DEV ? { spriteParity, spriteCrops } : {}),
     update,
     emit,
     stats: () => ({ ticks, draws, beats, since }),
-    spriteParity,
     ambientLog: () => [...ambientLog],
     floorSamples: () =>
       [...actors.poses()].map(([name, p]) => ({
