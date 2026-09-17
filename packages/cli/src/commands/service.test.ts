@@ -918,9 +918,31 @@ describe('serviceCommand', () => {
         ctx: c,
         health: async () => ({ connections: 0 }),
       }),
-    ).rejects.toThrow(/uncommitted changes/);
+    ).rejects.toThrow(/uncommitted changes \(1 file: packages\/cli\/src\/x\.ts\)/);
     expect(calls.some((x) => x.cmd === 'pnpm')).toBe(false);
     expect(calls.some((x) => x.cmd === 'launchctl')).toBe(false);
+  });
+
+  it('refresh refusal names every file, capped — the 2026-09-17 untracked-backup outage', async () => {
+    // The exact incident shape: one stray untracked file.
+    const c = ctx(refreshRunner({ dirty: '?? .image-digest.bak-20260917' }));
+    await expect(
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    ).rejects.toThrow(/1 file: \.image-digest\.bak-20260917/);
+    // Many files: first 10 named, the rest counted, never flooding the log.
+    const many = Array.from({ length: 13 }, (_, i) => ` M f${i}.ts`).join('\n');
+    const c2 = ctx(refreshRunner({ dirty: many }));
+    await expect(
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c2,
+        health: async () => ({ connections: 0 }),
+      }),
+    ).rejects.toThrow(/13 files:.*f0\.ts.*…and 3 more/);
   });
 
   it('refresh refuses with live sessions unless --force (guard before any side effect)', async () => {

@@ -1125,7 +1125,7 @@ export async function serviceCommand(
  *   1. **Guard** the shared daemon exactly like `restart` (refuse with live sessions unless `--force`).
  *   2. **Sync** the daemon's checkout to `origin/main` — detached, so the checkout can't drift onto a
  *      stale feature branch (the exact snag that stranded a rebuild this week). Refuses on uncommitted
- *      changes rather than clobber them.
+ *      changes — naming the files in the refusal — rather than clobbering them.
  *   3. **Build** dist; a failed build aborts *before* the restart, so the daemon never bounces onto
  *      broken code.
  *   4. **Restart** onto the fresh build.
@@ -1206,6 +1206,25 @@ function needsInstall(dir: string): boolean {
   }
 }
 
+/**
+ * Name the files behind a `git status --porcelain` refusal. A refusal that never says which
+ * file parks every auto-refresh until a human diffs the shared checkout by hand (2026-09-17:
+ * one untracked backup file, 86 silent refusals across 6 days) — so the file list IS the fix.
+ * Pure: porcelain in, message tail out. Paths shown as porcelain prints them (quotes, `->`
+ * renames included); capped so a huge tree can't flood the log or the OS notification.
+ */
+function porcelainFileList(porcelain: string, maxFiles = 10): string {
+  const files = porcelain
+    .split('\n')
+    .map((l) => l.replace(/\s+$/, ''))
+    .filter((l) => l.trim())
+    .map((l) => l.replace(/^.{2}\s+/, ''));
+  if (files.length === 1) return `1 file: ${files[0]}`;
+  const shown = files.slice(0, maxFiles);
+  const rest = files.length - shown.length;
+  return `${files.length} files: ${shown.join(', ')}` + (rest > 0 ? `, …and ${rest} more` : '');
+}
+
 async function refreshDaemon(
   ctx: ServiceCtx,
   health: () => Promise<DaemonHealth>,
@@ -1251,10 +1270,13 @@ async function refreshDaemon(
       1,
     );
   }
-  // Never clobber someone's in-progress edits in the shared checkout.
-  if (git('status', '--porcelain').stdout.trim()) {
+  // Never clobber someone's in-progress edits in the shared checkout — and name them, so the
+  // refusal (and the auto-refresh tick that hits it) says which file is in the way.
+  const porcelain = git('status', '--porcelain').stdout;
+  if (porcelain.trim()) {
     throw new CliError(
-      `${dir} has uncommitted changes — commit or stash them first (refresh won't discard work).`,
+      `${dir} has uncommitted changes (${porcelainFileList(porcelain)}) — ` +
+        `commit or stash them first (refresh won't discard work).`,
       1,
     );
   }
