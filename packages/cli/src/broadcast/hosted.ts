@@ -16,7 +16,7 @@
  * Everything is injected (`Exec`, `probeUpgrade`) so the whole ladder is unit-testable without a
  * tailnet, a daemon, or a Fly account.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   type TailnetSelf,
@@ -486,10 +486,19 @@ export function digestPath(repoRoot: string): string {
 }
 
 export function readDigest(repoRoot: string | null): string | null {
+  return readDigestRecord(repoRoot)?.digest ?? null;
+}
+
+/** The digest AND when it was written. The supervisor needs the timestamp to tell a rebuild from
+ * another checkout's file: `.image-digest` is gitignored and per-checkout, so "it differs" alone
+ * stopped being evidence of a deploy once worktrees existed (see `decideEnsure`). */
+export function readDigestRecord(repoRoot: string | null): { digest: string; at: number } | null {
   if (!repoRoot) return null;
   try {
-    const raw = readFileSync(digestPath(repoRoot), 'utf8').trim();
-    return raw.startsWith('sha256:') ? raw : null;
+    const path = digestPath(repoRoot);
+    const raw = readFileSync(path, 'utf8').trim();
+    if (!raw.startsWith('sha256:')) return null;
+    return { digest: raw, at: statSync(path).mtimeMs };
   } catch {
     return null;
   }

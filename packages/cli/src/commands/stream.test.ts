@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -76,6 +76,12 @@ describe('musterd stream', () => {
   const digest = 'sha256:' + 'a'.repeat(64);
   const withImage = () =>
     writeFileSync(join(repo, 'scripts', 'broadcast', '.image-digest'), digest);
+  /** Backdate `.image-digest` — the supervisor reads its mtime to tell a rebuild from another
+   * checkout's file, and a test that writes it "now" can only ever exercise the rebuild arm. */
+  const agedImage = (at: number) => {
+    const p = join(repo, 'scripts', 'broadcast', '.image-digest');
+    utimesSync(p, new Date(at), new Date(at));
+  };
 
   it('needs a subcommand and rejects an unknown one', async () => {
     await expect(run([])).rejects.toThrow(CliError);
@@ -564,6 +570,46 @@ describe('musterd stream', () => {
       expect(st.restarts).toEqual([]);
       expect(st.image).toBe('sha256:' + 'a'.repeat(64));
       expect(out.join('')).toMatch(/deploy/i);
+    });
+
+    // The live hazard this pair closes (2026-09-17): `.image-digest` is gitignored and per-checkout,
+    // and streamwatch's LaunchAgent runs from the MAIN checkout while streams are routinely started
+    // from a worktree. Main held a 14-day-old digest against a 1-day-old live machine, so a crash
+    // would have relaunched 14-day-old capture code — and been logged as a deploy, uncharged.
+    it('a crash relaunches the image the STREAM recorded, not the one this checkout holds', async () => {
+      withImage(); // this checkout says aaa…
+      agedImage(NOW - 120_000); // …and it was written before the stream started
+      const running = 'sha256:' + 'b'.repeat(64);
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [],
+        image: running,
+      });
+      const args: string[][] = [];
+      expect(
+        await run(
+          ['ensure'],
+          sup({ launch: (a: string[]) => (args.push(a), { code: 0, output: '' }) }),
+        ),
+      ).toBe(0);
+      expect(args[0]!.join(' ')).toContain(running);
+      expect(args[0]!.join(' ')).not.toContain('a'.repeat(64));
+      expect(readStreamState(statePath)!.image).toBe(running);
+    });
+
+    it('a stale checkout digest is charged to the flap budget — it is a crash, not a deploy', async () => {
+      withImage();
+      agedImage(NOW - 120_000);
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [],
+        image: 'sha256:' + 'b'.repeat(64),
+      });
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(readStreamState(statePath)!.restarts).toEqual([NOW]);
+      expect(out.join('')).not.toMatch(/deploy/i);
     });
 
     it('start records the launched image so ensure can tell a deploy from a crash', async () => {

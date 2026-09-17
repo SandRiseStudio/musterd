@@ -60,14 +60,25 @@ export interface EnsureDecision {
  * it differs from the digest the dead machine ran is a deploy, not a crash (2026-08-21: two
  * image-push replacements burned 2/3 flap slots and were one event from standing down a healthy
  * stream). A deploy relaunches without spending the budget — once, since the relaunch records the
- * new digest and the next disagreement is real again. */
+ * new digest and the next disagreement is real again.
+ *
+ * `recordedDigestAt` is when that file was last written, and it is what tells a deploy from a
+ * DIFFERENT CHECKOUT (2026-09-17). `.image-digest` is gitignored and per-checkout: streamwatch's
+ * LaunchAgent runs from the main checkout while a stream is routinely started from a worktree, so
+ * "the digest differs" stopped being evidence of a rebuild the day the second checkout appeared.
+ * Measured that day — main held a 14-day-old digest, the live machine ran a 1-day-old one — every
+ * crash would have relaunched 14-day-old capture code, uncharged to the flap budget, logging
+ * "deploy" about a deploy that never happened. A digest written BEFORE the run started cannot be
+ * this run's replacement, so it is not a deploy. Absent (legacy callers, unit tests) the old
+ * reading stands: only positive evidence of age demotes a deploy, never the lack of it. */
 export function decideEnsure(args: {
   state: StreamState | null;
   liveCount: number;
   now: number;
   recordedDigest?: string | null;
+  recordedDigestAt?: number | null;
 }): EnsureDecision {
-  const { state, liveCount, now, recordedDigest } = args;
+  const { state, liveCount, now, recordedDigest, recordedDigestAt } = args;
   if (!state)
     return {
       action: 'noop',
@@ -87,7 +98,10 @@ export function decideEnsure(args: {
   if (liveCount > 0)
     return { action: 'noop', state: { ...state, restarts, failures }, note: 'live' };
   // A missing `image` (legacy state) is never a free pass — only an observed change is a deploy.
-  if (recordedDigest && state.image && state.image !== recordedDigest) {
+  // And only a change that postdates the run: an older file is another checkout's, not a rebuild.
+  const digestPredatesRun =
+    recordedDigestAt !== undefined && recordedDigestAt !== null && recordedDigestAt <= state.at;
+  if (recordedDigest && state.image && state.image !== recordedDigest && !digestPredatesRun) {
     return {
       action: 'restart',
       state: { ...state, restarts, failures, image: recordedDigest },
@@ -101,13 +115,18 @@ export function decideEnsure(args: {
       note: `standing down and asking — ${standDownReport({ ...state, restarts, failures }, now)}`,
     };
   }
+  // What a crash relaunches is what the stream RECORDED, not whatever the supervisor's checkout
+  // holds — the deploy branch above is the only path that adopts a new digest, and it has now
+  // proven the digest postdates the run. `recordedDigest` remains the fallback for a state written
+  // before `image` existed, which is the case the 2026-08-21 stamp was added for.
+  const relaunchImage = state.image ?? recordedDigest;
   return {
     action: 'restart',
     state: {
       ...state,
       restarts: [...restarts, now],
       failures,
-      ...(recordedDigest ? { image: recordedDigest } : {}),
+      ...(relaunchImage ? { image: relaunchImage } : {}),
     },
     note: `crash detected: machine gone, no stop record — restarting (${restarts.length + 1}/${FLAP_MAX} in window)`,
   };

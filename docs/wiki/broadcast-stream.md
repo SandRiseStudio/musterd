@@ -41,6 +41,53 @@ same bug made `stream stop` during a boot print "nothing live" and walk away fro
 then came up and billed unattended; that path is fixed with it. `status` deliberately still reports
 `started`, because there "live" means *streaming* and a booting machine is not yet.
 
+## "The digest differs" stopped being evidence of a deploy the day a second checkout existed (2026-09-17; falsify: back-date `scripts/broadcast/.image-digest` in the main checkout, start a stream from a worktree, and watch `stream ensure` call the vanish a crash rather than a deploy) <!-- claim: defect -->
+
+`.image-digest` is **gitignored and per-checkout**, and streamwatch's LaunchAgent has
+`WorkingDirectory` `/Users/nick/agents/packages/cli/dist` — so `findRepoRoot` always resolves the
+**main** checkout, while a stream is routinely started from a worktree. Measured the day the stream
+was started from `agents-miley`:
+
+| | |
+| --- | --- |
+| `/Users/nick/agents` | `c084cf6f` — **Sep 3**, 14 days old |
+| `/Users/nick/agents-miley` (started the stream) | `ffdc018f` — Sep 16 |
+| `~/.musterd/stream/state.json` `image` | `ffdc018f` |
+
+So `decideEnsure` saw `state.image !== recordedDigest` and took the 2026-08-21 deploy branch. Three
+consequences, and the third is the one worth keeping: it would have relaunched the capture on
+**14-day-old code** (no frame watchdog, no `coalesceStep`, no ack fix — every defect closed on this
+page since Sep 3, back); it would have done so **uncharged to the flap budget**, because a deploy
+deliberately does not spend one; and the log would have **asserted a deploy that never happened**.
+That last is the same error as `entrypoint.sh` claiming a rebuild for every exit 75, one layer up —
+*a cause the supervisor cannot know is one it must not assert.*
+
+The 2026-08-21 predicate was not wrong when it was written; it was written when one checkout was the
+only checkout, and a worktree silently removed its premise. **A heuristic whose premise is a fact
+about the environment fails silently when the environment gains a case.**
+
+Two changes, and they are deliberately separate:
+
+1. **A digest that predates the run is not a deploy.** `decideEnsure` now takes `recordedDigestAt`
+   (the file's mtime) and demotes the deploy reading when the digest was written before `state.at`,
+   since a file older than the run is older than the image the run launched. Absent (legacy state,
+   unit tests) the old reading stands: only positive evidence of age demotes it.
+2. **A crash relaunches what the STREAM recorded, not what the checkout holds.** `ensure` launches
+   `d.state.image`, and `launchPreconditions`' digest is now only the fallback for legacy state with
+   no `image`. The deploy branch remains the one path that adopts a new digest, and it has now
+   proven the digest postdates the run.
+
+Belt and braces on purpose: even a misclassified deploy now launches the right image.
+
+**Not fixed, and worth knowing:** a genuine rebuild in a worktree is still invisible to the
+supervisor, which reads the main checkout's file. Deploy adoption works only for builds made in the
+main checkout. The root fix is to record the digest once per machine (beside `state.json`) rather
+than once per checkout; this change makes the current arrangement safe rather than correct.
+
+**Mitigated on the live stream before the code landed** by copying the running digest into the main
+checkout's `.image-digest` (old value kept at `.image-digest.bak-20260917`), so the stream running
+that afternoon could not be healed backwards.
+
 ## ffmpeg's `fps=20 speed=1.00x` was padding — the page delivered 15 (2026-09-16; falsify: `MUSTERD_BROADCAST_PERF` on the live box, compare `deliveredFps` to `encodedFps`) <!-- claim: defect -->
 
 nick saw a "tiny bit choppy" on member walks and act bubbles at 1080p20 while every throughput
