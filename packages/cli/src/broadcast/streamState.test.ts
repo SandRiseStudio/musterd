@@ -128,6 +128,59 @@ describe('decideEnsure', () => {
     expect(d.state.image).toBe('sha256:' + 'b'.repeat(64));
   });
 
+  // With ONE digest per machine the age proxy dissolves (2026-09-17, lane 01M2RAJ0JK). `start`
+  // launches whatever the record said and stamps it, so a record that now DIFFERS can only mean
+  // somebody rebuilt since — whichever checkout they ran it in, and whichever direction the
+  // timestamps happen to fall. That is the same rule in both directions, which the mtime gate was
+  // not: sloane's residual on #1538 was a main-checkout rebuild adopted for a worktree-started
+  // stream, passing the age gate on a technicality rather than on the question that mattered.
+  it('an AUTHORITATIVE record that differs is a deploy even when it predates the run', () => {
+    const d = decideEnsure({
+      state: live({ image: 'sha256:' + 'a'.repeat(64) }),
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: 'sha256:' + 'b'.repeat(64),
+      recordedDigestAt: NOW - 120_000, // older than state.at — the legacy gate would demote this
+      recordedDigestAuthoritative: true,
+    });
+    expect(d.action).toBe('restart');
+    expect(d.note).toMatch(/deploy/i);
+    expect(d.state.restarts).toEqual([]);
+    expect(d.state.image).toBe('sha256:' + 'b'.repeat(64));
+  });
+
+  it('an authoritative record that AGREES is still a crash, charged as ever', () => {
+    const same = 'sha256:' + 'a'.repeat(64);
+    const d = decideEnsure({
+      state: live({ image: same }),
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: same,
+      recordedDigestAt: NOW - 120_000,
+      recordedDigestAuthoritative: true,
+    });
+    expect(d.action).toBe('restart');
+    expect(d.note).not.toMatch(/deploy/i);
+    expect(d.state.restarts).toEqual([NOW]);
+  });
+
+  // The legacy arm keeps #1538's gate, because the per-checkout file really can be another
+  // checkout's and really does carry no other evidence of which.
+  it('a NON-authoritative (checkout) record older than the run is still demoted', () => {
+    const d = decideEnsure({
+      state: live({ image: 'sha256:' + 'a'.repeat(64) }),
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: 'sha256:' + 'b'.repeat(64),
+      recordedDigestAt: NOW - 120_000,
+      recordedDigestAuthoritative: false,
+    });
+    expect(d.action).toBe('restart');
+    expect(d.note).not.toMatch(/deploy/i);
+    expect(d.state.restarts).toEqual([NOW]);
+    expect(d.state.image).toBe('sha256:' + 'a'.repeat(64));
+  });
+
   it('machine gone with the SAME image recorded → a crash, charged as before', () => {
     const same = 'sha256:' + 'a'.repeat(64);
     const d = decideEnsure({

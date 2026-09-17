@@ -56,7 +56,8 @@ export interface EnsureDecision {
 }
 
 /** The reconcile rule, pure: actual (liveCount) vs desired, under the flap budget.
- * `recordedDigest` is what a relaunch would run right now (`.image-digest`); a machine gone while
+ * `recordedDigest` is what a relaunch would run right now (the machine's capture-image record, or
+ * a legacy checkout's `.image-digest` when there is none); a machine gone while
  * it differs from the digest the dead machine ran is a deploy, not a crash (2026-08-21: two
  * image-push replacements burned 2/3 flap slots and were one event from standing down a healthy
  * stream). A deploy relaunches without spending the budget — once, since the relaunch records the
@@ -77,8 +78,10 @@ export function decideEnsure(args: {
   now: number;
   recordedDigest?: string | null;
   recordedDigestAt?: number | null;
+  recordedDigestAuthoritative?: boolean;
 }): EnsureDecision {
-  const { state, liveCount, now, recordedDigest, recordedDigestAt } = args;
+  const { state, liveCount, now, recordedDigest, recordedDigestAt, recordedDigestAuthoritative } =
+    args;
   if (!state)
     return {
       action: 'noop',
@@ -98,9 +101,21 @@ export function decideEnsure(args: {
   if (liveCount > 0)
     return { action: 'noop', state: { ...state, restarts, failures }, note: 'live' };
   // A missing `image` (legacy state) is never a free pass — only an observed change is a deploy.
-  // And only a change that postdates the run: an older file is another checkout's, not a rebuild.
+  //
+  // When the record is AUTHORITATIVE (one per machine, beside this file) a difference is the whole
+  // answer: `start` launched whatever the record said and stamped it, so a record that now differs
+  // means somebody rebuilt since — in whichever checkout, in whichever direction the timestamps
+  // fall. The age proxy is not consulted, and that is the point: it was standing in for a question
+  // the old layout could not ask, and it answered it right in one direction only (sloane's
+  // residual on #1538 — a main-checkout rebuild adopted for a worktree-started stream).
+  //
+  // The legacy per-checkout file keeps #1538's gate, because it really can be another checkout's
+  // and really does carry no other evidence of whose.
   const digestPredatesRun =
-    recordedDigestAt !== undefined && recordedDigestAt !== null && recordedDigestAt <= state.at;
+    !recordedDigestAuthoritative &&
+    recordedDigestAt !== undefined &&
+    recordedDigestAt !== null &&
+    recordedDigestAt <= state.at;
   if (recordedDigest && state.image && state.image !== recordedDigest && !digestPredatesRun) {
     return {
       action: 'restart',

@@ -77,12 +77,32 @@ Two changes, and they are deliberately separate:
    no `image`. The deploy branch remains the one path that adopts a new digest, and it has now
    proven the digest postdates the run.
 
-Belt and braces on purpose: even a misclassified deploy now launches the right image.
+~~Belt and braces on purpose: even a misclassified deploy now launches the right image.~~
+CORRECTED 2026-09-17 by sloane's cross-family review of #1538, which caught the sentence claiming in
+both directions what it had only earned in one: a digest that is merely *stale* could no longer
+hijack a relaunch, but a genuine rebuild in the **main** checkout during a **worktree**-started
+stream postdated `state.at`, passed the age gate, and relaunched main's image for a stream that
+never ran it — uncharged. The age gate answered the question it could ask, not the one that
+mattered.
 
-**Not fixed, and worth knowing:** a genuine rebuild in a worktree is still invisible to the
-supervisor, which reads the main checkout's file. Deploy adoption works only for builds made in the
-main checkout. The root fix is to record the digest once per machine (beside `state.json`) rather
-than once per checkout; this change makes the current arrangement safe rather than correct.
+### The fix was to give the digest one home, at which point the age proxy dissolves (2026-09-17; falsify: `stream build` in one checkout, `stream ensure` from another, and read which digest it launches) <!-- claim: other -->
+
+Both of the above are properties of *where the digest lived*, so the repair is a location, not a
+sharper heuristic. The record now sits at `~/.musterd/stream/image.json`, beside `state.json`:
+written by `stream build` wherever it runs, read by `start`, `ensure` and `doctor` without reference
+to a checkout. `scripts/broadcast/.image-digest` is no longer written and is read only when no
+machine record exists, so an existing laptop keeps working until its next build.
+
+**The age gate is gone for the authoritative record, and that is the result rather than a
+simplification.** `start` launches whatever the record said and stamps it into `state.image`, so a
+record that now *differs* can only mean somebody rebuilt since — whichever checkout they ran it in,
+whichever way the timestamps fall. One comparison, the same rule in both directions. The mtime gate
+survives only on the legacy per-checkout path, where the asymmetry it was built for is still real.
+
+`stream doctor` now says **whose** image it is reporting (`recorded for this machine` vs `from this
+checkout only`). A doctor that prints a digest without saying who holds it is the same false green
+one layer down — it read green in a worktree while the supervisor would have launched something
+else.
 
 **Mitigated on the live stream before the code landed** by copying the running digest into the main
 checkout's `.image-digest` (old value kept at `.image-digest.bak-20260917`), so the stream running

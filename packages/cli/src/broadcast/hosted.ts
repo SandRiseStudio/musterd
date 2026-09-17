@@ -16,7 +16,7 @@
  * Everything is injected (`Exec`, `probeUpgrade`) so the whole ladder is unit-testable without a
  * tailnet, a daemon, or a Fly account.
  */
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   type TailnetSelf,
@@ -219,8 +219,8 @@ export interface DoctorCtx {
   port: number;
   /** The musterd checkout the image builds from, or null when running outside one. */
   repoRoot: string | null;
-  /** The digest `build` recorded, if any. */
-  digest: string | null;
+  /** The image the supervisor would launch, if any — machine record or legacy checkout file. */
+  image: CaptureImage | null;
 }
 
 const skip = (key: string, label: string, why: string): Check => ({
@@ -451,12 +451,21 @@ export async function runChecks(ctx: DoctorCtx): Promise<Check[]> {
   if (!ctx.repoRoot) {
     checks.push(skip('image', 'capture image built', 'not inside a musterd checkout'));
   } else {
-    const built = Boolean(ctx.digest);
+    const built = Boolean(ctx.image);
     checks.push({
       key: 'image',
       label: 'capture image built',
       state: built ? 'ok' : 'fail',
-      ...(built ? { detail: ctx.digest!.slice(0, 19) } : {}),
+      // Say WHERE it came from. A doctor that reports a digest without saying whether the machine
+      // or merely this worktree holds it is the false green this record exists to remove.
+      ...(built
+        ? {
+            detail:
+              ctx.image!.source === 'machine'
+                ? `${ctx.image!.digest.slice(0, 19)} · recorded for this machine`
+                : `${ctx.image!.digest.slice(0, 19)} · from this checkout only — run \`musterd stream build\` to record it for the machine`,
+          }
+        : {}),
       ...(built ? {} : { fix: 'musterd stream build' }),
     });
   }
@@ -483,6 +492,74 @@ export function findRepoRoot(from: string): string | null {
 
 export function digestPath(repoRoot: string): string {
   return join(repoRoot, 'scripts', 'broadcast', '.image-digest');
+}
+
+// ── The capture image record: one per MACHINE ────────────────────────────────────────────────────
+
+/** Where the digest lives now: beside `state.json`, not inside a checkout.
+ *
+ * The per-checkout `.image-digest` is gitignored, so every worktree had its own and they drifted —
+ * and streamwatch's LaunchAgent always resolves the MAIN checkout, so the supervisor read a file
+ * the stream had never written (2026-09-17: main held a digest 14 days older than the live
+ * machine's). A stream is a property of the MACHINE, and so is the image it runs. */
+export interface CaptureImage {
+  digest: string;
+  /** When it was recorded. Only the legacy `checkout` source needs this — see `decideEnsure`. */
+  at: number;
+  /** `machine` is the authoritative record; `checkout` is the migration fallback. */
+  source: 'machine' | 'checkout';
+  /** Which checkout ran the build. Provenance for `doctor`, never used to decide anything. */
+  repo?: string;
+}
+
+export function captureImagePath(statePath: string): string {
+  return join(dirname(statePath), 'image.json');
+}
+
+/** Record what `stream build` just pushed, wherever it was run from. */
+export function writeCaptureImage(a: {
+  statePath: string;
+  digest: string;
+  repoRoot: string | null;
+  now: number;
+}): void {
+  const path = captureImagePath(a.statePath);
+  mkdirSync(dirname(path), { recursive: true });
+  const body = { digest: a.digest, at: a.now, ...(a.repoRoot ? { repo: a.repoRoot } : {}) };
+  // tmp + rename: the supervisor reads this on its own 60s clock, and a half-written record read
+  // mid-build is a digest that resolves to nothing.
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(body, null, 2) + '\n');
+  renameSync(tmp, path);
+}
+
+/** The image the supervisor would launch. Machine record first; this checkout's legacy file only
+ * when there is no machine record, so an existing laptop keeps working until its next build. */
+export function readCaptureImage(a: {
+  statePath: string;
+  repoRoot: string | null;
+}): CaptureImage | null {
+  try {
+    const raw = JSON.parse(readFileSync(captureImagePath(a.statePath), 'utf8')) as {
+      digest?: unknown;
+      at?: unknown;
+      repo?: unknown;
+    };
+    // A tag can resolve to a stale image and a digest cannot — the same refusal `build` makes.
+    if (typeof raw.digest === 'string' && raw.digest.startsWith('sha256:')) {
+      return {
+        digest: raw.digest,
+        at: typeof raw.at === 'number' ? raw.at : 0,
+        source: 'machine',
+        ...(typeof raw.repo === 'string' ? { repo: raw.repo } : {}),
+      };
+    }
+    return null; // present and unusable is not a reason to fall back to a checkout's guess
+  } catch {
+    // Missing or unparseable — fall through to the legacy path.
+  }
+  const legacy = readDigestRecord(a.repoRoot);
+  return legacy ? { digest: legacy.digest, at: legacy.at, source: 'checkout' } : null;
 }
 
 export function readDigest(repoRoot: string | null): string | null {

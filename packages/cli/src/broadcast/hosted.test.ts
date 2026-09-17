@@ -1,5 +1,8 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
-import { describe, expect, it } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   parseTailscaleSelf,
   probeUpgradeHost,
@@ -11,7 +14,9 @@ import {
   parseSecrets,
   runChecks,
   occupiedMachines,
+  readCaptureImage,
   startedMachines,
+  writeCaptureImage,
   type Check,
 } from './hosted.js';
 
@@ -65,7 +70,11 @@ const green = {
   app: 'musterd-broadcast',
   port: 4849,
   repoRoot: '/repo',
-  digest: 'sha256:' + 'a'.repeat(64),
+  image: {
+    digest: 'sha256:' + 'a'.repeat(64),
+    at: 1_000,
+    source: 'machine' as const,
+  },
 };
 
 const by = (checks: Check[], key: string): Check => {
@@ -344,10 +353,100 @@ describe('runChecks', () => {
   });
 
   it('flags an unbuilt image and skips it outside a checkout', async () => {
-    expect(by(await runChecks({ ...green, digest: null }), 'image')).toMatchObject({
+    expect(by(await runChecks({ ...green, image: null }), 'image')).toMatchObject({
       state: 'fail',
       fix: 'musterd stream build',
     });
     expect(by(await runChecks({ ...green, repoRoot: null }), 'image').state).toBe('skip');
+  });
+
+  // The false green this record removes: a doctor that reports a digest without saying whose.
+  it('says whether the MACHINE holds the image or merely this checkout', async () => {
+    expect(by(await runChecks(green), 'image').detail).toContain('recorded for this machine');
+    const legacy = await runChecks({
+      ...green,
+      image: { digest: 'sha256:' + 'b'.repeat(64), at: 1_000, source: 'checkout' as const },
+    });
+    expect(by(legacy, 'image').detail).toContain('this checkout only');
+  });
+});
+
+/** One digest per MACHINE, not one per checkout (2026-09-17, lane 01M2RAJ0JK).
+ *
+ * `.image-digest` lives in the checkout that built it, but streamwatch's LaunchAgent always resolves
+ * the MAIN checkout — so the supervisor read a file the stream never wrote. The record now sits
+ * beside `state.json`, where every checkout and the supervisor see the same one. The per-checkout
+ * file stays readable as a migration fallback and nothing writes it any more. */
+describe('the capture image record', () => {
+  let dir: string;
+  let repo: string;
+  let statePath: string;
+  const A = 'sha256:' + 'a'.repeat(64);
+  const B = 'sha256:' + 'b'.repeat(64);
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'capture-image-'));
+    repo = join(dir, 'checkout');
+    mkdirSync(join(repo, 'scripts', 'broadcast'), { recursive: true });
+    mkdirSync(join(dir, 'stream'), { recursive: true });
+    statePath = join(dir, 'stream', 'state.json');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const withCheckoutDigest = (d: string) =>
+    writeFileSync(join(repo, 'scripts', 'broadcast', '.image-digest'), d + '\n');
+
+  it('reads nothing when neither the machine record nor a checkout file exists', () => {
+    expect(readCaptureImage({ statePath, repoRoot: repo })).toBeNull();
+  });
+
+  it('round-trips what `stream build` recorded, and remembers which checkout built it', () => {
+    writeCaptureImage({ statePath, digest: A, repoRoot: repo, now: 1_000 });
+    expect(readCaptureImage({ statePath, repoRoot: repo })).toEqual({
+      digest: A,
+      at: 1_000,
+      source: 'machine',
+      repo,
+    });
+  });
+
+  // The whole point: the reader does not care which checkout it is standing in.
+  it('a build in ONE checkout is visible from another — the bug this record exists to close', () => {
+    const other = join(dir, 'worktree');
+    mkdirSync(join(other, 'scripts', 'broadcast'), { recursive: true });
+    writeCaptureImage({ statePath, digest: A, repoRoot: other, now: 2_000 });
+    const seen = readCaptureImage({ statePath, repoRoot: repo }); // read from the OTHER checkout
+    expect(seen?.digest).toBe(A);
+    expect(seen?.source).toBe('machine');
+  });
+
+  it('falls back to this checkout’s legacy file when the machine record is absent', () => {
+    withCheckoutDigest(B);
+    const seen = readCaptureImage({ statePath, repoRoot: repo });
+    expect(seen?.digest).toBe(B);
+    expect(seen?.source).toBe('checkout');
+    expect(seen?.at).toBeGreaterThan(0); // the file's mtime — the legacy age gate still needs it
+  });
+
+  it('the machine record WINS over a legacy checkout file that disagrees', () => {
+    withCheckoutDigest(B);
+    writeCaptureImage({ statePath, digest: A, repoRoot: repo, now: 3_000 });
+    expect(readCaptureImage({ statePath, repoRoot: repo })?.digest).toBe(A);
+  });
+
+  it('survives a corrupt record by falling back rather than throwing', () => {
+    withCheckoutDigest(B);
+    writeFileSync(join(dir, 'stream', 'image.json'), '{not json');
+    expect(readCaptureImage({ statePath, repoRoot: repo })?.digest).toBe(B);
+  });
+
+  it('refuses a record that is not a digest — a tag can resolve to a stale image', () => {
+    writeFileSync(join(dir, 'stream', 'image.json'), JSON.stringify({ digest: 'capture', at: 1 }));
+    expect(readCaptureImage({ statePath, repoRoot: repo })).toBeNull();
+  });
+
+  it('reads with no checkout at all (the supervisor outside a repo)', () => {
+    writeCaptureImage({ statePath, digest: A, repoRoot: repo, now: 4_000 });
+    expect(readCaptureImage({ statePath, repoRoot: null })?.digest).toBe(A);
   });
 });
