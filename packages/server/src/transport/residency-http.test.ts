@@ -1237,3 +1237,66 @@ describe('roster wakeability (ADR 357 correction) — a busy host is not a quiet
     );
   });
 });
+
+/**
+ * Lane 01M2RNBRGRWCSD89JTE1BVQ3QG — a seat that says goodbye while holding an acceptance ask.
+ *
+ * Measured 2026-09-17: an ask was routed to delta at 16:11:47 and its session ended at 16:14:11.
+ * Nothing reacted, and the ask sat 22h until a human read the board. `event: 'end'` is the one
+ * clean departure the daemon actually hears, so it is where the re-route belongs.
+ */
+describe('POST /residency/session end — an acceptance ask does not leave with the session', () => {
+  beforeEach(async () => {
+    await claimAda();
+  });
+
+  it('re-routes the acceptance Ada was holding when Ada reports her session ended', async () => {
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    await post('/teams/dawn/members', { name: 'Kim', kind: 'agent' }, nickCred);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, nickCred);
+    await claimAgentHttp(base, 'dawn', agentKey, nickCred, 'Lin');
+    const kim = getMemberByName(server.db, team.id, 'Kim')!;
+    const ada = getMemberByName(server.db, team.id, 'Ada')!;
+    const lin = getMemberByName(server.db, team.id, 'Lin')!;
+    // A live occupancy that attests nothing is never routable (ADR 101/187 — the picker reads the
+    // model off the LIVE presence row, never a durable memory). Without this the test would assert
+    // "the picker found nobody" rather than the re-route.
+    server.db
+      .prepare('UPDATE presence SET model = ? WHERE member_id = ?')
+      .run('gpt-5.6-sol', lin.id);
+
+    const lane = openLane(server.db, team.id, 'dawn', 'Kim', { title: 'kim lane', claim: true });
+    updateLane(server.db, team.id, lane.id, 'dawn', { state: 'awaiting_acceptance' });
+    insertMessage(
+      server.db,
+      team.id,
+      kim.id,
+      ada.id,
+      makeEnvelope({
+        id: 'ask-departing',
+        team: 'dawn',
+        from: 'Kim',
+        to: { kind: 'member', name: 'Ada' },
+        act: 'ask',
+        body: '[lane] acceptance requested',
+        meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+        ts: 1_000,
+      }),
+    );
+
+    const ended = await post(
+      '/teams/dawn/residency/session',
+      { seat: 'Ada', harness: 'claude-code', event: 'end' },
+      adaAuth,
+    );
+    expect(ended.status).toBe(200);
+
+    const rerouted = audits('lane.review_rerouted');
+    expect(rerouted).toHaveLength(1);
+    const detail = JSON.parse(rerouted[0]!.detail as string);
+    expect(detail.lane).toBe(lane.id);
+    expect(detail.from_reviewer).toBe('Ada');
+    expect(detail.superseded_ask).toBe('ask-departing');
+    expect(detail.reviewer).not.toBe('Ada');
+  });
+});

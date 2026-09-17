@@ -1,10 +1,12 @@
-import { describeFamilyPosture } from '@musterd/protocol';
+import { describeFamilyPosture, makeEnvelope } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
+import { openLane, updateLane } from './lanes.js';
 import { addMember } from './members.js';
+import { insertMessage } from './messages.js';
 import { attach } from './presence.js';
 import { enrollResidency } from './residency.js';
-import { teamFamilyPosture } from './review.js';
+import { abandonedAcceptances, heldAcceptances, teamFamilyPosture } from './review.js';
 import { createTeam } from './teams.js';
 
 /**
@@ -929,5 +931,120 @@ describe('reviewLoopBounceCount (ADR 191)', () => {
     });
     expect(reviewLoopBounceCount(db, team.id, 'lane-1')).toBe(2);
     expect(reviewLoopBounceCount(db, team.id, 'other')).toBe(0);
+  });
+});
+
+/**
+ * Lane 01M2RNBRGRWCSD89JTE1BVQ3QG — an acceptance ask outlives the session it was routed to.
+ *
+ * Measured 2026-09-17: big-body raised a `lane_review` ask to delta at 16:11:47 and delta's session
+ * ended at 16:14:11 — two and a half minutes later. Nothing reacted. The only recovery today is
+ * `staleAcceptanceWarning` at ACCEPTANCE_STALE_MS (12h), which downgrades a directed ask to "any
+ * seat may answer" and waits to be read; the ask sat 22h.
+ *
+ * `abandonedAcceptances` is the read that makes the departure actionable: which open acceptance
+ * asks are held by a seat that is no longer live. It decides nothing and mints nothing — the caller
+ * re-routes, using the machinery `lane.review_rerouted` already provides.
+ */
+describe('selectReviewCounterpart — the departing seat (lane 01M2RNBRGRWCSD89JTE1BVQ3QG)', () => {
+  /**
+   * A seat re-routing its own acceptance on the way out is still attached when it says so: the
+   * `/residency/session` end route is presence-neutral and moves no presence row. So the picker has
+   * to be told, or it hands the ask straight back to the seat that is leaving.
+   */
+  it('never re-picks the seat named as departing, and files it under its own reason', async () => {
+    const { openLane } = await import('./lanes.js');
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team } = seed();
+    agent(db, team, 'worker', 'claude-opus-5');
+    agent(db, team, 'delta', 'gpt-5.6-sol');
+    agent(db, team, 'kim', 'gpt-5.6-sol');
+    const lane = openLane(db, team.id, team.slug, 'worker', { title: 'l', claim: true });
+
+    const open = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(['delta', 'kim']).toContain(open.pick?.reviewer);
+
+    const leaving = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT, {
+      departing: 'delta',
+    });
+    expect(leaving.pick?.reviewer).toBe('kim');
+    expect(leaving.snapshot.candidates.find((c) => c.member === 'delta')?.exclusion).toBe(
+      'departing',
+    );
+  });
+});
+
+describe('abandonedAcceptances (lane 01M2RNBRGRWCSD89JTE1BVQ3QG)', () => {
+  function laneAwaitingAcceptanceHeldBy(holder: string) {
+    const { db, team } = seed();
+    const worker = addMember(db, team, { kind: 'agent', name: 'ada', role: '' }).row;
+    const reviewer = addMember(db, team, { kind: 'agent', name: holder, role: '' }).row;
+    const lane = openLane(db, team.id, team.slug, worker.name, {
+      title: 'a lane awaiting acceptance',
+      claim: true,
+    });
+    updateLane(db, team.id, lane.id, team.slug, { state: 'awaiting_acceptance' });
+    insertMessage(
+      db,
+      team.id,
+      worker.id,
+      reviewer.id,
+      makeEnvelope({
+        id: 'ask-abandoned-1',
+        team: team.slug,
+        from: worker.name,
+        to: { kind: 'member', name: reviewer.name },
+        act: 'ask',
+        body: '[lane] acceptance requested',
+        meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+        ts: 1_000,
+      }),
+    );
+    return { db, team, lane, reviewer };
+  }
+
+  it('names the lane when the seat holding the ask has no live Presence', () => {
+    const { db, team, lane, reviewer } = laneAwaitingAcceptanceHeldBy('delta');
+    // delta never attached, which is what its session having ended looks like from here.
+    expect(abandonedAcceptances(db, team.id, reviewer.name, TIMEOUT)).toEqual([
+      { lane: lane.id, ask: 'ask-abandoned-1', holder: 'delta' },
+    ]);
+  });
+
+  it('names nothing once the ask has been answered, however long the seat has been gone', () => {
+    const { db, team, lane, reviewer } = laneAwaitingAcceptanceHeldBy('delta');
+    const verdict = addMember(db, team, { kind: 'agent', name: 'kim', role: '' }).row;
+    insertMessage(
+      db,
+      team.id,
+      verdict.id,
+      null,
+      makeEnvelope({
+        id: 'verdict-1',
+        team: team.slug,
+        from: 'kim',
+        to: { kind: 'team' },
+        act: 'accept',
+        body: 'ACCEPTED',
+        meta: { in_reply_to: 'ask-abandoned-1', lane_review: { lane: lane.id } },
+        ts: 2_000,
+      }),
+    );
+    expect(abandonedAcceptances(db, team.id, reviewer.name, TIMEOUT)).toEqual([]);
+  });
+
+  it("heldAcceptances names it regardless of liveness — the goodbye is the caller's signal", () => {
+    const { db, team, lane, reviewer } = laneAwaitingAcceptanceHeldBy('delta');
+    attach(db, reviewer.id, 'claude-code', 'conn-delta');
+    // Still attached, because a seat reporting its own session end has not detached yet.
+    expect(heldAcceptances(db, team.id, reviewer.name)).toEqual([
+      { lane: lane.id, ask: 'ask-abandoned-1', holder: 'delta' },
+    ]);
+  });
+
+  it('names nothing while that seat is still live', () => {
+    const { db, team, reviewer } = laneAwaitingAcceptanceHeldBy('delta');
+    attach(db, reviewer.id, 'claude-code', 'conn-delta');
+    expect(abandonedAcceptances(db, team.id, reviewer.name, TIMEOUT)).toEqual([]);
   });
 });

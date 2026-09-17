@@ -96,6 +96,11 @@ export type SnapshotGrade = ReviewGrade | typeof UNGRADED;
  * vocabulary deliberately bounded so an audit row remains evidence, not an unstructured diary. */
 export type ReviewSelectionExclusion =
   | 'self'
+  /** Named by the caller as on its way out (lane 01M2RNBRGRWCSD89JTE1BVQ3QG). A seat re-routing its
+   *  own acceptance at `/residency/session {event:'end'}` is still attached when it says so — the
+   *  route is presence-neutral — so `no_live_presence` will not catch it for some minutes yet, and
+   *  without this the picker hands the ask straight back to the seat that is leaving. */
+  | 'departing'
   | 'service_or_observer'
   | 'no_live_presence'
   | 'not_agent'
@@ -569,6 +574,7 @@ export function selectReviewCounterpart(
   _lane: Lane,
   worker: string,
   presenceTimeoutMs: number,
+  opts: { departing?: string } = {},
 ): ReviewSelection {
   const lastWork = lastActionBySubject(db, teamId, {
     // Claims, credentials, and leases establish authority/Presence; none is work that should make
@@ -603,6 +609,10 @@ export function selectReviewCounterpart(
     candidates.push(candidate);
     if (member.name === worker) {
       candidate.exclusion = 'self';
+      continue;
+    }
+    if (opts.departing !== undefined && member.name === opts.departing) {
+      candidate.exclusion = 'departing';
       continue;
     }
     if (member.observer || member.kind === 'service') {
@@ -905,4 +915,67 @@ export function reviewLoopBounceCount(db: Database, teamId: string, laneId: stri
     )
     .get(teamId, laneId);
   return row?.n ?? 0;
+}
+
+/** One acceptance ask a seat still owes a verdict on — {@link heldAcceptances}. */
+export interface HeldAcceptance {
+  lane: string;
+  ask: string;
+  holder: string;
+}
+
+/**
+ * The open acceptance asks `seat` still owes a verdict on (lane 01M2RNBRGRWCSD89JTE1BVQ3QG).
+ *
+ * Says nothing about whether the seat is still there — that is the caller's signal, and the two
+ * callers have different ones. `POST /residency/session {event:'end'}` is an explicit goodbye from
+ * the seat itself, which is still attached at that instant (the route is presence-neutral by
+ * design), so a liveness test there would be answering the wrong question. A sweep over seats that
+ * never said goodbye has no such statement and must infer departure, which is
+ * {@link abandonedAcceptances}.
+ */
+export function heldAcceptances(db: Database, teamId: string, seat: string): HeldAcceptance[] {
+  const member = getMemberByName(db, teamId, seat);
+  if (!member) return [];
+  const lanes = db
+    .prepare<[string, string], { lane: string }>(
+      `SELECT DISTINCT json_extract(m.meta, '$.lane_review.lane') AS lane
+         FROM messages m
+         JOIN lanes l ON l.id = json_extract(m.meta, '$.lane_review.lane')
+        WHERE m.team_id = ? AND m.act = 'ask' AND m.to_member = ?
+          AND l.team_id = m.team_id AND l.state = 'awaiting_acceptance'`,
+    )
+    .all(teamId, member.id);
+  const out: HeldAcceptance[] = [];
+  for (const row of lanes) {
+    if (!row.lane) continue;
+    // `openAcceptanceAsk` is the vetted predicate for "still owed": it already discounts answered,
+    // resolved and superseded asks, so this cannot name an acceptance that has moved on.
+    const open = openAcceptanceAsk(db, teamId, row.lane);
+    if (open && open.to === seat) out.push({ lane: row.lane, ask: open.id, holder: seat });
+  }
+  return out;
+}
+
+/**
+ * {@link heldAcceptances}, narrowed to a seat that is no longer live — the sweep's reading, for a
+ * seat that went away without a goodbye (reaped, crashed, or a cloud seat whose host vanished).
+ *
+ * Measured 2026-09-17: an ask was routed to delta at 16:11:47 and delta's session ended at
+ * 16:14:11. Nothing reacted to the departure, so the ask waited on a seat that was gone until
+ * `staleAcceptanceWarning` fired 12h later and downgraded it to "any seat may answer" — 22h in all.
+ *
+ * Liveness is `hasLivePresence`, the same predicate `selectReviewCounterpart` excludes candidates
+ * by, so a seat this names is a seat the picker would not have picked.
+ */
+export function abandonedAcceptances(
+  db: Database,
+  teamId: string,
+  seat: string,
+  presenceTimeoutMs: number,
+): HeldAcceptance[] {
+  const member = getMemberByName(db, teamId, seat);
+  if (!member) return [];
+  if (hasLivePresence(db, member.id, presenceTimeoutMs)) return [];
+  return heldAcceptances(db, teamId, seat);
 }
