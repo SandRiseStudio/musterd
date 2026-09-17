@@ -37,7 +37,7 @@ export const TOKEN_PREFIXES = {
   node: 'msnode_',
   /** A single-use, short-TTL enrollment code that mints exactly one `msnode_` (ADR 328 §2). */
   node_invite: 'msinv_',
-  /** A one-shot governed model launch handoff (ADR 410). */
+  /** A one-shot governed model launch handoff (ADR 411). */
   governed_launch: 'msla_',
 } as const;
 export type TokenKind = keyof typeof TOKEN_PREFIXES;

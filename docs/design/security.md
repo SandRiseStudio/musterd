@@ -99,7 +99,7 @@ Generation or a matching doctor result remains configuration evidence, not enfor
 generator. It derives only explicit workload-tag owners, exact workload-to-Aperture HTTPS ACLs, and
 opaque Member-to-transport-node-key mappings from committed policy. The generated files contain no
 credentials, node IDs, machine paths, or runtime configuration; they neither call Tailscale nor prove
-that a declared node key identifies a live machine. [ADR 410](../decisions/410-governed-model-authorization-substrate.md)
+that a declared node key identifies a live machine. [ADR 411](../decisions/411-governed-model-authorization-substrate.md)
 adds that runtime binding: a server-owned, secret-free policy; a human-issued, one-shot `msla_` launch
 handoff; and an Aperture decision that checks the enrolled node, target agent Member, consumed launch,
 live Presence, bounded Lane/Act/orientation context, and exact model policy. The mode remains `off` by

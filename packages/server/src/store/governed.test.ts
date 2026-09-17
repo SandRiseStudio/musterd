@@ -54,7 +54,7 @@ function requestFor(
   };
 }
 
-describe('governed authorization store (ADR 410)', () => {
+describe('governed authorization store (ADR 411)', () => {
   it('issues and consumes a launch handoff exactly once for a bound agent', () => {
     const db = openDb(':memory:');
     const team = createTeam(db, { slug: 'governed' });

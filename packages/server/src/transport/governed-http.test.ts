@@ -53,7 +53,7 @@ afterEach(async () => {
   await server.close();
 });
 
-describe('governed authorization HTTP routes (ADR 410)', () => {
+describe('governed authorization HTTP routes (ADR 411)', () => {
   it('syncs policy, issues a human-started handoff, consumes it, and authorizes a request', async () => {
     const policy = {
       version: 1,

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Increment 3 governed model authorization (ADR 410). This is deliberately a separate contract from
+ * Increment 3 governed model authorization (ADR 411). This is deliberately a separate contract from
  * seat-claim grants: a launch authorization proves one bounded workload handoff, not permission to
  * occupy a Team seat. Secrets are opaque and are returned once; consumers store only their hashes.
  */

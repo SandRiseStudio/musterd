@@ -2771,7 +2771,7 @@ export async function handleHttp(
         });
       }
 
-      // Governed model authorization (ADR 410). This substrate is deliberately separate from the
+      // Governed model authorization (ADR 411). This substrate is deliberately separate from the
       // seat-claim policy above: a human starts one bounded agent launch, and the node later redeems
       // it without ever receiving a human credential. Nothing here activates required enforcement.
       if (method === 'POST' && rest === '/governed/policy') {
@@ -2885,7 +2885,7 @@ export async function handleHttp(
                 })();
         const team = requireTeam(ctx.db, slug);
         appendAudit(ctx.db, team.id, {
-          actor: null,
+          actor: decision.decision === 'allow' ? (decision.member ?? null) : null,
           action:
             decision.decision === 'allow' ? 'governed.launch.consume' : 'governed.launch.refused',
           target: input.member,
@@ -2922,7 +2922,7 @@ export async function handleHttp(
           livePresenceMs: ctx.config.presenceTimeoutMs,
         });
         appendAudit(ctx.db, team.id, {
-          actor: null,
+          actor: decision.decision === 'allow' ? (decision.member ?? null) : null,
           action:
             decision.decision === 'allow' ? 'governed.request.allow' : 'governed.request.deny',
           target: input.member,

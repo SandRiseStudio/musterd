@@ -5,7 +5,7 @@
 ## Status — 2026-09-16
 
 - **Product:** v0.2 behavior remains stable; Increment 3 now adds the governed model authorization substrate without changing unmanaged Team or Presence behavior.
-- **Protocol:** `SPEC.md` remains **`musterd/0.3`**; feature epoch 21 and Appendix A.12 define the strict governed policy, one-shot launch handoff, work contexts, and structured decisions from ADR 410.
+- **Protocol:** `SPEC.md` remains **`musterd/0.3`**; feature epoch 21 and Appendix A.12 define the strict governed policy, one-shot launch handoff, work contexts, and structured decisions from ADR 411.
 - **Server:** schema migration 67 stores the server-owned governed policy and hash-only launch authorizations. Policy sync, human issuance, node consumption, revocation, and Aperture authorization are implemented and tested; `enforcement: off` remains the default.
 - **Published:** `@musterd/*@0.2.0` on npm (git tag `v0.2.0`).
 - **Quality:** Focused protocol and server tests pass; the full protocol/server milestone suites plus repository gates are the completion checks for this increment.

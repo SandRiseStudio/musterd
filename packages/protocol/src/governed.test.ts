@@ -17,7 +17,7 @@ const policy = {
   },
 };
 
-describe('governed authorization protocol (ADR 410)', () => {
+describe('governed authorization protocol (ADR 411)', () => {
   it('defaults governed enforcement to off and preserves restrictive member policy', () => {
     expect(GovernedPolicySchema.parse(policy)).toEqual({
       ...policy,

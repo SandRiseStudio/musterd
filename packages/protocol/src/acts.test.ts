@@ -20,7 +20,7 @@ describe('SURFACES (ADR 352)', () => {
   });
 });
 
-describe('FEATURE_EPOCH (governed model authorization, ADR 410)', () => {
+describe('FEATURE_EPOCH (governed model authorization, ADR 411)', () => {
   it('is 21 — an old checkout cannot issue governed launch handoffs', () => {
     expect(FEATURE_EPOCH).toBe(21);
   });

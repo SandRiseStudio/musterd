@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement the protocol/server substrate from [ADR 410](../../decisions/410-governed-model-authorization-substrate.md).
+Implement the protocol/server substrate from [ADR 411](../../decisions/411-governed-model-authorization-substrate.md).
 The Team remains `off` by default. This increment does not launch Claude Code or Codex, apply
 Tailscale/Aperture configuration, or activate `required` enforcement.
 
@@ -39,7 +39,7 @@ Tailscale/Aperture configuration, or activate `required` enforcement.
    typecheck/format checks.
 
 6. Update the implementation-facing architecture and security docs only for the behavior that lands,
-   linking back to ADR 410. Keep the existing Increment 2 generator docs unchanged except for links
+   linking back to ADR 411. Keep the existing Increment 2 generator docs unchanged except for links
    needed to describe the new runtime-binding seam.
 
 ## Completion criteria

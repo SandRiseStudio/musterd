@@ -68,7 +68,7 @@ export type AuditAction =
   | 'agent_session_lease.revoked'
   | 'agent_session_lease.minted'
   | 'agent_session_lease.renewed'
-  // ADR 410: governed model launch and per-request authorization metadata.
+  // ADR 411: governed model launch and per-request authorization metadata.
   | 'governed.policy.change'
   | 'governed.launch.issue'
   | 'governed.launch.consume'
@@ -587,6 +587,13 @@ export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject> = {
   'seat.unbound': 'actor',
   'seat.node_trusted': 'actor',
   'workspace.repaired': 'actor',
+  'governed.policy.change': 'actor',
+  'governed.launch.issue': 'actor',
+  'governed.launch.consume': 'actor',
+  'governed.launch.refused': 'none',
+  'governed.launch.revoke': 'actor',
+  'governed.request.allow': 'actor',
+  'governed.request.deny': 'actor',
 };
 
 /** The actions whose acting seat is in `target`, and those where no seat acted. */

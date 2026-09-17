@@ -1590,7 +1590,7 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    // ADR 410: governed model authorization is separate from seat-claim grants. The policy is the
+    // ADR 411: governed model authorization is separate from seat-claim grants. The policy is the
     // server-owned, secret-free effective ceiling; launch credentials are one-shot handoffs whose
     // hashes are durable so replay/expiry/revocation remain race-safe across daemon restarts.
     version: 67,

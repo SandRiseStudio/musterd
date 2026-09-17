@@ -429,7 +429,7 @@ Member answers. Promotion atomically creates one ordinary, unowned
 Lane and links it to the Seed; retries return the existing linked Lane. No raw body, Slack user id, or
 thread body appears in logs, telemetry, or audit details.
 
-## A.12 Governed model authorization substrate (Increment 3 — ADR 410)
+## A.12 Governed model authorization substrate (Increment 3 — ADR 411)
 
 This additive server/protocol slice establishes the runtime boundary for the optional Aperture paved
 road. It does not add a new Act, alter the `musterd/0.3` Envelope, launch a harness, configure
