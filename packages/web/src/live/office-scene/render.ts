@@ -1114,13 +1114,28 @@ function wallHanger(
   vine(12, 27, false);
 }
 
-function drawWalls(
+/**
+ * Which slice of the walls to paint (sprite cache, spec 2026-09-17).
+ *
+ * Three fixtures on the right-hand wall are NOT static: the clock reads the office hour, the
+ * working-hours sign reads `t`, and the lane board reads the live board. They are lifted out of the
+ * background sprite and painted in the same position in the sequence they occupy today — which is
+ * why there are two static slices rather than one. `before` is both walls up to those fixtures,
+ * `after` is the bulb strand that hangs over them on that wall. Painting `after` ahead of `live`
+ * would put the strand's glows under the clock instead of over it.
+ *
+ * `before` ++ `live` ++ `after` emits exactly the ops `all` does, in the same order.
+ */
+export type WallSlice = 'all' | 'before' | 'live' | 'after';
+
+export function drawWalls(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   env: LightEnv,
   teamWorkingHours: WorkingHours | null = null,
   wallBoard: WallBoard | null = null,
   t = 0,
+  slice: WallSlice = 'all',
 ): void {
   /**
    * What each wall carries. The right wall gets the clock (it is the only one whose `+t` runs screen-right,
@@ -1128,14 +1143,20 @@ function drawWalls(
    * corner; the left wall gets a tall print between its windows and the hanging planter. Nothing sits below
    * u 0.36 (the bookshelves' height) or inside a window's `t` span.
    */
+  const wantsStatic = slice !== 'live';
+  const wantsFixtures = slice === 'all' || slice === 'live';
+
   const dress = (edge: (t: number) => [number, number], wallIndex: 0 | 1): void => {
     // Nothing goes high near the back corner: that is where the wall is tallest on screen and the canvas
     // crops its top edge, so anything hung up there loses the wall behind it and floats.
-    for (const a of ART) {
-      if (a.wall !== wallIndex) continue;
-      wallArt(ctx, fit, edge, a.tc, a.uc, a.w, a.h, a.motif, a.frame);
+    if (wantsStatic) {
+      for (const a of ART) {
+        if (a.wall !== wallIndex) continue;
+        wallArt(ctx, fit, edge, a.tc, a.uc, a.w, a.h, a.motif, a.frame);
+      }
     }
     if (wallIndex === 1) {
+      if (!wantsFixtures) return;
       wallClock(ctx, fit, edge, 0.52, 0.62, env.hours); // dead centre, between the windows
       if (teamWorkingHours) workingHoursSign(ctx, fit, edge, teamWorkingHours, t);
       // The agile board — far-right gap. Must be THIS wall: `+t` runs screen-left on the other one
@@ -1143,14 +1164,21 @@ function drawWalls(
       wallLaneBoard(ctx, fit, edge, wallBoard);
       return;
     }
-    wallHanger(ctx, fit, edge, 0.52, 0.76); // between the windows — where you'd really hang one
+    if (wantsStatic) wallHanger(ctx, fit, edge, 0.52, 0.76); // between the windows — where you'd really hang one
   };
 
   const wall = (
     edge: (t: number) => [number, number],
     faceShade: number,
+    /** Which of this wall's pieces this call paints — the sprite-cache slice, see `WallSlice`. */
+    want: { shell: boolean; dress: boolean; cable: boolean },
   ): void => {
     const pt = (t: number, u: number): Pt => wallPt(edge, t, u, fit);
+    if (!want.shell) {
+      if (want.dress) dress(edge, edge === WALL_EDGES[1] ? 1 : 0);
+      if (want.cable) cableStrand(ctx, fit, edge);
+      return;
+    }
     // the wall face
     quad(ctx, [pt(0, 0), pt(1, 0), pt(1, 1), pt(0, 1)], shade(PAL.wall, faceShade));
     // a darker top cap, so the wall has a lip where it meets the (absent) ceiling
@@ -1198,38 +1226,51 @@ function drawWalls(
       }
     }
 
-    dress(edge, edge === WALL_EDGES[1] ? 1 : 0);
-
-    // A low, slightly sagging strand of warm bulbs turns the architectural shell into a place people
-    // chose to inhabit. The bulbs stay on in daylight too, but read as tiny pearl pins rather than glare.
-    const cable = cablePts(edge, fit);
-    ctx.save();
-    ctx.strokeStyle = 'rgba(91, 61, 38, 0.46)';
-    ctx.lineWidth = Math.max(0.7, 1.25 * fit.scale);
-    ctx.beginPath();
-    cable.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
-    ctx.stroke();
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 1; i < cable.length - 1; i += 2) {
-      const p = cable[i]!;
-      const r = 8 * fit.scale;
-      const glow = ctx.createRadialGradient(p.x, p.y + 2 * fit.scale, 0, p.x, p.y + 2 * fit.scale, r);
-      glow.addColorStop(0, 'rgba(255, 236, 166, 0.76)');
-      glow.addColorStop(0.25, 'rgba(255, 190, 82, 0.35)');
-      glow.addColorStop(1, 'rgba(255, 190, 82, 0)');
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y + 2 * fit.scale, r, 0, Math.PI * 2);
-      ctx.fill();
-      ellipse(ctx, { x: p.x, y: p.y + 2 * fit.scale }, 2.4 * fit.scale, 2.9 * fit.scale, '#fff0b0');
-    }
-    ctx.restore();
+    if (want.dress) dress(edge, edge === WALL_EDGES[1] ? 1 : 0);
+    if (want.cable) cableStrand(ctx, fit, edge);
   };
   // Two faces at slightly different shades so the back corner reads (like box()'s side faces).
   // back-left wall (lx=0 edge) is a touch darker — more edge-on to the implied upper-left light.
-  wall(WALL_EDGES[0]!, 0.9);
-  // back-right wall (ly=0 edge) catches more of that light.
-  wall(WALL_EDGES[1]!, 0.99);
+  // The LEFT wall carries no live fixture, so it belongs whole to the `before` slice.
+  if (slice === 'all' || slice === 'before') {
+    wall(WALL_EDGES[0]!, 0.9, { shell: true, dress: true, cable: true });
+  }
+  // back-right wall (ly=0 edge) catches more of that light — and carries the clock, sign and board.
+  wall(WALL_EDGES[1]!, 0.99, {
+    shell: slice === 'all' || slice === 'before',
+    dress: slice !== 'after',
+    cable: slice === 'all' || slice === 'after',
+  });
+}
+
+/**
+ * A low, slightly sagging strand of warm bulbs — it turns the architectural shell into a place
+ * people chose to inhabit. The bulbs stay on in daylight too, but read as tiny pearl pins rather
+ * than glare. Its own function so a wall can paint it separately from its face (see `WallSlice`).
+ */
+function cableStrand(ctx: CanvasRenderingContext2D, fit: Fit, edge: (t: number) => [number, number]): void {
+  const cable = cablePts(edge, fit);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(91, 61, 38, 0.46)';
+  ctx.lineWidth = Math.max(0.7, 1.25 * fit.scale);
+  ctx.beginPath();
+  cable.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+  ctx.stroke();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 1; i < cable.length - 1; i += 2) {
+    const p = cable[i]!;
+    const r = 8 * fit.scale;
+    const glow = ctx.createRadialGradient(p.x, p.y + 2 * fit.scale, 0, p.x, p.y + 2 * fit.scale, r);
+    glow.addColorStop(0, 'rgba(255, 236, 166, 0.76)');
+    glow.addColorStop(0.25, 'rgba(255, 190, 82, 0.35)');
+    glow.addColorStop(1, 'rgba(255, 190, 82, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y + 2 * fit.scale, r, 0, Math.PI * 2);
+    ctx.fill();
+    ellipse(ctx, { x: p.x, y: p.y + 2 * fit.scale }, 2.4 * fit.scale, 2.9 * fit.scale, '#fff0b0');
+  }
+  ctx.restore();
 }
 
 /** Monday-first, the order the week strip reads in. */
@@ -1859,12 +1900,13 @@ function nookItems(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   fridgeOpen = false,
-): { rug: () => void; items: DepthItem[] } {
+): { rug: (c: CanvasRenderingContext2D) => void; items: DepthItem[] } {
   const { lx, ly } = NOOK;
   const L = LOUNGE;
   const at = (dx: number, dy: number, fn: () => void): DepthItem => ({ d: depth(lx + dx, ly + dy), fn });
   return {
-    rug: () => drawRug(ctx, fit, NOOK_RUG, lx, ly, NOOK_RUG_R * 2, NOOK_RUG_R * 2),
+    // Flat floor paint: it belongs to the background layer, so it takes the context to draw on.
+    rug: (c) => drawRug(c, fit, NOOK_RUG, lx, ly, NOOK_RUG_R * 2, NOOK_RUG_R * 2),
     items: [
       at(L.fridge.dx, L.fridge.dy, () => fridge(ctx, fit, lx + L.fridge.dx, ly + L.fridge.dy, fridgeOpen)),
       at(L.counter.dx, L.counter.dy, () => {
@@ -4590,6 +4632,47 @@ export function seatedArmsDepth(slot: { lx: number; ly: number }): number {
 }
 
 /**
+ * Rasterize `draw` once for `key` (measuring its own box) and blit it at integer device coordinates
+ * under the identity transform — a straight copy, no resampling. Shared by the background layer and
+ * the depth-sorted loop.
+ */
+function blitSprite(
+  ctx: CanvasRenderingContext2D,
+  cache: SpriteCache,
+  key: string,
+  dpr: number,
+  draw: (c: CanvasRenderingContext2D) => void,
+): void {
+  const bounds = measureBounds(draw);
+  if (!bounds) return; // drew nothing — nothing to blit
+  const box = deviceBox(bounds, dpr);
+  const sprite = cache.get(key, box, draw);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(sprite, box.x, box.y);
+  ctx.restore();
+}
+
+/**
+ * The room shell's sprite key. It carries what the shell actually READS off the lighting envelope —
+ * the window glass colour, the sky wash and the daylight ramp — and not `veilAlpha` or `lampsOn`,
+ * which only `drawInteriorLight` reads and which is never cached. `hours` is absent on purpose: the
+ * clock is the live fixture that reads it.
+ */
+export function backgroundKey(fit: Fit, env: LightEnv, dpr: number): string {
+  return [
+    'bg',
+    glassColor(env),
+    env.skyTint,
+    env.skyStrength.toFixed(3),
+    env.daylight.toFixed(3),
+    fitKey(fit),
+    dpr,
+    paletteKey(),
+  ].join('·');
+}
+
+/**
  * Draw the whole office in painter's order, returning per-member screen anchors. Desks are drawn empty;
  * each present member is drawn as a free actor at its current `poses` entry (home seat when idle, or
  * interpolated mid-walk), so seated and walking members depth-sort against desks the same way.
@@ -4616,14 +4699,8 @@ export function renderScene(
   teamWorkingHours: WorkingHours | null = null,
   opts: RenderOpts = {},
 ): SceneAnchors {
-  // Grounds the diorama on the panel surface before anything else paints (the floor covers its middle).
-  drawGroundShadow(ctx, fit);
-  drawFloor(ctx, fit);
-  // The room shell: back walls + windows as a backdrop (behind every item), then the daylight beams they
-  // cast onto the floor (under every item). Both before the depth-sorted loop — see the walls note above.
-  // Roster order (Map insertion order), so a member keeps the same spot on the in/out board.
-  drawWalls(ctx, fit, env, teamWorkingHours, wallBoard, t);
-  drawWindowBeams(ctx, fit, env);
+  const cache = opts.sprites;
+  const dpr = opts.dpr ?? 1;
 
   // Desk-slot index → seat owner (for the monitor's working glow). Placement stores an index into
   // `DESK_SLOTS`; IDs are deliberately stable but sparse after pod sizes change, so they are not
@@ -4661,20 +4738,42 @@ export function renderScene(
       parts: [{ kind: 'sprite', key: `shelf·${si}·${statKey}`, draw: (c) => bookshelf(c, fit, s, si) }],
     });
   });
-  // Rugs are flat floor paint — draw them right after the floor (before every solid/actor), so a member
-  // standing anywhere on a rug is never over-painted by it. Solid pieces self-sort at their footprints.
-  for (const pod of PODS) {
-    const ns = pod.axis === 'ns';
-    const dims = pod.size === 1 ? POD_RUG_SOLO : pod.size === 2 ? POD_RUG_DUO : POD_RUG;
-    const w = ns ? dims.across : dims.along;
-    const d = ns ? dims.along : dims.across;
-    drawRug(ctx, fit, pod.rug, pod.cx, pod.cy, w, d);
-  }
-  drawRug(ctx, fit, MEETING.rug, MEETING.lx, MEETING.ly, MEETING.rug.w, MEETING.rug.d);
-  drawRug(ctx, fit, RECEPTION.rug, RECEPTION.rug.lx, RECEPTION.rug.ly, RECEPTION.rug.w, RECEPTION.rug.d);
   const nook = nookItems(ctx, fit, fx?.fridgeOpen ?? false);
-  nook.rug();
   items.push(...nook.items);
+
+  /* THE ROOM SHELL, painted before the depth-sorted loop: the ground shadow the diorama sits on, the
+     floor, the back walls and windows behind every item, the daylight beams they cast under every
+     item, and the flat rugs (drawn with the floor so a member standing on one is never over-painted
+     by it). All of it is static per lighting step — so with a cache it is two sprites around the
+     three live wall fixtures, and with none it paints exactly as it always has. */
+  const shellBefore = (c: CanvasRenderingContext2D): void => {
+    drawGroundShadow(c, fit);
+    drawFloor(c, fit);
+    drawWalls(c, fit, env, teamWorkingHours, wallBoard, t, cache ? 'before' : 'all');
+  };
+  const shellAfter = (c: CanvasRenderingContext2D): void => {
+    if (cache) drawWalls(c, fit, env, teamWorkingHours, wallBoard, t, 'after');
+    drawWindowBeams(c, fit, env);
+    for (const pod of PODS) {
+      const ns = pod.axis === 'ns';
+      const dims = pod.size === 1 ? POD_RUG_SOLO : pod.size === 2 ? POD_RUG_DUO : POD_RUG;
+      const w = ns ? dims.across : dims.along;
+      const d = ns ? dims.along : dims.across;
+      drawRug(c, fit, pod.rug, pod.cx, pod.cy, w, d);
+    }
+    drawRug(c, fit, MEETING.rug, MEETING.lx, MEETING.ly, MEETING.rug.w, MEETING.rug.d);
+    drawRug(c, fit, RECEPTION.rug, RECEPTION.rug.lx, RECEPTION.rug.ly, RECEPTION.rug.w, RECEPTION.rug.d);
+    nook.rug(c);
+  };
+  if (cache) {
+    const bg = backgroundKey(fit, env, dpr);
+    blitSprite(ctx, cache, `${bg}·a`, dpr, shellBefore);
+    drawWalls(ctx, fit, env, teamWorkingHours, wallBoard, t, 'live');
+    blitSprite(ctx, cache, `${bg}·b`, dpr, shellAfter);
+  } else {
+    shellBefore(ctx);
+    shellAfter(ctx);
+  }
   items.push({ d: depth(MEETING.lx, MEETING.ly), fn: () => meetingTable(ctx, fit) });
   for (const c of MEETING.chairs) {
     const cx = MEETING.lx + c.dx;
@@ -4779,8 +4878,6 @@ export function renderScene(
   }
 
   items.sort((a, b) => a.d - b.d);
-  const cache = opts.sprites;
-  const dpr = opts.dpr ?? 1;
   for (const it of items) {
     if (!cache || !it.parts) {
       it.fn();
@@ -4791,15 +4888,7 @@ export function renderScene(
         part.draw();
         continue;
       }
-      const bounds = measureBounds(part.draw);
-      if (!bounds) continue; // drew nothing — nothing to blit
-      const box = deviceBox(bounds, dpr);
-      const sprite = cache.get(part.key, box, part.draw);
-      // Integer device coordinates under the identity transform: a straight copy, no resampling.
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(sprite, box.x, box.y);
-      ctx.restore();
+      blitSprite(ctx, cache, part.key, dpr, part.draw);
     }
   }
 

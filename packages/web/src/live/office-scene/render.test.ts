@@ -31,6 +31,8 @@ import {
   drawCue,
   drawDog,
   drawWorkstation,
+  backgroundKey,
+  drawWalls,
   benchCounter,
   bookshelf,
   drawEntrance,
@@ -1428,5 +1430,66 @@ describe('static furniture sprites', () => {
     expect(paletteKey()).not.toBe(before);
     setScenePalette(DARK_PALETTE);
     expect(paletteKey()).toBe(before);
+  });
+});
+
+describe('background layer (sprite cache)', () => {
+  const fit = fitFloor(1920, 1080);
+  const env = computeLightEnv(14, true);
+  const schedule: WorkingHours = { timezone: 'America/Los_Angeles', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '17:00' };
+  const board = (): WallBoard =>
+    projectWallBoard({ lanes: [laneFix('a', 'open'), laneFix('b', 'active')], warnings: [] })!;
+
+  it('before ++ live ++ after emits exactly what the whole wall emits, in order', () => {
+    const all = recordingCtx();
+    drawWalls(all.ctx, fit, env, schedule, board(), 3, 'all');
+    const split = recordingCtx();
+    for (const slice of ['before', 'live', 'after'] as const) {
+      drawWalls(split.ctx, fit, env, schedule, board(), 3, slice);
+    }
+    expect(fmtOps(split.ops)).toEqual(fmtOps(all.ops));
+    expect(all.ops.length).toBeGreaterThan(200);
+  });
+
+  it('the static slices read neither t nor the office hour — only the live fixtures do', () => {
+    for (const slice of ['before', 'after'] as const) {
+      const a = recordingCtx();
+      drawWalls(a.ctx, fit, computeLightEnv(9, true), schedule, board(), 1, slice);
+      const b = recordingCtx();
+      drawWalls(b.ctx, fit, { ...computeLightEnv(9, true), hours: 16.5 }, schedule, board(), 9, slice);
+      expect(fmtOps(a.ops), slice).toEqual(fmtOps(b.ops));
+    }
+    const live1 = recordingCtx();
+    drawWalls(live1.ctx, fit, { ...env, hours: 9 }, schedule, board(), 3, 'live');
+    const live2 = recordingCtx();
+    drawWalls(live2.ctx, fit, { ...env, hours: 16.5 }, schedule, board(), 3, 'live');
+    expect(fmtOps(live1.ops)).not.toEqual(fmtOps(live2.ops)); // the clock hands moved
+  });
+
+  it('the live slice paints the clock, the sign and the board and nothing else', () => {
+    const live = recordingCtx();
+    drawWalls(live.ctx, fit, env, schedule, board(), 3, 'live');
+    const noFixtures = recordingCtx();
+    drawWalls(noFixtures.ctx, fit, env, null, null, 3, 'live');
+    expect(live.ops.length).toBeGreaterThan(noFixtures.ops.length); // sign + board are in there
+    expect(noFixtures.ops.length).toBeGreaterThan(0); // the clock always hangs
+  });
+
+  it('backgroundKey follows what the shell paints with, and not the office hour', () => {
+    const k = backgroundKey(fit, env, 1);
+    expect(backgroundKey(fit, { ...env, hours: (env.hours + 3) % 24 }, 1)).toBe(k);
+    expect(backgroundKey(fit, { ...env, skyStrength: env.skyStrength + 0.2 }, 1)).not.toBe(k);
+    expect(backgroundKey(fit, { ...env, skyTint: 'rgb(1, 2, 3)' }, 1)).not.toBe(k);
+    expect(backgroundKey(fit, { ...env, daylight: env.daylight / 2 }, 1)).not.toBe(k);
+    expect(backgroundKey({ ...fit, oy: fit.oy + 1 }, env, 1)).not.toBe(k);
+    expect(backgroundKey(fit, env, 2)).not.toBe(k);
+  });
+
+  it('the shell sets every state it reads, so its sprite can start from the 2D defaults', () => {
+    for (const slice of ['before', 'after'] as const) {
+      const r = recordingCtx();
+      drawWalls(r.ctx, fit, env, schedule, board(), 3, slice);
+      expect(readsBeforeWrites(r.ops), slice).toEqual([]);
+    }
   });
 });
