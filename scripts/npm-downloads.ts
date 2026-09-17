@@ -31,12 +31,12 @@
  * so the flag going quiet during a spike is the good outcome, not a bug.
  */
 
-interface DayPoint {
+export interface DayPoint {
   day: string;
   downloads: number;
 }
 
-interface PackageReading {
+export interface PackageReading {
   name: string;
   latest: string;
   /** Downloads of `latest` over the last 7 days — the closest thing to "someone installed it". */
@@ -77,7 +77,7 @@ function isoDaysAgo(days: number): string {
  * The published packages, read from the workspace rather than a hardcoded list, so a new package
  * appears here the release after it appears in `packages/`.
  */
-async function publishedPackages(): Promise<string[]> {
+export async function publishedPackages(): Promise<string[]> {
   const { readdirSync, readFileSync, existsSync } = await import('node:fs');
   const { join } = await import('node:path');
   const root = join(import.meta.dirname, '..', 'packages');
@@ -91,7 +91,7 @@ async function publishedPackages(): Promise<string[]> {
   return names.sort();
 }
 
-async function read(name: string, days: number): Promise<PackageReading> {
+export async function read(name: string, days: number): Promise<PackageReading> {
   const enc = encodeURIComponent(name);
   const meta = (await getJson(`${REGISTRY}/${enc}`)) as { 'dist-tags'?: Record<string, string> };
   const latest = meta['dist-tags']?.latest ?? 'unknown';
@@ -119,7 +119,7 @@ async function read(name: string, days: number): Promise<PackageReading> {
 }
 
 /** Days where every package moved together and well above the floor — a scope walk, not installs. */
-function suspectedMirrorDays(readings: PackageReading[]): string[] {
+export function suspectedMirrorDays(readings: PackageReading[]): string[] {
   const days = readings[0]?.daily.map((d) => d.day) ?? [];
   return days.filter((day) => {
     const counts = readings.map((r) => r.daily.find((d) => d.day === day)?.downloads ?? 0);
@@ -210,4 +210,8 @@ async function main(): Promise<void> {
   );
 }
 
-await main();
+// Run only when invoked directly — `traction.ts` imports the readers above rather than re-deriving
+// the mirror arithmetic, so the two commands can never disagree about what counts as an install.
+if (process.argv[1] && import.meta.filename === process.argv[1]) {
+  await main();
+}

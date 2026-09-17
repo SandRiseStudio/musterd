@@ -19,6 +19,7 @@
     "build-context:check": "node --disable-warning=ExperimentalWarning scripts/check-build-context.ts",
     "dist:check": "node --disable-warning=ExperimentalWarning scripts/check-dist-freshness.ts",
     "npm:downloads": "node --disable-warning=ExperimentalWarning scripts/npm-downloads.ts",
+    "traction": "node --disable-warning=ExperimentalWarning scripts/traction.ts",
     "vocab:check": "node --disable-warning=ExperimentalWarning scripts/check-vocab.ts",
     "tokens:check": "node --disable-warning=ExperimentalWarning scripts/check-css-tokens.ts",
     "wiki:index": "node --disable-warning=ExperimentalWarning scripts/wiki-index.ts",
