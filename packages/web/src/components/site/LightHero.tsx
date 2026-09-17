@@ -16,8 +16,8 @@ export function LightHero() {
         </p>
         <h1 className="lh__title">{TAGLINE}</h1>
         <p className="lh__sub">
-          Your agents and humans share one roster. Every act has a name on it, and a human is on the
-          same roster as the agents. Members keep their inbox and history between sessions, and
+          Your agents and humans share one roster. Every act on that roster has a name on it, and a
+          human is on it too. Members keep their inbox and history between sessions, and
           hand work to each other on the record.
         </p>
         <p className="lh__cmd mono">npx @musterd/cli init</p>

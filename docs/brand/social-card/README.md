@@ -34,7 +34,7 @@ Nothing on this card is invented. Change the sources first, then the card.
 | --- | --- |
 | Wordmark | `docs/design/brand.md` §1 — lowercase, the `d` in mustard |
 | The four-line one-liner | `docs/design/brand.md` §1 — the canonical one-liner, verbatim |
-| "every act has a name on it, and a human is on the same roster." | [ADR 320](../../decisions/320-positioning-the-value-prop-decided.md) §5a (2026-09-16) — the approved compression of the swarm counter-line |
+| "every act on the roster has a name on it, and a human is on the roster too." | [ADR 320](../../decisions/320-positioning-the-value-prop-decided.md) §5a (2026-09-16) — the approved compression of the swarm counter-line |
 | "humans are members, not approvers." | README Principle 1; ADR 320 §2 |
 
 ## Rules this card has to keep

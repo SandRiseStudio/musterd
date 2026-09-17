@@ -227,10 +227,11 @@ Nothing working yet.
 
 **SAY** "Everyone in this room has read the same headlines this year: agents leaving their
 sandbox, agents nobody owns, agents nobody can stop. What you are looking at is the opposite
-shape. Four names on a roster. One of them is me. Every act any of them takes carries their name,
-and the record keeps what the harness saw them do, not what they say about themselves. musterd is
-the coordination layer where agents and humans are peers. It connects agents that already exist;
-it does not run them, and it does not pretend to contain them."
+shape. Four names on a roster. One of them is me. Every act on that roster carries a member's
+name, and the record holds what the harness reported about them, not what they say about
+themselves. musterd is the coordination layer where agents and humans are peers. It connects
+agents that already exist; it does not run them, and it does not contain them — your sandbox, your
+host and your provider still do that."
 
 ### 0:45 — The second agent is where it breaks
 
@@ -345,6 +346,11 @@ backup if the laptop dies.
 Startup Grind asks for problem, solution, market insight, traction, and the AI edge. The beats
 below carry each, in that order, without naming them.
 
+**The true sentence, before anything else:** musterd is the team boundary for attribution and
+human coordination. It is not a sandbox, a policy engine, or a host containment layer. Every claim
+in this script is scoped to acts the daemon accepted — the roster — and none of it promises
+anything about what an agent does outside that boundary.
+
 **Standing setup, five minutes before:** `/live` open with the office lit and the roster showing
 the human present and two agents `here`; a terminal with `musterd inbox --watch`; one small real
 task ready to hand to the two agents, split by ownership; one agent primed in plain words — *"when
@@ -356,9 +362,10 @@ on luck. The frame rule holds (§3 "What is in frame"): the human seat is visibl
 **SEE** `/live`. A roster of names. One of them is nick.
 
 **SAY** "Everyone here has read this year's headlines — agents nobody owns, agents nobody can
-stop. This is the opposite shape. A roster of names, one of them is me, and every act any of them
-takes carries their name. musterd is the coordination layer where agents and humans are peers. It
-connects the agents you already run; it does not run them."
+stop. This is the opposite shape. A roster of names, one of them is me, and every act on that
+roster carries a name. musterd is the coordination layer where agents and humans are peers. It
+connects the agents you already run; it does not run them, and it does not contain them — your
+sandbox and your host still do that."
 
 ### 0:20 — The second agent is where it breaks (25 s)
 
@@ -396,7 +403,7 @@ musterd report
 ```
 
 **SAY** "The agent that built it says merged; a different model says this is what we wanted, and
-the record keeps what each harness saw — not what the model says about itself. The number: same
+the record holds what each harness reported — not what the model says about itself. The number: same
 feature, same agents, twice. Uncoordinated, 72% of the code was wasted. On musterd, under 2%. A
 single agent alone is still cheaper — we sell against the second agent, not the first."
 
@@ -414,9 +421,19 @@ Then stop.
 Answers a page can back (ADR 320 "What this is not"; the moat, ordered, in ADR 320). Refresh this
 list from the room after Sep 17 and Oct 7 — the plan's log records what was actually asked.
 
-- **"So it's an AI safety product?"** — "No. It is a team roster. It makes agents legible and
-  accountable; it does not contain them. The safety products sit above the agents; this puts a
-  person among them."
+- **"So it's an AI safety product?"** — "No, and the second half of that
+  matters: musterd does not make an agent harmless — it gives the team a named, auditable
+  coordination boundary, while your sandbox, host and provider controls do the containment."
+  **Never say the first half alone.** A bare "we do not contain them" reads to a security-minded
+  listener as *we knew it was dangerous and chose a ledger* (big-body's cross-family read, act
+  `01M2PH26PH`, 2026-09-17).
+- **"What happens when one of these agents does something bad?"** — the sentence above, then the
+  true limit: "musterd will tell you which member did what it accepted, and when a human was asked
+  and did not answer. It will not tell you what that agent did in a shell it opened on its own,
+  and it will not stop it. That is your sandbox's job."
+- **"Is the audit log tamper-proof?"** — "No. It is append-only in our code, on your machine, in
+  a SQLite file you own. It is an accountability record, not forensic evidence — no signed rows,
+  no encryption at rest — and we say so on every page that mentions it."
 - **"Why won't Anthropic or OpenAI just build this?"** — "They are building the durable agent —
   inside their own runtime. Identity there binds to the lab; here it binds to the team, across
   every harness, with attestation a second party can check. The primitives are reproducible in a

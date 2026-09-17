@@ -310,3 +310,28 @@ at a number, not at the doctrine. A pitch is stronger for saying this out loud.
   count by recipient kind in the coordination report (reporting), and attestation legibility on
   `/audit` so that "observed" and "declared" read as different to a stranger (designer).
 - No code changes. No glossary changes. brand.md §1 strings unchanged.
+
+- _Dated amendment, 2026-09-17 — the naming claim is scoped to the roster (lane `01M2PQ17N4`,
+  authorized by nick)._ Decision 5a's counter-line shipped to every surface on 2026-09-16 as
+  **"every act has a name on it"**. A cross-family security read (big-body, act `01M2PH26PH`,
+  answering a consult nick asked for before the demo season opens) established that the sentence is
+  true only of acts **the daemon accepted** — it says nothing about the shell, filesystem, network
+  or tool calls musterd never sees, which is most of what a frightened reader is actually asking
+  about. Unscoped, it is the containment claim decision 5 exists to refuse, wearing attribution's
+  clothes. The decision is unchanged and nothing here reopens it: the surfaces now say **"every act
+  on the roster has a name on it"**, and the disclaimer names who does contain in the same breath
+  ("your own host, sandbox and provider controls still do that"), because a bare "we do not sandbox"
+  reads as _we knew it was dangerous and chose a ledger_.
+
+  Two further corrections from the same read. **"The record keeps what the harness saw"** implied a
+  proof that attestation does not carry — it is a harness observation, not cryptography — so the
+  demo scripts now say the record _holds what the harness reported_. And the audit log is never to
+  be called immutable or tamper-proof: it is append-only in our code, unsigned, unencrypted at
+  rest, on the user's own machine. `docs/demo.md` §6 carries all three as answers a page can back.
+
+  **The gap this exposed, and it is live:** `model_source` never reaches `MemberSummarySchema` or
+  the audit rows, so `/live` and `/audit` cannot distinguish observed from declared from unattested
+  at all today (lane `01M2PAFNAS`, unowned; `docs/design/attestation-copy-spec.md` §3 waits on it).
+  Until that lands, no surface may imply those pages show an attested model. _Falsify: read
+  `MemberSummarySchema` in `packages/protocol/src/member.ts` and grep `model_source` under
+  `packages/web/src` — a hit in either means this note is stale._
