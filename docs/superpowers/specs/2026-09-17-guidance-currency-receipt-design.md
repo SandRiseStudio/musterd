@@ -34,6 +34,33 @@ guidance change that forgets to bump `GUIDANCE_CONTENT_VERSION` still registers 
 So the lane's filed cause — advisory refresh, deferred nudge — is substantially addressed. What
 remains is one layer down, and it is not addressed at all.
 
+### Observed live while this spec was being written, 2026-09-17 ~16:0x
+
+stanley's #1545 (`556ee598`, "The channel rule blamed the channel for a working-directory fact")
+bumped guidance v24 → v25. Census taken ~20 minutes later, from the seat that had just written the
+paragraph above:
+
+| epoch | seats |
+| --- | --- |
+| v25 (current) | izzo — and only because it ran `--refresh-guidance` by hand |
+| v24 | big-body, dolly, miley, ryder, sloane, stanley |
+| v23 | ghost, kimi |
+
+**One of nine current, twenty minutes after the rule landed** — and stanley, who *authored* v25, was
+himself running v24 in his own worktree.
+
+Note carefully which defect this is, because it is not the one this spec's Section 1 addresses. The
+daemon checkout had already caught up (dist at v25 by 15:45), so the build was fine. The seats were
+stale because **self-heal fires once, at session start**, and a session that stays up outlives the
+rule it started under. That is defect 2 from `2026-09-16-workspace-self-heal-design.md` ("It fires
+once"), which that spec named and did not fix.
+
+This is recorded here rather than folded into the argument for the receipt, because the receipt does
+not fix it either: a seat that never re-reads the receipt mid-session learns nothing new. What the
+receipt makes possible is that *something could* re-read it — the file is cheap enough to check at a
+task boundary, where `composeLine`'s once-per-session budget never was. Whether to spend a
+task-boundary check is a question for the plan, not a claim this design has already answered.
+
 ### The defect
 
 `selfHealWorkspace` repairs a seat to match **the local build**. `inspectClaudeHookDrift` states the
