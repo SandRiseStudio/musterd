@@ -1,3 +1,4 @@
+import { isWireAttestationSource } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { log } from '../log.js';
@@ -651,6 +652,15 @@ export interface AuditEntry {
   result: 'allow' | 'deny';
   /** JSON-serializable context (`{ reason }`, `{ fallback: 'no-admin' }`, …); never secrets. */
   detail?: Record<string, unknown>;
+  /**
+   * The actor's attestation at the moment of the write (lane 01M2PAFNAS). Leave both UNDEFINED and
+   * the append reads them from the actor's live presence — the ordinary case. Set them (a real
+   * value or an explicit null) only when the row is a replay of a row some other node already
+   * stamped: the fold carries the origin's stamp, because the origin saw the model and this node
+   * may hold a different (or no) presence for that seat.
+   */
+  actor_model?: string | null;
+  actor_model_source?: string | null;
 }
 
 export interface AuditRow {
@@ -667,6 +677,53 @@ export interface AuditRow {
    *  other row keeps `''`/`0` and reads as "not replicated". Server-stamped, never wire-fed. */
   origin_node: string;
   origin_seq: number;
+  /** What `actor` was attesting when the row was written (v68, lane 01M2PAFNAS); see AuditEntry. */
+  actor_model: string | null;
+  actor_model_source: string | null;
+}
+
+/**
+ * The actor's attestation at write time: the model on the actor's newest live presence that
+ * attests one, and its tier. One indexed read, by seat NAME (an audit row's `actor` is text, not
+ * a foreign key). A seat this roster lacks, a human (humans never carry a model — ADR 121), or a
+ * seat attesting nothing all read `{ null, null }`. `source` is null beside a real model when the
+ * tier is unknown; it is never guessed. Mirrors `currentAttestation` in presence.ts, joined by name.
+ */
+function actorAttestation(
+  db: Database,
+  teamId: string,
+  actor: string | null,
+): { model: string | null; source: string | null } {
+  if (actor === null) return { model: null, source: null };
+  const row = db
+    .prepare<[string, string], { model: string | null; model_source: string | null }>(
+      `SELECT p.model, p.model_source FROM presence p
+         JOIN members m ON m.id = p.member_id
+        WHERE m.team_id = ? AND m.name = ? AND m.left_at IS NULL AND p.model IS NOT NULL
+        ORDER BY p.last_seen_at DESC, p.id DESC LIMIT 1`,
+    )
+    .get(teamId, actor);
+  const model = row?.model ?? null;
+  const source = row?.model_source;
+  return { model, source: model && isWireAttestationSource(source) ? source : null };
+}
+
+/** The stamp for a row about to be written: the entry's own if it carries one, else read now. */
+function stampFor(
+  db: Database,
+  teamId: string,
+  entry: AuditEntry,
+): { actor_model: string | null; actor_model_source: string | null } {
+  if (entry.actor_model !== undefined || entry.actor_model_source !== undefined) {
+    const model = entry.actor_model ?? null;
+    const source = entry.actor_model_source;
+    return {
+      actor_model: model,
+      actor_model_source: model && isWireAttestationSource(source) ? source : null,
+    };
+  }
+  const now = actorAttestation(db, teamId, entry.actor);
+  return { actor_model: now.model, actor_model_source: now.source };
 }
 
 /**
@@ -703,10 +760,11 @@ export function appendReplicatedEvent(db: Database, teamId: string, entry: Audit
       created_at: now,
       origin_node: node.id,
       origin_seq: seq,
+      ...stampFor(db, teamId, entry),
     };
     db.prepare(
-      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
-       VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at, @origin_node, @origin_seq)`,
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq, actor_model, actor_model_source)
+       VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at, @origin_node, @origin_seq, @actor_model, @actor_model_source)`,
     ).run(row);
   })();
 }
@@ -768,10 +826,11 @@ export function appendAuditRequired(db: Database, teamId: string, entry: AuditEn
     created_at: now,
     origin_node: '',
     origin_seq: 0,
+    ...stampFor(db, teamId, entry),
   };
   db.prepare(
-    `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
-     VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at)`,
+    `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, actor_model, actor_model_source)
+     VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at, @actor_model, @actor_model_source)`,
   ).run(row);
 }
 

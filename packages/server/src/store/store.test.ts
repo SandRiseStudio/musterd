@@ -4,7 +4,7 @@ import { REMOTE_PRESENCE_TTL_MS } from '../config.js';
 import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { resolveActivity } from './activity.js';
-import { appendLaneEventRequired, appendReplicatedEvent, listAudit } from './audit.js';
+import { appendAudit, appendLaneEventRequired, appendReplicatedEvent, listAudit } from './audit.js';
 import { getCursor, setCursor } from './cursors.js';
 import { getLane, openLane } from './lanes.js';
 import {
@@ -1635,5 +1635,104 @@ describe('listTeamMessages (firehose backfill window)', () => {
     const rows = listTeamMessages(db, team.id, { since: 3, limit: 2 });
     // strictly after ts=3, oldest first, capped at 2 — so a cursor holder walks forward without skipping
     expect(rows.map((r) => r.ts)).toEqual([4, 5]);
+  });
+});
+
+describe('model_source reaches the surfaces that show a model (lane 01M2PAFNAS)', () => {
+  it('the roster projection carries model_source beside model, per occupancy — and null beside a model whose tier is unknown', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
+    const lin = addMember(db, team, { name: 'Lin', kind: 'agent' });
+    attach(db, ada.row.id, 'claude-code', 'c1', {
+      model: 'claude-opus-5',
+      model_source: 'observed',
+    });
+    attach(db, bo.row.id, 'cursor', 'c2', { model: 'grok-4.6', model_source: 'binding' });
+    // An older client: a model with no tier. Absence stays absence — never defaulted to `binding`.
+    attach(db, lin.row.id, 'codex', 'c3', { model: 'gpt-5.6' });
+    const byName = new Map(listPresence(db, team.id, 45_000).map((s) => [s.member.name, s]));
+    expect(byName.get('Ada')!.presences[0]).toMatchObject({
+      model: 'claude-opus-5',
+      model_source: 'observed',
+    });
+    expect(byName.get('Bo')!.presences[0]).toMatchObject({
+      model: 'grok-4.6',
+      model_source: 'binding',
+    });
+    expect(byName.get('Lin')!.presences[0]).toMatchObject({ model: 'gpt-5.6', model_source: null });
+  });
+
+  it('an audit row that names an actor is stamped with the model that actor is attesting right now, and its source', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    addMember(db, team, { name: 'Bo', kind: 'agent' });
+    attach(db, ada.row.id, 'claude-code', 'c1', {
+      model: 'claude-opus-5',
+      model_source: 'observed',
+    });
+
+    appendAudit(db, team.id, {
+      actor: 'Ada',
+      action: 'memory.save',
+      target: null,
+      result: 'allow',
+    });
+    appendAudit(db, team.id, { actor: 'Bo', action: 'memory.save', target: null, result: 'allow' });
+    appendAudit(db, team.id, { actor: null, action: 'claim.refused', target: 'x', result: 'deny' });
+
+    const rows = listAudit(db, team.id, { limit: 10 }).filter(
+      (r) => !r.action.startsWith('presence.'),
+    );
+    const of = (actor: string | null) => rows.find((r) => r.actor === actor)!;
+    // Ada attests: both land on the row, read from the presence at WRITE time.
+    expect(of('Ada')).toMatchObject({
+      actor_model: 'claude-opus-5',
+      actor_model_source: 'observed',
+    });
+    // Bo is a named seat with no live attestation: null, not a guess.
+    expect(of('Bo')).toMatchObject({ actor_model: null, actor_model_source: null });
+    // A system row has no actor and nothing to stamp.
+    expect(of(null)).toMatchObject({ actor_model: null, actor_model_source: null });
+  });
+
+  it('the stamp is what the actor attested WHEN the row was written — a later re-attestation does not rewrite history', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const row = attach(db, ada.row.id, 'claude-code', 'c1', {
+      model: 'claude-opus-5',
+      model_source: 'observed',
+    });
+    appendAudit(db, team.id, {
+      actor: 'Ada',
+      action: 'memory.save',
+      target: null,
+      result: 'allow',
+    });
+    reattestModel(db, row.id, 'claude-sonnet-5', 'observed');
+    appendAudit(db, team.id, {
+      actor: 'Ada',
+      action: 'memory.clear',
+      target: null,
+      result: 'allow',
+    });
+    const rows = listAudit(db, team.id, { limit: 10 });
+    expect(rows.find((r) => r.action === 'memory.save')!.actor_model).toBe('claude-opus-5');
+    expect(rows.find((r) => r.action === 'memory.clear')!.actor_model).toBe('claude-sonnet-5');
+  });
+
+  it('a replicated entry that already carries its stamp keeps it — the origin saw the model, this node did not', () => {
+    const { db, team } = freshTeam();
+    addMember(db, team, { name: 'Ada', kind: 'agent' });
+    appendReplicatedEvent(db, team.id, {
+      actor: 'Ada',
+      action: 'residency.woke',
+      target: null,
+      result: 'allow',
+      actor_model: 'claude-opus-5',
+      actor_model_source: 'observed',
+    });
+    const row = listAudit(db, team.id, { limit: 10 }).find((r) => r.action === 'residency.woke')!;
+    expect(row).toMatchObject({ actor_model: 'claude-opus-5', actor_model_source: 'observed' });
   });
 });

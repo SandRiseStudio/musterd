@@ -586,7 +586,7 @@ describe('POST /claim — occupancy', () => {
     expect(session.status).toBe(200);
   });
 
-  it('occupies a seat with a valid grant and attests the model', async () => {
+  it('occupies a seat with a valid grant and attests the model — tier included (lane 01M2PAFNAS)', async () => {
     const grant = await grantFor('Ada');
     const r = await post('/teams/dawn/claim', {
       key: agentKey,
@@ -594,6 +594,7 @@ describe('POST /claim — occupancy', () => {
       grant,
       surface: 'cli',
       model: 'claude-opus-4-8',
+      model_source: 'observed',
     });
     expect(r.status).toBe(200);
     expect(r.json).toMatchObject({ type: 'occupied', charter: 'Own the rails.' });
@@ -604,6 +605,20 @@ describe('POST /claim — occupancy', () => {
     const actions = listAudit(server.db, team.id).map((a) => a.action);
     expect(actions).toContain('claim.occupied');
     expect(actions).toContain('occupancy.model_attested');
+    // The mirror carries the tier onto the occupancy it creates — the WS frame always did.
+    const occupancy = server.db
+      .prepare<
+        [string],
+        { model: string | null; model_source: string | null }
+      >('SELECT model, model_source FROM presence WHERE id = ?')
+      .get(r.json.presence_id);
+    expect(occupancy).toEqual({ model: 'claude-opus-4-8', model_source: 'observed' });
+    // And the `claim.occupied` row itself is stamped with what the claimant attested.
+    const occupied = listAudit(server.db, team.id).find((a) => a.action === 'claim.occupied');
+    expect(occupied).toMatchObject({
+      actor_model: 'claude-opus-4-8',
+      actor_model_source: 'observed',
+    });
   });
 
   /**

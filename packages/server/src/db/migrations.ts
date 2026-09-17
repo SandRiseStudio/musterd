@@ -1625,6 +1625,21 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // Lane 01M2PAFNAS: an audit row that names an actor carries the model that actor was attesting
+    // when the row was written, and its tier (ADR 101/158). Stamped at the write edge from the
+    // actor's live presence and never updated — the roster shows what a seat attests NOW, the
+    // audit log shows what it attested THEN. Additive; pre-existing rows read NULL, which the wire
+    // carries as "not recorded", distinct from "attested nothing" only by the row's age.
+    version: 68,
+    up: (db) => {
+      // Guarded like v42: a rewind-and-replay must not fail on a column it already added.
+      const cols = db.prepare("SELECT name FROM pragma_table_info('audit')").pluck().all();
+      if (!cols.includes('actor_model')) db.exec('ALTER TABLE audit ADD COLUMN actor_model TEXT');
+      if (!cols.includes('actor_model_source'))
+        db.exec('ALTER TABLE audit ADD COLUMN actor_model_source TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

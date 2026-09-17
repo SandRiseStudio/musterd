@@ -8,7 +8,7 @@ import {
   SurfaceSchema,
 } from './acts.js';
 import { AccountStatusSchema, CapabilitiesSchema } from './capabilities.js';
-import { WAKEABILITIES } from './model.js';
+import { WAKEABILITIES, WIRE_ATTESTATION_SOURCES } from './model.js';
 import { OfflineReasonSchema } from './offline.js';
 import { PostureSchema } from './posture.js';
 import { WorkingHoursSchema, type WorkingHours } from './working-hours.js';
@@ -75,6 +75,15 @@ export const PresenceSchema = z.object({
   /** Harness-attested model id for this occupancy (ADR 101). Attested, never verified; null/absent
    *  when the adapter doesn't attest — rendered as `unknown`, never blocks. */
   model: z.string().nullish(),
+  /**
+   * Which tier produced `model` (ADR 101/158; lane 01M2PAFNAS): `observed` — a harness probe saw
+   * it during the session; `environment` / `binding` — a person or a config declared it. This is
+   * what lets a surface label a model "seen" vs "said" (attestation-copy-spec §3). Null/absent
+   * beside a real `model` means the tier is UNKNOWN (a pre-migration-42 row, or a client too old to
+   * send one) — never read as `binding`; "we do not know which tier" is a different fact from "it
+   * was a declaration". Always null when `model` is null.
+   */
+  model_source: z.enum(WIRE_ATTESTATION_SOURCES).nullish(),
   /** Client-attested build ref for this occupancy's dist (ADR 135) — the git SHA (optionally
    *  `-dirty`) the client's own `dist/build.json` stamp carries. Null/absent for unstamped or older
    *  clients. Now an operator-detail (tooltip) only: the visible roster skew signal is `epoch`, not this. */

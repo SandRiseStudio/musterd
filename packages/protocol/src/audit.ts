@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { WIRE_ATTESTATION_SOURCES } from './model.js';
 
 /**
  * The governance audit log entry (ADR 071) — the append-only who-did-what trace a team admin reads
@@ -19,6 +20,16 @@ export const AuditEntrySchema = z.object({
   ts: z.number().int(),
   /** Seat name that initiated the op; null for system/reaper writes. */
   actor: z.string().nullable(),
+  /**
+   * The model `actor` was attesting WHEN this row was written, and which tier attested it (ADR
+   * 101/158; lane 01M2PAFNAS) — read from the actor's live presence at the write edge and frozen
+   * on the row, so a later re-attestation never rewrites history. Null when the row names no
+   * actor, when the actor attested nothing at the time, or on rows written before the columns
+   * existed (absent from an older daemon: absence is not an assertion, ADR 236). `actor_model_source`
+   * is null beside a real `actor_model` when the tier was unknown — never defaulted to `binding`.
+   */
+  actor_model: z.string().nullish(),
+  actor_model_source: z.enum(WIRE_ATTESTATION_SOURCES).nullish(),
   /** Dotted governance verb. Open string — see file doc. */
   action: z.string(),
   /** Affected seat/resource name; null when not seat-scoped. */

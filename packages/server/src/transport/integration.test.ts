@@ -9691,3 +9691,85 @@ describe('incident convergence (spec 2026-08-14 inc 1)', () => {
     expect((lanes.json.lanes ?? []).filter((l: any) => l.kind === 'incident')).toHaveLength(0);
   });
 });
+
+describe('model_source on the roster and the audit log (lane 01M2PAFNAS)', () => {
+  it('GET /members carries model_source per occupancy and GET /audit stamps the actor row with model + source', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Bo', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    const a = new TestWs();
+    const b = new TestWs();
+    const l = new TestWs();
+    await Promise.all([a.open(), b.open(), l.open()]);
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(tok, 'Ada'),
+      'claude-opus-4-8',
+      undefined,
+      'observed',
+    );
+    await b.claim(
+      'dawn',
+      team.json.agent_key,
+      'Bo',
+      'cursor',
+      await standingGrant(tok, 'Bo'),
+      'grok-4.6',
+      undefined,
+      'binding',
+    );
+    await l.claim(
+      'dawn',
+      team.json.agent_key,
+      'Lin',
+      'codex',
+      await standingGrant(tok, 'Lin'),
+      'gpt-5.6',
+    );
+
+    const roster = await get('/teams/dawn/members', tok);
+    expect(roster.status).toBe(200);
+    const occupancy = (name: string) =>
+      (roster.json.members as any[]).find((m) => m.name === name).presences[0];
+    expect(occupancy('Ada')).toMatchObject({ model: 'claude-opus-4-8', model_source: 'observed' });
+    expect(occupancy('Bo')).toMatchObject({ model: 'grok-4.6', model_source: 'binding' });
+    // The tier-less attestation stays tier-less on the wire: the label has to read "unknown", not "said".
+    expect(occupancy('Lin')).toMatchObject({ model: 'gpt-5.6', model_source: null });
+
+    // An audited action carries what its actor was attesting when it happened. Dee occupies over
+    // HTTP (the one-shot claim mirror), attesting an observed model, then opens a lane.
+    await post('/teams/dawn/members', { name: 'Dee', kind: 'agent' }, tok);
+    const dee: Auth = { key: team.json.agent_key, seat: 'Dee' };
+    await get('/teams/dawn/members', dee); // resolves Dee's seat credential + lease
+    const reattest = await post('/teams/dawn/claim', {
+      key: dee.key,
+      target: { seat: 'Dee' },
+      surface: 'cli',
+      model: 'claude-opus-4-8',
+      model_source: 'observed',
+    });
+    expect(reattest.status).toBe(200);
+    Object.assign(dee, {
+      key: reattest.json.seat_credential ?? dee.key,
+      sessionLease: reattest.json.session_lease,
+    });
+    const opened = await post('/teams/dawn/lanes', { title: 'stamped', claim: true }, dee);
+    expect(opened.status).toBe(201);
+    const audit = await get('/teams/dawn/audit', tok);
+    const row = (audit.json.audit as any[]).find(
+      (r) => r.actor === 'Dee' && r.action === 'lane.opened',
+    );
+    expect(row).toMatchObject({ actor_model: 'claude-opus-4-8', actor_model_source: 'observed' });
+    // A system row names no actor and carries no stamp.
+    const system = (audit.json.audit as any[]).find((r) => r.actor === null);
+    if (system) expect(system).toMatchObject({ actor_model: null, actor_model_source: null });
+    a.close();
+    b.close();
+    l.close();
+  });
+});
