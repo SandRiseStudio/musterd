@@ -438,7 +438,8 @@ req opens so a warm path can be used the week it matters.
 **What converts, prepared once (sloane, weeks 1–2):** the musterd case study on sandrise.io; the
 resume's top line reframed from "Independent Product Development" to what it is — *Founder & PM,
 musterd (open source)* — with three shipped-and-measured bullets; the LinkedIn headline to match;
-the STAR points at 0.4.2 / ADR 320; a one-page "decisions I made and why" reading list for an
+the STAR points at 0.4.2 / ADR 320, with Exploring Next's 973 episodes as the second product
+story (§17); a one-page "decisions I made and why" reading list for an
 interviewer (ADR 320, the lanes tax, the cookoff, the human-role re-evaluation); and the
 two-sentence answer to "why the gap" that nick already has in his notes (family, then building).
 
@@ -456,7 +457,41 @@ dated January list.
 are proposed, not made). The case study, the story paragraph, the resume lines, and a one-page
 "what I decided and why" reading list for interviewers are sloane's.
 
-## 17. Weekly log
+## 17. Exploring Next — what the podcast is for in this plan
+
+Read 2026-09-16. [sandrise.io/exploring-next](https://sandrise.io/exploring-next) is nick's daily,
+AI-hosted podcast: two AI hosts, one new developer tool, paper, or API per episode, **973 episodes
+since 2025-11-21** — several a day, still running (the latest three landed today, one of them
+*Emergence World: adversarial stress-testing of long-horizon multi-agent systems*, squarely in
+musterd's cell). Every episode has audio, a transcript, an episode page with JSON-LD, a public
+read-only API with OpenAPI, an MCP server (`list_recent_episodes`, `search_episodes`,
+`get_episode`, `get_episode_script`), RSS, an embeddable player and oEmbed. Behind it: a Supabase
+pipeline, an eval system with a judge, host memory, and a designed-but-unbuilt host track record
+(falsifiable on-air calls, scored later — the same claims-carry-falsifiers culture as this repo).
+Audience: **unmeasured** — no play counts are wired, and nothing in this repo cites it. It does not
+mention musterd anywhere.
+
+Four uses, in order of value, and one rule:
+
+1. **It is the research radar, already running.** ADR 056's "standing research radar" and the
+   plan's post-Nov-20 weekly digest are a filter over this feed, not a new build: a seat reads
+   `search_episodes` for multi-agent / coordination / human-agent terms once a week and posts the
+   digest. Under a day to wire; async-safe by construction.
+2. **It is the non-code dogfood.** Run 11 (*a team doing work that is not code*) has no better
+   candidate than the podcast's own production line — curate, script, fact-check, voice, publish,
+   score — as a musterd team with nick as the human curator answering asks. Real coordination
+   traces every day (ADR 056's dataset feedstock), and a public story: *a daily podcast produced by
+   a team with a person on the roster*. Not in the window; first on the post-Nov-20 build list.
+3. **It is a second PM case study.** 973 episodes, evals, host memory, a public API and MCP
+   server, cost goals in the PRD — the resume line and the portfolio should carry the number.
+4. **It is a small distribution surface.** One episode on launch day (the launch post as source)
+   and one per shipped skill cost nothing. Measure before counting on it: week 1, read RSS fetches
+   and audio requests from Cloudflare so the audience is a number, not a hope.
+
+**The rule:** nothing else is built on the podcast inside the nine weeks. It is a running asset
+that produces episodes without nick; the window spends nick's hours on installs and conversations.
+
+## 18. Weekly log
 
 Appended each Sunday: events attended, demos given, installs (name/date/harness), active-a-week-later
 count, what broke, quotes added, conversations opened, measures hit or missed. Dated entries only.
