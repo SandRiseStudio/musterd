@@ -6,7 +6,7 @@
   [ADR 074](074-audit-cli-reader.md) (the reader), [ADR 088](088-interrupt-line-tool-boundary-inbox-check.md)
   (`interrupt.raised`), [ADR 219](219-quiescence-marks-a-busy-wake-candidate.md) (the wake pool reads by actor),
   [ADR 303](303-auditable-review-selection.md) (review selection reads by actor)
-- Lane: `01M2P4Z39E08APB7V7WRDC1P0D`
+- Lane: `01M2P4Z39E08APB7V7WRDC1P0D` (decision), `01M2PB4PTTTKCV58E4GF15D7V6` (implementation)
 - Evidence: [audit row attribution](../wiki/audit-row-attribution.md)
 
 ## Context
@@ -31,7 +31,7 @@ option. Fact 3 removes it: there are wrong numbers now, and documentation does n
 
 ## Problem
 
-Make "which seat is this row about" answerable from the row itself, without a migration of 190k+
+Make "which seat acted on this row" answerable from the row itself, without a migration of 190k+
 rows, without breaking the two readers that are correct today, and without asserting anything about
 replicated rows this daemon did not write.
 
@@ -44,15 +44,38 @@ action this daemon writes, which convention it uses:
 
 ```ts
 export type AuditSubject = 'actor' | 'target' | 'none';
-export const AUDIT_SUBJECT: Record<string, AuditSubject>;
+export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject>;
 ```
 
-`'actor'` — conventions 1, 3, 4 (the subject seat is in `actor`).
-`'target'` — convention 2 (the subject seat is in `target`; `actor` is the counterparty).
-`'none'` — no seat subject at all (system-written `residency.*`, credential-id rows).
+`'actor'` — the acting seat is in `actor` (conventions 1, 3, 4, and most of 2).
+`'target'` — the acting seat is in `target`.
+`'none'` — no seat acted (machine-written rows: the wake ledger, the reaper, refusals with a null
+actor).
 
 This is the smallest thing that makes the question answerable, and it is a fact the codebase already
 knows implicitly at all 74 call sites.
+
+#### Which question the map answers
+
+"Whose row is this *about*" and "which seat *acted*" are not the same question, and the first draft
+of this section conflated them. They agree on four of the five conventions and diverge on
+convention 2 — counterparty-as-actor — where the row concerns the target and was performed by the
+actor.
+
+**The map answers the second**, because that is the question its three readers ask: is this seat
+working right now? So `grant.issue` is `'actor'`. The row is about the grantee and was acted by the
+admin, and declaring it `'target'` would mark the grantee busy for work they did not do — the live
+defect mirrored rather than fixed.
+
+`interrupt.raised` is then the one action whose acting seat sits in `target`, and it is why the map
+exists: the row is stamped when the *recipient's* tool-boundary probe fires, while `actor` holds the
+seat that sent the act, a measured mean 4.6 h earlier. A probe firing IS the recipient working, so
+the row is real evidence pointed at the wrong seat — which is exactly the case the three readers get
+wrong today.
+
+`'none'` is not "no seat is named". `residency.woke` names a seat in `target` and that seat did not
+act; the host reported on it, and the seat's own first action lands as its own row moments later.
+Crediting it would ADD attribution where there is none today, which is the opposite of the repair.
 
 ### 2. `appendAudit` refuses an action missing from the map
 
@@ -62,10 +85,18 @@ six months. This is the load-bearing half of the decision; the map alone rots.
 
 ### 3. The generic readers take a subject argument, not a column name
 
-`lastActionByActor`, `quietestBusyMs` and `selectReviewCounterpart` stop reading `a.actor` directly
-and read *the subject column for that action*, via the map. The wake pool then asks what ADR 219
-always meant — "has this seat acted" — rather than "does this seat's name appear in the actor
-column".
+`lastActionByActor` (renamed `lastActionBySubject`), `quietestBusyMs` and `selectReviewCounterpart`
+stop reading `a.actor` directly and read *the acting-seat column for that action*, via a single SQL
+expression the map generates (`auditSubjectSql`).
+
+This is a different axis from `selectReviewCounterpart`'s existing `excludeActions` list, and the
+two stay separate: the map says WHICH COLUMN holds the seat, the list says WHICH ACTIONS COUNT AS
+WORK. A claim is convention 1 and still excluded, because establishing authority is not being busy.
+`interrupt.raised` is deliberately NOT added to that list — a probe at a tool boundary is a seat
+working, and once it is read by `target` it is evidence about the right seat.
+
+The wake pool then asks what ADR 219 always meant — "has this seat acted" — rather than "does this
+seat's name appear in the actor column".
 
 This corrects the three live readers without moving a single stored row.
 
@@ -82,6 +113,10 @@ reading. Convention 2 is not wrong; being undeclared is.
 describes rows *this* daemon writes. A reader folding a federated timeline cannot rely on it, and the
 map's doc comment must say that rather than let a future reader assume otherwise.
 
+Concretely, `auditSubjectSql` falls back to `actor` for an action absent from the map — a replicated
+row from a peer running a newer build. That is what every one of these readers does today, so an
+unknown verb is no worse off than before this landed.
+
 ## Consequences
 
 The `interrupt.refused` / `interrupt.raised` split stops being a trap without either row changing.
@@ -89,8 +124,14 @@ Adding an audit action costs one map entry. The three generic readers get the ri
 action, including ones added later, instead of being correct only for the actions nobody thought
 about.
 
-The cost is a map of ~90 entries that must be kept honest. Decision 2 is what keeps it honest; if
-that is dropped, this ADR is worth nothing and the cheap option should be taken instead.
+The cost is a map of 121 entries that must be kept honest. Two things keep it so: the map is typed
+`Record<AuditAction, AuditSubject>`, so widening the union without a declaration fails the build,
+and decision 2 catches an action that reaches a writer as a plain string. If both are dropped this
+ADR is worth nothing and the cheap option should be taken instead.
+
+`lane.released` writes the literal `'musterd'` in the actor column (`store/lanes.ts:993`) — the same
+family as the `'?'` / `'daemon'` sentinels, and a seat actually named `musterd` would collide with
+it. Left as a follow-on, now visible.
 
 Not addressed here, and left as follow-ons because each is its own decision: `claim.refused` writing
 four kinds of target across six sites, `request.decide` writing two target formats, `seed.ingested`

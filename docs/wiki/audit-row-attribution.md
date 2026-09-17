@@ -102,6 +102,21 @@ Additionally `sync/fold.ts` inserts replicated audit rows from peer nodes verbat
 foreign row carries whatever convention its origin node used. Any convention this repo declares is
 therefore a statement about rows *this* daemon writes, not about every row in the table.
 
+## What landed
+
+[ADR 410](../decisions/410-every-audit-action-declares-whose-row-it-is.md), implemented 2026-09-16
+(lane `01M2PB4PTTTKCV58E4GF15D7V6`): `AUDIT_SUBJECT` in `store/audit.ts` declares, per action,
+which column holds **the seat that acted** — 121 entries, exhaustive over the `AuditAction` union by
+type, with `appendAudit` and its two siblings refusing an action that is not in it. The three
+generic readers read that column through `auditSubjectSql` instead of `a.actor`, and
+`lastActionByActor` is now `lastActionBySubject`.
+
+Note the map answers "which seat acted", not "whose row is it" — the two questions diverge on
+convention 2, and the readers ask the first. Only `interrupt.raised` resolves to `target`; the rest
+of convention 2 (`member.reclaim`, `grant.issue`, `agent_seat_credential.rotated`) resolves to
+`actor`, because the admin is the one who acted. The census above is unchanged and still describes
+what the columns hold.
+
 ## Related
 
 - [ADR 088](../decisions/088-interrupt-line-tool-boundary-inbox-check.md) — where `interrupt.raised`
