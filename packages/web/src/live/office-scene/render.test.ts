@@ -30,6 +30,9 @@ import {
   dockAcross,
   drawCue,
   drawDog,
+  drawWorkstation,
+  ownedDeskWarmAlpha,
+  workstationKey,
   glassColor,
   MACHINE_H,
   MONITOR_ALONG,
@@ -1252,5 +1255,120 @@ describe('sprite parts', () => {
     });
     expect(sceneOps(b.ops)).toEqual(sceneOps(a.ops));
     expect(a.ops.length).toBeGreaterThan(1000); // the fixture actually painted a room
+  });
+});
+
+/** Ops that READ a context property this draw never SET: fill→fillStyle, stroke→strokeStyle+lineWidth,
+ * fillText→font+textAlign+textBaseline+fillStyle. `save`/`restore` are tracked as a stack. A cached
+ * item starts from the 2D defaults, so anything it reads without setting is state it was silently
+ * inheriting from the previous item on the direct path — a sprite would paint it differently. */
+function readsBeforeWrites(ops: RecordedOp[]): string[] {
+  const reads: Record<string, string[]> = {
+    fill: ['fillStyle'],
+    fillRect: ['fillStyle'],
+    fillText: ['fillStyle', 'font', 'textAlign', 'textBaseline'],
+    stroke: ['strokeStyle', 'lineWidth'],
+    strokeRect: ['strokeStyle', 'lineWidth'],
+    strokeText: ['strokeStyle', 'font'],
+  };
+  let set = new Set<string>();
+  const stack: Set<string>[] = [];
+  const bad: string[] = [];
+  ops.forEach((o, i) => {
+    if (o.name.startsWith('set:')) set.add(o.name.slice(4));
+    else if (o.name === 'save') stack.push(new Set(set));
+    else if (o.name === 'restore') set = stack.pop() ?? set;
+    else for (const p of reads[o.name] ?? []) if (!set.has(p)) bad.push(`${i}:${o.name} reads ${p}`);
+  });
+  return bad;
+}
+
+describe('workstation phases (sprite cache)', () => {
+  const fit = fitFloor(1920, 1080);
+  const slot = DESK_SLOTS.find((s) => s.kind !== 'bench')!;
+  /** A desk whose screen faces the camera (N or W) — the only facings whose lit panel paints a face
+   * at all, so the only ones where "the screen is the live part" is observable. */
+  const facingSlot = DESK_SLOTS.find((s) => s.kind !== 'bench' && (s.dir === 'N' || s.dir === 'W'))!;
+  const owner = node('ava', 'working');
+  const cases = [
+    ['empty', null, false],
+    ['owner idle', owner, false],
+    ['owner working', owner, true],
+  ] as const;
+  for (const [label, n, atWork] of cases) {
+    it(`${label}: pre ++ monitor ++ post == all`, () => {
+      const all = recordingCtx();
+      drawWorkstation(all.ctx, fit, slot, n, 'revive', false, 3, undefined, true, atWork, 'all');
+      const split = recordingCtx();
+      for (const phase of ['pre', 'monitor', 'post'] as const) {
+        drawWorkstation(split.ctx, fit, slot, n, 'revive', false, 3, undefined, true, atWork, phase);
+      }
+      expect(fmtOps(split.ops)).toEqual(fmtOps(all.ops));
+      expect(all.ops.length).toBeGreaterThan(50);
+    });
+  }
+  it('an owned, stepped-away desk (afterglow prop at the monitor’s station) splits the same way', () => {
+    const away: OfficeNode = { ...owner, presence: 'away', last_seen_at: Date.now() - 60_000 };
+    const all = recordingCtx();
+    drawWorkstation(all.ctx, fit, slot, away, 'revive', true, 3, undefined, true, false, 'all');
+    const split = recordingCtx();
+    for (const phase of ['pre', 'monitor', 'post'] as const) {
+      drawWorkstation(split.ctx, fit, slot, away, 'revive', true, 3, undefined, true, false, phase);
+    }
+    expect(fmtOps(split.ops)).toEqual(fmtOps(all.ops));
+    expect(fmtOps(all.ops).some((o) => o.includes('rgba(122, 148, 156'))).toBe(true); // the afterglow painted
+  });
+  it('the monitor phase is the only one that reads t', () => {
+    for (const phase of ['pre', 'post'] as const) {
+      const a = recordingCtx();
+      drawWorkstation(a.ctx, fit, slot, owner, 'revive', false, 1, undefined, true, true, phase);
+      const b = recordingCtx();
+      drawWorkstation(b.ctx, fit, slot, owner, 'revive', false, 9, undefined, true, true, phase);
+      expect(fmtOps(a.ops)).toEqual(fmtOps(b.ops));
+    }
+    const c = recordingCtx();
+    drawWorkstation(c.ctx, fit, facingSlot, owner, 'revive', false, 1, undefined, true, true, 'monitor');
+    const d = recordingCtx();
+    drawWorkstation(d.ctx, fit, facingSlot, owner, 'revive', false, 9, undefined, true, true, 'monitor');
+    expect(fmtOps(c.ops)).not.toEqual(fmtOps(d.ops));
+  });
+  it('cached phases set every state they read (nothing inherited from the previous item)', () => {
+    for (const [, n, atWork] of cases) {
+      for (const phase of ['pre', 'post'] as const) {
+        const r = recordingCtx();
+        drawWorkstation(r.ctx, fit, slot, n, 'revive', false, 3, undefined, true, atWork, phase);
+        expect(readsBeforeWrites(r.ops)).toEqual([]);
+      }
+    }
+  });
+  it('deskStationItems carries sprite·live·sprite parts for a desk slot and none for a bench seat', () => {
+    const r = recordingCtx();
+    const desk = deskStationItems(r.ctx, fit, slot, owner, { teamName: 'revive', t: 3, lampsOn: true });
+    expect(desk.items[0]!.parts!.map((p) => p.kind)).toEqual(['sprite', 'live', 'sprite']);
+    const bench = deskStationItems(r.ctx, fit, DESK_SLOTS.find((s) => s.kind === 'bench')!, owner, { teamName: 'revive' });
+    expect(bench.items.every((i) => !i.parts)).toBe(true);
+  });
+  it('the workstation key changes with every pixel-changing input and never with t', () => {
+    const base = { slot, node: owner, teamName: 'revive', owned: false, working: true, lampLit: true, hidden: undefined, fit, dpr: 1, warmAlpha: '' };
+    const k = workstationKey(base);
+    expect(workstationKey({ ...base, working: false })).not.toBe(k);
+    expect(workstationKey({ ...base, lampLit: false })).not.toBe(k);
+    expect(workstationKey({ ...base, owned: true })).not.toBe(k);
+    expect(workstationKey({ ...base, node: null })).not.toBe(k);
+    expect(workstationKey({ ...base, hidden: new Set(['coffee'] as const) })).not.toBe(k);
+    expect(workstationKey({ ...base, fit: { ...fit, ox: fit.ox + 0.5 } })).not.toBe(k);
+    expect(workstationKey({ ...base, dpr: 2 })).not.toBe(k);
+    expect(workstationKey({ ...base, warmAlpha: '0.108' })).not.toBe(k);
+    expect(workstationKey({ ...base, hidden: new Set(['water', 'coffee'] as const) })).toBe(workstationKey({ ...base, hidden: new Set(['coffee', 'water'] as const) }));
+  });
+  it('ownedDeskWarmAlpha is the exact string the afterglow paints with', () => {
+    const now = 1_000_000_000;
+    expect(ownedDeskWarmAlpha(null, true, now)).toBe('');
+    expect(ownedDeskWarmAlpha(owner, false, now)).toBe('');
+    const offline: OfficeNode = { ...owner, presence: 'offline', last_seen_at: now - 1_800_000 };
+    expect(ownedDeskWarmAlpha(offline, true, now)).toBe('0.090');
+    expect(ownedDeskWarmAlpha({ ...offline, last_seen_at: now - 7_200_000 }, true, now)).toBe('');
+    const away: OfficeNode = { ...owner, presence: 'away', last_seen_at: now };
+    expect(ownedDeskWarmAlpha(away, true, now)).toBe('0.108');
   });
 });

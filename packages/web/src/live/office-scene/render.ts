@@ -3418,6 +3418,24 @@ function screenPanel(
 /** How far above the desk the panel's bottom edge floats — the height of the stand's neck. */
 const PANEL_UP = 8;
 
+/**
+ * Which slice of a workstation to paint (sprite cache, spec 2026-09-17).
+ *
+ * The MONITOR is the one part of a desk that cannot be rasterized: a working desktop scrolls on `t`,
+ * and a lit screen's bloom composites with `lighter` over whatever is under it at that moment, which
+ * a transparent sprite cannot reproduce. So a desk paints as sprite(`pre`) → live(`monitor`) →
+ * sprite(`post`), three parts in ONE depth slot.
+ *
+ * The whole monitor is live, not just its screen face: a dual setup paints casing-then-face per
+ * panel, and the nearer panel paints over the farther one, so lifting only the faces out would group
+ * the two casings ahead of the two faces and change what covers what. The casing and stand are a few
+ * flat quads; the gradients and the bloom were always the cost.
+ *
+ * `pre` ++ `monitor` ++ `post` emits exactly the ops `all` does, in the same order — render.test.ts
+ * holds that as an invariant across every desk state.
+ */
+export type WorkstationPhase = 'all' | 'pre' | 'monitor' | 'post';
+
 /** A monitor stand: a flat base plate on the desk and a slim neck up to the panel. It replaces the
  * 8×6×8 solid block that used to sit under every panel, which at this camera angle read as a tower —
  * a full PC with a screen stuck to it, which is exactly the thing nick said these should stop being.
@@ -3914,7 +3932,7 @@ export function deskNearDepth(
  * free actors (see `drawActor`), so chair < sitter < desk (or the mirror of it, by facing) paint in true
  * painter's order instead of the desk blob swallowing both. Surface props self-sort back-to-front within
  * the desk by their own footprint depth, so a tall lamp/photo behind a mug never paints through it. */
-function drawWorkstation(
+export function drawWorkstation(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   slot: { lx: number; ly: number; dir: Dir; id: number },
@@ -3938,6 +3956,7 @@ function drawWorkstation(
    * and loop cannot disagree.
    */
   atWork = false,
+  phase: WorkstationPhase = 'all',
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -3959,22 +3978,29 @@ function drawWorkstation(
   // Owned empty desk (presence-honesty §4): the offline owner keeps the desk — chair in, monitor
   // dark, their name baked on a small plate. The lamp is off (nobody switched it on), a warm screen
   // glow fades over the first hour since they left, and a disconnected seat gets an amber glint.
+  // A stepped-away owner is present-but-absent (declared): same bodiless desk, different words —
+  // `ownedDeskWarmAlpha` owns that distinction now, because the sprite key and the paint must agree.
   const ownedEmpty = node != null && owned;
-  // A stepped-away owner is present-but-absent (declared): same bodiless desk, different words.
-  const steppedAway = ownedEmpty && node.presence !== 'offline';
 
-  for (const [sx, sy] of [
-    [-1, -1],
-    [1, -1],
-    [1, 1],
-    [-1, 1],
-  ] as const) {
-    box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, dim(PAL.wood, 0.9));
+  if (phase === 'monitor') {
+    monitor(ctx, fit, lx + f[0] * MONITOR_ALONG, ly + f[1] * MONITOR_ALONG, dir, working, up, id, t);
+    return;
   }
-  box(ctx, fit, lx, ly, wx, dy, ST, PAL.wood, DH);
+
+  if (phase !== 'post') {
+    for (const [sx, sy] of [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ] as const) {
+      box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, dim(PAL.wood, 0.9));
+    }
+    box(ctx, fit, lx, ly, wx, dy, ST, PAL.wood, DH);
+  }
   // Bevelled front lip (Delight D): a soft rim light along the slab's two viewer-facing top edges,
   // so the worktop reads as a finished edge rather than a raw extrusion.
-  {
+  if (phase !== 'post') {
     const e = project(lx - wx / 2, ly + dy / 2, fit);
     const s2 = project(lx + wx / 2, ly + dy / 2, fit);
     const e2 = project(lx + wx / 2, ly - dy / 2, fit);
@@ -3993,12 +4019,14 @@ function drawWorkstation(
   interface Prop {
     sum: number;
     fn: () => void;
+    /** The monitor — the sprite cache's split point (see `WorkstationPhase`). */
+    monitor?: true;
   }
   const props: Prop[] = [];
-  const at = (along: number, across: number, fn: (ix: number, iy: number) => void): void => {
+  const at = (along: number, across: number, fn: (ix: number, iy: number) => void, monitor?: true): void => {
     const ix = lx + f[0] * along + p[0] * across;
     const iy = ly + f[1] * along + p[1] * across;
-    props.push({ sum: deskPropSort(dir, along, across), fn: () => fn(ix, iy) });
+    props.push({ sum: deskPropSort(dir, along, across), fn: () => fn(ix, iy), ...(monitor ? { monitor } : {}) });
   };
 
   // The monitor at the back, then the keyboard + mouse pulled in to where a seated member's hands actually
@@ -4029,7 +4057,12 @@ function drawWorkstation(
       ctx.lineWidth = Math.max(1, fit.scale);
       ctx.stroke();
     });
-  at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id, t));
+  at(
+    MONITOR_ALONG,
+    0,
+    (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id, t),
+    true,
+  );
   // The dock, beside and behind the monitor on every desk — not a hashed personality prop and not
   // owner-dependent: the cradle is always there, and the laptop in it is there exactly when its owner
   // is working AND sitting at it. An empty dock on a desk with a body at it is honest, not a gap —
@@ -4072,19 +4105,81 @@ function drawWorkstation(
   // The owned-desk plate + texture (presence-honesty §4) ride the same prop pipeline so they
   // depth-sort with the desk. All static paint keyed to data refreshes — no new rAF.
   if (ownedEmpty && node) {
-    const age = node.last_seen_at != null ? Date.now() - node.last_seen_at : Infinity;
     // warm desk: screen afterglow fades over ~1h; a stepped-away desk keeps it (they just left)
-    const warmth = steppedAway ? 0.6 : Math.max(0, 1 - age / 3_600_000);
-    if (warmth > 0)
-      at(Df / 2 - 12, 0, (ix, iy) => {
+    const warmAlpha = ownedDeskWarmAlpha(node, owned);
+    if (warmAlpha)
+      at(MONITOR_ALONG, 0, (ix, iy) => {
         const b = project(ix, iy, fit);
-        ctx.fillStyle = `rgba(122, 148, 156, ${(0.18 * warmth).toFixed(3)})`;
+        ctx.fillStyle = `rgba(122, 148, 156, ${warmAlpha})`;
         ctx.fillRect(b.x - 15 * fit.scale, b.y - (up + 23) * fit.scale, 30 * fit.scale, 18 * fit.scale);
       });
   }
 
   props.sort((a, b) => a.sum - b.sum);
-  for (const pr of props) pr.fn();
+  // Split by the monitor's INDEX in the sorted order, not by its sort key: the owned-desk afterglow
+  // and the dock can TIE with it, and a tie that sorts after the monitor must still paint after the
+  // screen face. An index cannot be ambiguous where a key can.
+  const mi = props.findIndex((pr) => pr.monitor);
+  props.forEach((pr, i) => {
+    if (phase === 'pre' && mi >= 0 && i >= mi) return;
+    if (phase === 'post' && (mi < 0 || i <= mi)) return;
+    pr.fn();
+  });
+}
+
+/**
+ * The owned-desk afterglow alpha, formatted EXACTLY as `drawWorkstation` paints it — '' when it does
+ * not paint. One formula for the paint and for the sprite key: the fade over an hour is the one
+ * `Date.now()`-derived input in the room, and it enters the key only as the string it paints with.
+ */
+export function ownedDeskWarmAlpha(node: OfficeNode | null, owned: boolean, now = Date.now()): string {
+  if (!node || !owned) return '';
+  const steppedAway = node.presence !== 'offline';
+  const age = node.last_seen_at != null ? now - node.last_seen_at : Infinity;
+  const warmth = steppedAway ? 0.6 : Math.max(0, 1 - age / 3_600_000);
+  return warmth > 0 ? (0.18 * warmth).toFixed(3) : '';
+}
+
+/** The fit's contribution to every sprite key — `ox`/`oy` move the pixel grid, not just `scale`. */
+export function fitKey(fit: Fit): string {
+  return `${fit.ox}:${fit.oy}:${fit.scale}`;
+}
+
+/** The resolved scene palette, as a key fragment — a theme flip is one cold re-rasterization. */
+export function paletteKey(): string {
+  return `${PAL.floor}|${PAL.floor2}|${PAL.wood}|${PAL.couch}|${PAL.wall}`;
+}
+
+/** A workstation sprite's key: exactly the inputs that change its pixels, and never `t`. */
+export function workstationKey(k: {
+  slot: { id: number; dir: Dir };
+  node: OfficeNode | null;
+  teamName: string;
+  owned: boolean;
+  working: boolean;
+  lampLit: boolean;
+  hidden: ReadonlySet<PropKind> | undefined;
+  fit: Fit;
+  dpr: number;
+  warmAlpha: string;
+}): string {
+  const steppedAway = k.node != null && k.owned && k.node.presence !== 'offline';
+  return [
+    'ws',
+    k.slot.id,
+    k.slot.dir,
+    k.node?.name ?? '',
+    k.teamName,
+    k.owned ? 1 : 0,
+    steppedAway ? 1 : 0,
+    k.working ? 1 : 0,
+    k.lampLit ? 1 : 0,
+    k.hidden ? [...k.hidden].sort().join('+') : '',
+    k.warmAlpha,
+    fitKey(k.fit),
+    k.dpr,
+    paletteKey(),
+  ].join('·');
 }
 
 /**
@@ -4327,6 +4422,8 @@ export function deskStationItems(
     /** Props currently "in the owner's hand" (the sip mug, the errand's bottle) — skipped this frame. */
     hide?: Set<PropKind> | undefined;
     lampsOn?: boolean | undefined;
+    /** Device pixel ratio, for the sprite keys. Default 1. */
+    dpr?: number | undefined;
   },
 ): { items: DepthItem[]; lampLit: boolean } {
   const out: DepthItem[] = [];
@@ -4376,6 +4473,29 @@ export function deskStationItems(
        revert — the paragraph above is kept because it is the reasoning, not because anything is owed. */
       d: depth(slot.lx, slot.ly),
       fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
+      // Cached form: two sprites around a live screen (see `WorkstationPhase`). The sprite draws
+      // take the OFFSCREEN context; the screen paints on the stage.
+      parts: (() => {
+        const key = workstationKey({
+          slot,
+          node,
+          teamName,
+          owned: deskOwned,
+          working: seatedWorking,
+          lampLit: !!node && !deskOwned && env.lampsOn,
+          hidden: hide,
+          fit,
+          dpr: opts.dpr ?? 1,
+          warmAlpha: ownedDeskWarmAlpha(node, deskOwned),
+        });
+        const ws = (c: CanvasRenderingContext2D, phase: WorkstationPhase): void =>
+          drawWorkstation(c, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking, phase);
+        return [
+          { kind: 'sprite', key: `${key}·pre`, draw: (c) => ws(c, 'pre') },
+          { kind: 'live', draw: () => ws(ctx, 'monitor') },
+          { kind: 'sprite', key: `${key}·post`, draw: (c) => ws(c, 'post') },
+        ] satisfies SpritePart[];
+      })(),
     });
     // The room-side half again, at the FRONT EDGE's depth — so a member standing in front of this
     // desk paints in front of it. Additive by construction: the same pixels in the same colours, so
@@ -4585,6 +4705,7 @@ export function renderScene(
       t,
       hide,
       lampsOn: env.lampsOn,
+      dpr: opts.dpr,
     });
     if (station.lampLit) litLamps.add(slot.id);
     items.push(...station.items);
