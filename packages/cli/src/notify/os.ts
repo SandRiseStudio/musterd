@@ -3,7 +3,17 @@ import { platform as osPlatform } from 'node:os';
 
 /** A single OS notification: a short title and a body line. */
 export interface NotifyItem {
-  /** Envelope id this notification stands for — the de-dupe key (ADR 035). */
+  /**
+   * Envelope id this notification stands for.
+   *
+   * De-dupes only on the INBOX path, where {@link pollOnce} holds a `seen` set keyed on it (ADR 035).
+   * Nothing here reads it: `buildNotifyCommand` never passes it to `osascript` or `notify-send`, and
+   * neither platform notifier de-dupes on its own. A caller outside `pollOnce` that supplies a
+   * constant id therefore gets NO suppression — which is how the auto-refresh failure path came to
+   * fire 16 identical alarms in 3h12m while looking, in source, as though it were de-duped
+   * (lane 01M2RRQJDA, 2026-08-19). Such callers must debounce for themselves; see
+   * `blockedFailureNotice` in commands/service.ts for the shape.
+   */
   id: string;
   title: string;
   body: string;

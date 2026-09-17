@@ -305,6 +305,88 @@ export function shouldWaitForSettle(a: {
 }
 
 /**
+ * Escalation for a refresh that keeps failing on the SAME cause (lane 01M2RRQJDA).
+ *
+ * The `.attempted-sha` debounce is keyed on the target TIP, which is right for a broken build — that
+ * would fail identically — but wrong for a blocker that is waiting on a person. A dirty checkout does
+ * not care that main moved, so on a busy afternoon every new commit read as a fresh attempt and fired
+ * a fresh alarm. Measured 2026-08-19 from `~/.musterd/autorefresh/refresh.log`: 16 notices in 3h12m,
+ * 16 distinct target tips, all reporting the same unchanged `pinned b8a20c3` — one stuck file,
+ * an interruption every ~12 minutes, and the file still there at the end.
+ *
+ * So debounce on the CAUSE and let repetition earn its place: announce a new cause at once, then stay
+ * quiet until the block has outlived a threshold, and say how many attempts and how long when it has.
+ * Same shape as the ADR 230 outage ladder next door (a string marker with a stop rule), but escalating
+ * rather than one-shot: a blocker nobody clears must get louder, not disappear.
+ *
+ * Pure: previous marker + this tick\'s cause (null when the refresh succeeded) + now → next marker and
+ * the notice to fire, if any. `state` round-trips through {@link fileBlockedState}.
+ */
+export function blockedFailureNotice(
+  prev: string,
+  cause: string | null,
+  now: number,
+): { state: string; notify: { count: number; forHuman: string } | null } {
+  // Cleared: the refresh got through (or failed on nothing nameable). Forget the episode entirely, so
+  // the same cause a week later is news again rather than a suppressed repeat.
+  if (cause === null) return { state: '', notify: null };
+
+  let prior: { cause: string; since: number; count: number; notifiedAt: number } | null = null;
+  try {
+    const parsed: unknown = prev ? JSON.parse(prev) : null;
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof (parsed as { cause?: unknown }).cause === 'string'
+    ) {
+      prior = parsed as { cause: string; since: number; count: number; notifiedAt: number };
+    }
+  } catch {
+    // Unreadable marker → treat as a fresh episode. Failing loud is the only safe direction here: a
+    // corrupt file must never be the reason an operator hears nothing about a stuck daemon.
+    prior = null;
+  }
+
+  // A cause we have not seen (or a different one) is news: speak now, and start the clock.
+  if (prior === null || prior.cause !== cause) {
+    return {
+      state: JSON.stringify({ cause, since: now, count: 1, notifiedAt: now }),
+      notify: { count: 1, forHuman: humanDuration(0) },
+    };
+  }
+
+  const episode = prior; // narrowed; the .find closure below needs it non-null
+  const count = episode.count + 1;
+  const blockedFor = now - episode.since;
+  // The first threshold this episode has newly crossed since the last time we spoke. Comparing the
+  // LAST NOTICE's age (not this tick's) is what stops one long block re-firing at every later tick.
+  const due = BLOCKED_ESCALATION_MS.find(
+    (t) => blockedFor >= t && episode.notifiedAt - episode.since < t,
+  );
+  const state = JSON.stringify({
+    cause,
+    since: episode.since,
+    count,
+    notifiedAt: due === undefined ? episode.notifiedAt : now,
+  });
+  return due === undefined
+    ? { state, notify: null }
+    : { state, notify: { count, forHuman: humanDuration(blockedFor) } };
+}
+
+/** Escalation thresholds measured from the first failure. Past the last one the notice repeats daily:
+ *  every observed episode cleared inside 7h06m, so 1h is the first point at which "still stuck" is
+ *  genuinely new information, and 24h is the point at which nobody is coming. */
+const BLOCKED_ESCALATION_MS = [3_600_000, 6 * 3_600_000, 24 * 3_600_000];
+
+/** `3h12m` / `47m` — a duration a human reads on a lock screen, not a count of seconds. */
+function humanDuration(ms: number): string {
+  const mins = Math.floor(ms / 60_000);
+  const h = Math.floor(mins / 60);
+  return h > 0 ? `${h}h${String(mins % 60).padStart(2, '0')}m` : `${mins}m`;
+}
+
+/**
  * The quiet floor (quiescence inc 2 — spec: docs/superpowers/specs/2026-08-03-quiescence-signal-
  * design.md). The settle window answers "is MAIN still moving?"; this answers "is a SEAT still
  * moving?" — hold the bounce while an agent acted within the floor, so the restart lands in a lull
@@ -865,6 +947,7 @@ export async function serviceCommand(
     /** ADR 230: the outage run/escalation marker — SEPARATE from the build debounce, so an outage
      *  can never clobber the broken-`main` attempted-tip marker (or be clobbered by it). */
     outageState?: { read: () => string | null; write: (s: string) => void };
+    blockedState?: { read: () => string | null; write: (s: string) => void };
     /** Sleep between post-bounce `/health` polls (injected so tests never actually wait). */
     sleep?: (ms: number) => Promise<void>;
     /** ADR 224 log trim (injected so the tick's tests never touch the real ~/.musterd logs). */
@@ -962,6 +1045,7 @@ export async function serviceCommand(
       };
       const autoState = deps.autoState ?? fileAutoState();
       const outageState = deps.outageState ?? fileOutageState();
+      const blockedState = deps.blockedState ?? fileBlockedState();
       // Unattended output: stamp it and record what the operator was actually shown. `refresh.log`
       // is read after the fact, by a human asking "why did my machine just do that?" — and it
       // answered neither half. Every line looked alike whether it was emitted 2 minutes or 2 days
@@ -993,6 +1077,7 @@ export async function serviceCommand(
         notify,
         autoState,
         outageState,
+        blockedState,
         okStamped,
         fail,
         deps.touch,
@@ -1597,6 +1682,31 @@ function fileOutageState(): { read: () => string | null; write: (s: string) => v
   };
 }
 
+/** File-backed blocked-cause marker for the {@link blockedFailureNotice} ladder — its own file beside
+ *  the attempted-tip stamp and the outage marker, so three lifecycles (a tip already tried, a dead
+ *  daemon, a refresh stuck on one cause) can never overwrite each other. */
+function fileBlockedState(): { read: () => string | null; write: (s: string) => void } {
+  const p = join(dirname(configPath()), 'autorefresh', '.blocked');
+  return {
+    read: () => {
+      try {
+        return readFileSync(p, 'utf8').trim() || null;
+      } catch {
+        return null;
+      }
+    },
+    write: (v: string) => {
+      try {
+        mkdirSync(dirname(p), { recursive: true });
+        writeFileSync(p, v, 'utf8');
+      } catch {
+        // best-effort: a marker we cannot persist degrades to "every failure is a fresh episode",
+        // i.e. the pre-01M2RRQJDA behaviour — noisy, never silent. The safe direction.
+      }
+    },
+  };
+}
+
 /** File-backed attempted-tip store for the auto-refresher debounce (§ {@link autoRefreshStampPath}). */
 function fileAutoState(): { read: () => string | null; write: (sha: string) => void } {
   const p = autoRefreshStampPath();
@@ -1726,6 +1836,7 @@ async function autoRefreshTick(
   notify: (n: { id: string; title: string; body: string }) => void,
   autoState: { read: () => string | null; write: (sha: string) => void },
   outageState: { read: () => string | null; write: (s: string) => void },
+  blockedState: { read: () => string | null; write: (s: string) => void },
   ok: (s: string) => void,
   fail: (step: string, r: RunResult) => never,
   touch: (ok: (s: string) => void) => Promise<void> = touchServicePresence,
@@ -1759,6 +1870,9 @@ async function autoRefreshTick(
   const tip = ctx.run('git', ['-C', dir, 'rev-parse', 'origin/main']).stdout.trim();
   if (behind === 0) {
     if (autoState.read()) autoState.write(''); // reached tip — clear any stale attempt marker
+    // The block is over the moment a refresh lands: forget the episode, so the same cause weeks
+    // later is news again rather than a suppressed repeat (lane 01M2RRQJDA).
+    if (blockedState.read()) blockedState.write(blockedFailureNotice('', null, Date.now()).state);
     ok(`daemon up to date with origin/main (${health0.build.slice(0, 7)})`);
     return 0;
   }
@@ -1905,18 +2019,33 @@ async function autoRefreshTick(
     }
     return code;
   } catch (err) {
-    // A failed tick is the one state nothing else surfaces. The debounce then parks it, so the
-    // daemon stays pinned on old code across every later merge while /health answers cheerfully —
-    // and the only evidence is a log nobody reads unprompted. Say it out loud, once per tip (the
-    // debounce above guarantees that), then rethrow so the log keeps the full error.
-    notify({
-      id: 'musterd-autorefresh-failed',
-      title: 'musterd auto-refresh failed',
-      body:
-        `The daemon is pinned on ${health0.build.slice(0, 7)} — the refresh to ${tip.slice(0, 7)} ` +
-        `failed: ${failureCause(err)}. Nothing will retry until a new commit lands. ` +
-        `See ~/.musterd/autorefresh/refresh.log.`,
-    });
+    // A failed tick is the one state nothing else surfaces. But the `.attempted-sha` debounce is
+    // keyed on the TIP, so on a busy afternoon every new commit re-attempted an unchanged blocker
+    // and fired an identical alarm — 16 in 3h12m on 2026-08-19, one stuck file (lane 01M2RRQJDA).
+    // Debounce the ALARM on the cause instead: new cause speaks at once, a repeat waits for a
+    // threshold and then says how long and how many. Rethrow either way — the log keeps every
+    // failure, whether or not it was worth interrupting a human for.
+    const cause = failureCause(err);
+    const decision = blockedFailureNotice(blockedState.read() ?? '', cause, Date.now());
+    blockedState.write(decision.state);
+    if (decision.notify) {
+      const again =
+        decision.notify.count > 1
+          ? `Still blocked after ${decision.notify.forHuman} and ${decision.notify.count} attempts — `
+          : '';
+      notify({
+        id: 'musterd-autorefresh-failed',
+        title: 'musterd auto-refresh failed',
+        body:
+          `${again}the daemon is pinned on ${health0.build.slice(0, 7)} — the refresh to ` +
+          `${tip.slice(0, 7)} failed: ${cause}. Nothing will retry until a new commit lands. ` +
+          `See ~/.musterd/autorefresh/refresh.log.`,
+      });
+    } else {
+      // Not worth a human's attention yet — but the log still records every attempt, which is what
+      // made this defect measurable in the first place.
+      ok(`still blocked on the same cause, not re-notifying — ${cause}`);
+    }
     throw err;
   }
 }
