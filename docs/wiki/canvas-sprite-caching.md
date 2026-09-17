@@ -1,0 +1,56 @@
+# Canvas sprite caching
+
+What a canvas sprite cache costs as well as saves — measured on the office scene, 2026-09-17: rasterizing part of a scene moves where compositing happens, and a blit is a second composite.
+
+Context: the office's per-item sprite cache (`packages/web/src/live/office-scene/sprite-cache.ts`, spec `docs/superpowers/specs/2026-09-17-office-scene-sprite-cache-design.md`). The lessons are about canvas 2D, not about the office.
+
+## An additive pass cannot be separated from what it adds to (2026-09-17; falsify: rasterize `drawWindowBeams` into its own sprite, blit it over the floor sprite, and compare `getImageData` against the direct render — the beams land as flat paint instead of light) <!-- claim: other -->
+
+`globalCompositeOperation = 'lighter'` adds the source to **what is already on that canvas**. Draw it into an empty offscreen and it adds to transparency; blit that back source-over and it *replaces* the pixels it was supposed to brighten.
+
+The office shell was first split into two sprites so the live wall fixtures could keep their exact position in the draw order. The bulb strand and the daylight beams are additive and ended up in the second sprite, adding to nothing. Every one of the ten states in `pnpm scene:pixel-check` failed, at ~14% of all pixels.
+
+The rule that came out of it: **an additive pass belongs in the same sprite as the surface it brightens, or it stays live on the stage.** The office keeps the left wall's strand cached (its wall face is in the same sprite) and the right wall's strand live (its fixtures split the two apart). Source-over content has no such constraint — source-over is associative, so a chain of it can be cut anywhere.
+
+An op-sequence test is blind to it (2026-09-17; falsify: run `render.test.ts`'s cache-equivalence test against the two-sprite shell that failed the gate — it is green). The cached path emitted exactly the same calls in exactly the same order; only a rasterizer knows they landed on a different surface. <!-- claim: other -->
+
+## Unpremultiplied pixel comparison is meaningless near zero alpha (2026-09-17; falsify: compare two renders of the same scene by raw `getImageData` bytes and plot the deltas — they cluster on 255, 128, 85, 64, 51, 42) <!-- claim: other -->
+
+`getImageData` returns **unpremultiplied** RGBA. Canvas stores premultiplied, so recovering colour divides by alpha, and at alpha 1/255 a single stored step becomes a 255-step swing in the reported colour. A pixel at alpha 1 that reads `[0,0,0]` in one render and `[255,255,0]` in the other is the same invisible pixel twice.
+
+The office gate's first report was `maxDelta 255` on 161k pixels, and the delta histogram gave the diagnosis away: the values were 255/n for small n — 255, 128, 85, 64, 51, 42 — which is that division and nothing else. Comparing **premultiplied colour plus alpha** (`round(c·a/255)` per channel, and `|Δa|`) is comparing what a viewer gets, and it took the same run's worst delta from 255 to 19.
+
+## Blitting is a second composite, so ~13% of a detailed scene differs by one step, forever (2026-09-17; falsify: `pnpm scene:pixel-check` after any change to the cache, and read `beyond1` against `differing`) <!-- claim: other -->
+
+Measured across ten scene states at 1920×1080 (1,377,600 pixels), premultiplied comparison:
+
+| | pixels | share |
+|---|---|---|
+| differ by exactly one step | ~172,500 | ~12.5% |
+| differ by more than one step | ~4,000 | ~0.29% |
+| worst single-pixel delta | 88 | one desk edge |
+
+One step is what the extra composite costs: the direct path paints an antialiased edge straight onto the floor, the cached path paints it onto transparency and then composites the result. The office floor is drawn plank by plank, so "every antialiased edge" is a large share of the room. `__office.spriteCrops(x, y, r)` renders magnified PNGs of both paths at a pixel; at the worst pixel of the whole matrix the two crops are indistinguishable by eye.
+
+So **"pixel-identical" is not an achievable acceptance criterion for a sprite cache** — the reachable one is "no visible difference, with a stated bound and a gate that enforces it". Which of those a product wants is a person's decision; the measurement is what makes it a decision rather than a guess.
+
+## The win is smaller than "how much of the frame is static" suggests (2026-09-17, a LAPTOP proxy, not the capture box; falsify: re-run the A/B on a box with no GPU and compare) <!-- claim: other -->
+
+The premise was that ~39 ms of the office's ~56 ms per draw is static furniture ([broadcast stream](broadcast-stream.md)), so caching it should take most of that back. Interleaved A/B/A/B on one Chrome at 8× CPU throttle, same page and same room:
+
+| arm | ms/draw |
+|---|---|
+| direct | 42.0, 40.4 |
+| cached | 34.9, 35.8 |
+
+About 15%, with both direct arms consistent. Two reasons the share of the frame does not convert into a share of the time: a near-full-stage sprite costs real memory bandwidth to blit every frame, and everything that stays live (actors, the interior lighting pass, the vignette) was never part of the 39 ms in the first place. **This number is a laptop with a GPU** and the capture box runs SwiftShader, where the balance between rasterizing gradients and copying a large image is different — it is a signal that the win is not automatic, not the acceptance measurement.
+
+## Measure a sprite's box, do not estimate it (2026-09-17; falsify: set `SPRITE_PAD` to 200 and re-run the gate — the differences do not move) <!-- claim: other -->
+
+The spec planned to derive each sprite's bounding box from footprint geometry plus a fixed padding. `measureBounds` (in `sprite-cache.ts`) instead dry-runs the draw function against a context that tracks only the CTM and the extent of every point touched — path commands, rects, arcs, ellipses, images, and an estimate for text. It is JS-only and runs once per cache miss.
+
+That removed clipping from the list of suspects for free: when the gate went red, raising the padding from 24 to 200 device pixels changed nothing, which ruled out a whole class in one run instead of a session of box arithmetic.
+
+## Related
+
+- [broadcast stream](broadcast-stream.md) — where the 56 ms/draw and the "the room, not who is in it" measurement come from.
