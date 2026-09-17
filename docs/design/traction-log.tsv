@@ -1,0 +1,6 @@
+# The hand log behind traction-plan §6 (installs) and §16 (the PM track). One line per real event.
+# Appended by nick, usually the night of. A row with no name in "who" did not happen.
+#
+# kind: conversation | qualified | attempt | install | active | quote | pm-message | pm-chat | pm-referral
+# Read it with `pnpm traction`, which buckets by ISO week and names the starving step.
+date	kind	who	where	note
