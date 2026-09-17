@@ -10,7 +10,7 @@ The harness-native fix for "give an agent standing context every session" is the
 
 **Two follow-ups (2026-06-24 dogfood).** The original primer assumed two things that don't always hold, so it's now (a) **channel-aware** and (b) **self-claim-aware**:
 
-- _Channel._ The first cut spoke only of the `team_*` MCP tools and **banned the `musterd` CLI**. But an agent without the MCP server provisioned — e.g. a fresh session in musterd's _own_ repo — coordinates via the CLI; the ban actively misled it. The primer now documents both forms (`team_*` tool / `musterd` CLI) and keeps the one-channel-at-a-time caution (don't drive the CLI _alongside_ the tools — different identity → failed sends) only where it applies.
+- _Channel._ The first cut spoke only of the `team_*` MCP tools and **banned the `musterd` CLI**. But an agent without the MCP server provisioned — e.g. a fresh session in musterd's _own_ repo — coordinates via the CLI; the ban actively misled it. The primer now documents both forms (`team_*` tool / `musterd` CLI). The one-channel-at-a-time caution that replaced the ban was itself retired on 2026-09-17 (lane 01M2RP18EV): it blamed the channel for an identity split that comes from the **working directory**, and it forbade a CLI the shipped orient skill prescribes (`musterd session orient-stamp`, which has no MCP verb). The caution now names the cwd, which is the thing that actually decides which seat the CLI acts as.
 - _Seat._ `renderPrimer`'s `member` is now optional. A provisioned agent is named (`You are **Ada** …`); an **unprovisioned** agent is told to claim its seat first (`musterd claim <name>`), which is exactly the fresh-agent path and avoids a primer that names a seat the agent doesn't hold.
 
 ## 2. Decision
@@ -63,9 +63,10 @@ are reachable through it, and humans on the team are peers, not approvers.
 · unprovisioned: You are a member of the **{{team}}** team — **claim your seat first**
 (`team_join`, or `musterd claim <name>` then `musterd status`) …
 
-**Your channel.** If this session has the `team_*` tools (the musterd MCP server), use them.
-If it does not, coordinate with the `musterd` CLI instead — the same team and acts. Use one
-channel only — with the `team_*` tools, do not also drive the CLI (different identity → failed sends).
+**Your channel.** Prefer the `team_*` tools (the musterd MCP server) where this session has
+them; the `musterd` CLI is the same team and acts, and is the right route where no tool exists
+(`session orient-stamp`, `stream …`). Run the CLI **from this Workspace** — what swaps identity
+is the working directory, not the channel. `musterd whoami` says who you are.
 
 Work as a teammate, not in isolation — `team_*` tool form / `musterd` CLI form:
 

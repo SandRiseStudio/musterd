@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 24;
+export const GUIDANCE_CONTENT_VERSION = 25;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -103,9 +103,11 @@ export function parseContentStamp(text: string): { version: number; hash: string
 }
 
 const CHANNEL_NOTE =
-  'Use **one channel**: if this session has the `team_*` tools (the musterd MCP server), use them; ' +
-  'otherwise use the `musterd` CLI. Do not drive both — the CLI can resolve to a different identity and ' +
-  'your sends will fail. Names below are given tool-form / CLI-form.';
+  'Prefer the `team_*` tools (the musterd MCP server) where this session has them. The `musterd` CLI ' +
+  'resolves the SAME seat from this Workspace, so it is the right route where no tool exists ' +
+  '(`session orient-stamp`, `stream …`) — what swaps identity is the working directory, not the ' +
+  "channel: run the CLI from this Workspace, else it acts as that folder's seat. `musterd whoami` " +
+  'says who you are. Names below are given tool-form / CLI-form.';
 
 /**
  * The skill *body* — the harness-neutral playbook text (no frontmatter, no stamp; those are added per
@@ -293,8 +295,10 @@ export function renderSkillBody(opts: { team: string }): string {
     '',
     '- **"You are auto-joined" but the `team_*` tools are absent** → the MCP server is not registered in',
     '  this checkout. Run `musterd init` (or `musterd init --check` to see the drift without writing).',
-    '- **Sends fail / wrong identity** → run `musterd whoami`; you are likely driving the CLI alongside the',
-    '  `team_*` tools (two identities). Pick one channel.',
+    '- **Sends fail / wrong identity** → run `musterd whoami`. It reports the seat your *working',
+    "  directory* binds to, which is what the CLI acts as — from a teammate's worktree you send as THEM,",
+    '  and from an unbound folder you fall back to a read-only config identity. Mixing tools and CLI is',
+    '  not itself the fault; being in the wrong folder is.',
     '- **You cannot tell what is real** → invoke the tool and use what it returns. Never write down an',
     '  imagined inbox or reply; if you did not call it, you do not know what is there.',
     '',

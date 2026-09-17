@@ -546,6 +546,12 @@ export interface LaneFilter {
   owner?: string;
   openOnly?: boolean;
   goalId?: string;
+  /**
+   * Only lanes in these states. The board reader for a seat with history: `mine` alone
+   * returns every lane ever owned (200 done rows bury the live ones), so the reader needs a
+   * state edge — `GET /lanes?state=claimed&state=active`, `lane_board {state: [...]}`.
+   */
+  states?: LaneState[];
 }
 
 export function listLanes(
@@ -562,7 +568,8 @@ export function listLanes(
     .filter((l) => (filter.project ? l.project === filter.project : true))
     .filter((l) => (filter.owner ? l.owner_seat === filter.owner : true))
     .filter((l) => (filter.openOnly ? l.state === 'open' : true))
-    .filter((l) => (filter.goalId ? l.goal_id === filter.goalId : true));
+    .filter((l) => (filter.goalId ? l.goal_id === filter.goalId : true))
+    .filter((l) => (filter.states ? filter.states.includes(l.state) : true));
 }
 
 /**

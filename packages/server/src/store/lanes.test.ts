@@ -162,6 +162,21 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     expect(board[0]!.branch).toBe('agent/riley');
   });
 
+  it('board states filter — a seat with history sees only the live lanes (lane 01M2R988GK)', () => {
+    const { db, team } = seed();
+    const live = openLane(db, team.id, 'bravo', 'June', { title: 'live', claim: true });
+    updateLane(db, team.id, live.id, 'bravo', { state: 'active' });
+    const old = openLane(db, team.id, 'bravo', 'June', { title: 'old', claim: true });
+    updateLane(db, team.id, old.id, 'bravo', { state: 'done' });
+    // Owner alone returns both — the overflow this filter fixes.
+    expect(listLanes(db, team.id, 'bravo', { owner: 'June' })).toHaveLength(2);
+    const filtered = listLanes(db, team.id, 'bravo', {
+      owner: 'June',
+      states: ['claimed', 'active', 'blocked', 'awaiting_acceptance', 'ready_for_review'],
+    });
+    expect(filtered.map((l) => l.id)).toEqual([live.id]);
+  });
+
   it('scenario 3 — the clean independent lane stays silent', () => {
     const { db, team } = seed();
     openLane(db, team.id, 'bravo', 'June', {

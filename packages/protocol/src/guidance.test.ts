@@ -147,6 +147,7 @@ describe('version-bump discipline (ADR 085)', () => {
     22: '70084e92e29476ed', // the skill catches up with four surfaces that moved under it (lane 01M1VD1CQV): `done` records submit-vs-unconfirmed and says which; `--wait` (blocks) vs `--waiting` (returns) named as the twins they are; team_availability + the goal tools get their tool form; and a "when you were woken" playbook for team_wake_context, which had a name in the reference and no prose in the body
     23: '414d3a6cbc654871', // orient step 3 scopes the announce clause to eligible-set acts and says a lane_review ask's accept IS the verdict (ADR 202) — announcing with accept closed ryder's lane before review (lane 01M2GQFJXG, 2026-09-14)
     24: 'e483f3745643ee00', // orient step 3 names the ACKNOWLEDGE: `wait` on a lane_review ask takes it without deciding, audited as lane.review_acknowledged (lane 01M2P2E2H6) — the old "say 'on it' with a status_update" told humans and not the board
+    25: 'cdf87bd806cb0789', // the channel rule stops forbidding the CLI it also prescribes (lane 01M2RP18EV): `session orient-stamp` has no MCP verb, so "do not drive both" was a rule every compliant seat had to break — and the identity that swaps is the one bound to the WORKING DIRECTORY (measured: whoami in agents-stanley → stanley, in agents-miley → miley, in ~ → nick read-only), not the channel
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
@@ -260,5 +261,34 @@ describe('the skill teaches the surface as it is (lane 01M1VD1CQV)', () => {
 
   it('dates the acceptors-came-back measurement instead of asserting it timelessly', () => {
     expect(body).toMatch(/as of 2026-08 acceptors had\s+come back 20 of 20 times/i);
+  });
+});
+
+describe('the channel rule (lane 01M2RP18EV)', () => {
+  const body = renderSkillBody({ team: 'dawn' });
+  const orient = renderOrientSkill({ team: 'dawn' });
+
+  it('does not tell a seat to avoid the CLI it also instructs them to run', () => {
+    // The skill body forbade driving both channels while THIS SAME FILE's orient skill ends on
+    // `musterd session orient-stamp` — a CLI write with no MCP verb. A rule every compliant seat
+    // must break is not a rule; a live seat read it, obeyed the skill, and apologised for obeying.
+    expect(orient).toContain('musterd session orient-stamp');
+    expect(body).not.toMatch(/Do not drive both/i);
+    expect(body).not.toMatch(/Pick one channel/i);
+  });
+
+  it('blames the working directory rather than the channel', () => {
+    // Measured 2026-09-17: `musterd whoami` in agents-stanley → "stanley on revive (cli · binding)",
+    // in agents-miley → "miley on revive (cli · binding)", in ~ → "nick on revive (cli · config)".
+    // The seat follows the cwd, not the channel — so cwd is the fact worth teaching.
+    expect(body).toMatch(/from (this|the seat's own) Workspace/i);
+    expect(body).toMatch(/`musterd whoami`/);
+  });
+
+  it('does not claim a second identity comes from the registration', () => {
+    // MUSTERD_MEMBER was retired by ADR 075; nothing under packages/ reads it, so a registration
+    // can no longer bake an identity that disagrees with `.musterd/binding.json`.
+    expect(body).not.toMatch(/resolve to a different identity/i);
+    expect(body).not.toMatch(/two identities/i);
   });
 });

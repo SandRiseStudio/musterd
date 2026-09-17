@@ -547,3 +547,137 @@ describe('inbox command', () => {
     });
   });
 });
+
+/**
+ * `musterd inbox --waiting` against an unreachable daemon (dolly, lane 01M2H0H2MT, 2026-09-14).
+ *
+ * Measured before this block existed: with the daemon unreachable, `inbox --waiting` and its
+ * `nudge` alias printed NOTHING and exited 0, while `musterd status` on the same seat, same CLI,
+ * same dead port said "✗ can't reach team server". Two of the three answers to "what is waiting
+ * for me" rendered DOWN as NOTHING-WAITING, and the human reading them cannot tell an empty queue
+ * from an unasked question.
+ *
+ * The fix is NOT "make the probe loud". The silence is deliberate and load-bearing: this command
+ * rides a `Notification` hook at the approval-prompt moment, where a line on every failure is
+ * worse than no line at all. So the seam is WHO IS ASKING, and the signal is a TTY — the installed
+ * hooks run it with stdout captured (`musterd inbox --waiting 2>/dev/null`, claude-code and grok
+ * alike, with no distinguishing flag to key off), while a human typing it has a terminal. A human
+ * at a terminal learns the daemon is down; the hook stays exactly as silent as it was.
+ */
+describe('inbox --waiting — a down daemon is not an empty queue (dolly, 2026-09-14)', () => {
+  let dir: string;
+  let server: RunningServer;
+  let reachable: string;
+  let ada: HttpClient;
+  const env = { ...process.env };
+
+  // A seat that is properly configured and whose daemon then goes away — the real shape of this
+  // bug. Config is written against a LIVE server (otherwise the command fails resolution long
+  // before it reaches the network, and would be measuring the wrong thing); the port is then
+  // pointed at a socket nothing listens on.
+  beforeEach(async () => {
+    server = createServer({ db: openDb(':memory:'), port: 0 });
+    const { port } = await server.listen();
+    dir = mkdtempSync(join(tmpdir(), 'musterd-waiting-'));
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+    process.env['MUSTERD_SERVER'] = `http://127.0.0.1:${port}`;
+    vi.spyOn(process, 'cwd').mockReturnValue(dir);
+    delete process.env['MUSTERD_NO_NUDGE'];
+    await teamCommand(parseArgs(['create', 'dawn', '--as', 'nick']));
+    reachable = `http://127.0.0.1:${port}`;
+    const cfg = loadConfig();
+    const nickKey = cfg.identities['dawn']!.key;
+    const admin = new HttpClient({ server: reachable, key: nickKey });
+    await admin.addMember('dawn', { name: 'Ada', kind: 'agent' });
+    const adaAuth = await claimAgentHttp(reachable, 'dawn', cfg.agentKeys['dawn']!, nickKey, 'Ada');
+    ada = new HttpClient({ server: reachable, ...adaAuth });
+    process.env['MUSTERD_SERVER'] = 'http://127.0.0.1:1';
+  });
+
+  /** Ada asks nick something — one directed act, so the queue is genuinely non-empty. */
+  async function ask(): Promise<void> {
+    await ada.send(
+      'dawn',
+      makeEnvelope({
+        id: ulid(),
+        team: 'dawn',
+        from: 'Ada',
+        to: { kind: 'member', name: 'nick' },
+        act: 'ask',
+        body: 'judge this',
+        ts: Date.UTC(2026, 6, 7, 12, 0),
+        thread: null,
+        meta: { species: 'approve', tier: 'standard' },
+      }),
+    );
+  }
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    process.env = { ...env };
+    await server.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** Capture stdout with `isTTY` forced either way — the seam under test. */
+  async function run(isTTY: boolean): Promise<{ code: number; out: string }> {
+    const chunks: string[] = [];
+    const write = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((c: never) => (chunks.push(String(c)), true));
+    // `isTTY` is a plain property on the stream (absent entirely when not a terminal), not an
+    // accessor — so it is assigned and restored, not spied.
+    const had = Object.prototype.hasOwnProperty.call(process.stdout, 'isTTY');
+    const prev = process.stdout.isTTY;
+    process.stdout.isTTY = isTTY;
+    try {
+      const code = await inboxCommand(parseArgs(['--waiting']));
+      return { code, out: chunks.join('') };
+    } finally {
+      write.mockRestore();
+      if (had) process.stdout.isTTY = prev;
+      else delete (process.stdout as { isTTY?: boolean }).isTTY;
+    }
+  }
+
+  it('tells a human at a terminal that it could not ask', async () => {
+    const r = await run(true);
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/can't reach|cannot reach|unreachable/i);
+  });
+
+  it('stays silent for the hook — stdout captured, no terminal', async () => {
+    const r = await run(false);
+    expect(r.code).toBe(0);
+    expect(r.out).toBe('');
+  });
+
+  it('stays silent when nudges are muted, terminal or not', async () => {
+    process.env['MUSTERD_NO_NUDGE'] = '1';
+    expect((await run(true)).out).toBe('');
+    expect((await run(false)).out).toBe('');
+  });
+
+  /**
+   * The two controls that keep this change from quietly becoming something bigger. The first pins
+   * the empty state: a REACHABLE daemon with nothing waiting must still print nothing, terminal or
+   * not — the new line means "I could not ask", and it would be worthless if it also appeared when
+   * the answer was a truthful zero. The second pins the delivery path: the waiting output itself is
+   * NOT TTY-gated, because the hook is the caller that most needs it and has no terminal. A future
+   * reader who decides to "just gate the whole command on isTTY" breaks that one.
+   */
+  it('a reachable daemon with an empty queue still says nothing — terminal or not', async () => {
+    process.env['MUSTERD_SERVER'] = reachable;
+    expect((await run(true)).out).toBe('');
+    expect((await run(false)).out).toBe('');
+  });
+
+  it('delivery is not TTY-gated — the hook has no terminal and is the caller that needs it', async () => {
+    process.env['MUSTERD_SERVER'] = reachable;
+    await ask();
+    const hook = await run(false);
+    expect(hook.out).not.toBe('');
+    expect(hook.out).toContain('Ada');
+    expect((await run(true)).out).toContain('Ada');
+  });
+});

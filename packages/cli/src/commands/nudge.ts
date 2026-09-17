@@ -1,5 +1,7 @@
 import type { Parsed } from '../args.js';
+import { isDaemonUnreachable } from '../client.js';
 import { renderReachabilityNudge, renderWaitingActs } from '../render/rows.js';
+import { theme } from '../render/theme.js';
 import { pendingActionSummary, resolveRead } from './helpers.js';
 
 /**
@@ -44,8 +46,35 @@ export async function nudgeCommand(parsed: Parsed): Promise<number> {
     // The acts themselves, not only the count: the human at the prompt can act on a line that
     // names who asked for what; a bare count pointed at an inbox it then had to go and read.
     process.stdout.write([line, ...renderWaitingActs(pending.waiting)].join('\n') + '\n');
-  } catch {
-    // Best-effort: a blocked approval prompt must never be disturbed by a failing nudge.
+  } catch (err) {
+    // Best-effort: a blocked approval prompt must never be disturbed by a failing nudge — with one
+    // exception, and only for the one caller who can act on it.
+    //
+    // The silence above means "nothing is waiting". When the daemon is unreachable this command
+    // produced the SAME silence, so a down daemon and an empty queue were one picture on the
+    // surface whose entire job is to report what is owed. `musterd status`, on the same seat and
+    // the same dead port, said so plainly; --waiting and its `nudge` alias said nothing and exited
+    // 0 (measured 2026-09-14, lane 01M2H0H2MT).
+    //
+    // The fix is not to make the probe loud. The hooks run this at the approval-prompt moment,
+    // where a line on every failure is worse than no line at all — and they run it with stdout
+    // captured and no distinguishing flag to key off (`musterd inbox --waiting 2>/dev/null`,
+    // claude-code and grok alike), so the command cannot be told who invoked it by its arguments.
+    // A TTY can: a human typing this has a terminal, a hook does not. Same idiom the bell already
+    // uses two files over (`inbox.ts`, `process.stdout.isTTY === true`).
+    //
+    // So: the human at the terminal learns the question could not be asked; every hook stays
+    // exactly as silent as before; and every OTHER failure stays silent for everyone, because a
+    // refused credential or a 500 does not make this command's silence a lie about the queue.
+    if (isDaemonUnreachable(err) && process.stdout.isTTY === true) {
+      // `⚠`, not the `✗` bin.ts gives a fatal: the command still exits 0 and still rides hooks —
+      // this is an advisory about the ANSWER, not a failed invocation. The second line is the
+      // whole point of the change, so it says the distinction outright rather than implying it.
+      process.stdout.write(
+        `${theme.warn('⚠')} ${err instanceof Error ? err.message : String(err)}\n` +
+          `  ${theme.meta('couldn\'t ask — this is not "nothing is waiting"')}\n`,
+      );
+    }
   }
   return 0;
 }

@@ -185,6 +185,11 @@ export function registerLanes(
         project: z.string().optional().describe('filter to one project'),
         mine: z.boolean().optional().describe('only lanes I own'),
         open: z.boolean().optional().describe('only unowned/claimable lanes'),
+        // Plain strings, not z.enum(LaneStateSchema.options): the 8 enum values cost ~100 B
+        // of standing context and broke context:check (lane 01M2R988GK). The server re-validates
+        // against LaneStateSchema at the boundary and its 400 names the valid values, so a typo
+        // still gets a useful answer — validation lives in one place, not two.
+        state: z.array(z.string()).optional().describe('only these states'),
       },
     },
     async (args) => {

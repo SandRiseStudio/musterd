@@ -69,7 +69,8 @@ vi.mock('../client.js', () => ({
 const { buildSkewNotes, footprintNotes, inspectProvisioning, runSessionProbe } =
   await import('./doctor.js');
 const { writeGuidance, CANONICAL_SKILL_PATH } = await import('./guidance.js');
-const { writeProvisionManifest, saveProvisioning } = await import('./manifest.js');
+const { writeProvisionManifest, saveProvisioning, loadProvisioning } =
+  await import('./manifest.js');
 
 function harness(label: string, installed: boolean, configured: boolean, registeredClaim?: string) {
   return {
@@ -792,16 +793,52 @@ describe('inspectProvisioning — the legacy manifest line says what it read (ry
     expect(line).toContain('version 1');
   });
 
-  it('degrades to naming the shape when the file carries no readable version', async () => {
+  /**
+   * What this test used to be, and why it was worth replacing (izzo's nit on #1413, run down
+   * 2026-09-14): it fed `{...V1, version: 'one'}`, called that "a file carrying no readable
+   * version", and asserted `line === '' || line.includes('pre-v3 shape')`. Both halves were wrong.
+   *
+   * The fixture does not classify `legacy` at all. The legacy predicate is `V2Schema.safeParse ||
+   * ProvisionManifestSchema.safeParse` (manifest.ts), and BOTH pin `version` to a numeric literal
+   * (`z.literal(2)` / `z.literal(1)`), so a mangled version fails both and the file classifies
+   * `invalid` — a different branch, pushing a different line. `manifestLine` then found nothing,
+   * returned '', and the `line === ''` escape passed the test on the strength of the absence it
+   * was supposed to rule out. Measured: with the entire manifest-line push deleted, the other
+   * three tests in this block go red and this one stayed GREEN.
+   *
+   * The disjunction was not carelessness, it was a hedge — the author was unsure which branch the
+   * fixture hit and wrote an assertion that could not lose either way. That is the mechanism
+   * `docs/wiki/double-gated-tests.md` is about, and the hedge is now an instance on that page.
+   *
+   * So the honest test is of the branch the fixture actually reaches.
+   */
+  it('a mangled version is invalid, not legacy — it gets the unreadable line, never the manifest line', async () => {
     h.primer = 'managed';
     h.binding = { claim: { mode: 'seat', name: 'Miley' } };
-    // A future frozen shape, or a `role`-keyed pre-rename v1 whose version key went missing: the
-    // classifier still says legacy, so the line must still fire — naming a number it cannot read
-    // is the defect, saying nothing at all would be worse.
     const dir = legacyManifest({ ...V1, version: 'one' as unknown as number });
-    const line = manifestLine((await inspectProvisioning(dir)).drift);
-    expect(line === '' || line.includes('pre-v3 shape')).toBe(true);
-    expect(line).not.toContain('version 1 (');
+    const { drift } = await inspectProvisioning(dir);
+    expect(drift.some((d) => d.includes('exists but is unreadable'))).toBe(true);
+    expect(drift.some((d) => d.includes('provisioning manifest is'))).toBe(false);
+  });
+
+  /**
+   * The invariant the deleted test was reaching for, stated where it is actually true. `legacy`
+   * implies a numeric version BY CONSTRUCTION, so the line can always name a number — and the
+   * `'a pre-v3 shape'` fallback in doctor.ts is unreachable today (see the note there).
+   *
+   * Written as a positive assertion with no escape: every body the classifier calls `legacy` must
+   * produce a line naming a digit. Deleting the push fails this, which is what the old test did
+   * not do.
+   */
+  it('every legacy body yields a line naming a number — the classification guarantees one', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+    for (const body of [V1, V2]) {
+      const dir = legacyManifest(body);
+      expect(loadProvisioning(dir).kind, `v${body.version} must classify legacy`).toBe('legacy');
+      const line = manifestLine((await inspectProvisioning(dir)).drift);
+      expect(line, `v${body.version}`).toMatch(/provisioning manifest is version \d/);
+    }
   });
 
   it('prescribes the same repair either way — the classification is what the prescription rests on', async () => {

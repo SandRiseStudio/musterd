@@ -1,4 +1,4 @@
-# 413 — A reaped reviewer does not strand its acceptance
+# 414 — A reaped reviewer does not strand its acceptance
 
 - Status: proposed — 2026-09-17
 - Date: 2026-09-17
