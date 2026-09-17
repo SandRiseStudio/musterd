@@ -1,7 +1,8 @@
 # 410 — Every audit action declares whose row it is
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-16
+- Accepted: 2026-09-16, on the implementation landing in #1530 (`cb958943`)
 - Relates to: [ADR 071](071-v0.3-p2-in-band-enforcement-and-audit.md) (the audit table),
   [ADR 074](074-audit-cli-reader.md) (the reader), [ADR 088](088-interrupt-line-tool-boundary-inbox-check.md)
   (`interrupt.raised`), [ADR 219](219-quiescence-marks-a-busy-wake-candidate.md) (the wake pool reads by actor),
