@@ -130,10 +130,12 @@ this increment does not activate `required` enforcement.
 
 An active human Member issues a bounded authorization for an active agent Member already bound to one
 enrolled machine node. The server returns a one-shot `msla_` token, stores only its SHA-256 hash, and
-records a correlation plus exactly one work context: an active owned Lane, an unresolved directed Act,
-or a short-lived human-created orientation allowance. The matching agent Presence consumes the token
-once; expiry, revocation, replay, Member/node/correlation mismatch, and a missing or held Presence are
-refusals. The public authorization projection never contains the token.
+records a correlation plus one currently authorizable work context: an active owned Lane or an
+unresolved directed Act. The protocol parses an `orientation` context for forward compatibility, but
+Increment 3 has no allowance record or issuance path for it and refuses it with
+`denied_context_orientation` until a later ADR adds that authority. The matching agent Presence
+consumes the token once; expiry, revocation, replay, Member/node/correlation mismatch, and a missing or
+held Presence are refusals. The public authorization projection never contains the token.
 
 The Aperture decision endpoint authenticates the enrolled node, then checks the consumed launch, live
 Presence, durable Member↔node binding, work context, and server-owned model policy. It returns a

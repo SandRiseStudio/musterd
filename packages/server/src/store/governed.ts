@@ -397,6 +397,8 @@ export function authorizeGovernedRequest(
       )
       .get(teamId, context.act_id, member.id);
     if (!act) return deny(input, 'denied_context_act');
+  } else {
+    return deny(input, 'denied_context_orientation');
   }
   const stored = getGovernedPolicy(db, teamId);
   if (!stored) return deny(input, 'denied_policy');

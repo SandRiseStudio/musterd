@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   GovernedModelsManifestSchema,
+  isMusterdCredential,
   parseRoleFile,
   parseSeatFile,
   parseTeamFile,
@@ -11,7 +12,6 @@ import {
   type SeatFile,
 } from '@musterd/protocol';
 
-const MUSTERD_CREDENTIAL_PREFIX = /^(?:mskey_|msgr_|mscr_|msac_|msls_|msla_)/i;
 const MANIFEST_PATH = '.musterd/governed-models.json';
 
 export interface GovernedSeat {
@@ -54,8 +54,7 @@ function stringValues(value: unknown): string[] {
 }
 
 function assertSecretFree(value: unknown, label: string): void {
-  if (stringValues(value).some((entry) => MUSTERD_CREDENTIAL_PREFIX.test(entry)))
-    fail(`${label} resembles a credential`);
+  if (stringValues(value).some(isMusterdCredential)) fail(`${label} resembles a credential`);
 }
 
 /** Read only the committed roster inputs needed by generation; the CLI never imports the server. */

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TOKEN_PREFIXES } from './credentials.js';
 import {
   GOVERNED_LAUNCH_TTL_MAX_MS,
   GovernedAuthorizationRequestSchema,
@@ -28,10 +29,20 @@ describe('governed authorization protocol (ADR 411)', () => {
   it.each([
     ['floating model', { ...policy, team: { models: ['anthropic/latest'] } }],
     ['wildcard model', { ...policy, team: { models: ['anthropic/*'] } }],
-    ['credential-like policy', { ...policy, members: { ada: { models: ['mscr_secret'] } } }],
   ])('rejects %s', (_name, value) => {
     expect(GovernedPolicySchema.safeParse(value).success).toBe(false);
   });
+
+  it.each(Object.values(TOKEN_PREFIXES))(
+    'rejects a Member name beginning with the registered credential prefix %s',
+    (prefix) => {
+      const value = {
+        ...policy,
+        members: { [`${prefix}member`]: { models: ['anthropic/claude-sonnet-4-6'] } },
+      };
+      expect(GovernedPolicySchema.safeParse(value).success).toBe(false);
+    },
+  );
 
   it('parses a bounded human-issued launch handoff with each work context', () => {
     const issue = GovernedLaunchAuthorizationIssueSchema.parse({

@@ -102,11 +102,13 @@ credentials, node IDs, machine paths, or runtime configuration; they neither cal
 that a declared node key identifies a live machine. [ADR 411](../decisions/411-governed-model-authorization-substrate.md)
 adds that runtime binding: a server-owned, secret-free policy; a human-issued, one-shot `msla_` launch
 handoff; and an Aperture decision that checks the enrolled node, target agent Member, consumed launch,
-live Presence, bounded Lane/Act/orientation context, and exact model policy. The mode remains `off` by
-default, so the substrate is available for explicit governed launches without claiming to enforce every
-request. The handoff credential is shown once and stored only as a hash; audit and request logs contain
-metadata and model identifiers, never credentials or prompt/response bodies. Launcher adapters, live
-Tailscale/Aperture changes, and a future `required` cutover remain separate work.
+live Presence, bounded Lane/Act context, and exact model policy. The protocol carries orientation
+context for forward compatibility, but the server refuses it until a later allowance authority exists.
+The mode remains `off` by default, so the substrate is available for explicit governed launches without
+claiming to enforce every request. The handoff credential is shown once and stored only as a hash; audit
+and request logs contain metadata and model identifiers, never credentials or prompt/response bodies.
+Launcher adapters, live Tailscale/Aperture changes, and a future `required` cutover remain separate
+work.
 
 ## Out of scope (roadmap, named so we don't design into a corner)
 

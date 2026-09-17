@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { GovernedTransportManifest } from '@musterd/protocol';
+import { TOKEN_PREFIXES, type GovernedTransportManifest } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { loadGovernedModelsManifest } from './governed-models.js';
 import { loadGovernedTransportManifest, renderTailscaleTransport } from './governed-transport.js';
@@ -114,7 +114,7 @@ describe('Tailscale governed-transport renderer (ADR 402)', () => {
     ).not.toThrow();
   });
 
-  it.each(['mskey_', 'msgr_', 'mscr_', 'msac_', 'msls_'])(
+  it.each(Object.values(TOKEN_PREFIXES))(
     'rejects a governed-model workload key beginning with %s',
     (prefix) => {
       const root = workspace();

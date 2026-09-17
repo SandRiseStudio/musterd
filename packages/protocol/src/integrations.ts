@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isMusterdCredential } from './credentials.js';
 import { GovernedEnforcementModeSchema } from './governed.js';
 
 const ExactModelSchema = z
@@ -21,10 +22,8 @@ const DollarQuotaSchema = z.object({
 const WorkloadIdSchema = z
   .string()
   .regex(/^[a-z0-9]{6,64}$/, 'workload_id must be lowercase opaque alphanumeric text');
-const MUSTERD_CREDENTIAL_PREFIX = /^(?:mskey_|msgr_|mscr_|msac_|msls_|msla_)/i;
-
 function containsCredential(value: unknown): boolean {
-  if (typeof value === 'string') return MUSTERD_CREDENTIAL_PREFIX.test(value);
+  if (typeof value === 'string') return isMusterdCredential(value);
   if (Array.isArray(value)) return value.some(containsCredential);
   if (value !== null && typeof value === 'object')
     return Object.entries(value).some(
@@ -178,7 +177,7 @@ export const GovernedTransportManifestSchema = z
       ...value.tag_owners,
       ...value.nodes.flatMap((node) => [node.node_key, ...node.members]),
     ];
-    if (values.some((entry) => MUSTERD_CREDENTIAL_PREFIX.test(entry))) {
+    if (values.some(isMusterdCredential)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'transport manifest must not contain a musterd credential',

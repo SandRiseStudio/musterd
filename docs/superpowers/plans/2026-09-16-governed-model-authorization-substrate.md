@@ -33,8 +33,8 @@ Tailscale/Aperture configuration, or activate `required` enforcement.
    return structured refusal results without leaking which secret check was close.
 
 5. Add protocol and server tests before each implementation slice. Cover strict schemas, policy
-   narrowing, one-shot replay, expiry, revocation, wrong Member/node/correlation, Lane/Act/orientation
-   contexts, `off` behavior, refusal determinism, secret-free audit data, HTTP body parsing, and
+   narrowing, one-shot replay, expiry, revocation, wrong Member/node/correlation, Lane/Act contexts
+   plus the fail-closed orientation refusal, `off` behavior, refusal determinism, secret-free audit data, HTTP body parsing, and
    transaction races. Run the protocol package gate, then the server package gate, then repository
    typecheck/format checks.
 
