@@ -35,6 +35,10 @@ import {
   killGroup,
   makeFramePump,
   makeFrameWatchdog,
+  makeDrawRateFloor,
+  parseOfficeStats,
+  DRAW_FLOOR_FPS,
+  DRAW_FLOOR_WINDOW_MS,
   makeAckRefusalReporter,
   FRAME_STALL_MS,
   parseOptions,
@@ -1015,5 +1019,97 @@ describe('makeSecretScrubber (chunk-boundary safe)', () => {
     const out = scrub(`to ${twitch.target} failed\r`);
     expect(out).not.toContain('live_123456789abc_secretKEY');
     expect(out).toContain('<redacted>');
+  });
+});
+
+describe('makeDrawRateFloor (the degradation every armed counter calls healthy)', () => {
+  const setup = (floorFps = DRAW_FLOOR_FPS, windowMs = DRAW_FLOOR_WINDOW_MS) => {
+    let t = 0;
+    let draws = 0;
+    let beats = 0;
+    const reports: Array<{ achieved: number; floor: number; overMs: number }> = [];
+    const f = makeDrawRateFloor(
+      (achieved, floor, overMs) => reports.push({ achieved, floor, overMs }),
+      floorFps,
+      windowMs,
+    );
+    // Advance the clock while the scene draws at `fps` and the loop stays unparked.
+    const run = (seconds: number, fps: number, parkedBeatsPerSec = 0) => {
+      for (let i = 0; i < seconds; i++) {
+        t += 1000;
+        draws += fps;
+        beats += parkedBeatsPerSec;
+        f.sample({ draws, beats }, t);
+      }
+    };
+    return { f, reports, run, sample: () => f.sample({ draws, beats }, t) };
+  };
+
+  it('stays quiet at the rate a healthy box holds', () => {
+    const { reports, run } = setup();
+    run(180, 18);
+    expect(reports).toEqual([]);
+  });
+
+  it('reports once when the scene draws below the floor with its loop unparked', () => {
+    const { reports, run } = setup();
+    // 61, not 60: the first sample is the anchor a delta is measured from, so a full window is
+    // only closed on the sample after it.
+    run(61, 8);
+    expect(reports).toEqual([
+      { achieved: 8, floor: DRAW_FLOOR_FPS, overMs: DRAW_FLOOR_WINDOW_MS },
+    ]);
+    // Loud exactly once: the run continues degraded for hours and a line per window buries the
+    // first one, which is the only one that says when it began.
+    run(180, 8);
+    expect(reports).toHaveLength(1);
+  });
+
+  it('reports the window it actually measured, not an assumed minute', () => {
+    const { reports, run } = setup(DRAW_FLOOR_FPS, 10_000);
+    run(11, 8);
+    expect(reports[0]?.overMs, 'the sentence a human reads says "over the last N" — N must be real').toBe(10_000);
+  });
+
+  it('stays quiet while the room is parked — a still office is not a degraded one', () => {
+    const { reports, run } = setup();
+    // The drift heartbeat draws ~4/s and ticks `beats`; that is the scene choosing to be calm.
+    run(180, 4, 4);
+    expect(reports).toEqual([]);
+  });
+
+  it('says nothing before a full window has passed', () => {
+    const { reports, run } = setup();
+    run(60, 0);
+    expect(reports, 'one short window is not evidence of a degraded run').toEqual([]);
+  });
+
+  it('disarms, so a teardown is not reported as degradation', () => {
+    const { f, reports, run } = setup();
+    f.disarm();
+    run(180, 0);
+    expect(reports).toEqual([]);
+  });
+});
+
+describe('parseOfficeStats (what the page hands back, and what it does not)', () => {
+  it('reads the three counters the floor and the recorder need', () => {
+    expect(parseOfficeStats('{"ticks":9040,"draws":9039,"beats":28,"since":993.6}')).toEqual({
+      ticks: 9040,
+      draws: 9039,
+      beats: 28,
+    });
+  });
+
+  it('treats a scene that is not mounted yet as no reading, not as zero', () => {
+    // Zero would be a draw rate of zero, which is the exact shape of the failure — a probe that
+    // cannot see the scene must not be mistaken for a scene that has stopped drawing.
+    expect(parseOfficeStats('null')).toBeUndefined();
+    expect(parseOfficeStats(undefined)).toBeUndefined();
+    expect(parseOfficeStats('not json')).toBeUndefined();
+  });
+
+  it('refuses a reading with a counter missing', () => {
+    expect(parseOfficeStats('{"ticks":10,"draws":9}')).toBeUndefined();
   });
 });

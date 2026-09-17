@@ -140,6 +140,20 @@ screencast frames/s that the 20 fps pump discards. `screencastEveryNthFrame(20)`
 `compositorHz` assumes 30 on Linux; the box composites nearer 27 here. That waste is the next cut
 if Chrome's CPU ever needs to come down; it does not affect what the viewer sees.
 
+## Half speed is not a gap, so the freeze watchdog cannot see it — the floor is under `draws`, not under arrivals (2026-09-17; falsify: run a capture on a box that holds 18 draws/s and read `drawFps` p5 out of the perf JSONL — a p5 under 12 on a box we call healthy means this floor is set too high) <!-- claim: defect -->
+
+nick said the stream looked slower than the evening before. It was: the live capture drew **8.06 frames/s inside a 20 fps stream**, measured over 484 samples / 483 s on the performance-4x box, against a median of **18** recorded the day before. `drawsPerEncodedFrame` was **0.403** — three in five encoded frames carried no new draw at all.
+
+Every armed counter read healthy, for the same reason as the claim above and one step worse. `fps=` and `speed=` were clean because the pump re-emits `latest` on a wall clock. The ADR 159 queue watchdog was satisfied because queue growth was **negative**. `makeFrameWatchdog` was silent because frames kept *arriving* — just fewer of them, and it asks *when did one last arrive*, not *how many*. A freeze is a gap; this has no gap.
+
+**The floor cannot go under arrivals.** Screencast delivers only on a new composite, so a genuinely still room legitimately delivers almost nothing, and a floor that cries on a calm office is a floor nobody leaves armed. The scene itself knows the difference: while its rAF loop runs it is *trying* to draw at the requested cadence, and when it parks it hands over to the drift heartbeat, which ticks `beats`. So `beats` advancing means the room chose to be calm, and that window is not evidence of anything. `makeDrawRateFloor` judges only unparked windows.
+
+**It reports and never stops.** A half-rate stream is worth far more to a viewer than no stream, so this is the one counter that does not reach for `forceStop` — loud exactly once, because the run continues degraded for hours and a line per window buries the first one, which is the only one that says when it began.
+
+**Sized from measurement:** 12/s sits ~33 % under the healthy median (18) and 50 % over the observed failure (8.06), judged over a 60 s window because the fault is sustained and the office's own bursts move the instantaneous rate far more than the fault does. The probe is a CDP read of `window.__office.stats()` every 10 s and is **always on** — the whole finding of the day was that the instrument which could have seen this (`deliveredFps`, behind `MUSTERD_BROADCAST_PERF`) was opt-in, so on an ordinary run nothing was watching.
+
+**Not yet answered by this:** *why* the per-frame draw got dearer. The CPU profile on the live page is 50.4 % `(program)` — native Skia raster under canvas 2D gradients, fills and text, on a box with no GPU (`--use-angle=swiftshader-webgl`) — with the scene's own JS at ~6 % of samples. Whether that is more content than the baseline run had, or a draw path that got dearer per unit of content, is open.
+
 ## Every health signal the capture had measured the encoder, and the encoder is downstream of the freeze (2026-09-16; falsify: `Page.stopScreencast` mid-run and watch ffmpeg keep reporting a healthy rate) <!-- claim: defect -->
 
 A frozen source keeps ffmpeg perfectly fed, because the pump re-emits `latest` by design. So every
