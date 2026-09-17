@@ -17,18 +17,17 @@
  * failure modes, different preconditions, so a different verb.
  */
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { makeEnvelope } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import type { Parsed } from '../args.js';
 import {
   DEFAULT_APP,
-  digestPath,
   findRepoRoot,
-  readDigestRecord,
   parsePushedDigest,
-  readDigest,
+  readCaptureImage,
+  writeCaptureImage,
   REGION,
   runChecks,
   occupiedMachines,
@@ -115,6 +114,7 @@ export async function streamCommand(parsed: Parsed, deps: StreamDeps = {}): Prom
         app,
         port: origin.port,
         repoRoot,
+        statePath,
         out,
         json: parsed.flags['json'] === true,
         // Only when the CALLER did not name the server: an injected/flagged one has no provenance
@@ -122,7 +122,7 @@ export async function streamCommand(parsed: Parsed, deps: StreamDeps = {}): Prom
         ...(deps.server ? {} : { provenance: serverProvenance(cwd) }),
       });
     case 'build':
-      return buildVerb({ exec, app, repoRoot, out });
+      return buildVerb({ exec, app, repoRoot, statePath, now, out });
     case 'start':
       return startVerb({ exec, app, repoRoot, parsed, out, err, ...sup });
     case 'stop':
@@ -144,6 +144,7 @@ async function doctorVerb(a: {
   app: string;
   port: number;
   repoRoot: string | null;
+  statePath: string;
   out: (s: string) => void;
   json: boolean;
   provenance?: ServerProvenance;
@@ -154,7 +155,9 @@ async function doctorVerb(a: {
     app: a.app,
     port: a.port,
     repoRoot: a.repoRoot,
-    digest: readDigest(a.repoRoot),
+    // The image the SUPERVISOR would launch, not this checkout's file — a doctor that answers
+    // about its own worktree reads green while the stream would run something else entirely.
+    image: readCaptureImage({ statePath: a.statePath, repoRoot: a.repoRoot }),
   });
   const failed = checks.filter((c) => c.state === 'fail');
 
@@ -217,6 +220,8 @@ async function buildVerb(a: {
   exec: Exec;
   app: string;
   repoRoot: string | null;
+  statePath: string;
+  now: () => number;
   out: (s: string) => void;
 }): Promise<number> {
   const root = requireRepo(a.repoRoot);
@@ -265,10 +270,10 @@ async function buildVerb(a: {
       1,
     );
   }
-  writeFileSync(digestPath(root), digest + '\n');
-  a.out(
-    `${theme.ok('✓')} built ${theme.meta(digest.slice(0, 19))} — recorded for \`stream start\`\n`,
-  );
+  // Recorded ONCE PER MACHINE, beside `state.json` — not in this checkout. Whichever worktree ran
+  // the build, `start`, `ensure` and the supervisor all read the same record (lane 01M2RAJ0JK).
+  writeCaptureImage({ statePath: a.statePath, digest, repoRoot: root, now: a.now() });
+  a.out(`${theme.ok('✓')} built ${theme.meta(digest.slice(0, 19))} — recorded for this machine\n`);
   return 0;
 }
 
@@ -317,12 +322,14 @@ function launchArgs(a: {
 }
 
 /** Resolve the launch preconditions (image digest + tailnet address) or throw the doctor hint. */
-function launchPreconditions(a: { exec: Exec; repoRoot: string | null }): {
+function launchPreconditions(a: { exec: Exec; repoRoot: string | null; statePath: string }): {
   digest: string;
   addr: string;
 } {
-  const root = requireRepo(a.repoRoot);
-  const digest = readDigest(root);
+  // Deliberately NOT `requireRepo`: the image is a property of the machine now, so a launch does
+  // not need to be standing in a checkout to know which one to run.
+  const image = readCaptureImage({ statePath: a.statePath, repoRoot: a.repoRoot });
+  const digest = image?.digest;
   if (!digest) throw new CliError('no image recorded — run `musterd stream build` first', 2);
   // The address is discovered, never demanded. Requiring MUSTERD_AIR_ADDR meant every launch began
   // by looking up a name the machine already knows.
@@ -651,15 +658,16 @@ async function ensureVerb(
   // machine read as absent is the 2026-09-03 duplicate-launch, where the supervisor put a second
   // performance-4x beside a healthy start and Twitch killed one of them.
   const liveCount = occupiedMachines(machineListJson(a.exec, a.app)).length;
-  // Both halves of the same question: WHAT the checkout holds, and WHEN it was written. The second
-  // is what keeps another checkout's older file from reading as this run's rebuild.
-  const recorded = readDigestRecord(a.repoRoot);
+  // The machine's record if there is one, this checkout's legacy file only if there is not — and
+  // `decideEnsure` is told which, because a difference means something different in each case.
+  const recorded = readCaptureImage({ statePath: a.statePath, repoRoot: a.repoRoot });
   const d = decideEnsure({
     state,
     liveCount,
     now: a.now(),
     recordedDigest: recorded?.digest ?? null,
     recordedDigestAt: recorded?.at ?? null,
+    recordedDigestAuthoritative: recorded?.source === 'machine',
   });
   switch (d.action) {
     case 'noop':

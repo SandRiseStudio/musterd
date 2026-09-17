@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseArgs } from '../args.js';
+import { writeCaptureImage } from '../broadcast/hosted.js';
 import { readStreamState, writeStreamState } from '../broadcast/streamState.js';
 import { CliError } from '../errors.js';
 import type { Exec, ExecResult } from '../process.js';
@@ -610,6 +611,70 @@ describe('musterd stream', () => {
       expect(await run(['ensure'], sup())).toBe(0);
       expect(readStreamState(statePath)!.restarts).toEqual([NOW]);
       expect(out.join('')).not.toMatch(/deploy/i);
+    });
+
+    // The falsifier from lane 01M2RAJ0JK: a build in ANY checkout is visible to `ensure` run from
+    // any other. Before the machine record, this is the case that could not work — streamwatch
+    // always resolves the main checkout, so a worktree's build was invisible to it.
+    it('launches the MACHINE record, not this checkout’s file, when the two disagree', async () => {
+      withImage(); // this checkout says aaa… (a worktree that built long ago)
+      const fromAnotherCheckout = 'sha256:' + 'c'.repeat(64);
+      writeCaptureImage({
+        statePath,
+        digest: fromAnotherCheckout,
+        repoRoot: join(repo, 'elsewhere'),
+        now: NOW - 10_000,
+      });
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [],
+        image: fromAnotherCheckout,
+      });
+      const args: string[][] = [];
+      expect(
+        await run(
+          ['ensure'],
+          sup({ launch: (a: string[]) => (args.push(a), { code: 0, output: '' }) }),
+        ),
+      ).toBe(0);
+      expect(args[0]!.join(' ')).toContain(fromAnotherCheckout);
+      expect(args[0]!.join(' ')).not.toContain('a'.repeat(64));
+    });
+
+    // Sloane's residual on #1538, now answered by the same rule in both directions: a rebuild is a
+    // deploy whichever checkout ran it, because there is only one record to disagree with.
+    it('a rebuild recorded for the machine is a deploy even though it predates the run', async () => {
+      const rebuilt = 'sha256:' + 'd'.repeat(64);
+      writeCaptureImage({ statePath, digest: rebuilt, repoRoot: repo, now: NOW - 120_000 });
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [],
+        image: 'sha256:' + 'e'.repeat(64),
+      });
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(out.join('')).toMatch(/deploy/i);
+      expect(readStreamState(statePath)!.restarts).toEqual([]); // a deploy never spends the budget
+      expect(readStreamState(statePath)!.image).toBe(rebuilt);
+    });
+
+    it('start needs no checkout digest at all once the machine has a record', async () => {
+      // No withImage(): nothing in this checkout. The machine record alone must be enough.
+      writeCaptureImage({
+        statePath,
+        digest: 'sha256:' + 'f'.repeat(64),
+        repoRoot: repo,
+        now: NOW,
+      });
+      const args: string[][] = [];
+      expect(
+        await run(
+          ['start'],
+          sup({ launch: (a: string[]) => (args.push(a), { code: 0, output: '' }) }),
+        ),
+      ).toBe(0);
+      expect(args[0]!.join(' ')).toContain('f'.repeat(64));
     });
 
     it('start records the launched image so ensure can tell a deploy from a crash', async () => {
