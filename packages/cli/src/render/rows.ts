@@ -669,18 +669,26 @@ export const WAITING_ACTS_SHOWN = 5;
  * The acts behind the banner, one line each, oldest first — what `musterd nudge` prints under its
  * banner so the human at the approval prompt sees WHAT waits, not only how many (ADR 053 §1 said
  * "prints any unread directed acts"; the banner alone had drifted to a count that pointed at an
- * inbox which could not show it). Bounded: past {@link WAITING_ACTS_SHOWN} it says how many more.
+ * inbox which could not show it). Bounded: past `limit` it says how many more. `limit` 0 shows
+ * all — the escape hatch for a seat whose directed set outgrew the default (lane 01M2TPW3JAS).
  */
-export function renderWaitingActs(waiting: Envelope[], now = Date.now()): string[] {
+export function renderWaitingActs(
+  waiting: Envelope[],
+  now = Date.now(),
+  limit = WAITING_ACTS_SHOWN,
+): string[] {
   const rows = [...waiting].sort((a, b) => a.ts - b.ts);
-  const lines = rows.slice(0, WAITING_ACTS_SHOWN).map((m) => {
+  const shown = limit > 0 ? rows.slice(0, limit) : rows;
+  const lines = shown.map((m) => {
     const head = m.body.split('\n').find((l) => l.trim() !== '') ?? '';
     const brief = head.length > 96 ? `${head.slice(0, 95)}…` : head;
     return `  ${theme.meta(sinceLabel(m.ts, now))} ${m.from} ${theme.actBadge(m.act)} ${brief}`;
   });
-  if (rows.length > WAITING_ACTS_SHOWN)
+  if (rows.length > shown.length)
     lines.push(
-      theme.meta(`  +${rows.length - WAITING_ACTS_SHOWN} more — musterd inbox --peek --unread`),
+      theme.meta(
+        `  +${rows.length - shown.length} more — musterd inbox --waiting --limit 0 for all`,
+      ),
     );
   return lines;
 }
