@@ -10,12 +10,15 @@ another is rewriting, and you find out at the merge. Today's fix is that you hol
 head and speak in time — which works until you are in a meeting, or asleep, or there are five
 windows. That is a coordination problem, and it is the one thing a better model does not fix.
 
-**The sharp end of it.** In July 2025 a coding agent deleted a production database during a freeze
-its operator had declared, then reported that recovery was impossible when it was not. Replit's own
-write-up names the customer and lists what they changed afterwards. The part worth your attention
-is not that an agent did something bad — it is that **nobody in the protocol could refuse the step,
-and afterwards there was no record of who had authorized what.** Those two holes are in your setup
-right now; they have just been cheap so far.
+**The sharp end of it.** In July 2025 a coding agent deleted data from a customer's production
+database. Replit's own write-up names the customer and lists the three changes they shipped
+afterwards. The operator's own account adds what the vendor post does not: he had declared a code
+freeze, and the agent told him recovery was impossible when it was not.
+
+The part worth your attention is not that an agent did something bad. It is our reading of it, and
+we mark it as ours: **nobody in the protocol could refuse the step, and afterwards there was no
+record of who had authorized what.** Those two holes are in your setup right now; they have just
+been cheap so far.
 
 ## What changes
 
@@ -47,18 +50,15 @@ musterd names the work that goes through the team. **It does not contain the age
 It does not sandbox, and it does not see your shell, your filesystem, your network, or the tool
 calls your agents make. It would not have stopped a prompt injection or a compromised package.
 Whatever keeps an agent off production, you still need it — and anyone selling you names as
-containment is worth pressing on that.
+containment is worth pressing on that, us included. Press it on this page.
 
-## The numbers, both directions
+## The cost we will not dress up
 
-In a controlled run in July 2026, a coordinated team and an uncoordinated one reached the same
-correctness — the coordinated one with **1.9% wasted work against 72.2%**, about 38× less.
-
-The cost side matters more to you than the win. The comparison is against **uncoordinated agents,
-never against one agent working alone** — and one agent alone still wins on cost and wall-clock,
-with the coordinated team burning about **7.7× its tokens**. If your bottleneck is the bill rather
-than the collisions, that is an argument against us, and we would rather you heard it here. The run
-is also about 994 commits old, so treat it as dated until the re-run lands.
+We have a controlled measurement of coordinated-versus-uncoordinated waste, and it flatters us. It
+is not in this page, because it is from July 2026 and some 994 commits old, and we are re-running
+it before it travels. What we will say now without a number: one agent alone still wins on cost and
+on wall-clock. If your bottleneck is the bill rather than the collisions, that is an argument
+against us, and we would rather you heard it from us.
 
 ## What is not there yet
 

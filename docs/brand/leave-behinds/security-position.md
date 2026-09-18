@@ -238,6 +238,38 @@ never made. Publishing the number we look worst on is what makes the other five 
   closes **2026-10-11**) may use the title only under ghost's rule: mechanism and dated receipt
   attached, every time.
 
+## 5a. The second-seat read, and what it changed
+
+wanderer read the platform-team page against this document on 2026-09-18 (`01M2TXP272`, four
+break-attempts as asked). Four of five findings held and are applied to both leave-behinds:
+
+1. **The boundary invitation was rhetorical.** The page said "that is the claim to press" without
+   naming us, sitting under a list that had just sold observed-vs-declared as a product fact — so a
+   security reader could hear it as *press the other vendors*. Both pages now say "us included.
+   Press it on this page." I had also described the page to nick as already saying that; it did
+   not, and I had written the same overstatement into a commit message.
+2. **The 38× against this document's own §6.5.** See above.
+3. **The Replit paragraph put our reading in the sources' mouths.** "Names the loss" overclaims the
+   vendor post, which gives no record counts and never mentions the freeze — those are the
+   operator's account. Both pages now separate what each source says from what we read into it, and
+   label the reading as ours.
+4. **"Check on your own machine in an afternoon" collided with "not there yet."** Attestation is
+   locally checkable and has no public surface; both were true and read as a contradiction. The
+   bullet is now scoped to the daemon's own record.
+
+**One finding I did not take, with the reason on the record.** wanderer flagged "coordination
+layer" as the bare category noun that ADR 320 decision 4 forbids. It is not bare — the page reads
+"a coordination layer **where agents and humans are peers**", which is decision 4's qualifier
+verbatim and the same form the homepage H2 uses. Declining a correction is cheap to get wrong, so:
+if the qualified form ever starts reading as me-too, decision 4's own vocabulary test reopens the
+category noun, and that is the signal to watch rather than this sentence.
+
+**One he raised that I extended.** "It connects agents; it does not run them" is ADR 320 §1's own
+sentence, and it is also Band's half of the competitive fork (positioning.md: *"Band connects your
+agents; musterd makes them a team"*). Canonical and still wrong as an opening line, because it puts
+us on the competitor's side of the fork in the reader's first breath. Both pages now lead with what
+is ours: it does not run or orchestrate your agents — it makes the ones you already run into a team.
+
 ## 6. Open, and owed
 
 1. ~~A primary source for Replit / SaaStr, before the first leave-behind travels~~ — **CLEARED
@@ -252,3 +284,11 @@ never made. Publishing the number we look worst on is what makes the other five 
 4. **kimi's read never arrived.** Two is enough to reconcile; if kimi answers later, this document
    gets a dated amendment rather than a rewrite.
 5. **The 38× refresh** (`01M1VDRC6BAG`) gates any use of that number in outbound copy.
+   **Honoured 2026-09-18 by dropping the figure, not by amending this line.** The first draft of
+   the platform-team page used it with all four caveats, which wanderer caught on the second-seat
+   read: the caveats were correct and complete, and the page still violated a gate I had written
+   myself two commits earlier. Amending the gate to fit the copy was the available move and it is
+   the wrong one — a bar that bends to an argument is not a bar. Both leave-behinds now say the
+   honest thing without the number: one agent alone still wins on cost and on wall-clock, and if
+   the reader's bottleneck is the bill rather than the collisions, that is an argument against us.
+   The figure returns when the re-run lands, not before.

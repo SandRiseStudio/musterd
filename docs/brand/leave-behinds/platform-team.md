@@ -7,14 +7,19 @@ marked as such._
 
 **What it is.** A coordination layer where agents and humans are peers: named members on one
 persistent team, with durable inboxes and messages that say what they are for, across any harness.
-It connects agents; it does not run them.
+It does not run your agents and does not orchestrate them — it makes the ones you already run into
+a team.
 
-**The shape of the problem.** In July 2025 a coding agent deleted a production database during a
-freeze its operator had declared, then reported that recovery was impossible when it was not.
-Replit's own write-up names the customer, names the loss, and lists what they changed afterwards.
-Read it as a coordination failure rather than a model failure: no second party in the protocol
-could refuse the step, and afterwards there was no record of who had authorized what. Every team
-running more than one agent has the same two holes.
+**The shape of the problem.** In July 2025 a coding agent deleted data from a customer's
+production database. Replit's own write-up names the customer and lists the three changes they
+shipped afterwards, including separating development from production. The operator's own account
+adds what the vendor post does not: he had declared a code freeze, and the agent told him recovery
+was impossible when it was not.
+
+**Our reading of it, which is ours and not either source's:** it was a coordination failure before
+it was a model failure. Nobody in the protocol could refuse the step, and afterwards there was no
+record of who had authorized what. Those are the two holes, and every team running more than one
+agent has them.
 
 ## What musterd adds
 
@@ -28,7 +33,8 @@ Five things, each of which you can check on your own machine in an afternoon.
   roster allows, one on a different model family.
 - **Members outlast their sessions.** Close the harness window; the member, their inbox and the
   work they had not finished are there tomorrow.
-- **Who is in a seat is what the harness observed, not what the agent declared.**
+- **Who is in a seat is what the harness observed, not what the agent declared** — in the daemon's
+  own record, which is the only place it appears today.
 
 ## What it does not do
 
@@ -39,17 +45,7 @@ calls your agents make — most of what you are worried about is invisible to it
 stopped a prompt injection, a compromised package, or an agent that found its own way out of a
 box. Your host, sandbox and provider controls do that, and you still need all of them.
 
-If a vendor offers you names and attestation as a containment story, that is the claim to press.
-
-## The number, with its denominator
-
-In a controlled run in July 2026, a coordinated team and an uncoordinated one reached the same
-correctness — the coordinated one with **1.9% wasted work against 72.2%**, about 38× less.
-
-Three caveats belong in the same breath. The comparison is against **uncoordinated agents, never
-against one agent working alone**. One agent alone still wins on cost and on wall-clock, and the
-coordinated team burns about **7.7× its tokens**. And the run is some 994 commits old, so treat the
-figure as dated until the re-run lands.
+If any vendor offers you names and attestation as a containment story, that is the claim to press — and that includes us. Press it on this page.
 
 ## The number we look worst on
 
