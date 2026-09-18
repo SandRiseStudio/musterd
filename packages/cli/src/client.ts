@@ -96,6 +96,7 @@ import {
   isConnRefused,
   worthRetrying,
 } from './errors.js';
+import { workspaceGuidanceEpoch } from './guidanceAttestation.js';
 import { cliBuild } from './version.js';
 
 /** The `/inbox/interrupt-check` response (ADR 088). `raised: false` is the silent common path. */
@@ -1354,6 +1355,12 @@ export class HttpClient {
       ...(model !== undefined ? { model } : {}),
       ...(modelSource !== undefined ? { modelSource } : {}),
       ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
+      // Guidance attestation (ADR 417) — the stamp in this workspace's own files. Read fresh, not
+      // memoised like `cliBuild()`: a dist stamp cannot change under a running process, guidance
+      // files demonstrably can.
+      ...(workspaceGuidanceEpoch() !== undefined
+        ? { guidanceEpoch: workspaceGuidanceEpoch()! }
+        : {}),
       ...(claimProvenance !== undefined ? { provenance: claimProvenance } : {}),
     });
     const body = {
@@ -1374,6 +1381,10 @@ export class HttpClient {
       ...(frame.model_source !== undefined ? { model_source: frame.model_source } : {}),
       ...(frame.build !== undefined ? { build: frame.build } : {}),
       ...(frame.epoch !== undefined ? { epoch: frame.epoch } : {}),
+      // ADR 417: the mirror carries the guidance epoch the same way the WS frame does. dolly's lane
+      // 01M2RTF2D0 found this body silently dropping `model_source` — three resolved-then-dropped
+      // fields on one route — so this one is written here rather than assumed to ride along.
+      ...(frame.guidance_epoch !== undefined ? { guidance_epoch: frame.guidance_epoch } : {}),
       // ADR 131 §6: the last field that kept this route from being the mirror SPEC A.7 calls it.
       ...(frame.provenance !== undefined ? { provenance: frame.provenance } : {}),
     };
@@ -1589,6 +1600,12 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
             // tier is still null null for the whole occupancy, re-affirming the id forever and the
             // evidence for it never.
             ...(attestedModelSource !== undefined ? { model_source: attestedModelSource } : {}),
+            // Re-attest guidance too (ADR 417): self-heal fires once, at session start, so a long
+            // session outlives the rule it started under. Recomputed per tick on purpose — a cached
+            // value would make this a slower copy of the claim.
+            ...(workspaceGuidanceEpoch() !== undefined
+              ? { guidance_epoch: workspaceGuidanceEpoch() }
+              : {}),
           }),
         ),
       15_000,
@@ -1613,6 +1630,11 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
           ...(attestedModelSource !== undefined ? { modelSource: attestedModelSource } : {}),
           // Build attestation (ADR 135): this CLI dist's own stamp.
           ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
+          // Guidance attestation (ADR 417): the stamp in this workspace's own guidance files —
+          // what the model actually read, not what this build would have written.
+          ...(workspaceGuidanceEpoch() !== undefined
+            ? { guidanceEpoch: workspaceGuidanceEpoch()! }
+            : {}),
           // Provenance (ADR 131 §6) — the server applies the authoritative agent-only gate.
           ...(attestedProvenance !== undefined ? { provenance: attestedProvenance } : {}),
         }),

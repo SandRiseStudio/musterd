@@ -1,11 +1,15 @@
 import { FEATURE_EPOCH } from '@musterd/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpClient } from './client.js';
+import { workspaceGuidanceEpoch } from './guidanceAttestation.js';
 import { CliError } from './errors.js';
 
 // Pin the CLI's own build stamp to "unstamped": the exact-body assertions below must not pick up
 // this worktree's ambient dist/build.json (ADR 135) — the build field has its own dedicated tests.
 vi.mock('./version.js', () => ({ cliVersion: () => '0.0.0', cliBuild: () => undefined }));
+// Pin the workspace guidance epoch too: this suite must assert what the CLIENT sends, not what the
+// folder vitest happens to run in has installed (ADR 417).
+vi.mock('./guidanceAttestation.js', () => ({ workspaceGuidanceEpoch: vi.fn(() => 24) }));
 
 const seat = { id: 'm1', team: 'dawn', name: 'Ada', kind: 'agent' as const, created_at: 1 };
 const input = { key: 'mskey_x', target: { seat: 'Ada' } as const, surface: 'cli' as const };
@@ -36,6 +40,41 @@ afterEach(() => {
  * The server then falls back to label equality (`ws.ts` sameWorkspace / `http.ts`) — the pre-ADR-368
  * behaviour the key existed to replace.
  */
+/**
+ * ADR 417, and the same failure shape one field over: dolly's lane 01M2RTF2D0 found this very body
+ * silently dropping `model_source` — the third resolved-then-dropped field on this route. The claim
+ * frame can carry a value perfectly and the mirror still not send it, because the body is an
+ * explicit allow-list and a field absent from it fails no typecheck.
+ */
+describe('HttpClient.claim — the guidance epoch reaches the wire (ADR 417)', () => {
+  it('sends guidance_epoch in the body when the workspace carries a stamp', async () => {
+    const fetchFn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({ server: 'http://x' }).claim('dawn', input);
+    const body = JSON.parse(fetchFn.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(body['guidance_epoch']).toBe(24);
+  });
+
+  it('omits it for a workspace carrying no guidance — absent, never 0', async () => {
+    vi.mocked(workspaceGuidanceEpoch).mockReturnValueOnce(undefined);
+    const fetchFn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({ server: 'http://x' }).claim('dawn', input);
+    const body = JSON.parse(fetchFn.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect('guidance_epoch' in body).toBe(false);
+  });
+});
+
 describe('HttpClient.claim — the workspace identity reaches the wire (ADR 368, lane 01M1JQYYAC)', () => {
   it('sends workspace_key in the body, beside the label', async () => {
     const fetchFn = stubFetch(200, {
@@ -154,6 +193,9 @@ describe('HttpClient.claim (SPEC A.7, ADR 075/077) — status dispatch', () => {
       surface: 'claude-code',
       // Feature epoch (ADR 148) — always attested by our own clients (a compiled-in constant).
       epoch: FEATURE_EPOCH,
+      // Guidance epoch (ADR 417) — the stamp in the claiming workspace's own files, mocked above.
+      // Unlike `epoch` this one is CONDITIONAL: an unprovisioned folder attests nothing.
+      guidance_epoch: 24,
     });
     expect(body.type).toBeUndefined();
     expect(body.v).toBeUndefined();

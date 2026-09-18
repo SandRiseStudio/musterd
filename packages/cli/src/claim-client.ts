@@ -64,6 +64,10 @@ export function buildClaimFrame(input: {
    *  id and is dropped without it: a tier describes an id, so a bare one asserts nothing real. */
   modelSource?: WireAttestationSource;
   build?: string;
+  /** The guidance epoch this WORKSPACE is running (ADR 417) — `installedGuidanceEpoch`, the stamp
+   *  in its own files, never `GUIDANCE_CONTENT_VERSION`. Undefined for an unstamped or
+   *  unprovisioned workspace, and then omitted from the frame entirely. */
+  guidanceEpoch?: number;
   /** What ANIMATES this session (ADR 131 §6) — `wake` for an actuator-spawned harness, `session`
    *  for a person's own. Not identity: the seat is who, this is what caused it to be here. */
   provenance?: Provenance;
@@ -98,6 +102,11 @@ export function buildClaimFrame(input: {
     // Provenance (ADR 131 §6) — the wake actuators read it back to tell their own spawned child
     // from a stranger holding the seat, so a claim that drops it costs the actuator that judgement.
     ...(input.provenance !== undefined ? { provenance: input.provenance } : {}),
+    // Guidance attestation (ADR 417) — the stamp in THIS workspace's guidance files. Conditional,
+    // unlike `epoch` below: that is a compiled-in constant and therefore always known, while this is
+    // a filesystem read that legitimately answers "nothing here" for an unstamped or unprovisioned
+    // workspace. An absent stamp must stay absent on the wire — 0 would read as maximally stale.
+    ...(input.guidanceEpoch !== undefined ? { guidance_epoch: input.guidanceEpoch } : {}),
     // Feature epoch (ADR 148) — this CLI dist's compiled-in capability counter; always attested (a
     // constant, not a stamp), so a CLI-claimed seat carries the roster's skew signal like any other.
     epoch: FEATURE_EPOCH,

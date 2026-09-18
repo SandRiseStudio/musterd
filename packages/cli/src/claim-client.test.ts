@@ -136,6 +136,28 @@ describe('buildClaimFrame (SPEC A.3, ADR 078)', () => {
     expect(f.model_source).toBeUndefined();
   });
 
+  it('carries the workspace guidance epoch when it is known (ADR 417), omits it otherwise', () => {
+    const f = buildClaimFrame({
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'cli',
+      guidanceEpoch: 24,
+    });
+    expect(f.guidance_epoch).toBe(24);
+    // Unlike `epoch` (a compiled-in constant, always attested), this is a filesystem read that can
+    // legitimately answer "nothing here" — an unstamped or unprovisioned workspace. It must then be
+    // ABSENT on the wire, never 0, which would read as maximally stale.
+    const bare = buildClaimFrame({
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(bare.guidance_epoch).toBeUndefined();
+    expect('guidance_epoch' in bare).toBe(false);
+  });
+
   it('throws on a bad target shape', () => {
     expect(() =>
       buildClaimFrame({

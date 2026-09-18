@@ -254,37 +254,6 @@ export function guidanceTargets(harnesses: Harness[]): string[] {
 }
 
 /**
- * The guidance epoch this WORKSPACE is running — parsed out of the files installed here, never
- * `GUIDANCE_CONTENT_VERSION` (ADR 417).
- *
- * The constant is this build's CEILING: what it *would* write. The stamps are what is actually in
- * the model's context right now. Attesting the constant would repeat the self-referential defect
- * `runtime.ts:59` already names — a binary that writes v21 pronouncing v21 current — one layer up,
- * on the wire, where it is much harder to see.
- *
- * Three rulings, all deliberate:
- * - **Disagreement takes the minimum.** A workspace whose files carry different stamps ran the
- *   weakest rule in the set, and the weakest rule is the one a census exists to find.
- * - **An unstamped file is skipped, not zeroed.** No stamp is an absence of evidence, not evidence
- *   of epoch 0 — zeroing would drag the minimum to 0 and report every hand-edited workspace as
- *   maximally stale.
- * - **Nothing readable ⇒ `undefined` ⇒ the field is omitted on the wire** (ADR 135: degrade to
- *   silence, never to a guessed value).
- */
-export function installedGuidanceEpoch(cwd: string, harnesses: Harness[]): number | undefined {
-  let lowest: number | undefined;
-  for (const rel of guidanceTargets(harnesses)) {
-    const abs = join(cwd, rel);
-    const text = existsSync(abs) ? safeRead(abs) : null;
-    if (text === null) continue; // absent or unreadable: no evidence, not a zero
-    const stamp = parseContentStamp(text);
-    if (stamp === null) continue; // unstamped or hand-written: likewise no evidence
-    lowest = lowest === undefined ? stamp.version : Math.min(lowest, stamp.version);
-  }
-  return lowest;
-}
-
-/**
  * Remove the guidance files musterd wrote (ADR 027 reversibility — `musterd uninstall`). Stamp-gated:
  * only deletes a file that carries a musterd content stamp, so a user-authored file at the same path
  * is never removed. Prunes musterd's now-empty guidance dirs. Never throws on a missing file.

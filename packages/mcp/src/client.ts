@@ -17,6 +17,7 @@ import {
   type Report,
   type Seed,
   type SubmitSeedBrief,
+  installedGuidanceEpoch,
   type PromoteSeed,
   type TeamMemorySearchResponse,
   TeamMemorySearchResponseSchema,
@@ -34,6 +35,21 @@ import { persistRenewedLease } from './claim.js';
 import { refreshAttestation, type McpConfig } from './config.js';
 import { reconcileCursorCapture } from './cursorCapture.js';
 import { SessionAttestation } from './sessionLiveness.js';
+
+/**
+ * The guidance epoch to attest for the claiming workspace (ADR 417), or undefined when it carries
+ * no readable stamp. Never cached: the files it reads are rewritten by `musterd init
+ * --refresh-guidance` and by ADR 408 self-heal while this process is alive, and a session that
+ * outlives the rule it started under is the exact defect this field exists to make visible.
+ */
+function guidanceEpochOf(workspace: string | undefined): number | undefined {
+  if (!workspace) return undefined;
+  try {
+    return installedGuidanceEpoch(workspace);
+  } catch {
+    return undefined; // an unreadable workspace attests nothing rather than guessing (ADR 135)
+  }
+}
 
 /**
  * What the daemon says about a `handoff`'s lane (ADR 231). Either `lane` — attached because the
@@ -1121,6 +1137,14 @@ export class MusterdClient {
             : {}),
           ...(this.config.build ? { build: this.config.build } : {}),
           ...(this.config.epoch != null ? { epoch: this.config.epoch } : {}),
+          // Guidance attestation (ADR 417) — the stamp in the CLAIMING WORKSPACE's own files, read
+          // fresh here rather than carried in the config, because self-heal and
+          // `--refresh-guidance` rewrite those files mid-session and a reconnect is a second chance
+          // to attest truthfully (ADR 158 §7). Absent for an unstamped or unprovisioned folder:
+          // omitted, never 0, which would read as maximally stale.
+          ...(guidanceEpochOf(this.config.workspace) !== undefined
+            ? { guidance_epoch: guidanceEpochOf(this.config.workspace) }
+            : {}),
           // ADR 241: the correlation token, when a wake spawned this session. Absent otherwise —
           // never a placeholder, because the host treats a match as proof of authorship.
           ...(this.config.wakeLease ? { wake_lease: this.config.wakeLease } : {}),
@@ -1203,6 +1227,14 @@ export class MusterdClient {
                         ? { model_source: this.config.modelSource }
                         : {}),
                     }
+                  : {}),
+                // Guidance re-attestation (ADR 417): self-heal fires ONCE, at session start, so a
+                // session that stays up outlives the rule it started under — measured 2026-09-17,
+                // one of nine seats current twenty minutes after v25 landed. Re-reading the stamp
+                // here is what lets the roster notice the refresh without a reconnect. Absent ⇒ no
+                // change, never a clear.
+                ...(guidanceEpochOf(this.config.workspace) !== undefined
+                  ? { guidance_epoch: guidanceEpochOf(this.config.workspace) }
                   : {}),
                 // Occupancy follows capture (ADR 275): refreshAttestation just updated
                 // config.surface from the slot; send it so the presence row does not keep the

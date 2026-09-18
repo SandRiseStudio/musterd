@@ -1,19 +1,23 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { GUIDANCE_CONTENT_VERSION, parseContentStamp, renderContentStamp } from '@musterd/protocol';
+import {
+  GUIDANCE_CONTENT_VERSION,
+  GUIDANCE_INSTALL_PATHS,
+  parseContentStamp,
+} from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_ORIENT_PATH,
   CANONICAL_SKILL_PATH,
   contentHash,
   guidanceTargets,
-  installedGuidanceEpoch,
   removeGuidance,
   strippedBody,
   writeGuidance,
 } from './guidance.js';
 import { claudeCode } from './harnesses/claudeCode.js';
+import { HARNESSES } from './harnesses/index.js';
 import { codex } from './harnesses/codex.js';
 import { cursor } from './harnesses/cursor.js';
 
@@ -247,60 +251,21 @@ describe('orient guidance unit (ADR 333)', () => {
   });
 });
 
-describe('installedGuidanceEpoch', () => {
-  // A guidance file as it actually lands on disk: a body, then the stamp `renderContentStamp`
-  // writes. The hash is irrelevant here — this function reads the VERSION, and drift detection
-  // (which reads the hash) is a separate check that already has its own tests.
-  function stamped(version: number): string {
-    return `# skill\n\nbody text\n${renderContentStamp(version, contentHash('body text'))}\n`;
-  }
-
-  /** A workspace whose every claude-code guidance file carries `version`. */
-  function workspaceAt(version: number): string {
-    const dir = tmp();
-    for (const rel of guidanceTargets([claudeCode])) write(dir, rel, stamped(version));
-    return dir;
-  }
-
-  it('reads the version every installed file agrees on', () => {
-    expect(installedGuidanceEpoch(workspaceAt(22), [claudeCode])).toBe(22);
+describe('GUIDANCE_INSTALL_PATHS drift guard (ADR 417)', () => {
+  // The CLI's harness definitions decide what gets WRITTEN; `@musterd/protocol` owns the list the
+  // epoch reader VISITS, because `@musterd/mcp` claims seats too and cannot import the CLI. Two
+  // lists, one meaning — so a path added to a harness here and forgotten there would make the
+  // reader silently blind to it, and a census would read high. This is the guard against that.
+  it('covers every path guidanceTargets produces for every harness', () => {
+    const declared = new Set(GUIDANCE_INSTALL_PATHS);
+    const written = guidanceTargets(HARNESSES);
+    const missing = written.filter((rel) => !declared.has(rel));
+    expect(missing).toEqual([]);
   });
 
-  it('takes the MINIMUM when installed files disagree — the seat ran the weakest rule', () => {
-    const targets = guidanceTargets([claudeCode]);
-    expect(targets.length).toBeGreaterThan(1); // the disagreement case needs two files
-    const dir = workspaceAt(24);
-    write(dir, targets[0], stamped(21));
-    expect(installedGuidanceEpoch(dir, [claudeCode])).toBe(21);
-  });
-
-  it('skips an unstamped file rather than counting it as epoch 0', () => {
-    const targets = guidanceTargets([claudeCode]);
-    const dir = workspaceAt(23);
-    write(dir, targets[0], '# skill\n\nhand-written, no stamp\n');
-    expect(installedGuidanceEpoch(dir, [claudeCode])).toBe(23);
-  });
-
-  it('returns undefined for a workspace with no guidance files at all', () => {
-    expect(installedGuidanceEpoch(tmp(), [claudeCode])).toBeUndefined();
-  });
-
-  it('returns undefined when every installed file is unstamped', () => {
-    const dir = tmp();
-    for (const rel of guidanceTargets([claudeCode])) write(dir, rel, 'no stamp here\n');
-    expect(installedGuidanceEpoch(dir, [claudeCode])).toBeUndefined();
-  });
-
-  it('reads the FILES, not the build constant — a workspace one epoch behind says so', () => {
-    const behind = GUIDANCE_CONTENT_VERSION - 1;
-    const epoch = installedGuidanceEpoch(workspaceAt(behind), [claudeCode]);
-    expect(epoch).toBe(behind);
-    expect(epoch).not.toBe(GUIDANCE_CONTENT_VERSION);
-  });
-
-  it('reads what writeGuidance actually wrote, not a hand-built fixture', () => {
-    const dir = tmp();
-    writeGuidance(dir, [claudeCode], { team: 'dawn' });
-    expect(installedGuidanceEpoch(dir, [claudeCode])).toBe(GUIDANCE_CONTENT_VERSION);
+  it('declares no path no harness would ever write', () => {
+    const written = new Set(guidanceTargets(HARNESSES));
+    const orphans = GUIDANCE_INSTALL_PATHS.filter((rel) => !written.has(rel));
+    expect(orphans).toEqual([]);
   });
 });
