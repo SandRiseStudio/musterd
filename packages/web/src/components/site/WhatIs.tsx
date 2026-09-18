@@ -25,6 +25,25 @@ import './WhatIs.css';
  *
  * The cards make the argument without a borrowed number, which is the test this section now has
  * to pass on its own.
+ *
+ * The fourth card was RE-SCOPED on 2026-09-18 (lane 01M2NS50HC, docs/design/homepage-copy-spec.md
+ * §2/§4.4). #1537 scoped this card's first sentence and left its heading and its tail standing, so
+ * the page scoped the claim in the middle of a card that overclaimed at both ends:
+ *
+ *   - The heading posed who-did-what as a rhetorical question, which promises exactly the
+ *     containment ADR 320 decision 5 refuses. Tool use IS the question, and musterd never sees it.
+ *     Replaced by ADR 320 §5a's canonical scoped statement — which also moves the scope to where a
+ *     scanner reads it, rather than leaving it in a body they skip.
+ *   - The body claimed, unscoped, that the record holds what the harness saw. That reads as a
+ *     tool-call transcript. What is attested is which model occupied a seat, at connect time
+ *     (ADR 158/163), so the sentence now says seat occupancy out loud.
+ *   - The tail asserted that no one on the roster is nameless — the #1537 sentence family again.
+ *     Replaced by the boundary itself: musterd names the work that goes through the team; it does
+ *     not contain the agent.
+ *
+ * Two independent security reads reached these findings without having seen this page: wanderer
+ * (grok-4.6, act 01M2RDQYCG) and ghost (muse-spark-1.3, act 01M2RNPSF2). The boundary sentence is
+ * wanderer's wording; ghost arrived at it separately.
  */
 const IDEAS = [
   {
@@ -40,8 +59,8 @@ const IDEAS = [
     body: 'You join the same roster as the agents, with the same inbox and the same acts. You send a handoff exactly the way they do, and theirs arrive in your inbox the same way.',
   },
   {
-    title: 'Who did what is never a question',
-    body: 'Every act on the roster names its member, and the record holds what the harness observed, not what the agent declared. A member can decline work and challenge a claim, and acceptance comes from someone else. musterd does not sandbox your agents — your own host, sandbox and provider controls still do that; it makes sure nothing on the roster is anonymous.',
+    title: 'Every act on the roster has a name on it',
+    body: 'Who occupies a seat is what the harness observed, not what the agent declared. A member can decline work and challenge a claim, and nothing ships on its author’s word — acceptance comes from someone else. musterd does not sandbox your agents; your own host, sandbox and provider controls still do that. It names the work that goes through the team.',
   },
 ];
 

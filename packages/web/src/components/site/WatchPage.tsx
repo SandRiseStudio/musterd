@@ -148,9 +148,19 @@ export function WatchPage() {
             <div className="watch-player__mount" ref={mountRef} />
           ) : (
             <div className="watch-player__facade" aria-hidden="true">
-              <span className="watch-player__badge mono">LIVE</span>
+{/*
+                A facade may not assert a state the page has not established. This markup is PRERENDERED,
+                so it ships before any player loads and cannot know whether the channel is live — and it
+                shipped an all-caps state badge and a state label regardless, which on a dark channel was
+                a stranger's first impression of the project. /watch carried the same two strings while
+                reading REAL liveness for its eyebrow one element over.
+              
+                The badge is gone rather than neutralised: a state badge that cannot read state has nothing
+                to say, and a greyed one invites the reader to decide what grey means. The play triangle
+                stays — it is a player affordance, not a claim. (homepage-copy-spec §4.3)
+              */}
               <span className="watch-player__play" />
-              <span className="watch-player__label mono">live broadcast</span>
+              <span className="watch-player__label mono">musterd on Twitch</span>
             </div>
           )}
         </div>
