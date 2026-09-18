@@ -2,6 +2,8 @@
 
 Bumping `GUIDANCE_CONTENT_VERSION` ships nothing on its own: a seat's `SKILL.md` only moves when someone runs the repair in that worktree, and for five days nothing told anyone to.
 
+Related: [uniform error is invisible](uniform-error-is-invisible.md) — why the checks that were quiet during this outage could not have been anything else.
+
 ## What actually moves a seat's guidance
 
 Guidance files (`.musterd/skill/*`, `.claude/skills/musterd*/SKILL.md`, `.claude/commands/musterd-*.md`, the Cursor rules) are **written by provisioning, not by any periodic job**. Nothing on this laptop rewrites them on merge — the auto-refresher rebuilds `dist` and bounces the daemon, and neither touches a worktree's guidance. The three ways a seat's guidance moves:
