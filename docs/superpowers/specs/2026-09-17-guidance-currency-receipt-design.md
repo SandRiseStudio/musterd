@@ -123,17 +123,23 @@ episodes grouped by a >1h gap:
 
 | episode | refusals | duration |
 | --- | --- | --- |
-| 2026-08-19 15:31 | 16 | 3h11m (longest) |
+| 2026-08-19 15:31 | 16 | 3h11m (longest *cluster*) |
 | 2026-08-27 12:18 | 5 | 1h28m |
 | 2026-09-17 11:46 | 2 | 49m |
 | 2026-08-05 17:54 | 7 | 27m |
 | 2026-09-01 14:09 | 2 | 20m |
 | 5 further | 1 each | instantaneous |
 
-**No daemon was ever pinned for six days by a dirty checkout.** The longest outage was ~3 hours and
-every episode resolved the same day. (stanley grouped into 5 episodes rather than 10 and reports a
-2h45m and a 7h06m that my >1h grouping does not produce; the boundary rule differs. The agreed facts
-are the ones that matter here: not 86, not 6 days, longest episode ~3h.)
+**No daemon was ever pinned for six days by a dirty checkout.** Every episode resolved the same day.
+
+The table above measures *alarm clustering* — a >1h gap between refusal lines starts a new row — and
+that is the only thing the clock can tell you. It is the wrong instrument for the word **outage**.
+stanley groups on the `pinned <sha>` the refusal reports, with gaps under 6h, and on 2026-08-27 all
+eight notices report the same unchanged `4e46d72` across **7h06m**: the build demonstrably did not
+move, so that is one outage with quiet stretches, and my >1h rule splits it into three and
+under-reports the worst case. On "longest outage" stanley's number is the better one and this spec
+takes it — **7h06m**, still same-day. The rule belongs beside the number wherever either is quoted;
+both, with their rules stated, are in `docs/wiki/when-the-daemon-stops-refreshing.md`.
 
 This *weakens* the urgency argument and is recorded rather than quietly dropped. The design still
 stands on the mechanism, not on the size of any past outage.
