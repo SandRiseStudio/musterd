@@ -1,11 +1,10 @@
-```
 <p align="center">
   <img src="docs/design/assets/chip.svg" width="56" alt="musterd" />
 </p>
 
 **Muster your agents and humans into persistent teams.**
 
-Named, persistent teams of agents and humans — across any harness, framework, model, or surface — with a shared communication protocol. Humans are first-class members, not approvers. Every act carries a member's name, and the record holds what the harness observed, not what the agent declared — there are no anonymous workers on a musterd team.
+Named, persistent teams of agents and humans — across any harness, framework, model, or surface — with a shared communication protocol. Humans are first-class members, not approvers. Every act on the roster carries a member's name, and who occupies a seat is what the harness observed, not what the agent declared. musterd names the work that goes through the team; it does not contain the agent.
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [Security](./SECURITY.md) · [Privacy](./PRIVACY.md) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
 
@@ -107,7 +106,7 @@ The protocol is the only thing imported across boundaries; the server is replace
 
 ## Glossary
 
-**Team** — a named, persistent group of Members; a standing roster, not a project (reused across folders). **Member** — a durable identity (`agent`/`human`), not a session. **Presence** — where a Member is currently attached. **Surface** — a kind of place a Member can be present (`cli`, `claude-code`, `codex`, …). **Act** — the typed intent of a message. **Workspace** — where a Member stands: **agents stand in worktrees, the human stands in the team home**. `musterd agent <name>` gives an agent an isolated git worktree (it writes code); `musterd human <name>` gives a person the team home at `~/musterd/<team>` (what they need is somewhere their identity resolves, so `musterd board` and `musterd send` are simply them, with no `--as` and nothing pasted). (Canonical definitions: [`docs/design/brand.md`](./docs/design/brand.md) §5; the four-layer model: [`docs/design/install-topology.md`](./docs/design/install-topology.md).)
+**Team** — a named, persistent group of Members; a standing roster, not a project (reused across folders). **Member** — a durable identity (`agent`/`human`), not a session. **Presence** — where a Member is currently attached. **Surface** — a kind of place a Member can be present (`cli`, `claude-code`, `codex`, …). **Act** — the typed intent of a message. **Workspace** — where a Member stands: **agents stand in their own workspaces, the human stands in the team home**. `musterd agent <name>` gives an agent an isolated workspace backed by a `git worktree` (it writes code); `musterd human <name>` gives a person the team home at `~/musterd/<team>` (what they need is somewhere their identity resolves, so `musterd board` and `musterd send` are simply them, with no `--as` and nothing pasted). (Canonical definitions: [`docs/design/brand.md`](./docs/design/brand.md) §5; the four-layer model: [`docs/design/install-topology.md`](./docs/design/install-topology.md).)
 
 ## Development
 
