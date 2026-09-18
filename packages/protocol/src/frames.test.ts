@@ -159,7 +159,9 @@ describe('heartbeat guidance re-attestation (ADR 417)', () => {
 
   it('rejects a malformed stamp version rather than storing it', () => {
     expect(HeartbeatFrame.safeParse({ type: 'heartbeat', guidance_epoch: -1 }).success).toBe(false);
-    expect(HeartbeatFrame.safeParse({ type: 'heartbeat', guidance_epoch: 2.5 }).success).toBe(false);
+    expect(HeartbeatFrame.safeParse({ type: 'heartbeat', guidance_epoch: 2.5 }).success).toBe(
+      false,
+    );
   });
 
   it('rides the client-frame union, not just the bare schema', () => {

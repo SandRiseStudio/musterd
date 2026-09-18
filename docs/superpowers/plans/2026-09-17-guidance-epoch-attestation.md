@@ -55,11 +55,11 @@ Read this before Task 1; it changes what you rebase onto, not what you write.
   same route.
   **Rule: land after it.** Rebase this branch onto `main` once #1549 merges, take **migration 69**,
   and follow whatever column/serialisation shape it set rather than inventing a parallel one. If it
-  is still unmerged when this plan starts, do Tasks 1 and 2 (which do not touch her files) and hold
+  is still unmerged when this plan starts, do Tasks 1 and 2 (which do not touch their files) and hold
   Task 3 until it lands.
 - **dolly's follow-on lane `01M2RTF2D0`** — "the CLI never SENDS `model_source` on the HTTP claim
   mirror" — is the *same defect* for `model_source` that Task 5 of this plan fixes for
-  `guidance_epoch`. Coordinate before writing Task 5: if she has already repaired the mirror's send
+  `guidance_epoch`. Coordinate before writing Task 5: if they have already repaired the mirror's send
   path, Task 5 shrinks to adding one field to a body that is already correct.
 - **ADR number:** 416 is taken by #1549 (unmerged), so this increment is **ADR 417**. Reserve it with
   a draft push at Task 2 before building — ryder lost 413 to exactly this collision.
@@ -706,7 +706,7 @@ dist, so all nine were wrong together and consistently. Claims carry dates and f
 The PR body states the amended acceptance and what it does NOT buy (visibility, not prevention).
 After merge: `lane_submit`, then **do what its reply says** (ADR 235).
 
-**Acceptance routing:** a cross-family reviewer is owed. ryder is opus-5 like this seat, so he cannot
+**Acceptance routing:** a cross-family reviewer is owed. ryder is opus-5 like this seat, so they cannot
 be the acceptor — route to a seat on a different family (dolly and miley are fable-5-1, big-body is
 gpt-5.6-luna, ghost is muse-spark) and say in the ask that the grade needs to be real.
 

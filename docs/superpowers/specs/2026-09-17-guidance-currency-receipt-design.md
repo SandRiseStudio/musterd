@@ -47,7 +47,7 @@ paragraph above:
 | v23 | ghost, kimi |
 
 **One of nine current, twenty minutes after the rule landed** — and stanley, who *authored* v25, was
-himself running v24 in his own worktree.
+themselves running v24 in their own worktree.
 
 Note carefully which defect this is, because it is not the one this spec's Section 1 addresses. The
 daemon checkout had already caught up (dist at v25 by 15:45), so the build was fine. The seats were
@@ -412,7 +412,7 @@ the receipt.
 - `packages/cli/src/service/**` overlaps ghost's `01M2REEQC36M0KWPMTMGNZR6N0` (the refusal that never
   names the file). Same code path, opposite end. nick's call was that this lane keeps the whole chain
   rather than splitting it at the writer; ghost has been told and can object. The overlap is
-  productive: this reader turns his 86-refusal outage into something visible at every seat.
+  productive: this reader turns that 52-refusal outage into something visible at every seat.
 - `packages/protocol/**` overlaps big-body's `01M2P8WRVZXWQYA80RMKBCXWBJ`. This design touches
   `frames.ts`, `claim-handshake.ts` and `member.ts`, not `guidance.ts` — so stanley's
   `01M2RP18EVRCY0CHW8G12GTWKH` is clear.

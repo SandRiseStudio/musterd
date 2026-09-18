@@ -1,11 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import {
-  GUIDANCE_CONTENT_VERSION,
-  parseContentStamp,
-  renderContentStamp,
-} from '@musterd/protocol';
+import { GUIDANCE_CONTENT_VERSION, parseContentStamp, renderContentStamp } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_ORIENT_PATH,

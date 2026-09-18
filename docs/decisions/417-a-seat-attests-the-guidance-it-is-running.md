@@ -16,7 +16,7 @@
 ## Context
 
 ADR 408 workspace self-heal landed 2026-09-16 and works: it repairs a seat's guidance files before
-the skill is read, and it cut the stale-worktree census from 7 of 9 to 4 of 9 in a day.
+the skill is read, and it cut the stale-workspace census from 7 of 9 to 4 of 9 in a day.
 
 It repairs a seat to match **the local build**. `inspectClaudeHookDrift` states the rule in its own
 comment — compare "against what THIS build would write." On this laptop the global `musterd` is a
@@ -52,7 +52,7 @@ census taken twenty minutes later:
 | v24 | big-body, dolly, miley, ryder, sloane, stanley |
 | v23 | ghost, kimi |
 
-One of nine current — and stanley, who *authored* v25, was running v24 in his own worktree. That
+One of nine current — and stanley, who *authored* v25, was running v24 in their own workspace. That
 census took a shell script across nine checkouts. Nothing in the daemon could answer it.
 
 ## Decision
@@ -101,6 +101,27 @@ increment 2), `seat_knew_it_was_behind` would be a field whose semantics we woul
 A second migration is a real cost; a field that attests something we cannot yet define correctly is
 a worse one.
 
+## Observability & Evaluation
+
+**Traces.** The field is carried on the claim handshake, the heartbeat frame and the presence row,
+and read back through the roster. It logs no file contents and no paths — only an integer version
+already public in every guidance file's stamp. No new audit row: a guidance epoch is occupancy state,
+not an event, and `presence` is where occupancy state lives. (Increment 2, which can *observe a
+change* in that epoch mid-session, is where an audit row would earn its place.)
+
+**Eval.** Dataset: the nine seat workspaces on this machine, whose installed stamps were counted by
+shell script on 2026-09-17 and found at v25×1 / v24×6 / v23×2 twenty minutes after v25 landed; plus
+the `installedGuidanceEpoch` fixtures — agreeing stamps, disagreeing stamps, an unstamped file, an
+empty workspace, and a workspace written by `writeGuidance` itself. Baseline: the census required a
+shell loop across nine checkouts and the daemon could not answer it at all; every seat's
+`guidance_epoch` was structurally absent. The repaired baseline is `musterd status --json` returning
+the same nine numbers the files carry — and the falsifier is that the query must agree with the
+files, because the files are ground truth and a census that argues with them has no standing.
+
+**Experiment.** None in this increment; it is a deterministic schema and store change. The experiment
+this increment *exists to enable* is increment 3's: measure the false-positive rate of a currency
+verdict before any gate is allowed to refuse an act on one.
+
 ## Consequences
 
 **Self-reported, and nothing proves it.** A seat says which epoch it ran; no signature, no
@@ -110,10 +131,10 @@ something this ADR denies.
 
 **Visibility, not prevention.** This increment makes staleness *detectable*; it does not make acting
 on a stale rule impossible. The lane's filed acceptance — "a guidance correction landed on main is
-provably running in every live seat worktree within one session boundary" — cannot be met by it, and
+provably running in every live seat workspace within one session boundary" — cannot be met by it, and
 is amended to what warn-plus-attest can actually deliver:
 
-> A seat that acts on a superseded rule is detectable without forensics: the nine-worktree census is
+> A seat that acts on a superseded rule is detectable without forensics: the nine-workspace census is
 > answerable as a query rather than a script.
 
 The sentence was also unachievable as written: a seat whose session never starts can never be
