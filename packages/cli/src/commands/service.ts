@@ -374,9 +374,11 @@ export function blockedFailureNotice(
     : { state, notify: { count, forHuman: humanDuration(blockedFor) } };
 }
 
-/** Escalation thresholds measured from the first failure. Past the last one the notice repeats daily:
- *  every observed episode cleared inside 7h06m, so 1h is the first point at which "still stuck" is
- *  genuinely new information, and 24h is the point at which nobody is coming. */
+/** Escalation thresholds measured from the first failure. Past the last one the episode STANDS DOWN
+ *  and says nothing further — `due` is the first threshold newly crossed, so once 24h is behind the
+ *  last notice nothing matches. That is ADR 230's shape for a daemon confirmed down: say it, then
+ *  stop. Every observed episode cleared inside 7h06m, so 1h is the first point at which "still stuck"
+ *  is genuinely new information, and 24h is the point at which nobody is coming. */
 const BLOCKED_ESCALATION_MS = [3_600_000, 6 * 3_600_000, 24 * 3_600_000];
 
 /** `3h12m` / `47m` — a duration a human reads on a lock screen, not a count of seconds. */
