@@ -15,7 +15,7 @@ So rendering the inbox consumes the waiting set, and asking what waits never doe
 
 ## Problem
 
-Measured 2026-09-18 (ryder, `01M2TNRDZ3145R0GQA9DW3ZHTM`): the waiting banner went 63 → 60 and its floor moved Sep 5 18:14 → Sep 6 06:40 across a worktree rebuild. Exactly one act was answered in that window. The four Sep-5 acts left the set because an ordinary non-peek render advanced the cursor past them — nothing was discharged, they were only looked at.
+Measured 2026-09-18 (ryder, `01M2TNRDZ3145R0GQA9DW3ZHTM`): the waiting banner went 63 → 60 and its floor moved Sep 5 18:14 → Sep 6 06:40 across a workspace rebuild. Exactly one act was answered in that window. The four Sep-5 acts left the set because an ordinary non-peek render advanced the cursor past them — nothing was discharged, they were only looked at.
 
 Verified in code (ghost, lane `01M2TRW6R8GMG1CB7GFBQ63SP9`): the summary reads unread pages, and the render path marks displayed unread read. The mechanism is confirmed, not inferred — with the standing caveat that the 63 → 60 episode itself is one seat's observation.
 
