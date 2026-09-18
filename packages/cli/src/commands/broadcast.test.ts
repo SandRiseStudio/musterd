@@ -1056,9 +1056,7 @@ describe('makeDrawRateFloor (the degradation every armed counter calls healthy)'
     // 61, not 60: the first sample is the anchor a delta is measured from, so a full window is
     // only closed on the sample after it.
     run(61, 8);
-    expect(reports).toEqual([
-      { achieved: 8, floor: DRAW_FLOOR_FPS, overMs: DRAW_FLOOR_WINDOW_MS },
-    ]);
+    expect(reports).toEqual([{ achieved: 8, floor: DRAW_FLOOR_FPS, overMs: DRAW_FLOOR_WINDOW_MS }]);
     // Loud exactly once: the run continues degraded for hours and a line per window buries the
     // first one, which is the only one that says when it began.
     run(180, 8);
@@ -1068,7 +1066,10 @@ describe('makeDrawRateFloor (the degradation every armed counter calls healthy)'
   it('reports the window it actually measured, not an assumed minute', () => {
     const { reports, run } = setup(DRAW_FLOOR_FPS, 10_000);
     run(11, 8);
-    expect(reports[0]?.overMs, 'the sentence a human reads says "over the last N" — N must be real').toBe(10_000);
+    expect(
+      reports[0]?.overMs,
+      'the sentence a human reads says "over the last N" — N must be real',
+    ).toBe(10_000);
   });
 
   it('stays quiet while the room is parked — a still office is not a degraded one', () => {
