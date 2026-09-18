@@ -9,6 +9,7 @@ import { isStill } from '../live/stillMode';
 import type { Caption } from '../live/captions';
 import type { RoomEntry } from '../live/workingOn';
 import type { OfficeData, OfficeEvent, OfficeHandle } from '../live/office-scene';
+import { spritesFromUrl } from './broadcast';
 
 export const Route = createFileRoute('/office-preview')({
   head: () => ({
@@ -503,10 +504,13 @@ function OfficePreviewPage() {
         const reduced = search.has('reduced');
         const handle = mountOffice(host, labelHost, reduced, {
           interactiveLabels: true,
-          /* `?sprites` — paint the static furniture from the sprite cache (spec 2026-09-17). This
+          /* `?sprites=1` — paint the static furniture from the sprite cache (spec 2026-09-17). This
              route is where the pixel gate runs, and `__office.spriteParity()` compares the two
-             paths on demand whatever this flag says; the flag is for looking at the cached room. */
-          sprites: search.has('sprites'),
+             paths on demand whatever this flag says; the flag is for looking at the cached room.
+             Shares `/broadcast`'s parser deliberately: this read `search.has('sprites')` until
+             2026-09-18, so `?sprites=0` turned the cache ON here and OFF there — opposite meanings
+             for one spelling, on the one route a human eyeballs arms by hand (found by ryder). */
+          sprites: spritesFromUrl(search.toString()),
           // The narration is chrome now, so the scene only says what the moment is and the fixture's
           // own overlay renders it — the same wiring `/live` and `/broadcast` use.
           onCaption: (next) => setCaption(next),

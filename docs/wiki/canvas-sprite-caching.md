@@ -47,6 +47,17 @@ About 15%, with both direct arms consistent. Two reasons the share of the frame 
 
 **Which surface this number belongs to matters more than the number.** The two office surfaces do not run in the same place: `/live` renders in a viewer's browser — on this laptop, with a GPU — while the broadcast renders on a Fly `performance-4x` that `musterd stream start` rents per stream and destroys after, reaching the laptop's daemon over Tailscale ([broadcast stream](broadcast-stream.md), ADR 157). Nothing stream-related runs locally. So a laptop A/B is a **direct** measurement of what the cache does for `/live` and only a **weak proxy** for the stream, where there is no GPU and half the frame's CPU was native raster under gradients and text. Copying a large image and rasterizing a gradient trade places between those two machines, which is exactly why the 25 ms acceptance has to be measured where the stream actually runs.
 
+**Answered on the box, 2026-09-18.** That falsifier has now been run. Interleaved off/on/off/on on a `performance-4x` against a populated room, `/broadcast` at the stream's own `fps=20`, `beats` delta 0 on every arm:
+
+| arm | ms/draw | draws/s |
+|---|---|---|
+| direct | 71.5 | 14.00 |
+| cached | 57.4 | 17.42 |
+
+**+24% on the box against ~15% on the laptop** — so the laptop understated it, and the "weak proxy" caveat above was right about the direction being unknowable rather than small. The cache is the larger of the two cuts available, because the box's cost is dominated by per-operation work rather than painted area, and collapsing hundreds of static-furniture ops into one `drawImage` is exactly a per-op cut ([where a canvas scene's time actually goes](canvas-raster-vs-js.md)).
+
+**It is still not enough on its own, and that is the decision this number exists for.** 17.42 against a 20 fps cap. Stacked with a clip covering ~1% of the stage the same box reaches 19.2 draws/s, so the two cuts compose — neither is sufficient alone. ~56 ms remains after the static room is blitted: the actors, the interior lighting and vignette passes, and the blits themselves.
+
 ## Measure a sprite's box, do not estimate it (2026-09-17; falsify: set `SPRITE_PAD` to 200 and re-run the gate — the differences do not move) <!-- claim: other -->
 
 The spec planned to derive each sprite's bounding box from footprint geometry plus a fixed padding. `measureBounds` (in `sprite-cache.ts`) instead dry-runs the draw function against a context that tracks only the CTM and the extent of every point touched — path commands, rects, arcs, ellipses, images, and an estimate for text. It is JS-only and runs once per cache miss.
