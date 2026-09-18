@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_STAGE, stageSize } from './broadcast';
+import { DEFAULT_STAGE, spritesFromUrl, stageSize } from './broadcast';
 
 describe('stageSize', () => {
   it('reads the 720p rung off the query', () => {
@@ -45,5 +45,19 @@ describe('the stage survives hydration', () => {
   it('applies the URL height in an effect, so React patches the DOM', () => {
     const effects = src.match(/useEffect\(\(\)\s*=>\s*\{[\s\S]*?\n {2}\}, \[[^\]]*\]\);/g) ?? [];
     expect(effects.some((e) => e.includes('stageSize(')), 'stageSize belongs in a mount effect').toBe(true);
+  });
+});
+
+describe('spritesFromUrl', () => {
+  it('is off unless the URL says exactly 1 — a stream must not opt itself in', () => {
+    expect(spritesFromUrl('')).toBe(false);
+    expect(spritesFromUrl('?fps=20')).toBe(false);
+    expect(spritesFromUrl('?sprites')).toBe(false);
+    expect(spritesFromUrl('?sprites=0')).toBe(false);
+    expect(spritesFromUrl('?sprites=true')).toBe(false);
+  });
+  it('turns on for &sprites=1, wherever it sits in the query', () => {
+    expect(spritesFromUrl('?sprites=1')).toBe(true);
+    expect(spritesFromUrl('?h=1080&fps=20&sprites=1')).toBe(true);
   });
 });

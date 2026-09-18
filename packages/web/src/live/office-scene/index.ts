@@ -47,8 +47,10 @@ import {
   setScenePalette,
   toneColor,
   type Cue,
+  type RenderOpts,
   type ScenePalette,
 } from './render';
+import { makeSpriteCache } from './sprite-cache';
 import { GESTURE, isIdleGesture } from './skeleton';
 import type { WallBoard } from './wallboard';
 import {
@@ -63,7 +65,7 @@ import {
   type SpeechMarking,
   type SpeechToken,
 } from './speech';
-import type { AmbientLogEntry, OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
+import type { AmbientLogEntry, OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose, SpriteParity } from './types';
 
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, OfficeStats } from './types';
 
@@ -267,6 +269,14 @@ export interface OfficeOptions {
    * renders it (WorkStack's header) and the scene only says what the moment is (nick, 2026-08-31).
    */
   onCaption?: (caption: Caption | null) => void;
+  /**
+   * Rasterize the static furniture once per state and blit it, instead of redrawing the whole room
+   * every frame (spec 2026-09-17). Dark by default: `/broadcast` turns it on with `&sprites=1`, and
+   * the default flips only once the pixel gate is byte-equal and the box measures under 25 ms/draw.
+   * The baked idle frame never uses it — keeping `bake()` byte-identical is what makes the gate's
+   * reference honest.
+   */
+  sprites?: boolean;
 }
 
 export function mountOffice(
@@ -291,6 +301,10 @@ export function mountOffice(
   const platesOpen = interactiveLabels && platesOpenMode();
   const showWorkCues = options.showWorkCues !== false;
   const dpr = officeDpr(broadcast, DPR_CAP);
+  /* The per-item sprite cache, or undefined — `renderScene` with no cache paints exactly as it
+     always has, so this flag is the whole blast radius. Cleared on resize (every key carries the
+     fit, so stale entries would only waste memory) and on dispose. */
+  const sprites = options.sprites === true ? makeSpriteCache({ dpr }) : undefined;
 
   const canvas = document.createElement('canvas');
   canvas.style.display = 'block';
@@ -505,6 +519,8 @@ export function mountOffice(
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
     fit = fitFloor(width, height);
+    // Every sprite key carries the fit, so a resize only strands the old rasters — drop them.
+    sprites?.clear();
   }
 
   /** Read the office surface tokens (`--floor`, `--floor-2`, `--wood`, `--couch`) the active theme
@@ -1287,6 +1303,7 @@ export function mountOffice(
       recep,
       wallBoard,
       teamWorkingHours,
+      { sprites, dpr },
     );
     drawCues();
     positionLabels(anchors.heads);
@@ -1980,9 +1997,158 @@ export function mountOffice(
     }
   }, LIGHT_TICK_MS);
 
+  /**
+   * Render the CURRENT scene state twice into two fresh offscreen canvases — once direct, once
+   * through a fresh sprite cache — and compare the bytes. The gate
+   * (`scripts/perf/scene-pixel-check.mjs`) drives this over CDP; the app never calls it.
+   *
+   * DEV ONLY. It is gate machinery, and a viewer must not carry it — the ADR 151 total-JS budget
+   * caught exactly that, 0.3 KB over, the first time this shipped. `import.meta.env.DEV` is static
+   * in a production build, so the whole body and `spriteCrops` below drop out of the bundle. The
+   * gate therefore runs against `vite dev`, which paints with the same code.
+   *
+   * Both renders read the same poses, the same clock and the same lighting synchronously, so `t` is
+   * not a confound: any difference is the cache's doing.
+   */
+  function spriteParity(only?: string): SpriteParity {
+    const paint = (c: CanvasRenderingContext2D, o: RenderOpts = {}): void => {
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.clearRect(0, 0, width, height);
+      renderScene(
+        c,
+        fit,
+        placements,
+        actors.nodes(),
+        actors.poses(),
+        clock,
+        teamName,
+        lightEnv,
+        pet,
+        actors.sceneFx(),
+        recep,
+        wallBoard,
+        teamWorkingHours,
+        o,
+      );
+    };
+    const surface = (): CanvasRenderingContext2D => {
+      const c = document.createElement('canvas');
+      c.width = canvas.width;
+      c.height = canvas.height;
+      return c.getContext('2d')!;
+    };
+    const direct = surface();
+    const cached = surface();
+    setScenePalette(resolveScenePalette());
+    paint(direct);
+    paint(cached, { sprites: makeSpriteCache({ dpr }), dpr, ...(only !== undefined ? { spriteOnly: only } : {}) });
+    const da = direct.getImageData(0, 0, canvas.width, canvas.height).data;
+    const db = cached.getImageData(0, 0, canvas.width, canvas.height).data;
+    const histogram = new Array<number>(256).fill(0);
+    const cell = 120;
+    const gridW = Math.ceil(canvas.width / cell);
+    const gridH = Math.ceil(canvas.height / cell);
+    const grid = new Array<number>(gridW * gridH).fill(0);
+    const at = (i: number): { x: number; y: number; direct: number[]; sprite: number[] } => {
+      const px = i / 4;
+      return {
+        x: px % canvas.width,
+        y: Math.floor(px / canvas.width),
+        direct: [...da.slice(i, i + 4)],
+        sprite: [...db.slice(i, i + 4)],
+      };
+    };
+    let differing = 0;
+    let beyondRounding = 0;
+    let maxDelta = 0;
+    let first: SpriteParity['first'] = null;
+    let worst: SpriteParity['worst'] = null;
+    /*
+     * Compare what is VISIBLE, which is the premultiplied pixel plus its alpha — not the raw bytes
+     * `getImageData` hands back.
+     *
+     * Those bytes are UNPREMULTIPLIED, and unpremultiplying is unstable as alpha goes to zero: at
+     * alpha 1/255 the stored colour is one 8-bit step of premultiplied value, so recovering it
+     * multiplies the rounding by 255. The first run of this gate reported maxDelta 255 on 161k
+     * pixels and the deltas clustered on 255, 128, 85, 64, 51, 42 — 255/n for small n, which is that
+     * arithmetic and nothing else. A pixel at alpha 1 that reads [0,0,0] against [255,255,0] is the
+     * same invisible pixel twice. Comparing premultiplied values is comparing what a viewer gets.
+     */
+    for (let i = 0; i < da.length; i += 4) {
+      const aa = da[i + 3]!;
+      const ab = db[i + 3]!;
+      let d = Math.abs(aa - ab);
+      for (let k = 0; k < 3; k++) {
+        d = Math.max(d, Math.abs(Math.round((da[i + k]! * aa) / 255) - Math.round((db[i + k]! * ab) / 255)));
+      }
+      if (d === 0) continue;
+      differing++;
+      histogram[d] = (histogram[d] ?? 0) + 1;
+      if (d > 1) {
+        beyondRounding++;
+        // The map shows only what is BEYOND one step: a blit composites where the direct path does
+        // not, so a one-step difference is everywhere and localizes nothing.
+        const px = i / 4;
+        const gx = Math.floor((px % canvas.width) / cell);
+        const gy = Math.floor(Math.floor(px / canvas.width) / cell);
+        grid[gy * gridW + gx] = (grid[gy * gridW + gx] ?? 0) + 1;
+      }
+      if (d > maxDelta) {
+        maxDelta = d;
+        worst = at(i);
+      }
+      if (!first) first = at(i);
+    }
+    return {
+      equal: differing === 0,
+      total: da.length / 4,
+      differing,
+      beyondRounding,
+      maxDelta,
+      histogram,
+      first,
+      worst,
+      grid,
+      gridW,
+      gridH,
+      cell,
+    };
+  }
+
+  /** DEBUG (gate only): magnified crops of the same region, painted direct and through a cache. */
+  function spriteCrops(cx: number, cy: number, r: number, zoom = 8): Record<string, string> {
+    const paint = (o: RenderOpts = {}): HTMLCanvasElement => {
+      const c = document.createElement('canvas');
+      c.width = canvas.width;
+      c.height = canvas.height;
+      const g = c.getContext('2d')!;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, width, height);
+      renderScene(g, fit, placements, actors.nodes(), actors.poses(), clock, teamName, lightEnv, pet, actors.sceneFx(), recep, wallBoard, teamWorkingHours, o);
+      return c;
+    };
+    setScenePalette(resolveScenePalette());
+    const crop = (src: HTMLCanvasElement): string => {
+      const c = document.createElement('canvas');
+      c.width = 2 * r * zoom;
+      c.height = 2 * r * zoom;
+      const g = c.getContext('2d')!;
+      g.imageSmoothingEnabled = false;
+      g.fillStyle = '#101014';
+      g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(src, cx - r, cy - r, 2 * r, 2 * r, 0, 0, c.width, c.height);
+      return c.toDataURL('image/png');
+    };
+    return {
+      direct: crop(paint()),
+      sprite: crop(paint({ sprites: makeSpriteCache({ dpr }), dpr })),
+    };
+  }
+
   ensureLoop(); // a room with anyone working is alive from the first frame (no-op under reduced-motion)
 
   return {
+    ...(import.meta.env.DEV ? { spriteParity, spriteCrops } : {}),
     update,
     emit,
     stats: () => ({ ticks, draws, beats, since }),
@@ -2065,6 +2231,7 @@ export function mountOffice(
     },
     dispose: () => {
       disposed = true;
+      sprites?.clear();
       cancelAnimationFrame(raf);
       stopDrift(); // the heartbeat outlives nothing
       clearInterval(lightTimer); // stop the PST lighting clock

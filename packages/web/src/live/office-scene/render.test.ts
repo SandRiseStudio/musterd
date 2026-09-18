@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { homePoses } from './actors';
 import { memberColor } from '../format';
 import { depth, fitFloor, project } from './iso';
-import { BENCH, CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, KEYBOARD_ALONG, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
+import { BENCH, BOOKSHELVES, CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, KEYBOARD_ALONG, LOUNGE, NOOK, PLANTS, WORKING_HOURS_CALENDAR } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import {
@@ -30,6 +30,18 @@ import {
   dockAcross,
   drawCue,
   drawDog,
+  drawWorkstation,
+  backgroundKey,
+  drawWalls,
+  benchCounter,
+  bookshelf,
+  drawEntrance,
+  drawPlant,
+  DARK_PALETTE,
+  paletteKey,
+  setScenePalette,
+  ownedDeskWarmAlpha,
+  workstationKey,
   glassColor,
   MACHINE_H,
   MONITOR_ALONG,
@@ -42,6 +54,8 @@ import {
 import { assignSeats } from './seating';
 import type { OfficeNode, Pose } from './types';
 import { projectWallBoard, STICKY_CAP, type WallBoard } from './wallboard';
+import { fmtOps, recordingCtx, type RecordedOp } from './recording-ctx';
+import type { SpriteCache } from './sprite-cache';
 import type { Lane, LaneState, WorkingHours } from '@musterd/protocol';
 
 /** A minimal lane for wall-board fixtures — only id and state matter to the wall. */
@@ -1200,5 +1214,276 @@ describe('desk props stand on the desk', () => {
         }
       }
     }
+  });
+});
+
+/**
+ * Sprite cache (spec 2026-09-17): the standing invariant. With a cache supplied, renderScene must
+ * emit exactly the direct path's ops in the direct path's order — the blit bookkeeping aside.
+ * `passthroughCache` draws straight onto the caller's recording context (no offscreen), so the ops
+ * a sprite part emits land in the same stream as the live parts, in the order the loop ran them.
+ */
+function passthroughCache(ctx: CanvasRenderingContext2D): SpriteCache {
+  return {
+    get: (_key, _box, draw) => {
+      draw(ctx);
+      return {} as CanvasImageSource;
+    },
+    size: () => 0,
+    clear: () => {},
+  };
+}
+const BLIT_OPS = new Set(['save', 'restore', 'setTransform', 'drawImage']);
+const sceneOps = (ops: RecordedOp[]): string[] => fmtOps(ops.filter((o) => !BLIT_OPS.has(o.name)));
+
+/** A full room: 24 members across pods, bench, window desks and the overflow strip, working and idle. */
+function fullRoom(): { placements: ReturnType<typeof assignSeats>; byName: Map<string, OfficeNode>; poses: Map<string, Pose> } {
+  const names = ['ada', 'bo', 'cy', 'di', 'ed', 'fay', 'gus', 'hal', 'ivy', 'jo', 'kim', 'lou', 'mo', 'ned', 'oz', 'pat', 'quin', 'rae', 'sy', 'ty', 'uma', 'vic', 'wes', 'xi'];
+  const nodes = names.map((n, i) => node(n, i % 3 === 0 ? 'working' : i % 3 === 1 ? 'active' : 'offline'));
+  const byName = new Map(nodes.map((n) => [n.name, n]));
+  const placements = assignSeats(nodes);
+  return { placements, byName, poses: homePoses(placements, byName) };
+}
+
+describe('sprite parts', () => {
+  const fit = fitFloor(1920, 1080);
+  const env = computeLightEnv(21, true); // night: veil up, lamps on — the busiest paint
+  const schedule: WorkingHours = { timezone: 'America/Los_Angeles', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '17:00' };
+  const wallFixture = (): WallBoard =>
+    projectWallBoard({ lanes: [laneFix('a', 'open'), laneFix('b', 'active'), laneFix('c', 'blocked')], warnings: [] })!;
+
+  it('with a cache, renderScene emits the direct path’s ops in the same order (blit bookkeeping aside)', () => {
+    const { placements, byName, poses } = fullRoom();
+    const a = recordingCtx();
+    renderScene(a.ctx, fit, placements, byName, poses, 3, 'revive', env, null, undefined, null, wallFixture(), schedule);
+    const b = recordingCtx();
+    renderScene(b.ctx, fit, placements, byName, poses, 3, 'revive', env, null, undefined, null, wallFixture(), schedule, {
+      sprites: passthroughCache(b.ctx),
+      dpr: 1,
+    });
+    expect(sceneOps(b.ops)).toEqual(sceneOps(a.ops));
+    expect(a.ops.length).toBeGreaterThan(1000); // the fixture actually painted a room
+  });
+});
+
+/** Ops that READ a context property this draw never SET: fill→fillStyle, stroke→strokeStyle+lineWidth,
+ * fillText→font+textAlign+textBaseline+fillStyle. `save`/`restore` are tracked as a stack. A cached
+ * item starts from the 2D defaults, so anything it reads without setting is state it was silently
+ * inheriting from the previous item on the direct path — a sprite would paint it differently. */
+function readsBeforeWrites(ops: RecordedOp[]): string[] {
+  const reads: Record<string, string[]> = {
+    fill: ['fillStyle'],
+    fillRect: ['fillStyle'],
+    fillText: ['fillStyle', 'font', 'textAlign', 'textBaseline'],
+    stroke: ['strokeStyle', 'lineWidth'],
+    strokeRect: ['strokeStyle', 'lineWidth'],
+    strokeText: ['strokeStyle', 'font'],
+  };
+  let set = new Set<string>();
+  const stack: Set<string>[] = [];
+  const bad: string[] = [];
+  ops.forEach((o, i) => {
+    if (o.name.startsWith('set:')) set.add(o.name.slice(4));
+    else if (o.name === 'save') stack.push(new Set(set));
+    else if (o.name === 'restore') set = stack.pop() ?? set;
+    else for (const p of reads[o.name] ?? []) if (!set.has(p)) bad.push(`${i}:${o.name} reads ${p}`);
+  });
+  return bad;
+}
+
+describe('workstation phases (sprite cache)', () => {
+  const fit = fitFloor(1920, 1080);
+  const slot = DESK_SLOTS.find((s) => s.kind !== 'bench')!;
+  /** A desk whose screen faces the camera (N or W) — the only facings whose lit panel paints a face
+   * at all, so the only ones where "the screen is the live part" is observable. */
+  const facingSlot = DESK_SLOTS.find((s) => s.kind !== 'bench' && (s.dir === 'N' || s.dir === 'W'))!;
+  const owner = node('ava', 'working');
+  const cases = [
+    ['empty', null, false],
+    ['owner idle', owner, false],
+    ['owner working', owner, true],
+  ] as const;
+  for (const [label, n, atWork] of cases) {
+    it(`${label}: pre ++ monitor ++ post == all`, () => {
+      const all = recordingCtx();
+      drawWorkstation(all.ctx, fit, slot, n, 'revive', false, 3, undefined, true, atWork, 'all');
+      const split = recordingCtx();
+      for (const phase of ['pre', 'monitor', 'post'] as const) {
+        drawWorkstation(split.ctx, fit, slot, n, 'revive', false, 3, undefined, true, atWork, phase);
+      }
+      expect(fmtOps(split.ops)).toEqual(fmtOps(all.ops));
+      expect(all.ops.length).toBeGreaterThan(50);
+    });
+  }
+  it('an owned, stepped-away desk (afterglow prop at the monitor’s station) splits the same way', () => {
+    const away: OfficeNode = { ...owner, presence: 'away', last_seen_at: Date.now() - 60_000 };
+    const all = recordingCtx();
+    drawWorkstation(all.ctx, fit, slot, away, 'revive', true, 3, undefined, true, false, 'all');
+    const split = recordingCtx();
+    for (const phase of ['pre', 'monitor', 'post'] as const) {
+      drawWorkstation(split.ctx, fit, slot, away, 'revive', true, 3, undefined, true, false, phase);
+    }
+    expect(fmtOps(split.ops)).toEqual(fmtOps(all.ops));
+    expect(fmtOps(all.ops).some((o) => o.includes('rgba(122, 148, 156'))).toBe(true); // the afterglow painted
+  });
+  it('the monitor phase is the only one that reads t', () => {
+    for (const phase of ['pre', 'post'] as const) {
+      const a = recordingCtx();
+      drawWorkstation(a.ctx, fit, slot, owner, 'revive', false, 1, undefined, true, true, phase);
+      const b = recordingCtx();
+      drawWorkstation(b.ctx, fit, slot, owner, 'revive', false, 9, undefined, true, true, phase);
+      expect(fmtOps(a.ops)).toEqual(fmtOps(b.ops));
+    }
+    const c = recordingCtx();
+    drawWorkstation(c.ctx, fit, facingSlot, owner, 'revive', false, 1, undefined, true, true, 'monitor');
+    const d = recordingCtx();
+    drawWorkstation(d.ctx, fit, facingSlot, owner, 'revive', false, 9, undefined, true, true, 'monitor');
+    expect(fmtOps(c.ops)).not.toEqual(fmtOps(d.ops));
+  });
+  it('cached phases set every state they read (nothing inherited from the previous item)', () => {
+    for (const [, n, atWork] of cases) {
+      for (const phase of ['pre', 'post'] as const) {
+        const r = recordingCtx();
+        drawWorkstation(r.ctx, fit, slot, n, 'revive', false, 3, undefined, true, atWork, phase);
+        expect(readsBeforeWrites(r.ops)).toEqual([]);
+      }
+    }
+  });
+  it('deskStationItems carries sprite·live·sprite parts for a desk slot and none for a bench seat', () => {
+    const r = recordingCtx();
+    const desk = deskStationItems(r.ctx, fit, slot, owner, { teamName: 'revive', t: 3, lampsOn: true });
+    expect(desk.items[0]!.parts!.map((p) => p.kind)).toEqual(['sprite', 'live', 'sprite']);
+    const bench = deskStationItems(r.ctx, fit, DESK_SLOTS.find((s) => s.kind === 'bench')!, owner, { teamName: 'revive' });
+    expect(bench.items.every((i) => !i.parts)).toBe(true);
+  });
+  it('the workstation key changes with every pixel-changing input and never with t', () => {
+    const base = { slot, node: owner, teamName: 'revive', owned: false, working: true, lampLit: true, hidden: undefined, fit, dpr: 1, warmAlpha: '' };
+    const k = workstationKey(base);
+    expect(workstationKey({ ...base, working: false })).not.toBe(k);
+    expect(workstationKey({ ...base, lampLit: false })).not.toBe(k);
+    expect(workstationKey({ ...base, owned: true })).not.toBe(k);
+    expect(workstationKey({ ...base, node: null })).not.toBe(k);
+    expect(workstationKey({ ...base, hidden: new Set(['coffee'] as const) })).not.toBe(k);
+    expect(workstationKey({ ...base, fit: { ...fit, ox: fit.ox + 0.5 } })).not.toBe(k);
+    expect(workstationKey({ ...base, dpr: 2 })).not.toBe(k);
+    expect(workstationKey({ ...base, warmAlpha: '0.108' })).not.toBe(k);
+    expect(workstationKey({ ...base, hidden: new Set(['water', 'coffee'] as const) })).toBe(workstationKey({ ...base, hidden: new Set(['coffee', 'water'] as const) }));
+  });
+  it('ownedDeskWarmAlpha is the exact string the afterglow paints with', () => {
+    const now = 1_000_000_000;
+    expect(ownedDeskWarmAlpha(null, true, now)).toBe('');
+    expect(ownedDeskWarmAlpha(owner, false, now)).toBe('');
+    const offline: OfficeNode = { ...owner, presence: 'offline', last_seen_at: now - 1_800_000 };
+    expect(ownedDeskWarmAlpha(offline, true, now)).toBe('0.090');
+    expect(ownedDeskWarmAlpha({ ...offline, last_seen_at: now - 7_200_000 }, true, now)).toBe('');
+    const away: OfficeNode = { ...owner, presence: 'away', last_seen_at: now };
+    expect(ownedDeskWarmAlpha(away, true, now)).toBe('0.108');
+  });
+});
+
+describe('static furniture sprites', () => {
+  const fit = fitFloor(1920, 1080);
+  it('plants, shelves, the entrance and the bench counter each carry one sprite part', () => {
+    const { placements, byName, poses } = fullRoom();
+    const keys: string[] = [];
+    const census: SpriteCache = {
+      get: (key, _box, draw) => {
+        keys.push(key);
+        draw(recordingCtx().ctx);
+        return {} as CanvasImageSource;
+      },
+      size: () => 0,
+      clear: () => {},
+    };
+    const r = recordingCtx();
+    renderScene(r.ctx, fit, placements, byName, poses, 3, 'revive', computeLightEnv(21, true), null, undefined, null, null, null, {
+      sprites: census,
+      dpr: 1,
+    });
+    const count = (kind: string) => keys.filter((k) => k.startsWith(`${kind}·`)).length;
+    expect(count('plant')).toBe(PLANTS.length);
+    expect(count('shelf')).toBe(BOOKSHELVES.length);
+    expect(count('entrance')).toBe(1);
+    expect(count('bench')).toBe(1);
+    expect(new Set(keys).size).toBe(keys.length); // no two items share a key
+  });
+  it('each one sets every state it reads, so a sprite starting from the 2D defaults is equivalent', () => {
+    const draws: [string, (c: CanvasRenderingContext2D) => void][] = [
+      ['plant snake', (c) => drawPlant(c, fit, PLANTS[0]!.lx, PLANTS[0]!.ly, 'snake')],
+      ['plant fiddle', (c) => drawPlant(c, fit, PLANTS[0]!.lx, PLANTS[0]!.ly, 'fiddle')],
+      ['shelf', (c) => bookshelf(c, fit, BOOKSHELVES[0]!, 0)],
+      ['entrance', (c) => drawEntrance(c, fit)],
+      ['bench', (c) => benchCounter(c, fit)],
+    ];
+    for (const [label, draw] of draws) {
+      const r = recordingCtx();
+      draw(r.ctx);
+      expect(r.ops.length, label).toBeGreaterThan(5);
+      expect(readsBeforeWrites(r.ops), label).toEqual([]);
+    }
+  });
+  it('a sprite key follows the palette, so a theme flip cannot reuse the old raster', () => {
+    const before = paletteKey();
+    setScenePalette({ ...DARK_PALETTE, wood: '#123456' });
+    expect(paletteKey()).not.toBe(before);
+    setScenePalette(DARK_PALETTE);
+    expect(paletteKey()).toBe(before);
+  });
+});
+
+describe('background layer (sprite cache)', () => {
+  const fit = fitFloor(1920, 1080);
+  const env = computeLightEnv(14, true);
+  const schedule: WorkingHours = { timezone: 'America/Los_Angeles', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00', end: '17:00' };
+  const board = (): WallBoard =>
+    projectWallBoard({ lanes: [laneFix('a', 'open'), laneFix('b', 'active')], warnings: [] })!;
+
+  it('static ++ live emits exactly what the whole wall emits, in order', () => {
+    const all = recordingCtx();
+    drawWalls(all.ctx, fit, env, schedule, board(), 3, 'all');
+    const split = recordingCtx();
+    for (const slice of ['static', 'live'] as const) {
+      drawWalls(split.ctx, fit, env, schedule, board(), 3, slice);
+    }
+    expect(fmtOps(split.ops)).toEqual(fmtOps(all.ops));
+    expect(all.ops.length).toBeGreaterThan(200);
+  });
+
+  it('the static slices read neither t nor the office hour — only the live fixtures do', () => {
+    const a = recordingCtx();
+    drawWalls(a.ctx, fit, computeLightEnv(9, true), schedule, board(), 1, 'static');
+    const b = recordingCtx();
+    drawWalls(b.ctx, fit, { ...computeLightEnv(9, true), hours: 16.5 }, schedule, board(), 9, 'static');
+    expect(fmtOps(a.ops)).toEqual(fmtOps(b.ops));
+    const live1 = recordingCtx();
+    drawWalls(live1.ctx, fit, { ...env, hours: 9 }, schedule, board(), 3, 'live');
+    const live2 = recordingCtx();
+    drawWalls(live2.ctx, fit, { ...env, hours: 16.5 }, schedule, board(), 3, 'live');
+    expect(fmtOps(live1.ops)).not.toEqual(fmtOps(live2.ops)); // the clock hands moved
+  });
+
+  it('the live slice paints the clock, the sign and the board and nothing else', () => {
+    const live = recordingCtx();
+    drawWalls(live.ctx, fit, env, schedule, board(), 3, 'live');
+    const noFixtures = recordingCtx();
+    drawWalls(noFixtures.ctx, fit, env, null, null, 3, 'live');
+    expect(live.ops.length).toBeGreaterThan(noFixtures.ops.length); // sign + board are in there
+    expect(noFixtures.ops.length).toBeGreaterThan(0); // the clock always hangs
+  });
+
+  it('backgroundKey follows what the shell paints with, and not the office hour', () => {
+    const k = backgroundKey(fit, env, 1);
+    expect(backgroundKey(fit, { ...env, hours: (env.hours + 3) % 24 }, 1)).toBe(k);
+    expect(backgroundKey(fit, { ...env, skyStrength: env.skyStrength + 0.2 }, 1)).not.toBe(k);
+    expect(backgroundKey(fit, { ...env, skyTint: 'rgb(1, 2, 3)' }, 1)).not.toBe(k);
+    expect(backgroundKey(fit, { ...env, daylight: env.daylight / 2 }, 1)).not.toBe(k);
+    expect(backgroundKey({ ...fit, oy: fit.oy + 1 }, env, 1)).not.toBe(k);
+    expect(backgroundKey(fit, env, 2)).not.toBe(k);
+  });
+
+  it('the shell sets every state it reads, so its sprite can start from the 2D defaults', () => {
+    const r = recordingCtx();
+    drawWalls(r.ctx, fit, env, schedule, board(), 3, 'static');
+    expect(readsBeforeWrites(r.ops)).toEqual([]);
   });
 });

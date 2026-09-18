@@ -878,3 +878,31 @@ one surface that is now growing page by page would be choosing the same failure 
   under 136.2 KB, total under 239.3 KB, site CSS under 3.9 KB. If initial reads nearer 135 KB than
   134 KB, the `watchCopy.ts` split has been undone and the `head:` is importing the component
   module again.
+
+## Total JS budget RAISED 245,000 → 248,400 bytes gzip (2026-09-18) — a raise, not a re-baseline
+
+The office sprite cache (#1550) adds `sprite-cache.ts` and the parity-free half of its wiring to the
+shipped graph. Measured on this branch after `pnpm -r build`: **total JS gzip 239.0 KB across 38
+chunks** against a 239.3 KB budget — passing locally by 0.3 KB and **failing in CI at 239.4 KB**,
+which is the ~0.7 KB CI gzip delta this file has recorded since 2026-08-24 eating the entire margin.
+
+**Re-baseline checked first and unavailable**: measured + 15% is 274.9 KB, which loosens, and a
+re-baseline may only tighten (ADR 183). So this is an ordinary raise and follows the raise protocol —
+local measured **239.0** + the known **~0.7 KB** CI gzip delta + **~1.2%** = 242.6 KB = 248,400 bytes.
+
+**What the bytes buy**, so the next reader can price a revert rather than re-derive it: on a
+GPU-less `performance-4x` the cache takes `/broadcast` from **14.00 to 17.42 draws/s** at the
+stream's own `fps=20` (+24%, ~71.5 → ~57.4 ms per draw), measured interleaved against a populated
+room with `beats` delta 0. It is the only cut of three examined on 2026-09-18 that pays: dirty-rect
+damage tracking was measured and declined (~26% cap, lane 01M2TM6C6XF6), and a smaller stage saves
+only ~9 ms of 51 because the cost is per-operation rather than per-pixel
+([where a canvas scene's time actually goes](../wiki/canvas-raster-vs-js.md)).
+
+**The other budgets did not move.** `initialJsGzipBytes` reads 134.6 KB against 136.2 — the cache
+rides in the office-scene chunk, which `/live` already loads, so the eager graph is unchanged. This
+is the case ADR 183 splits the two budgets for: the code the product carries grew, the payload a
+viewer feels did not.
+
+- Falsify: `pnpm -r build && pnpm perf:check` on this branch — total must read under 242.6 KB and
+  initial under 136.2 KB. If total reads at or under 239.3 KB, the cache has been dropped from the
+  graph and this raise should be reverted with it.

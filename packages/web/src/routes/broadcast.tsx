@@ -66,6 +66,15 @@ function captureFpsFromUrl(): number {
 }
 
 /**
+ * `&sprites=1` — rasterize the static furniture once per state and blit it, instead of redrawing
+ * the whole room every frame (spec 2026-09-17). OFF unless asked: the default flips only once the
+ * pixel gate is byte-equal and one box measures ≤ 25 ms/draw with it on.
+ */
+export function spritesFromUrl(search: string): boolean {
+  return new URLSearchParams(search).get('sprites') === '1';
+}
+
+/**
  * Where a viewer of the stream can find the team — a fact asserted on a public surface, so it is
  * written per team rather than derived (`<slug>@musterd.io` would claim a mailbox for every team
  * that ever streams). The address appears only where one exists; a team without a mailbox shows
@@ -210,6 +219,8 @@ function BroadcastPage() {
     setStage(stageSize(window.location.search));
   }, []);
   const [captureFps] = useState(captureFpsFromUrl);
+  // Read once per page load, like the stage rung above: a capture never changes it mid-stream.
+  const [sprites] = useState(() => (typeof window === 'undefined' ? false : spritesFromUrl(window.location.search)));
 
   // Sound on, unless the URL says otherwise. Both engines default OFF and normally need a click;
   // a capture box never gets one, which is what `--autoplay-policy=no-user-gesture-required` and
@@ -301,6 +312,7 @@ function BroadcastPage() {
             {...officeRoom(team, stream, { entries, board })}
             broadcast
             captureFps={captureFps}
+            sprites={sprites}
             workCues="stack"
             topSlot={<AsksReel envelopes={envelopes} roster={roster} board={board} />}
             cornerSlot={broadcastCorner(team, shipped)}
