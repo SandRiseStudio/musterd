@@ -1,8 +1,8 @@
 import { FEATURE_EPOCH } from '@musterd/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpClient } from './client.js';
-import { workspaceGuidanceEpoch } from './guidanceAttestation.js';
 import { CliError } from './errors.js';
+import { workspaceGuidanceEpoch } from './guidanceAttestation.js';
 
 // Pin the CLI's own build stamp to "unstamped": the exact-body assertions below must not pick up
 // this worktree's ambient dist/build.json (ADR 135) — the build field has its own dedicated tests.

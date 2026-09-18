@@ -17,9 +17,9 @@ import {
   writeGuidance,
 } from './guidance.js';
 import { claudeCode } from './harnesses/claudeCode.js';
-import { HARNESSES } from './harnesses/index.js';
 import { codex } from './harnesses/codex.js';
 import { cursor } from './harnesses/cursor.js';
+import { HARNESSES } from './harnesses/index.js';
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), 'musterd-guidance-'));
