@@ -171,7 +171,9 @@ vi.mock('@clack/prompts', () => ({
 }));
 
 vi.mock('../client.js', () => ({
-  HttpClient: vi.fn(() => h.http),
+  HttpClient: vi.fn(function () {
+    return h.http;
+  }),
   // Fakes `musterd claim`'s live WS handshake for init.ts's "existing member" branch: consumes one
   // queued outcome and fires the matching callback on the next microtask (mirrors a real WS reply).
   watchClaim: (opts: {
@@ -233,6 +235,7 @@ let cwd: string;
 let origCwd: string;
 
 beforeEach(() => {
+  vi.clearAllMocks();
   origCwd = process.cwd();
   cwd = mkdtempSync(join(tmpdir(), 'musterd-init-'));
   process.chdir(cwd);
@@ -800,7 +803,7 @@ describe('runInit — add-agent happy path', () => {
 
   it('returns 1 when harness reconciliation fails', async () => {
     const adapter = (h.adapters['claude-code'] ??= h.adapterFor('claude-code'));
-    (adapter.apply as ReturnType<typeof vi.fn>).mockRejectedValue(
+    (adapter.apply as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('claude mcp add failed'),
     );
     happyAnswers();
