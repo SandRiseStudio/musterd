@@ -75,6 +75,9 @@ prompt; it cannot inject context, so there is no repeating-nudge seam on Cursor 
   Codex-shaped, not Cursor-shaped, until Cursor grows an inject-on-prompt seam.
 - `packages/protocol/src/guidance.ts` is unchanged here (izzo's `#1087` owns the skill body /
   tier wording). Cursor's `alwaysApply: false` frontmatter is assembled in the CLI writer.
+- **2026-09-17 — still one orient body ([ADR 418](418-session-label-capability-is-the-tool-list.md)).**
+  Desktop vs terminal cannot be provisioned apart. The shared skill now contains the tool-list tree;
+  do not generate per-driver orient files.
 
 ## Observability & Evaluation
 

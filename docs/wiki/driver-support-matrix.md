@@ -33,6 +33,12 @@ it behave otherwise, then invalidate-date the cell (wiki rule 4).
 | Config entry scope | repo-shared (keys by repo root) | same | same | per-folder, secret inside the tree | same | per-folder; plus machine-global `~/.codex/config.toml` that no repair reaches (`registeredElsewhere`, measured 2026-08-05) |
 | Hook drift detection (doctor) | markers checked, missing hooks named | same | same | ~~not populated~~ populated since 2026-09-05 (`inspectCursorHookDrift`, ADR 369 note): missing and STALE hooks named, refresh prescribed | same as IDE (same file) | the only harness that populates `hookDrift` today (2026-08-24; falsify: grep `hookDrift` in `harnesses/*`) | <!-- claim: other -->
 
+Desktop and terminal share the same `.claude/skills/musterd-label-sessions` file and the same
+`label-nudge` hook, so provision cannot express the labeling row's driver split. ADR 418's runtime
+gate: the agent follows **this session's tool list** (peer sweep / self-label / skip silently), then
+always `orient-stamp`. `label-nudge` is silent when `TERM_PROGRAM` is a known terminal emulator.
+Measured on `claude` 2.1.276 in Apple Terminal: `TERM_PROGRAM=Apple_Terminal` (2026-09-17; falsify: a Claude Code Desktop UserPromptSubmit hook that inherits that value). <!-- claim: other -->
+
 ### Grok CLI (added 2026-09-02, ADR 352)
 
 Observed against Grok 1.0.13 docs on this machine. Parity target is Claude Code where Grok exposes the seam.
@@ -86,4 +92,4 @@ this — this page only records the fact. The nearest real enum on the wire is `
 - [Harness statusline seams](harness-statusline-seams.md) — why the `persistent seat indicator` row reads
   as it does: the per-harness survey behind those cells, each verdict dated with its own falsifier.
 - `docs/design/harness-residency.md` — residency classes per harness×driver (the closest prior table).
-- ADRs 160, 186 (labeling), 265 (Cursor CLI capture), 021 (driver co-presence).
+- ADRs 160, 186 (labeling), 418 (runtime tool-list gate + terminal `label-nudge` silence), 265 (Cursor CLI capture), 021 (driver co-presence).

@@ -1369,9 +1369,38 @@ export function labelSweepDue(now = Date.now(), env: NodeJS.ProcessEnv = process
 export const LABEL_NUDGE_TEXT =
   'musterd: unlabeled seat sessions need a sidebar chip — run the musterd-label-sessions skill now.';
 
+/**
+ * `TERM_PROGRAM` values that mean this hook is running under a terminal emulator — Claude Code
+ * CLI, not Desktop session-management. Measured 2026-09-17: `claude` 2.1.276 in Apple Terminal
+ * inherits `TERM_PROGRAM=Apple_Terminal` (ADR 418). Falsify: a Desktop UserPromptSubmit hook
+ * that inherits one of these; drop that value from the set rather than widening silence.
+ */
+export const TERMINAL_TERM_PROGRAMS: ReadonlySet<string> = new Set([
+  'Apple_Terminal',
+  'iTerm.app',
+  'ghostty',
+  'WezTerm',
+  'kitty',
+  'Alacritty',
+  'alacritty',
+  'tmux',
+  'screen',
+]);
+
+/**
+ * True when this process is a known no-sidebar-write driver. Unknown stays false (ADR 173:
+ * absent ≠ nothing to do — silencing Desktop by mistake is the unlabeled-sidebar failure the
+ * nudge exists to close). `TERM_PROGRAM=vscode` is not in {@link TERMINAL_TERM_PROGRAMS}.
+ */
+export function labelNudgeHasNoSidebarWrite(env: NodeJS.ProcessEnv = process.env): boolean {
+  const tp = env['TERM_PROGRAM'];
+  return typeof tp === 'string' && TERMINAL_TERM_PROGRAMS.has(tp);
+}
+
 /** `session label-nudge` — hook-driven, hence silent-or-one-line and never failing. */
 function labelNudgeCommand(): number {
   try {
+    if (labelNudgeHasNoSidebarWrite()) return 0;
     if (labelSweepDue()) {
       process.stdout.write(`${LABEL_NUDGE_TEXT}\n`);
     }

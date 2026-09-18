@@ -115,6 +115,34 @@ describe('orient tier 1 owns addressed work (ADR 326 amendment 2026-08-27 UTC)',
     expect(announce).toMatch(/eligible/);
     expect(announce).not.toMatch(/review request.*Announce/s);
   });
+
+  it('labels from this session’s tool list, then always stamps (ADR 418)', () => {
+    const skill = renderOrientSkill();
+    expect(skill).toMatch(/list_sessions.*set_session_title|set_session_title/);
+    expect(skill).toContain('rename_chat');
+    expect(skill).toMatch(/skip silently/i);
+    expect(skill).toMatch(/Then always run `musterd session orient-stamp`/);
+    const stampAt = skill.indexOf('musterd session orient-stamp');
+    const labelAt = skill.indexOf('Label from THIS session');
+    expect(labelAt).toBeGreaterThan(0);
+    expect(stampAt).toBeGreaterThan(labelAt);
+  });
+});
+
+describe('labeling skills skip silently when this session cannot rename (ADR 418)', () => {
+  it('the peer-sweep skill tells a no-tool session to skip, not to narrate or write SQLite', () => {
+    const skill = renderLabelSessionsSkill();
+    expect(skill).toMatch(/skip silently/);
+    expect(skill).toMatch(/Do not narrate the skip/);
+    expect(skill).toMatch(/Do not invent a\n?\s*SQLite write/);
+  });
+
+  it('the self-label skill tells a no-rename_chat session to skip without narrating', () => {
+    const skill = renderSelfLabelSessionSkill();
+    expect(skill).toMatch(/Skip silently when `rename_chat` is not in your tool list/);
+    expect(skill).toMatch(/do not narrate the skip/);
+    expect(skill).toContain('not invent a SQLite write');
+  });
 });
 
 describe('version-bump discipline (ADR 085)', () => {
@@ -148,6 +176,7 @@ describe('version-bump discipline (ADR 085)', () => {
     23: '414d3a6cbc654871', // orient step 3 scopes the announce clause to eligible-set acts and says a lane_review ask's accept IS the verdict (ADR 202) — announcing with accept closed ryder's lane before review (lane 01M2GQFJXG, 2026-09-14)
     24: 'e483f3745643ee00', // orient step 3 names the ACKNOWLEDGE: `wait` on a lane_review ask takes it without deciding, audited as lane.review_acknowledged (lane 01M2P2E2H6) — the old "say 'on it' with a status_update" told humans and not the board
     25: 'cdf87bd806cb0789', // the channel rule stops forbidding the CLI it also prescribes (lane 01M2RP18EV): `session orient-stamp` has no MCP verb, so "do not drive both" was a rule every compliant seat had to break — and the identity that swaps is the one bound to the WORKING DIRECTORY (measured: whoami in agents-stanley → stanley, in agents-miley → miley, in ~ → nick read-only), not the channel
+    26: 'd1af927ac631680d', // ADR 418: orient labels from this session's tool list then always stamps; labeling skills skip silently when the tools are absent
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
