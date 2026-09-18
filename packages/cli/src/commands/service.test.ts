@@ -15,7 +15,7 @@ import {
 } from '../service/launchd.js';
 import type { LiveCtx } from '../service/live.js';
 import type { RunResult, Runner, ServiceCtx } from '../service/manage.js';
-import { resolveLiveCtx, serviceCommand } from './service.js';
+import { blockedFailureNotice, resolveLiveCtx, serviceCommand } from './service.js';
 
 describe('serviceCommand', () => {
   let dir: string;
@@ -1269,5 +1269,154 @@ describe('serviceCommand', () => {
     expect(out).toContain(LIVE_LABEL);
     expect(out).toContain('up');
     expect(out).toContain('/live');
+  });
+});
+
+describe('blockedFailureNotice — lane 01M2RRQJDA', () => {
+  const H = 3_600_000;
+  const DIRTY = '/Users/nick/agents has uncommitted changes (1 file: .image-digest.bak-20260917)';
+  const t0 = Date.parse('2026-08-19T22:31:13Z');
+
+  it('announces a cause the first time it is seen', () => {
+    const r = blockedFailureNotice('', DIRTY, t0);
+    expect(r.notify).not.toBeNull();
+    expect(r.notify?.count).toBe(1);
+    expect(r.state).not.toBe('');
+  });
+
+  it('stays silent while the same cause repeats under the first threshold', () => {
+    // The measured failure: 2026-08-19 fired 16 notices in 3h12m because the debounce was keyed on
+    // the target TIP, and every new commit to main looked like a fresh attempt. The cause never
+    // moved — `pinned b8a20c3` on all 16 — so after the first notice these must be silent.
+    let state = blockedFailureNotice('', DIRTY, t0).state;
+    const fired: number[] = [];
+    // Ticks every ~12 minutes, the observed cadence, stopping short of the 1h threshold (the 5th
+    // tick lands exactly on it, which is an escalation, not a repeat).
+    for (let i = 1; i <= 4; i++) {
+      const r = blockedFailureNotice(state, DIRTY, t0 + i * 12 * 60_000);
+      state = r.state;
+      if (r.notify) fired.push(i);
+    }
+    expect(fired).toEqual([]);
+  });
+
+  it('escalates at 1h and 6h, and says how many attempts and how long', () => {
+    let state = blockedFailureNotice('', DIRTY, t0).state;
+    const fired: { at: string; count: number }[] = [];
+    // 16 ticks at 12-minute spacing spans 3h12m — the real episode.
+    for (let i = 1; i <= 36; i++) {
+      const now = t0 + i * 12 * 60_000;
+      const r = blockedFailureNotice(state, DIRTY, now);
+      state = r.state;
+      if (r.notify) fired.push({ at: r.notify.forHuman, count: r.notify.count });
+    }
+    // One at the 1h mark and one at the 6h mark — not sixteen.
+    expect(fired.length).toBe(2);
+    expect(fired[0]?.count).toBeGreaterThan(1);
+    // Repetition carries new information: the attempt count and the elapsed time.
+    expect(fired[0]?.at).toMatch(/h/);
+    expect(fired[1]?.count).toBeGreaterThan(fired[0]?.count ?? 0);
+  });
+
+  it('re-announces immediately when the cause CHANGES — a new blocker is new news', () => {
+    const state = blockedFailureNotice('', DIRTY, t0).state;
+    const r = blockedFailureNotice(state, 'pnpm build failed: tsc exited 2', t0 + 60_000);
+    expect(r.notify).not.toBeNull();
+    expect(r.notify?.count).toBe(1);
+  });
+
+  it('forgets the episode once it clears, so the next block announces again', () => {
+    const state = blockedFailureNotice('', DIRTY, t0).state;
+    // A tick that succeeds clears the marker...
+    const cleared = blockedFailureNotice(state, null, t0 + 60_000);
+    expect(cleared.state).toBe('');
+    expect(cleared.notify).toBeNull();
+    // ...so the same cause tomorrow is a fresh episode, not a suppressed repeat.
+    const again = blockedFailureNotice(cleared.state, DIRTY, t0 + 24 * H);
+    expect(again.notify?.count).toBe(1);
+  });
+
+  it('treats unreadable state as a fresh episode rather than swallowing the alarm', () => {
+    // Fail loud: a corrupt marker must never be the reason an operator hears nothing.
+    expect(blockedFailureNotice('{not json', DIRTY, t0).notify).not.toBeNull();
+  });
+});
+
+describe('the auto-refresh tick does not re-alarm an unchanged blocker (lane 01M2RRQJDA)', () => {
+  // The failure notification path had NO test before this lane — which is how sixteen identical
+  // alarms in three hours reached a human without anything going red.
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'musterd-blocked-'));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function tickCtx(runner: Runner): ServiceCtx {
+    return {
+      uid: 501,
+      label: SERVICE_LABEL,
+      plistPath: join(tmp, 'agent.plist'),
+      node: '/opt/homebrew/bin/node',
+      binJs: '/repo/packages/cli/dist/bin.js',
+      serveArgs: ['serve'],
+      workingDir: '/repo',
+      stdoutPath: join(tmp, 'daemon.log'),
+      stderrPath: join(tmp, 'daemon.err.log'),
+      path: '/usr/bin:/bin',
+      run: runner,
+    };
+  }
+
+  function tickRunner(dirty: string): Runner {
+    return (cmd, args) => {
+      if (cmd !== 'git') return { status: 0, stdout: '', stderr: '' };
+      if (args.includes('--is-inside-work-tree')) return { status: 0, stdout: 'true', stderr: '' };
+      if (args.includes('--porcelain')) return { status: 0, stdout: dirty, stderr: '' };
+      if (args.includes('--count')) return { status: 0, stdout: '3', stderr: '' }; // behind
+      if (args.includes('rev-parse')) return { status: 0, stdout: 'tip00000', stderr: '' };
+      if (args.includes('log')) return { status: 0, stdout: '1', stderr: '' }; // ancient: no settle
+      return { status: 0, stdout: '', stderr: '' };
+    };
+  }
+
+  async function tick(
+    runner: Runner,
+    blocked: { read: () => string | null; write: (s: string) => void },
+    fired: { title: string; body: string }[],
+  ): Promise<void> {
+    await serviceCommand(parseArgs(['refresh', '--auto', '--settle', '0']), {
+      platform: 'darwin',
+      ctx: tickCtx(runner),
+      health: async () => ({ connections: 0, build: 'old11111' }),
+      autoState: { read: () => null, write: () => {} },
+      outageState: { read: () => null, write: () => {} },
+      blockedState: blocked,
+      notify: (n) => fired.push({ title: n.title, body: n.body }),
+    }).catch(() => {
+      /* the tick rethrows the refusal by design; the notification is what we assert */
+    });
+  }
+
+  it('announces the first failure and stays silent on an immediate repeat', async () => {
+    let state = '';
+    const blocked = {
+      read: () => state,
+      write: (s: string) => {
+        state = s;
+      },
+    };
+    const fired: { title: string; body: string }[] = [];
+    const runner = tickRunner('?? .image-digest.bak-20260917');
+
+    await tick(runner, blocked, fired);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.body).toContain('.image-digest.bak-20260917');
+
+    // Second tick, same blocker. Before this lane the tip-keyed debounce let a new commit re-fire
+    // an identical alarm; now the cause is what is debounced, so the operator hears nothing.
+    await tick(runner, blocked, fired);
+    expect(fired).toHaveLength(1);
   });
 });

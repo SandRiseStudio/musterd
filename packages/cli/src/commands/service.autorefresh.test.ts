@@ -126,6 +126,7 @@ describe('service refresh --auto (the tick)', () => {
     notify?: (n: { id: string; title: string; body: string }) => void;
     autoState?: { read: () => string | null; write: (sha: string) => void };
     outageState?: { read: () => string | null; write: (s: string) => void };
+    blockedState?: { read: () => string | null; write: (s: string) => void };
     touch?: (ok: (s: string) => void) => Promise<void>;
     refreshSharedHooks?: (dir: string) => string[];
   }) =>
@@ -143,6 +144,10 @@ describe('service refresh --auto (the tick)', () => {
         // ADR 230: the outage run/escalation marker — a SEPARATE store from the build debounce, so
         // an outage can never clobber the broken-`main` marker (and vice versa).
         outageState: over.outageState ?? memState(),
+        // Lane 01M2RRQJDA: the blocked-cause marker, a THIRD separate store. It must default to a
+        // fresh one per test — it debounces the alarm on the failure cause, so a shared store makes
+        // the second test in a file that fails the same way silently expect no notification.
+        blockedState: over.blockedState ?? memState(),
         // ADR 408 inc 5: default to a no-op so no test ever writes this machine's real shared
         // Codex hooks file — the production default reaches a path outside the temp dir.
         refreshSharedHooks: over.refreshSharedHooks ?? (() => []),
@@ -312,6 +317,7 @@ describe('service refresh --auto (the tick)', () => {
         health: async () => ({ connections: 0, build: 'oldsha0' }),
         notify,
         autoState: memState(null),
+        blockedState: memState(null),
       }),
     ).rejects.toThrow(/build failed/);
     const n = notify.mock.calls.at(-1)?.[0] as { title: string; body: string };
@@ -354,6 +360,7 @@ describe('service refresh --auto (the tick)', () => {
         health: async () => ({ connections: 0, build: 'oldsha0' }),
         notify,
         autoState: memState(null),
+        blockedState: memState(null),
       }),
     ).rejects.toThrow(/git switch/);
     const body = (notify.mock.calls.at(-1)?.[0] as { body: string }).body;
@@ -376,6 +383,7 @@ describe('service refresh --auto (the tick)', () => {
         health: async () => ({ connections: 0, build: 'oldsha0' }),
         notify,
         autoState: memState(null),
+        blockedState: memState(null),
       }),
     ).rejects.toThrow(/build failed/);
     expect((notify.mock.calls.at(-1)?.[0] as { body: string }).body).toContain('build failed');
@@ -528,6 +536,7 @@ describe('service refresh --auto (the tick)', () => {
         health: async () => ({ connections: 4, build: 'oldsha0' }), // live sessions → notice mode
         notify,
         autoState: memState(null),
+        blockedState: memState(null),
       }),
     ).rejects.toThrow(/build failed/);
     expect(notify).toHaveBeenCalledOnce();
@@ -592,6 +601,7 @@ describe('service refresh --auto (the tick)', () => {
           health: async () => ({ connections: 4, build: 'oldsha0' }),
           notify: vi.fn(),
           autoState: memState(null),
+          blockedState: memState(null),
         }),
       ).rejects.toThrow(/build failed/);
     } finally {
