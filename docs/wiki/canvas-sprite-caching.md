@@ -71,9 +71,15 @@ Run on the box against `/broadcast` (`spriteParity()`, both paths painted into f
 | beyond rounding | 4,028 — 0.292% | 1,488 — **0.072%** |
 | maxDelta | 88 | 100 |
 
-**The box is 4.1x kinder on the statistic that matters** and marginally worse on the extreme. 99.2% of every difference is a single step — the unpremultiply rounding this page already documents, invisible by construction. What is left is **1,488 pixels of 2,073,600**, scattered, at up to 100/255.
+**The box is 4.1x kinder on the statistic that matters** and marginally worse on the extreme. 99.2% of every difference is a single step — the unpremultiply rounding this page already documents, invisible by construction. The residue is **1,488 pixels of 2,073,600**, scattered, at up to 100/255.
 
-**It is still not pixel-identical, and no measurement will make it so.** A blit is a second composite; that is the mechanism, not a bug to be fixed. So the decision this number exists for is a product one: `equal: false` stands, and the question is whether 0.072% of the stage at up to 100/255 is a price worth paying for +24% on a box that otherwise cannot hold 20 fps. That is nick's call, and the bar as written ("pixel-identical") does not survive it either way.
+**It is still not pixel-identical, and no measurement will make it so.** A blit is a second composite; that is the mechanism, not a bug to be fixed. So `equal: false` stands and the bar as written ("pixel-identical") does not survive contact with it either way.
+
+**Decided 2026-09-18: the cache goes on for the stream, off for `/live`.** 0.072% of the stage at up to 100/255 is worth +24% on a box that otherwise cannot hold 20 fps, because the stream is delivered as H.264 at a fixed bitrate and a lossy encoder's own quantization error on a 1080p frame is larger than a scattered 0.072% — so the canvas-level bar measures a fidelity no viewer receives, while 14-vs-17.4 fps is one every viewer does. `/live` keeps the direct path: it renders on a viewer's GPU, where the cache measured only ~15% and where no encoder sits downstream to hide anything.
+
+**That last argument is reasoning, not measurement, and it is the one to attack.** Nobody has encoded both arms and diffed the decoded output. Falsify: render one frame each way, encode both through the stream's own ffmpeg settings, decode, and compare — if the cache's delta survives encode as a larger difference than two encodes of the *same* frame differ from each other, the reasoning is wrong and the default should go back to dark. Follows-up: 01M2V0KX8TDFWE811CG2GFQY8Z
+
+**One gap in the evidence, stated rather than buried:** the bench box was destroyed before capturing *where* the 1,488 beyond-rounding pixels sit. Scattered singles and one clump on a face are the same number and not the same product.
 
 ## Measure a sprite's box, do not estimate it (2026-09-17; falsify: set `SPRITE_PAD` to 200 and re-run the gate — the differences do not move) <!-- claim: other -->
 
