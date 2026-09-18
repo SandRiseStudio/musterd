@@ -34,7 +34,7 @@ One step is what the extra composite costs: the direct path paints an antialiase
 
 So **"pixel-identical" is not an achievable acceptance criterion for a sprite cache** — the reachable one is "no visible difference, with a stated bound and a gate that enforces it". Which of those a product wants is a person's decision; the measurement is what makes it a decision rather than a guess.
 
-## The win is smaller than "how much of the frame is static" suggests (2026-09-17, a LAPTOP proxy, not the capture box; falsify: re-run the A/B on a box with no GPU and compare) <!-- claim: other -->
+## The win is smaller than "how much of the frame is static" suggests, and the laptop cannot answer for the stream (2026-09-17; falsify: re-run the A/B on the rented Fly machine and compare it to the laptop numbers below) <!-- claim: other -->
 
 The premise was that ~39 ms of the office's ~56 ms per draw is static furniture ([broadcast stream](broadcast-stream.md)), so caching it should take most of that back. Interleaved A/B/A/B on one Chrome at 8× CPU throttle, same page and same room:
 
@@ -43,7 +43,9 @@ The premise was that ~39 ms of the office's ~56 ms per draw is static furniture 
 | direct | 42.0, 40.4 |
 | cached | 34.9, 35.8 |
 
-About 15%, with both direct arms consistent. Two reasons the share of the frame does not convert into a share of the time: a near-full-stage sprite costs real memory bandwidth to blit every frame, and everything that stays live (actors, the interior lighting pass, the vignette) was never part of the 39 ms in the first place. **This number is a laptop with a GPU** and the capture box runs SwiftShader, where the balance between rasterizing gradients and copying a large image is different — it is a signal that the win is not automatic, not the acceptance measurement.
+About 15%, with both direct arms consistent. Two reasons the share of the frame does not convert into a share of the time: a near-full-stage sprite costs real memory bandwidth to blit every frame, and everything that stays live (actors, the interior lighting pass, the vignette) was never part of the 39 ms in the first place.
+
+**Which surface this number belongs to matters more than the number.** The two office surfaces do not run in the same place: `/live` renders in a viewer's browser — on this laptop, with a GPU — while the broadcast renders on a Fly `performance-4x` that `musterd stream start` rents per stream and destroys after, reaching the laptop's daemon over Tailscale ([broadcast stream](broadcast-stream.md), ADR 157). Nothing stream-related runs locally. So a laptop A/B is a **direct** measurement of what the cache does for `/live` and only a **weak proxy** for the stream, where there is no GPU and half the frame's CPU was native raster under gradients and text. Copying a large image and rasterizing a gradient trade places between those two machines, which is exactly why the 25 ms acceptance has to be measured where the stream actually runs.
 
 ## Measure a sprite's box, do not estimate it (2026-09-17; falsify: set `SPRITE_PAD` to 200 and re-run the gate — the differences do not move) <!-- claim: other -->
 
