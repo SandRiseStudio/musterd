@@ -1640,6 +1640,23 @@ export const MIGRATIONS: Migration[] = [
         db.exec('ALTER TABLE audit ADD COLUMN actor_model_source TEXT');
     },
   },
+  {
+    // ADR 417: the presence row carries the guidance epoch the SEAT attested — the stamp in its own
+    // workspace files, not the ceiling its build could write. The sibling of `epoch` with one
+    // difference: `epoch` is compiled in and cannot move inside an occupancy, this is a filesystem
+    // read that can, because a mid-session refresh rewrites the files under a live session.
+    //
+    // Nullable, and deliberately not `NOT NULL DEFAULT 0`: an unstamped workspace and a client too
+    // old to attest both genuinely have no answer, and 0 is the exact silhouette of maximal
+    // staleness. Defaulting would report every one of them as the most out-of-date seat on the team.
+    version: 69,
+    up: (db) => {
+      // Guarded like v42/v68: a rewind-and-replay must not fail on a column it already added.
+      const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
+      if (!cols.includes('guidance_epoch'))
+        db.exec('ALTER TABLE presence ADD COLUMN guidance_epoch INTEGER');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

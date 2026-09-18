@@ -31,6 +31,7 @@ import {
   currentAttestedModel,
   detach,
   heartbeat,
+  reattestGuidanceEpoch,
   reattestModel,
   reattestSurface,
   hasActivePresence,
@@ -1066,6 +1067,49 @@ describe('presence', () => {
     const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
     attach(db, bo.row.id, 'claude-code', 'c2');
     expect(epochOf('Bo')).toBeNull();
+  });
+
+  /**
+   * ADR 417. `guidance_epoch` is the sibling of `epoch` with one difference that matters: `epoch` is
+   * a compiled-in constant, so it cannot change inside an occupancy, while this one is a filesystem
+   * read of the seat's own workspace and CAN — a mid-session refresh rewrites the guidance files
+   * under a session that is still running. So the round-trip has to prove both halves: a heartbeat
+   * carrying a NEW epoch must move the row forward, and a heartbeat carrying NONE must not clear it.
+   */
+  it('round-trips the attested guidance epoch, movable forward and sticky when absent (ADR 417)', () => {
+    const { db, team } = freshTeam();
+    const guidanceOf = (name: string) =>
+      listPresence(db, team.id, 45_000).find((s) => s.member.name === name)?.presences[0]
+        ?.guidance_epoch;
+
+    // Claim path: attach attests epoch 23; listPresence surfaces it on the presence entry.
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const adaPresence = attach(db, ada.row.id, 'claude-code', 'c1', { guidance_epoch: 23 });
+    expect(guidanceOf('Ada')).toBe(23);
+
+    // A heartbeat carrying a NEWER epoch moves the row — the seat refreshed mid-session and said so.
+    // This is the half `epoch` never needs and the reason the field exists at all.
+    reattestGuidanceEpoch(db, adaPresence.id, 25);
+    expect(guidanceOf('Ada')).toBe(25);
+
+    // A heartbeat carrying NONE must not clear the attested one: silence is not an assertion, and
+    // a client too old to attest would otherwise erase what the claim stored on its first tick.
+    reattestGuidanceEpoch(db, adaPresence.id, undefined);
+    reattestGuidanceEpoch(db, adaPresence.id, null);
+    expect(guidanceOf('Ada')).toBe(25);
+
+    // The ambient path is sticky the same way — a fire-and-exit CLI touch carries no guidance.
+    const cy = addMember(db, team, { name: 'Cy', kind: 'agent' });
+    touchAmbientPresence(db, cy.row.id, 'cli', 45_000, { guidance_epoch: 24 });
+    expect(guidanceOf('Cy')).toBe(24);
+    touchAmbientPresence(db, cy.row.id, 'cli', 45_000, {});
+    expect(guidanceOf('Cy')).toBe(24);
+
+    // An unstamped workspace (or an older client) reads null — never 0, which would read as the
+    // staleest possible workspace rather than as an absent answer.
+    const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
+    attach(db, bo.row.id, 'claude-code', 'c2');
+    expect(guidanceOf('Bo')).toBeNull();
   });
 
   /**

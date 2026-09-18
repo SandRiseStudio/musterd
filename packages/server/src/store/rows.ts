@@ -102,6 +102,12 @@ export interface PresenceRow {
    *  connecting dist was built against. Null for older clients. Sticky across ambient heartbeats like
    *  `build`/`model`; the roster renders skew from it in place of the raw build ref. */
   epoch: number | null;
+  /** Client-attested guidance epoch of the seat's own WORKSPACE (ADR 417): the stamp in the files it
+   *  is actually running, not the ceiling its build could write. Unlike `epoch` this can move inside
+   *  an occupancy — a mid-session refresh rewrites the files under a live session — so the heartbeat
+   *  COALESCEs it forward. Null for unstamped workspaces and older clients, and never defaulted to
+   *  0: absence and "the oldest epoch there is" are different facts. */
+  guidance_epoch: number | null;
   /** The wake lease that spawned this occupancy (ADR 241) — the daemon-minted `lease_id` the
    *  actuator handed the child, attested back on claim. Null for every occupancy no wake caused,
    *  which is nearly all of them. The only column here that identifies rather than describes. */

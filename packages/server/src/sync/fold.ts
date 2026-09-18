@@ -578,8 +578,8 @@ function projectPresenceEvent(
       if (db.prepare('SELECT 1 FROM presence WHERE id = ?').get(presenceId)) return 'applied';
       const model = str('model');
       db.prepare(
-        `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, model_source, build, epoch, wake_lease, node, created_at)
-         VALUES (?, ?, ?, 'online', NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+        `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, model_source, build, epoch, guidance_epoch, wake_lease, node, created_at)
+         VALUES (?, ?, ?, 'online', NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
       ).run(
         presenceId,
         member.id,
@@ -592,6 +592,10 @@ function projectPresenceEvent(
         model ? str('model_source') : null,
         str('build'),
         typeof d['epoch'] === 'number' ? d['epoch'] : null,
+        // ADR 417. Folded like `epoch`: a remote seat's guidance epoch is a fact about THAT seat's
+        // workspace, and a census that silently reads null for every replicated row would report the
+        // rest of the fleet as unstamped rather than as unmeasured.
+        typeof d['guidance_epoch'] === 'number' ? d['guidance_epoch'] : null,
         originNode,
         event.ts,
       );
@@ -606,9 +610,18 @@ function projectPresenceEvent(
       const model = str('model');
       const r = db
         .prepare(
-          'UPDATE presence SET model = ?, model_source = ?, surface = COALESCE(?, surface) WHERE id = ? AND node = ?',
+          'UPDATE presence SET model = ?, model_source = ?, surface = COALESCE(?, surface), guidance_epoch = COALESCE(?, guidance_epoch) WHERE id = ? AND node = ?',
         )
-        .run(model, model ? str('model_source') : null, surface, presenceId, originNode);
+        .run(
+          model,
+          model ? str('model_source') : null,
+          surface,
+          // COALESCE, matching the origin's own rule: an origin that re-attested a model without
+          // touching guidance sends null here, and null is "no change", not "forget what you knew".
+          typeof d['guidance_epoch'] === 'number' ? d['guidance_epoch'] : null,
+          presenceId,
+          originNode,
+        );
       return r.changes === 0 ? 'unborn' : 'applied';
     }
     default:
