@@ -76,6 +76,10 @@ check** — the grep it prescribes takes ten seconds and would have caught this 
 The cheap check is the one from *Finding the next one*, run **after** the fix rather than before it:
 group the live rows by the field and confirm the value actually moved.
 
+**A manual probe finds it; only a test keeps it.** The live database read above is not repeatable in CI, so the same assertion now runs in-process: `client.claimMirror.e2e.test.ts` drives the real `HttpClient.claim` against a real `createServer({ db: openDb(':memory:') })` and asserts the row the daemon stored — the join itself, not either end of it, and deleting `model_source` from the claim body turns exactly its two positive cases red while the null-control stays green (2026-09-18; falsify: remove the `frame.model_source` spread from the claim body in `client.ts` and run that file — if it stays green the test is asserting something other than the join and this is wrong). <!-- claim: defect -->
+
+Reaching for a throwaway daemon before reaching for an in-process server is what cost a seat credential that night; see [team create binds the folder](team-create-binds-the-folder.md).
+
 ## Repair: remove the seam, do not fill the field in
 
 Correcting the spelling leaves the trap armed for the next field. Both repairs that held were structural:
