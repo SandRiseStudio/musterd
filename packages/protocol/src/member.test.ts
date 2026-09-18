@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MemberSchema, MemberSummarySchema } from './member.js';
+import { MemberSchema, MemberSummarySchema, PresenceSchema } from './member.js';
 
 const base = {
   id: '01M',
@@ -24,5 +24,23 @@ describe('Member.hue (ADR 374)', () => {
     expect(() => MemberSchema.parse({ ...base, hue: 360 })).toThrow();
     expect(() => MemberSchema.parse({ ...base, hue: -1 })).toThrow();
     expect(() => MemberSchema.parse({ ...base, hue: 1.5 })).toThrow();
+  });
+});
+
+describe('Presence.guidance_epoch (ADR 417)', () => {
+  const base = { id: 'p1', surface: 'claude-code', status: 'online', last_seen_at: 1 };
+
+  it('carries the epoch the occupancy attested', () => {
+    expect(PresenceSchema.parse({ ...base, guidance_epoch: 24 }).guidance_epoch).toBe(24);
+  });
+
+  it('is nullish — an unstamped workspace is unknown, and unknown is not epoch 0', () => {
+    expect(PresenceSchema.parse({ ...base, guidance_epoch: null }).guidance_epoch).toBeNull();
+    expect(PresenceSchema.parse(base).guidance_epoch).toBeUndefined();
+  });
+
+  it('rejects a malformed stamp version', () => {
+    expect(PresenceSchema.safeParse({ ...base, guidance_epoch: -1 }).success).toBe(false);
+    expect(PresenceSchema.safeParse({ ...base, guidance_epoch: 1.5 }).success).toBe(false);
   });
 });

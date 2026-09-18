@@ -93,6 +93,11 @@ export const PresenceSchema = z.object({
    *  when this is known *and* lower than the daemon's epoch — i.e. the seat genuinely lacks later features,
    *  never on benign build drift. */
   epoch: z.number().int().nonnegative().nullish(),
+  /** The guidance epoch this occupancy attested (ADR 417) — the stamp in the seat's own guidance
+   *  files, not its build's ceiling. Null/absent for unstamped workspaces and older clients, and
+   *  absent is UNKNOWN rather than zero. This is the field that makes the nine-worktree census a
+   *  query instead of a shell script. */
+  guidance_epoch: z.number().int().nonnegative().nullish(),
   /**
    * The wake lease this occupancy was spawned by (ADR 241) — the daemon-minted `lease_id` carried
    * to the child through `MUSTERD_WAKE_LEASE` and attested back on claim. This is the only field on

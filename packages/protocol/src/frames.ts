@@ -61,6 +61,12 @@ export const HeartbeatFrame = z.object({
   // does. A mid-session heal (ADR 270 writes `session.harness=cursor`) must not keep the
   // claim-time declaration on the presence row. Absent ⇒ no change (never a clear).
   surface: SurfaceSchema.optional(),
+  // Guidance re-attestation (ADR 417, additive): self-heal or `musterd init --refresh-guidance` can
+  // move this workspace's stamp mid-occupancy, so the adapter carries the current one on a
+  // heartbeat. Absent ⇒ no change, never a clear — the same rule `model` carries, for the same
+  // reason: attestation moves forward, and `unknown` comes from never attesting rather than from
+  // omitting the field on one frame.
+  guidance_epoch: z.number().int().nonnegative().optional(),
 });
 
 export const WSClientFrame = z.discriminatedUnion('type', [

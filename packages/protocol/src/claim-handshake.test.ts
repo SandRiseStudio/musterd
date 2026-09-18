@@ -113,6 +113,24 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
     expect(ClaimFrame.safeParse({ ...base, epoch: 1.5 }).success).toBe(false);
   });
 
+  it('parses a claim carrying the guidance epoch it is RUNNING (ADR 417)', () => {
+    const base = {
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'claude-code',
+    };
+    expect(ClaimFrame.parse({ ...base, guidance_epoch: 24 }).guidance_epoch).toBe(24);
+    // Absent is legal — an unstamped or unprovisioned workspace, or an older client. It must stay
+    // ABSENT rather than defaulting to 0, which would read as "maximally stale" (ADR 135).
+    expect(ClaimFrame.parse(base).guidance_epoch).toBeUndefined();
+    // A stamp version is a non-negative integer; anything else is malformed, not merely low.
+    expect(ClaimFrame.safeParse({ ...base, guidance_epoch: -1 }).success).toBe(false);
+    expect(ClaimFrame.safeParse({ ...base, guidance_epoch: 24.5 }).success).toBe(false);
+  });
+
   it('parses a claim with an observe target (human credential)', () => {
     const f = ClaimFrame.parse({
       type: 'claim',
