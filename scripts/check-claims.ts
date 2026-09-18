@@ -100,13 +100,25 @@ function unbalancedFences(source: string): number | null {
   return marks % 2 === 0 ? null : marks;
 }
 
-/** Strip what is a MENTION rather than a USE: fenced code, HTML and line comments, JSDoc. */
+/**
+ * Strip what is a MENTION rather than a USE: fenced code, HTML and line comments, JSDoc, and —
+ * the case that matters most here — backticked and double-quoted spans.
+ *
+ * QUOTED SPANS ARE WHY THIS EXISTS. The document that DEFINES these bans has to write them out
+ * in order to forbid them: `security-position.md` §3 is a numbered list of the exact sentences
+ * nobody may ship. Without this, the rulebook fails the rule, five times, and the only ways out
+ * are to suppress the canonical list or to paraphrase the bans until they stop being quotable —
+ * both of which destroy the thing being protected. `check-vocab.ts` reached the same conclusion
+ * first and states it plainly: backticks and double-quoted spans are mentions.
+ */
 function prose(source: string): string {
   return source
     .replace(/```[\s\S]*?```/g, (m) => m.replace(/[^\n]/g, ' '))
     .replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, ' '))
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/^\s*\/\/.*$/gm, (m) => ' '.repeat(m.length));
+    .replace(/^\s*\/\/.*$/gm, (m) => ' '.repeat(m.length))
+    .replace(/`[^`\n]*`/g, (m) => ' '.repeat(m.length))
+    .replace(/[“"][^”"\n]*[”"]/g, (m) => ' '.repeat(m.length));
 }
 
 function walk(abs: string, out: string[]): void {
