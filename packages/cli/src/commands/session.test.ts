@@ -508,6 +508,57 @@ describe('musterd session (capture)', () => {
     await expect(sessionCommand(parseArgs(['bogus']))).rejects.toMatchObject({ exitCode: 2 });
   });
 
+  it('runs the startup probe for a Grok SessionStart using the payload workspace', async () => {
+    const probe = vi.fn();
+    const stdin = vi.spyOn(process.stdin, 'on').mockImplementation((event, listener) => {
+      if (event === 'data')
+        (listener as (chunk: string) => void)(
+          JSON.stringify({
+            hookEventName: 'SessionStart',
+            sessionId: 'grok-1',
+            cwd: wsA,
+          }),
+        );
+      if (event === 'end') (listener as () => void)();
+      return process.stdin;
+    });
+    const encoding = vi.spyOn(process.stdin, 'setEncoding').mockReturnValue(process.stdin);
+
+    try {
+      await sessionCommand(parseArgs(['start', '--stdin']), { probe });
+    } finally {
+      stdin.mockRestore();
+      encoding.mockRestore();
+    }
+
+    expect(probe).toHaveBeenCalledWith(wsA);
+  });
+
+  it('runs the startup probe for Cursor orientation using the payload workspace', async () => {
+    const probe = vi.fn();
+    const stdin = vi.spyOn(process.stdin, 'on').mockImplementation((event, listener) => {
+      if (event === 'data')
+        (listener as (chunk: string) => void)(
+          JSON.stringify({
+            conversation_id: 'cursor-1',
+            cwd: wsA,
+          }),
+        );
+      if (event === 'end') (listener as () => void)();
+      return process.stdin;
+    });
+    const encoding = vi.spyOn(process.stdin, 'setEncoding').mockReturnValue(process.stdin);
+
+    try {
+      await sessionCommand(parseArgs(['observe', '--stdin', '--orient']), { probe });
+    } finally {
+      stdin.mockRestore();
+      encoding.mockRestore();
+    }
+
+    expect(probe).toHaveBeenCalledWith(wsA);
+  });
+
   describe('model observation', () => {
     const transcript = (ws: string, model: string): string => {
       const p = join(ws, 't.jsonl');

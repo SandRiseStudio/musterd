@@ -29,6 +29,7 @@ import {
 } from '../session/liveness.js';
 import { attestedModel, findWorkspaceDir, resolveClaimWorkspace } from './helpers.js';
 import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
+import { runSessionStartProbe, type SessionStartProbe } from './sessionProbe.js';
 import { composeSessionStatusline, type SessionStatuslineInput } from './sessionStatusline.js';
 
 /**
@@ -53,10 +54,17 @@ import { composeSessionStatusline, type SessionStatuslineInput } from './session
  *
  * `show` is the human/triage half: what is captured here, is it live, would a wake resume it.
  */
-export async function sessionCommand(parsed: Parsed): Promise<number> {
+export interface SessionCommandDeps {
+  probe?: SessionStartProbe;
+}
+
+export async function sessionCommand(
+  parsed: Parsed,
+  deps: SessionCommandDeps = {},
+): Promise<number> {
   const sub = parsed.positionals[0];
-  if (sub === 'start' || sub === 'end') return captureCommand(sub, parsed);
-  if (sub === 'observe') return observeCommand(parsed);
+  if (sub === 'start' || sub === 'end') return captureCommand(sub, parsed, deps);
+  if (sub === 'observe') return observeCommand(parsed, deps);
   if (sub === 'resolve-labels') return resolveLabelsCommand(parsed);
   if (sub === 'label-nudge') return labelNudgeCommand();
   if (sub === 'orient-nudge') return orientNudgeCommand();
@@ -156,7 +164,11 @@ function parseHookPayload(raw: string): HookPayload {
   }
 }
 
-async function captureCommand(event: 'start' | 'end', parsed: Parsed): Promise<number> {
+async function captureCommand(
+  event: 'start' | 'end',
+  parsed: Parsed,
+  deps: SessionCommandDeps,
+): Promise<number> {
   if (parsed.flags['stdin'] !== true) {
     throw new CliError(
       `usage: musterd session ${event} --stdin  — hook-driven: pipe the harness's hook JSON in ` +
@@ -165,12 +177,14 @@ async function captureCommand(event: 'start' | 'end', parsed: Parsed): Promise<n
     );
   }
   const payload = parseHookPayload(await readStdin());
+  const captureDir = resolveCaptureDir(payload);
+  if (event === 'start') await runSessionStartProbe(captureDir ?? undefined, deps.probe);
   await captureSession(event, payload);
   if (event === 'start') {
     // The orientation resolves from the SAME anchored dir capture writes to — never bare
     // process.cwd() (miley's #1072 review: the ADR 018 clobber shape, read edition — a mis-cwd'd
     // hook must not emit another seat's inbox and memory headline into this session's context).
-    const orientation = await emitSessionOrientation(resolveCaptureDir(payload));
+    const orientation = await emitSessionOrientation(captureDir);
     if (orientation) process.stdout.write(orientation + '\n');
   }
   return 0;
@@ -382,7 +396,7 @@ async function statuslineCommand(parsed: Parsed): Promise<number> {
   return 0;
 }
 
-async function observeCommand(parsed: Parsed): Promise<number> {
+async function observeCommand(parsed: Parsed, deps: SessionCommandDeps): Promise<number> {
   if (parsed.flags['stdin'] !== true) {
     throw new CliError(
       'usage: musterd session observe --stdin [--orient] [--interrupt]  — Cursor hook-driven (ADR 198 / ADR 333 / ADR 369): pipe the Agent hook JSON in',
@@ -393,6 +407,7 @@ async function observeCommand(parsed: Parsed): Promise<number> {
   await observeCursorSession(payload);
   const captureDir = resolveCaptureDir(payload);
   if (parsed.flags['orient'] === true) {
+    await runSessionStartProbe(captureDir ?? undefined, deps.probe);
     const json = formatCursorOrientation(await emitSessionOrientation(captureDir));
     if (json) process.stdout.write(json + '\n');
   }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Binding } from '@musterd/protocol';
@@ -18,9 +18,10 @@ const event = (overrides: Record<string, unknown> = {}) =>
 describe('musterd codex-hook', () => {
   it('records only the SessionStart capture selected by its command', async () => {
     const start = vi.fn();
+    const probe = vi.fn();
 
     await expect(
-      handleCodexHook(parseArgs(['start', '--stdin']), event(), { start }),
+      handleCodexHook(parseArgs(['start', '--stdin']), event(), { start, probe }),
     ).resolves.toBeNull();
 
     expect(start).toHaveBeenCalledWith({
@@ -29,6 +30,7 @@ describe('musterd codex-hook', () => {
       cwd: '/workspace',
       transcript_path: '/workspace/rollout.jsonl',
     });
+    expect(probe).toHaveBeenCalledWith('/workspace');
   });
 
   it('records direct PostToolUse model evidence without using a transcript', async () => {
@@ -85,6 +87,7 @@ describe('Codex hook local evidence', () => {
       parseArgs(['start', '--stdin']),
       event({ cwd: workspace, session_id: 'first' }),
     );
+    expect(existsSync(join(workspace, '.musterd', 'drift.json'))).toBe(true);
     await handleCodexHook(
       parseArgs(['end', '--stdin']),
       event({ cwd: workspace, session_id: 'other', hook_event_name: 'SessionEnd' }),
