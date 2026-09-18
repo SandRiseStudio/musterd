@@ -547,26 +547,28 @@ export function makeFrameWatchdog(
  * counter that does not reach for `forceStop`. Loud exactly once, for the same reason the ack
  * refusal reporter is: the run continues degraded for hours, and a line per window buries the first
  * one, which is the only one that says when it began.
+ *
+ * **Sized from measurement on the performance-4x box, not taste.** Healthy (2026-09-16, after the
+ * `coalesceStep` fix): **18 draws/s median**. Degraded (2026-09-17, same box, 484 samples over
+ * 483 s): **8.06 mean**. Twelve sits ~33 % under that healthy median and 50 % over the degraded
+ * mean. It is NOT a margin ordinary variance cannot reach: the real page idles at 15.35 draws/s
+ * with ~20 % box-to-box variance (docs/wiki/broadcast-stream.md, 2026-09-17), and 20 % under 15.35
+ * is 12.3 — so on the boxes we have this is a budget assertion, and it can cry on a healthy run.
+ *
+ * Falsify by running a healthy capture on a box we have and reading `drawFps` p5 out of the perf
+ * JSONL: a p5 under 12 on a run nobody would call degraded means this is too high, and that run
+ * says so. (Corrected 2026-09-18: as first written the falsifier needed a box that holds 18/s,
+ * which the wiki's own next claim says none of ours does.)
  */
 export const DRAW_FLOOR_FPS = 12;
-
-/**
- * Sized from measurement on the performance-4x box, not taste. Healthy (2026-09-16, after the
- * `coalesceStep` fix): **18 draws/s median**. Degraded (2026-09-17, same box, 484 samples over
- * 483 s): **8.06 mean**. Twelve sits ~33 % under the healthy median and 50 % over the degraded
- * mean — far enough below healthy that ordinary variance cannot reach it, far enough above the
- * failure that the failure cannot hide under it.
- *
- * Falsify by running a healthy capture and reading `drawFps` p5 out of the perf JSONL: if p5 dips
- * under 12 on a box we call healthy, this is too high and the run it cried on says so.
- */
-export const DRAW_FLOOR_WINDOW_MS = 60_000;
 
 /**
  * A minute is deliberate. The failure is sustained, and shorter windows buy nothing but false
  * alarms: a few slow seconds cost the viewer nothing, and the office's own bursts (a walk, a cue,
  * a settle) move the instantaneous rate around far more than the fault does.
  */
+export const DRAW_FLOOR_WINDOW_MS = 60_000;
+
 /**
  * The office's own counters, as the page serializes them. Kept separate from the CDP round-trip so
  * the parsing — which is where a bad reading turns into a false alarm — is testable without Chrome.

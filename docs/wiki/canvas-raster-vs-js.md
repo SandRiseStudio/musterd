@@ -29,6 +29,8 @@ The generalisation worth keeping: **when JS is a single-digit percentage of a fr
 
 ## The office repaints 1,377,600 pixels to change about 13,000 (2026-09-17; falsify: diff consecutive `getImageData` frames on `/broadcast` and read the median changed share — a median near the bounding box's ~30% would mean damage is diffuse and dirty rects cannot pay) <!-- claim: other -->
 
+**Corrected 2026-09-18:** ~~1,377,600 pixels~~ in the heading is wrong (headings are what `wiki:check` tracks sections by, so it stays as written and the correction lives here). The stage is 1920x1080 at DPR 1 = **2,073,600** device px, read back from the canvas itself on the bench box (`__clipProbe().stage`). The shares below were always ratios of the full stage and never depended on the absolute figure.
+
 Sixty consecutive frame pairs on a live room, full-stage `getImageData` diff at 1920x1080:
 
 | | changed share of stage |
@@ -40,7 +42,7 @@ Sixty consecutive frame pairs on a live room, full-stage `getImageData` diff at 
 
 The room is static and the actors are small. The **bounding box** of the changed pixels is ~30% of the stage even on frames where 0.3% changed, so a single damage rectangle is worth ~70% and per-region tracking is worth far more.
 
-This is the number that makes dirty-rect damage tracking the cut that fits a held pixel-identical bar: pixels that are not redrawn are byte-identical, with no second composite — which is precisely what the sprite cache (PR #1550) could not offer, because a blit *is* a second composite. The open risks are antialiasing at clip boundaries (`pnpm scene:pixel-check` is the instrument), the occasional wholesale repaint, and threading damage through a 4,808-line renderer.
+This is the number that makes dirty-rect damage tracking the cut that fits a held pixel-identical bar: pixels that are not redrawn are byte-identical, with no second composite — which is precisely what the sprite cache (PR #1550) could not offer, because a blit *is* a second composite. The open risks are antialiasing at clip boundaries (~~`pnpm scene:pixel-check` is the instrument~~ — corrected 2026-09-18: that script exists only on the unmerged #1550 branch, and `main` has no pixel-identity instrument yet; the dirty-rect lane has to land one before it can claim byte-identity), the occasional wholesale repaint, and threading damage through a 4,808-line renderer.
 
 ## Method notes
 
