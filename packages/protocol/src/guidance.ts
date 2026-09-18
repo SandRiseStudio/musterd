@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 25;
+export const GUIDANCE_CONTENT_VERSION = 26;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -351,6 +351,10 @@ export function renderLabelSessionsSkill(): string {
     'belongs to which seat. Run this at session start in a seat worktree, or when asked to label',
     'or tidy session titles.',
     '',
+    'If this session does not have both `list_sessions` and `set_session_title`, skip silently —',
+    'you are not on a driver with a sidebar write API. Do not narrate the skip. Do not invent a',
+    'SQLite write. Terminal tabs are already labeled by the CLI OSC postamble.',
+    '',
     '**A session can never rename itself** — the rename tool refuses the current session. Sessions',
     'label *each other*: the one you are in stays bare until the next session’s sweep. That is',
     'expected — never report it as a problem.',
@@ -405,7 +409,8 @@ export function renderSelfLabelSessionSkill(): string {
     '- At session start in a musterd seat worktree, once, if the `rename_chat` tool is available',
     '  (Cursor built-in MCP `cursor-app-control`).',
     '- When the user asks to label or rename this chat.',
-    '- Skip silently when `rename_chat` is not in your tool list — do not invent a SQLite write.',
+    '- Skip silently when `rename_chat` is not in your tool list — do not narrate the skip; do',
+    '  not invent a SQLite write. Terminal tabs are already OSC-labeled.',
     '',
     '## The self-label',
     '',
@@ -565,8 +570,16 @@ export function renderOrientSkill(): string {
     '   with what you found. Do not start other work into a shared red.',
     '4. **Surface, do not handle (tier 2) — work nobody routed to you.** Carried lanes, up-next,',
     '   claimable open lanes: one compact readout for the human. Do not claim unaddressed work.',
-    "5. `team_send {act:'status_update'}` — one line — then run `musterd session orient-stamp`.",
-    '6. When tier 1 is done, stop and wait for direction. Autonomous pickup of UNADDRESSED work',
+    "5. `team_send {act:'status_update'}` — one line.",
+    "6. **Label from THIS session's tool list** — not from which harness you think you are on",
+    '   (ADR 418). `list_sessions` AND `set_session_title` → run the musterd-label-sessions',
+    '   sweep (pipe through `musterd session resolve-labels`; do not hand-craft titles). Else',
+    '   `rename_chat` → self-label this chat with the shared grammar; a title the user just',
+    '   typed wins. Else skip silently: terminal tabs are already OSC-labeled; do not narrate',
+    '   the skip; do not write Cursor `state.vscdb` or Codex SQLite.',
+    '7. Then always run `musterd session orient-stamp`. A skip does not skip the stamp — the',
+    '   stamp is what quiets the orient nudge.',
+    '8. When tier 1 is done, stop and wait for direction. Autonomous pickup of UNADDRESSED work',
     '   is deliberately NOT this skill (session-orientation spec §E); work addressed to this',
     '   seat was never optional.',
     '',

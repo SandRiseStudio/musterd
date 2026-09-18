@@ -89,6 +89,10 @@ silent (do not write SQLite). Not a peer sweep; not merged into the harness-neut
   for Codex (titles readable, still not writable). This ADR is the capability spine going forward.
 - A future musterd harness has a clear slot: declare `sessionsSkillPath` / in-process rename and
   reuse the same grammar + resolve-labels engine.
+- **2026-09-17 — runtime gate is [ADR 418](418-session-label-capability-is-the-tool-list.md).** This
+  ADR remains the provision map (`sessionsSkillPath` / `selfLabelSkillPath`). Claude Code Desktop
+  and terminal share those files, so labeling vs skip is this session's tool list, and
+  `label-nudge` is silent on a known terminal `TERM_PROGRAM`. Unknown still nudges.
 
 ## Observability & Evaluation
 

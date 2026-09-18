@@ -86,6 +86,10 @@ authorized, and named by no guidance surface at all.
   `scripts/adr-sections.ts`; see [amending an ADR](../wiki/amending-an-adr.md)) — so :45 and :49 now
   carry the markers inline where a reader meets them, and the Status line keeps its pointer. The
   reason recorded here was a limitation, not a preference, and it is gone.)_
+- **2026-09-17 — orient labels from the tool list then always stamps
+  ([ADR 418](418-session-label-capability-is-the-tool-list.md)).** The ritual still ends on
+  `orient-stamp`. A new step between `status_update` and the stamp chooses peer-sweep / self-label /
+  skip silently from tools present in this session. A skip does not skip the stamp.
 
 ## Observability & Evaluation
 

@@ -13,6 +13,7 @@ import {
   captureSession,
   checkHookInterrupt,
   LABEL_SWEEP_STALE_MS,
+  labelNudgeHasNoSidebarWrite,
   labelSweepDue,
   lookupCcdMeta,
   observeCursorSession,
@@ -1684,7 +1685,7 @@ describe('musterd session label-nudge (evidence-based due)', () => {
       titleSource: 'auto',
       isArchived: false,
     });
-    expect(await withEnv(env())).toBe(0);
+    expect(await withEnv({ ...env(), TERM_PROGRAM: 'vscode' })).toBe(0);
     expect(out.mock.calls.map((c) => String(c[0])).join('')).toContain('musterd-label-sessions');
     out.mockClear();
     // clear the unlabeled row → quiet
@@ -1700,9 +1701,48 @@ describe('musterd session label-nudge (evidence-based due)', () => {
         isArchived: false,
       }),
     );
-    expect(await withEnv(env())).toBe(0);
+    expect(await withEnv({ ...env(), TERM_PROGRAM: 'vscode' })).toBe(0);
     expect(out.mock.calls.join('')).toBe('');
     out.mockRestore();
+  });
+
+  it('is silent on a known terminal TERM_PROGRAM even when CCD still has unlabeled rows (ADR 418)', async () => {
+    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const run = () => sessionCommand(parseArgs(['label-nudge']));
+    const withEnv = async (e: Record<string, string>): Promise<number> => {
+      const prev: Record<string, string | undefined> = {};
+      for (const [k, v] of Object.entries(e)) {
+        prev[k] = process.env[k];
+        process.env[k] = v;
+      }
+      try {
+        return await run();
+      } finally {
+        for (const [k, v] of Object.entries(prev)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
+      }
+    };
+    writeCcd('s1', {
+      sessionId: 's1',
+      cliSessionId: 's1',
+      title: 'Needs chip',
+      cwd: seatWs,
+      createdAt: NOW - 3_600_000,
+      titleSource: 'auto',
+      isArchived: false,
+    });
+    expect(await withEnv({ ...env(), TERM_PROGRAM: 'Apple_Terminal' })).toBe(0);
+    expect(out.mock.calls.join('')).toBe('');
+    out.mockRestore();
+  });
+
+  it('labelNudgeHasNoSidebarWrite is true only for known terminal emulators', () => {
+    expect(labelNudgeHasNoSidebarWrite({ TERM_PROGRAM: 'Apple_Terminal' })).toBe(true);
+    expect(labelNudgeHasNoSidebarWrite({ TERM_PROGRAM: 'iTerm.app' })).toBe(true);
+    expect(labelNudgeHasNoSidebarWrite({ TERM_PROGRAM: 'vscode' })).toBe(false);
+    expect(labelNudgeHasNoSidebarWrite({})).toBe(false);
   });
 
   it('resolve-labels stamps the sweep even when nothing needed labeling', () => {
