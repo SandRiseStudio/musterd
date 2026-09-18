@@ -717,7 +717,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'inbox',
     signature:
-      '[--watch] [--all] [--unread] [--peek] [--deferred] [--limit <n>] [--from <name>] [--act <act>]  |  --id <act_id>  |  --waiting  |  defer <act_id> --until-lane <id> | --until-reply  |  --wait [--timeout <s>]  |  --interrupt-check',
+      '[--watch] [--all] [--unread] [--peek] [--deferred] [--limit <n>] [--from <name>] [--act <act>]  |  --id <act_id>  |  --waiting [--limit <n>]  |  defer <act_id> --until-lane <id> | --until-reply  |  --wait [--timeout <s>]  |  --interrupt-check',
     summary: 'read what’s waiting for you; watch or block for the next act',
     group: 'waiting',
     primary: true,
@@ -728,6 +728,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'shows the full history; `--peek` reads without marking anything read; `--unread` shows only new. ' +
       '`--watch` streams live; `--wait` blocks until the next directed act then exits (pairs with /loop); ' +
       '`--waiting` prints the waiting-acts banner and the directed acts behind it, read-only and silent when nothing waits (the ADR 053 approval-prompt Notification hook target; `musterd nudge` until 2026-09-03). ' +
+      '`--waiting --limit <n>` resizes the rendered acts (default 5); `--waiting --limit 0` shows all. ' +
       '`--interrupt-check` is silent unless an urgent act waits (the ADR 088 PostToolUse interrupt hook). ' +
       '`defer <act_id>` postpones one act until a condition fires — `--until-lane <id>` (that lane moves) ' +
       'or `--until-reply` (someone answers on its thread); it comes back on its own then, even if the ' +

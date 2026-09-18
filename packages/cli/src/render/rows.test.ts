@@ -16,6 +16,8 @@ import {
   renderReachabilityNudge,
   renderStatusHeader,
   renderRoster,
+  renderWaitingActs,
+  WAITING_ACTS_SHOWN,
 } from './rows.js';
 import { dayLabel, sinceLabel } from './theme.js';
 
@@ -1080,5 +1082,44 @@ describe('a read-not-delivered act says so (ADR 407 inc 3)', () => {
         .split('\n')
         .find((l) => l.includes('in huddle')) ?? '';
     expect(teamLine).not.toContain('@team');
+  });
+});
+
+describe('renderWaitingActs --limit (lane 01M2TPW3JAS)', () => {
+  const waiting = (n: number): Envelope[] =>
+    Array.from({ length: n }, (_, i) =>
+      env({
+        id: `w${i}`,
+        from: 'Ada',
+        to: { kind: 'member', name: 'nick' },
+        act: 'request_help',
+        body: `task ${i}`,
+        ts: 1_000 + i,
+      }),
+    );
+
+  it('caps at WAITING_ACTS_SHOWN by default and names the overflow', () => {
+    const lines = renderWaitingActs(waiting(WAITING_ACTS_SHOWN + 2), 9_000);
+    expect(lines).toHaveLength(WAITING_ACTS_SHOWN + 1);
+    expect(lines[WAITING_ACTS_SHOWN]).toContain('+2 more');
+    expect(lines[WAITING_ACTS_SHOWN]).toContain('--waiting --limit 0');
+  });
+
+  it('renders oldest first and honours an explicit limit', () => {
+    const lines = renderWaitingActs(waiting(7), 9_000, 3);
+    expect(lines).toHaveLength(4);
+    expect(lines[0]).toContain('task 0');
+    expect(lines[2]).toContain('task 2');
+    expect(lines[3]).toContain('+4 more');
+  });
+
+  it('limit 0 shows all with no overflow line', () => {
+    const lines = renderWaitingActs(waiting(7), 9_000, 0);
+    expect(lines).toHaveLength(7);
+    expect(lines[6]).toContain('task 6');
+  });
+
+  it('shows everything short of the cap with no overflow line', () => {
+    expect(renderWaitingActs(waiting(2), 9_000)).toHaveLength(2);
   });
 });

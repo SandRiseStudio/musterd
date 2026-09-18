@@ -980,6 +980,32 @@ describe('inbox --waiting — surface waiting acts at the approval prompt (ADR 0
     expect(waiting.code).toBe(0);
     expect(waiting.out).toBe('');
   });
+
+  it('--limit resizes the rendered acts; --limit 0 shows all (lane 01M2TPW3JAS)', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const authority = await claimedAgent('dawn', 'Ada');
+    for (let i = 0; i < 7; i++) {
+      await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', `task ${i}`]);
+    }
+
+    actAs('dawn', 'Ada', authority.key, authority.sessionLease);
+    const capped = await run(inboxCommand, ['--waiting']);
+    expect(capped.code).toBe(0);
+    expect(capped.out).toContain('task 0');
+    expect(capped.out).not.toContain('task 5');
+    expect(capped.out).toContain('+2 more');
+
+    const all = await run(inboxCommand, ['--waiting', '--limit', '0']);
+    expect(all.code).toBe(0);
+    expect(all.out).toContain('task 0');
+    expect(all.out).toContain('task 6');
+    expect(all.out).not.toContain('more');
+
+    // Read-only either way: the full render moved no cursor, so the capped view repeats.
+    const again = await run(inboxCommand, ['--waiting']);
+    expect(again.out).toContain('+2 more');
+  });
 });
 
 describe('inbox --wait — wake on message (ADR 054)', () => {

@@ -1,4 +1,5 @@
 import type { Parsed } from '../args.js';
+import { flagStr } from '../args.js';
 import { isDaemonUnreachable } from '../client.js';
 import { renderReachabilityNudge, renderWaitingActs } from '../render/rows.js';
 import { theme } from '../render/theme.js';
@@ -41,11 +42,24 @@ export async function nudgeCommand(parsed: Parsed): Promise<number> {
     // Silent when nothing waits: this rides an approval-prompt Notification hook, so a "nothing here"
     // line would be noise on every parked prompt. Absence of output IS the empty state here.
     if (!pending) return 0;
+    // `--limit <N>` resizes the rendered acts (lane 01M2TPW3JAS — the directed set was computed
+    // in full and then capped at five with no way to reach the rest); `--limit 0` shows all.
+    // A lens, like --from/--act on `inbox`: read-only either way, so no cursor handling here.
+    const limitStr = flagStr(parsed.flags, 'limit');
+    const limit = limitStr !== undefined ? Number(limitStr) : undefined;
+    if (limitStr !== undefined && (!Number.isInteger(limit) || (limit as number) < 0)) {
+      // stderr, not stdout: hooks consume stdout at the approval prompt, and this line is for
+      // the human who typed the flag. Exit stays 0 — this command never fails its caller.
+      process.stderr.write(`${theme.warn('⚠')} --limit must be a non-negative integer\n`);
+      return 0;
+    }
     const line = renderReachabilityNudge(pending.count, pending.since, identity.name);
     if (!line) return 0;
     // The acts themselves, not only the count: the human at the prompt can act on a line that
     // names who asked for what; a bare count pointed at an inbox it then had to go and read.
-    process.stdout.write([line, ...renderWaitingActs(pending.waiting)].join('\n') + '\n');
+    process.stdout.write(
+      [line, ...renderWaitingActs(pending.waiting, Date.now(), limit)].join('\n') + '\n',
+    );
   } catch (err) {
     // Best-effort: a blocked approval prompt must never be disturbed by a failing nudge — with one
     // exception, and only for the one caller who can act on it.
