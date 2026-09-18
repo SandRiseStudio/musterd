@@ -123,7 +123,7 @@ approve_pending() {
 down() {
   # Only ever by recorded PID. `pkill -f serve` also kills the real daemon and every other seat's —
   # that mistake cost a session.
-  for f in "$BENCH/daemon.pid" "$BENCH/driver.pid"; do
+  for f in "$BENCH/daemon.pid" "$BENCH/driver.pid" "$BENCH"/holder-*.pid; do
     [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null || true
   done
   # `rm -rf` on an env-supplied path deserves a guard: BENCH_ROOT is a knob, and an empty or careless
@@ -177,6 +177,18 @@ up() {
   wait_bound=0
   for i in $(seq 1 "$SEATS"); do grep -q 'occupied on' "$SEATDIR/s$i/claim.log" 2>/dev/null && wait_bound=$((wait_bound + 1)); done
   [ "$wait_bound" -eq "$SEATS" ] || { echo "✗ only $wait_bound/$SEATS seats bound — see $SEATDIR/*/claim.log" >&2; exit 1; }
+
+  # Presence holders. Under ADR 377 a claim binds the folder and EXITS, and the seat's Presence dies
+  # with its socket — so a bound seat is still `offline`, and the office draws an empty room (found
+  # 2026-09-18: a whole sweep of draw timings taken against bare furniture). Each seat therefore keeps
+  # one watch socket open, as itself, for as long as the fixture is up; `down` kills them by pid.
+  for i in $(seq 1 "$SEATS"); do
+    (cd "$SEATDIR/s$i" && while :; do
+       MUSTERD_CONFIG="$SEATDIR/s$i/config.json" node "$BIN" inbox --watch --server "$SERVER" >/dev/null 2>&1 || true
+       sleep 1
+     done) &
+    echo $! >"$BENCH/holder-s$i.pid"
+  done
 
   # The beat. Rotating status_updates keep seats `working`, which is what puts characters at desks,
   # produces speech bubbles, and keeps the loop drawing instead of parking.
