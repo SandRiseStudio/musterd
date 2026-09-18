@@ -1,6 +1,7 @@
 import { makeEnvelope } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
+import { appendAudit } from './audit.js';
 import { recordBlockedReport } from './incidents.js';
 import { openLane, updateLane } from './lanes.js';
 import { addMember, getMemberByName } from './members.js';
@@ -379,6 +380,43 @@ describe('owed_reviews — the verdicts someone is waiting on from ME (ADR 233)'
 
     updateLane(db, team.id, lane.id, 'revive', { state: 'done' });
     expect(deriveNext(db, team.id, 'revive', 'stanley').owed_reviews).toEqual([]);
+  });
+
+  // Lane 01M2TNWK0K: after a re-route the relieved seat's brief still named the lane as owed.
+  // The verdict edge and `openAcceptanceAsk` already exclude superseded asks; the brief did not,
+  // so wanderer's `next` said "verdict owed" on #1541 and both wanderer and ryder judged it.
+  it('drops the review once a re-route has superseded my ask — the new acceptor alone owes it', () => {
+    const { db, team, nick, stanley } = seed();
+    const miley = addMember(db, team, { name: 'miley', kind: 'agent' }).row;
+    const lane = openLane(db, team.id, 'revive', 'nick', { title: 'rerouted', claim: true });
+    updateLane(db, team.id, lane.id, 'revive', { state: 'awaiting_acceptance' });
+    askReview(db, team.id, nick, stanley.id, lane.id, 'ask-old', 1_000);
+    expect(deriveNext(db, team.id, 'revive', 'stanley').owed_reviews).toHaveLength(1);
+
+    // The re-route: audit row names the superseded ask, and a fresh ask goes to miley.
+    appendAudit(db, team.id, {
+      actor: 'stanley',
+      action: 'lane.review_rerouted',
+      target: lane.id,
+      result: 'allow',
+      detail: {
+        lane: lane.id,
+        reviewer: 'miley',
+        from_reviewer: 'stanley',
+        superseded_ask: 'ask-old',
+      },
+    });
+    askReview(db, team.id, nick, miley.id, lane.id, 'ask-new', 2_000);
+
+    expect(deriveNext(db, team.id, 'revive', 'stanley').owed_reviews).toEqual([]);
+    expect(deriveNext(db, team.id, 'revive', 'miley').owed_reviews.map((r) => r.ask_id)).toEqual([
+      'ask-new',
+    ]);
+    // The statusline / orient-nudge summary is a separate bounded query and must agree.
+    expect(deriveNextSummary(db, team.id, 'revive', 'stanley').owed).toEqual([]);
+    expect(deriveNextSummary(db, team.id, 'revive', 'miley').owed).toEqual([
+      { lane: lane.id, ts: 2_000 },
+    ]);
   });
 
   it('never asks me to review my own lane, even if an ask names me', () => {
