@@ -5,11 +5,13 @@ import {
   BINDING_FILE,
   bindingSeat,
   envelopePosition,
+  isWireAttestationSource,
   resolveAttestation,
   resolveAttestedModel,
   type Envelope,
   type MemberKind,
   type MemberSummary,
+  type WireAttestationSource,
 } from '@musterd/protocol';
 import { gitOutput, gitToplevel, resolveWorkspaceKey } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
@@ -103,6 +105,8 @@ export function identityClientOpts(
     workspaceKey: string;
     identity: Identity;
     model?: string | undefined;
+    /** The tier that produced `model` (ADR 301) — resolved in the same call, passed down beside it. */
+    modelSource?: WireAttestationSource | undefined;
   },
   claimSeatPerRequest: boolean,
 ): HttpClientOpts {
@@ -122,6 +126,12 @@ export function identityClientOpts(
     surface: input.identity.surface,
     claimSeatPerRequest,
     ...(input.model !== undefined ? { model: input.model } : {}),
+    // ADR 301: the tier rides with the id and only with the id — the same omission shape as
+    // `workspaceKey` above, one field over, and with the same consequence: a value resolved on every
+    // invocation and then dropped at the boundary, so the transport could not state it.
+    ...(input.model !== undefined && input.modelSource !== undefined
+      ? { modelSource: input.modelSource }
+      : {}),
   };
 }
 
@@ -187,6 +197,9 @@ function gather(flags: Record<string, string | boolean>) {
   }
 
   const team = flagStr(flags, 'team') ?? envId?.team ?? binding?.team ?? config.current;
+  // ADR 246 resolves WHICH model to attest; ADR 301 keeps WHICH RUNG answered. One resolve, read
+  // twice: the id and its tier must describe the same answer, and two calls could not guarantee it.
+  const attestation = attestedAttestation(binding, env);
   return {
     config,
     server,
@@ -195,7 +208,8 @@ function gather(flags: Record<string, string | boolean>) {
     workspace: resolveClaimWorkspace(),
     workspaceKey: resolveWorkspaceKey(),
     asName: flagStr(flags, 'as'),
-    model: attestedModel(binding, env),
+    model: attestation.model,
+    modelSource: attestation.source,
   };
 }
 
@@ -219,11 +233,42 @@ export function attestedModel(
   binding: ReturnType<typeof findBinding>,
   env: NodeJS.ProcessEnv,
 ): string | undefined {
-  return resolveAttestation({
+  return attestedAttestation(binding, env).model;
+}
+
+/**
+ * The same resolution as {@link attestedModel}, keeping the tier it computed (ADR 301) — WHICH RUNG
+ * answered: `observed` (a harness probe saw the model), `environment` (this session's env declared
+ * it), or `binding` (a provisioning snapshot did).
+ *
+ * `resolveAttestation` has always returned `{model, source}`, because deciding which rung answers IS
+ * the resolution — and until lane 01M2RTF2D0 this function kept the id and discarded the source on
+ * the next line. That one discard was the whole defect: past this point no CLI surface could name
+ * the tier, so the claim frame, the stateless mirror and every ambient touch sent a model id with no
+ * way to say whether it was seen or merely said, while the MCP adapter on the same protocol sent one.
+ *
+ * It is not decoration. ADR 158's rule is that an observation outranks a declaration, and the roster
+ * ranks on `Presence.model_source`; a null tier reads as `unknown`, which ranks a CLI-claimed seat
+ * whose probe actually fired BELOW a seat that merely declared the same model. A rule that ranks two
+ * kinds of claim cannot rank a claim that never says which kind it is.
+ *
+ * `source` is undefined — never the string `unknown` — when no rung answered: the wire omits the
+ * field rather than carrying the ladder's internal sentinel, so the row records null (ADR 236,
+ * absence is not an assertion).
+ */
+export function attestedAttestation(
+  binding: ReturnType<typeof findBinding>,
+  env: NodeJS.ProcessEnv,
+): { model: string | undefined; source: WireAttestationSource | undefined } {
+  const resolved = resolveAttestation({
     observed: binding?.model_observed,
     env: resolveAttestedModel(env),
     binding: binding?.model,
-  }).model;
+  });
+  return {
+    model: resolved.model,
+    source: isWireAttestationSource(resolved.source) ? resolved.source : undefined,
+  };
 }
 
 /**
@@ -233,7 +278,8 @@ export function attestedModel(
  * from silently acting as a real teammate.
  */
 export function resolve(flags: Record<string, string | boolean>): Resolved {
-  const { config, server, sources, team, workspace, workspaceKey, asName, model } = gather(flags);
+  const { config, server, sources, team, workspace, workspaceKey, asName, model, modelSource } =
+    gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -264,7 +310,7 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
     explicit: true,
     http: new HttpClient(
       identityClientOpts(
-        { server, team, workspace, workspaceKey, identity: match.identity, model },
+        { server, team, workspace, workspaceKey, identity: match.identity, model, modelSource },
         true,
       ),
     ),
@@ -310,7 +356,8 @@ export function resolveRead(
   opts: ResolveReadOptions = {},
 ): ResolvedRead {
   const claimSeatPerRequest = opts.claimSeatPerRequest ?? false;
-  const { config, server, sources, team, workspace, workspaceKey, asName, model } = gather(flags);
+  const { config, server, sources, team, workspace, workspaceKey, asName, model, modelSource } =
+    gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -333,7 +380,7 @@ export function resolveRead(
     http: new HttpClient(
       identity
         ? identityClientOpts(
-            { server, team, workspace, workspaceKey, identity, model },
+            { server, team, workspace, workspaceKey, identity, model, modelSource },
             claimSeatPerRequest,
           )
         : { server },

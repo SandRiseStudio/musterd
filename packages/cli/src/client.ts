@@ -29,6 +29,7 @@ import {
   type GuardianTiers,
   type Policy,
   type PolicyOverride,
+  type WireAttestationSource,
   type EnforcementPolicy,
   type ActorAttestation,
   type GateCheckRequest,
@@ -143,6 +144,17 @@ export interface HttpClientOpts {
    * and correct for callers that have no binding to consult.
    */
   model?: string;
+  /**
+   * WHICH TIER produced {@link model} (ADR 301) — `observed` (a harness probe saw it),
+   * `environment` (this session's env declared it), or `binding` (a provisioning snapshot did).
+   * Resolved by the same caller, in the same `resolveAttestation` call, and passed down beside the
+   * id it describes.
+   *
+   * It rides wherever the model rides, and never without it: a tier describes an id, so a bare tier
+   * asserts a measurement of nothing. Absent ⇒ the daemon records `model_source: null`, which is the
+   * pre-ADR-301 behaviour and reads as `unknown` — honest for a caller that genuinely cannot say.
+   */
+  modelSource?: WireAttestationSource;
   /**
    * Suppress the ambient presence touch (ADR 057) for this client's requests via `x-musterd-no-touch`.
    * For background pollers that read on a member's behalf — the notifier — which must not make an
@@ -301,6 +313,12 @@ export class HttpClient {
         ...(workspace !== undefined ? { workspace } : {}),
         ...(workspaceKey !== undefined ? { workspaceKey } : {}),
         ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
+        // ADR 301: and its tier. This claim creates the presence row an ordinary CLI act attaches
+        // to, so it is the one place the tier most has to reach — the ambient touch updates the
+        // newest UNHELD row and this one is held, so the header path never corrects it.
+        ...(this.opts.model !== undefined && this.opts.modelSource !== undefined
+          ? { modelSource: this.opts.modelSource }
+          : {}),
         ...(this.opts.createClaimSocket ? { createSocket: this.opts.createClaimSocket } : {}),
         onDeliver: () => {},
         onOccupied: (_seat, _presenceId, _grant, _memory, _credential, sessionLease) => {
@@ -357,6 +375,22 @@ export class HttpClient {
         this.opts.key?.startsWith(TOKEN_PREFIXES.agent_seat) === true
           ? (this.opts.model ?? resolveAttestedModel(process.env))
           : undefined;
+      // ADR 301: the tier travels with the id and only with the id. `x-musterd-model` says WHICH
+      // model; this says whether that id was SEEN or merely SAID, and ADR 158's "observed outranks
+      // declared" cannot rank a claim that never says which kind it is. The daemon has read this
+      // header since ADR 301 (`attestedModelSourceHeader`) — the CLI simply never wrote it, so every
+      // ambient touch from a one-shot landed a good model id beside a null tier.
+      //
+      // Two branches, matching `attestedModel` exactly: the caller's resolved tier when the caller
+      // resolved the id, and `environment` when we fell through to the env — that fallback IS the
+      // `environment` rung by construction, so naming it costs nothing and reporting it as unknown
+      // would be strictly less true than what this client knows.
+      const attestedModelSource =
+        attestedModel === undefined
+          ? undefined
+          : this.opts.model !== undefined
+            ? this.opts.modelSource
+            : 'environment';
       // ADR 131 §6 (increment 5): provenance rides the same gate as model — a wake-spawned
       // session's hook/one-shot CLI commands inherit MUSTERD_PROVENANCE from the actuator, so
       // their ambient touches label the seat `wake` instead of the `session` default (the inc-4
@@ -386,6 +420,9 @@ export class HttpClient {
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
           ...(attestedModel !== undefined ? { 'x-musterd-model': attestedModel } : {}),
+          ...(attestedModelSource !== undefined
+            ? { 'x-musterd-model-source': attestedModelSource }
+            : {}),
           ...(attestedProvenance !== undefined
             ? { 'x-musterd-provenance': attestedProvenance }
             : {}),
@@ -1282,6 +1319,18 @@ export class HttpClient {
     // resolved by the caller into `this.opts.model` (see `helpers.ts:attestedModel`), so use it
     // when present; fall back to the env declaration alone for callers that have no binding.
     const model = this.opts.model ?? resolveAttestedModel(process.env);
+    // ADR 301, lane 01M2RTF2D0: the tier that describes `model`, resolved on exactly the same two
+    // branches the id was — the caller's own `resolveAttestation` answer when the caller had one,
+    // and `environment` when we fell through to the env, which IS that rung by construction.
+    // Without this the mirror sent a perfectly good id with no way to say whether a probe saw it,
+    // and the roster's ADR 158 ranking read the seat as `unknown` — below a seat that merely
+    // declared the same model over MCP.
+    const modelSource =
+      model === undefined
+        ? undefined
+        : this.opts.model !== undefined
+          ? this.opts.modelSource
+          : 'environment';
     // ADR 131 §6: provenance rides the claim on the same gate the ambient header uses — never from
     // a human credential, because the wake actuators read this word to decide a seat is their own
     // child, and a human shell must not be able to say `wake`. The server applies the authoritative
@@ -1303,6 +1352,7 @@ export class HttpClient {
       ...(input.workspaceKey !== undefined ? { workspaceKey: input.workspaceKey } : {}),
       ...(input.grant !== undefined ? { grant: input.grant } : {}),
       ...(model !== undefined ? { model } : {}),
+      ...(modelSource !== undefined ? { modelSource } : {}),
       ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
       ...(claimProvenance !== undefined ? { provenance: claimProvenance } : {}),
     });
@@ -1317,6 +1367,11 @@ export class HttpClient {
       ...(frame.workspace !== undefined ? { workspace: frame.workspace } : {}),
       ...(frame.workspace_key !== undefined ? { workspace_key: frame.workspace_key } : {}),
       ...(frame.model !== undefined ? { model: frame.model } : {}),
+      // ADR 301: the tier rides the mirror exactly as it rides the WS frame — SPEC A.7 calls this
+      // route a MIRROR, and a mirror that drops a field is the defect this route keeps re-learning
+      // (workspace 2026-09-04, provenance after it). An older daemon strips the unknown key, so this
+      // is additive both ways.
+      ...(frame.model_source !== undefined ? { model_source: frame.model_source } : {}),
       ...(frame.build !== undefined ? { build: frame.build } : {}),
       ...(frame.epoch !== undefined ? { epoch: frame.epoch } : {}),
       // ADR 131 §6: the last field that kept this route from being the mirror SPEC A.7 calls it.
@@ -1455,6 +1510,9 @@ export interface WatchClaimOpts {
   /** Harness-attested model id (ADR 101). Defaults to the env resolution (`MUSTERD_MODEL` /
    *  `ANTHROPIC_MODEL`); absent reads as `unknown` server-side, never blocks. */
   model?: string;
+  /** WHICH TIER produced `model` (ADR 301) — rides the claim frame and each heartbeat beside the id,
+   *  never without it. Absent ⇒ the occupancy records a null tier, which reads as `unknown`. */
+  modelSource?: WireAttestationSource;
   /** `team` (default) = my inbox stream; `team-all` = the whole-team firehose (ADR 061). */
   scope?: 'team' | 'team-all';
   onDeliver: (env: Envelope) => void;
@@ -1495,6 +1553,15 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
   // Model attestation (ADR 101): explicit opt wins, else the shared env resolution — resolved once
   // so a reconnecting frame attests the same value.
   const attestedModel = opts.model ?? resolveAttestedModel(process.env);
+  // ADR 301, lane 01M2RTF2D0: the tier, resolved once beside the id and on the same two branches, so
+  // the claim frame AND every heartbeat re-affirm the same tier the id was resolved at. The server
+  // has read `frame.model_source` off both since ADR 301; this is the client half that never existed.
+  const attestedModelSource =
+    attestedModel === undefined
+      ? undefined
+      : opts.model !== undefined
+        ? opts.modelSource
+        : 'environment';
   // ADR 131 §6: the live claim carries what animates this session, on the same gate the ambient
   // header and the stateless mirror use — never from a human `mscr_` credential. Until now this
   // path sent workspace, model and build but no provenance, so every CLI-claimed seat attached
@@ -1517,6 +1584,11 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
             type: 'heartbeat',
             // Re-affirm the attested model each heartbeat (ADR 101); the server no-ops when unchanged.
             ...(attestedModel !== undefined ? { model: attestedModel } : {}),
+            // ADR 301: and its tier, because `presence.ts` COALESCEs the tier on the same condition
+            // as the id — so a heartbeat that re-asserts the model without one leaves a row whose
+            // tier is still null null for the whole occupancy, re-affirming the id forever and the
+            // evidence for it never.
+            ...(attestedModelSource !== undefined ? { model_source: attestedModelSource } : {}),
           }),
         ),
       15_000,
@@ -1537,6 +1609,8 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
           ...(opts.workspaceKey !== undefined ? { workspaceKey: opts.workspaceKey } : {}),
           // Model attestation (ADR 101): explicit opt wins, else the shared env resolution.
           ...(attestedModel !== undefined ? { model: attestedModel } : {}),
+          // ADR 301: and the tier that says whether that id was seen or said.
+          ...(attestedModelSource !== undefined ? { modelSource: attestedModelSource } : {}),
           // Build attestation (ADR 135): this CLI dist's own stamp.
           ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
           // Provenance (ADR 131 §6) — the server applies the authoritative agent-only gate.
