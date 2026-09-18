@@ -74,10 +74,21 @@ describe('the player facade never asserts a state it cannot read', () => {
     'utf8',
   );
   const watch = readFileSync(new URL('../components/site/WatchPage.tsx', import.meta.url), 'utf8');
+  /**
+   * Comments are stripped before matching, and that is the point rather than a convenience.
+   * This gate is about what the component SHIPS, not about what a maintainer is allowed to
+   * explain. Matching raw source means the next person who documents the rule types the banned
+   * string into a comment and gets a failure that looks like their code is wrong — which happened
+   * twice while writing this change, and was "fixed" both times by rewording the explanation
+   * instead of the code. A gate that punishes its own documentation teaches the wrong lesson.
+   */
+  const code = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   it.each([
     ['StreamSection', stream],
     ['WatchPage', watch],
-  ])('%s ships no live claim in its facade', (_name, source) => {
+  ])('%s ships no live claim in its facade', (_name, raw) => {
+    const source = code(raw);
     expect(source).not.toMatch(/>LIVE</);
     expect(source).not.toMatch(/live broadcast/);
     expect(source).toContain('musterd on Twitch');
