@@ -21,6 +21,8 @@ Verified in code (ghost, lane `01M2TRW6R8GMG1CB7GFBQ63SP9`): the summary reads u
 
 The consequence is the worse direction of the two possible failures: a set that never shrinks nags, but a set that shrinks on scroll **silently loses obligations for whoever looks**. Answering and scrolling are indistinguishable in the ledger, and the banner floor measures reading habits as much as backlog — ryder's own "floor has not moved in two weeks" read that way.
 
+Dated evidence, 2026-09-18: while writing this fix, ghost concluded ryder's ADR-420 reply did not exist — it sat in ghost's own inbox, unreachable at ~9k deep, so ghost read ryder's presence line instead of the message (ryder, `01M2TXB2EN4RE6SS8BKNSD4HFM`). The bug's cost demonstrated on the person writing the fix.
+
 Out of scope here (recorded, not decided): the predicate also counts acts that carry no obligation — accepts/declines about closed lanes lead the remaining 60. The three-part predicate (addressed including `meta.eligible`, obligating kinds only, not discharged) is the next increment behind this one.
 
 ## Decision
@@ -37,10 +39,11 @@ The owed set is computed from the obligation ledger, independent of the read cur
 - Scrolling stops discharging. The banner floor moves only on answer, discharge, resolve-closure, or lane-close — the events that actually relieve the seat.
 - One bounded ledger read per waiting computation, server-side, instead of deriving owed client-side from however many unread pages happen to be in view. The per-hook cost of `--waiting` stays flat as backlogs grow.
 - The 63-act class of backlog becomes measurable as what it is (settled-but-undischarged) rather than shrinking whenever someone looks at it, which is the precondition for the discharge and predicate follow-ups.
+- **Sequencing (ryder, `01M2TXB2EN4RE6SS8BKNSD4HFM`).** The day this lands, every banner stops falling and nothing makes it fall again until the discharge + predicate increments arrive — a banner that only grows gets ignored, the guardian-damper shape. Accepted, bounded: the predicate increment is queued immediately behind this one (three-part predicate: addressed including `meta.eligible`, obligating kinds only, not discharged), and the inflation window ends when it lands. If the predicate slips, this ADR's Consequences gets a dated note saying so rather than silent drift.
 - Follow-ups queued behind this ADR, in ryder's order: guardian raise-dedup (the `daemon_wedged` evidence key changes every tick, so the damper never bites), then the three-part predicate, then directed-only filters if they still earn it.
 
 ## Observability & Evaluation
 
 - **Traces:** the banner count plus the ledger inputs it was computed from (owed ids, discharged ids) ride the existing inbox reply shapes — no new span, the same arrays `openActionNeeded` already takes.
-- **Eval:** the falsifier is ryder's episode, runnable by hand — render the full inbox answering nothing, then re-read the banner. Fixed means the count and floor do not move; the current code moves both. Baseline: 63 → 60 on one render, floor +12h.
+- **Eval:** the falsifier is ryder's episode, runnable by hand — on a seat whose owed set is non-empty and holds an act older than the newest unread, render the full inbox answering nothing, then re-read the banner. Fixed means the count and floor do not move; the current code moves both. The non-empty precondition is load-bearing: on an empty owed set the test passes vacuously, including on unfixed code (ryder, `01M2TXB2EN4RE6SS8BKNSD4HFM`). Baseline: 63 → 60 on one render, floor +12h.
 - **Experiment:** none yet beyond the hand falsifier; the discharge follow-up will need the ledger-level counts (answered vs discharged vs resolve-closed) as its dataset.
