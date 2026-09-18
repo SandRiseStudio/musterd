@@ -6,7 +6,13 @@ import {
   PROTOCOL_VERSION,
   RefusedFrame,
 } from '@musterd/protocol';
-import type { ClaimTarget, Provenance, RefusedCode, Surface } from '@musterd/protocol';
+import type {
+  ClaimTarget,
+  Provenance,
+  RefusedCode,
+  Surface,
+  WireAttestationSource,
+} from '@musterd/protocol';
 
 /**
  * The pure client-side half of the v0.3 `claim` handshake (ADR 075/078, SPEC A.3) — the frame builder
@@ -54,6 +60,9 @@ export function buildClaimFrame(input: {
    *  01M1JQYYAC). The label above is branch-qualified and changes under its own session. */
   workspaceKey?: string;
   model?: string;
+  /** WHICH TIER produced `model` (ADR 301) — `observed` | `environment` | `binding`. Rides with the
+   *  id and is dropped without it: a tier describes an id, so a bare one asserts nothing real. */
+  modelSource?: WireAttestationSource;
   build?: string;
   /** What ANIMATES this session (ADR 131 §6) — `wake` for an actuator-spawned harness, `session`
    *  for a person's own. Not identity: the seat is who, this is what caused it to be here. */
@@ -75,6 +84,15 @@ export function buildClaimFrame(input: {
     ...(input.workspaceKey !== undefined ? { workspace_key: input.workspaceKey } : {}),
     // Model attestation (ADR 101) — harness-attested per-occupancy; absent reads as `unknown`.
     ...(input.model !== undefined ? { model: input.model } : {}),
+    // The TIER behind that id (ADR 301) — whether it was seen or merely said. Gated on `model`, not
+    // on its own presence, because `ws.ts` and `http.ts` both null a tier that arrives without an id
+    // and a client that sent one anyway would be asserting a measurement of nothing. `ClaimFrame`
+    // has defined this field since ADR 301; until lane 01M2RTF2D0 this builder had no way to fill it,
+    // so every CLI-claimed occupancy — WS and stateless mirror alike — was born tier-less while the
+    // MCP adapter, on the same protocol, sent one.
+    ...(input.model !== undefined && input.modelSource !== undefined
+      ? { model_source: input.modelSource }
+      : {}),
     // Build attestation (ADR 135) — the client dist's own stamp; absent for unstamped builds.
     ...(input.build !== undefined ? { build: input.build } : {}),
     // Provenance (ADR 131 §6) — the wake actuators read it back to tell their own spawned child

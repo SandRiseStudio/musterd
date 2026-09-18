@@ -64,4 +64,24 @@ describe('identityClientOpts — the resolved workspace identity reaches the cli
     expect('model' in opts).toBe(false);
     expect('sessionLease' in opts).toBe(false);
   });
+
+  /**
+   * ADR 301 / lane 01M2RTF2D0. The same shape of omission as `workspaceKey` above, one field over:
+   * `gather()` resolves the attestation on every CLI invocation and this builder passed only the id
+   * down, so the tier was resolved and then dropped at the boundary — and every ambient touch and
+   * per-request claim carried a model whose evidence class the transport could not state.
+   */
+  it('carries the resolved tier beside the model', () => {
+    const opts = identityClientOpts(
+      { ...base, model: 'claude-fable-5', modelSource: 'observed' },
+      true,
+    );
+    expect(opts.model).toBe('claude-fable-5');
+    expect(opts.modelSource).toBe('observed');
+  });
+
+  it('omits the tier when the caller resolved no model — a tier describes an id', () => {
+    const opts = identityClientOpts(base, true);
+    expect('modelSource' in opts).toBe(false);
+  });
 });

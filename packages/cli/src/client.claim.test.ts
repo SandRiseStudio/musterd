@@ -201,6 +201,68 @@ describe('HttpClient.claim (SPEC A.7, ADR 075/077) — status dispatch', () => {
     expect(JSON.parse(fn.mock.calls[0][1].body).provenance).toBeUndefined();
   });
 
+  /**
+   * ADR 301 / lane 01M2RTF2D0. MEASURED 2026-09-17: `grep -n model_source client.ts` returned
+   * nothing, while the MCP adapter has sent it since ADR 301 (`mcp/src/client.ts`). Two adapters,
+   * one protocol, opposite answers — so a seat that occupied through `musterd claim` carried a model
+   * with no tier, and one that occupied through the harness adapter carried the same model with one.
+   *
+   * The consequence is a ranking, not a missing field. ADR 158 says an observation outranks a
+   * declaration; the roster labels the tier off `Presence.model_source`. A CLI-claimed seat reads
+   * null → `unknown` → labelled BELOW a seat whose harness merely declared the same model. The rule
+   * cannot rank what the CLI never said.
+   */
+  it('puts model_source beside the model on the claim body (ADR 301)', async () => {
+    const fn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({
+      server: 'http://x',
+      model: 'claude-fable-5',
+      modelSource: 'observed',
+    }).claim('dawn', input);
+    const body = JSON.parse(fn.mock.calls[0][1].body) as Record<string, unknown>;
+    expect(body['model']).toBe('claude-fable-5');
+    expect(body['model_source']).toBe('observed');
+  });
+
+  it('names the env fallback `environment` when the caller resolved no model itself', async () => {
+    vi.stubEnv('MUSTERD_MODEL', 'qwen2.5:3b-instruct');
+    const fn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({ server: 'http://x' }).claim('dawn', input);
+    const body = JSON.parse(fn.mock.calls[0][1].body) as Record<string, unknown>;
+    expect(body['model']).toBe('qwen2.5:3b-instruct');
+    expect(body['model_source']).toBe('environment');
+  });
+
+  /** A tier describes an id; with no id there is nothing for it to describe. The server drops a
+   *  tier that arrives alone anyway (`ws.ts`, `http.ts`) — this keeps the client from sending one. */
+  it('never sends a tier without a model', async () => {
+    vi.stubEnv('MUSTERD_MODEL', '');
+    vi.stubEnv('ANTHROPIC_MODEL', '');
+    const fn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({ server: 'http://x', modelSource: 'observed' }).claim('dawn', input);
+    const body = JSON.parse(fn.mock.calls[0][1].body) as Record<string, unknown>;
+    expect('model' in body).toBe(false);
+    expect('model_source' in body).toBe(false);
+  });
+
   it('5xx → CliError server error (exit 1)', async () => {
     stubFetch(500, {});
     await expect(new HttpClient({ server: 'http://x' }).claim('dawn', input)).rejects.toMatchObject(

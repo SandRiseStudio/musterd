@@ -114,6 +114,73 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
     expect(frames.some((f) => f.type === 'subscribe' && f.scope === 'team')).toBe(true);
   });
 
+  /**
+   * ADR 301 / lane 01M2RTF2D0. The live WS claim is the OTHER half of the same client-side gap the
+   * stateless mirror had: `ws.ts` has recorded `frame.model ? frame.model_source : null` off both
+   * the claim and the heartbeat since ADR 301, and `buildClaimFrame` — the one place a CLI claim
+   * becomes a frame — had no input to fill it with. So this path attested an id and no tier too.
+   */
+  it('puts the attested tier on the claim frame beside the model (ADR 301)', () => {
+    const sock = new FakeSocket();
+    watchClaim({
+      ...base,
+      createSocket: () => sock,
+      model: 'claude-fable-5',
+      modelSource: 'observed',
+      onOccupied: vi.fn(),
+      onPending: vi.fn(),
+      onRefused: vi.fn(),
+      onError: vi.fn(),
+      onPresence: vi.fn(),
+    });
+    sock.emit('open');
+    const frame = JSON.parse(sock.sent[0]!);
+    expect(frame.model).toBe('claude-fable-5');
+    expect(frame.model_source).toBe('observed');
+  });
+
+  /**
+   * The heartbeat re-affirms the model every 15s (ADR 101). A heartbeat that re-affirms the id but
+   * drops the tier is not merely incomplete: `presence.ts` COALESCEs the tier on the same condition
+   * as the id, so on a row whose tier is still null the heartbeat re-asserts the model and leaves
+   * `model_source` null for the life of the occupancy. The tier must ride whatever the id rides.
+   */
+  it('re-affirms the tier on each heartbeat, not just the model', () => {
+    vi.useFakeTimers();
+    try {
+      const sock = new FakeSocket();
+      watchClaim({
+        ...base,
+        createSocket: () => sock,
+        model: 'claude-fable-5',
+        modelSource: 'observed',
+        onOccupied: vi.fn(),
+        onPending: vi.fn(),
+        onRefused: vi.fn(),
+        onError: vi.fn(),
+        onPresence: vi.fn(),
+      });
+      sock.emit('open');
+      sock.emit(
+        'message',
+        JSON.stringify({
+          type: 'occupied',
+          seat,
+          presence_id: '01J',
+          server_time: 7,
+          memory: null,
+        }),
+      );
+      vi.advanceTimersByTime(15_000);
+      const beat = sock.sent.map((s) => JSON.parse(s)).find((f) => f.type === 'heartbeat');
+      expect(beat).toBeDefined();
+      expect(beat.model).toBe('claude-fable-5');
+      expect(beat.model_source).toBe('observed');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('subscribes BEFORE handing control to onOccupied, so a re-drain cannot race the subscription', () => {
     // Load-bearing ordering, not cosmetics. `inbox --wait` drains the durable inbox, THEN opens this
     // socket; an act landing between those two points is caught by neither, so the wait sits until

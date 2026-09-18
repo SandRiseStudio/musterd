@@ -92,6 +92,50 @@ describe('buildClaimFrame (SPEC A.3, ADR 078)', () => {
     });
     expect(bare.provenance).toBeUndefined();
   });
+  /**
+   * ADR 301 / lane 01M2RTF2D0. `ClaimFrame` has carried `model_source` since ADR 301 and the daemon
+   * reads it off the claim on both transports (`ws.ts` `frame.model ? frame.model_source : null`).
+   * This builder — the single place every CLI claim becomes a frame, WS and HTTP alike — had no
+   * input for it, so the field the schema defines could not be populated by the client that owns it.
+   *
+   * The gate is `model`, not the tier's own presence: `ws.ts` already discards a tier that arrives
+   * without an id, and a client that sends one anyway is asserting a measurement of nothing.
+   */
+  it('carries model_source beside the model (ADR 301), and never without one', () => {
+    const f = buildClaimFrame({
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'cli',
+      model: 'claude-fable-5',
+      modelSource: 'observed',
+    });
+    expect(f.model).toBe('claude-fable-5');
+    expect(f.model_source).toBe('observed');
+
+    const tierWithNoModel = buildClaimFrame({
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'cli',
+      modelSource: 'observed',
+    });
+    expect(tierWithNoModel.model).toBeUndefined();
+    expect(tierWithNoModel.model_source).toBeUndefined();
+  });
+
+  it('omits model_source when the caller resolved an id but no tier', () => {
+    const f = buildClaimFrame({
+      team: 'dawn',
+      key: 'mskey_x',
+      target: { seat: 'Ada' },
+      surface: 'cli',
+      model: 'claude-fable-5',
+    });
+    expect(f.model).toBe('claude-fable-5');
+    expect(f.model_source).toBeUndefined();
+  });
+
   it('throws on a bad target shape', () => {
     expect(() =>
       buildClaimFrame({

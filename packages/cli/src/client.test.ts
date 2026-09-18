@@ -77,6 +77,35 @@ describe('claimSessionLease — the claim frame carries the workspace identity (
     expect(frame['workspace']).toBe('agents-dolly@some-branch');
     expect('workspace_key' in frame).toBe(false);
   });
+
+  /**
+   * ADR 301 / lane 01M2RTF2D0, and the site the LIVE falsifier caught that every unit test missed.
+   *
+   * This claim is what creates the `cli` presence row for an ordinary command — `claimSeatPerRequest`
+   * claims the seat before the request, so the row a CLI act attaches is born HERE, not from the
+   * ambient touch. The touch updates the newest row with `conn_id IS NULL AND held_until IS NULL`;
+   * this one is held, so the header fix does not reach it and the two paths write different rows.
+   *
+   * MEASURED on the live daemon 2026-09-17 20:47:01, with the header already landing correctly:
+   * `presence` still read `surface=cli, model=claude-opus-5, model_source=NULL` — a good id beside a
+   * null tier, which is the exact row the lane was opened about. Four call sites had been fixed and
+   * the one that writes the row in question had not.
+   */
+  it('carries the attested tier beside the model — the row a CLI act actually attaches', () => {
+    const sock = new FakeSocket();
+    void new HttpClient({
+      ...baseOpts,
+      claimSeatPerRequest: true,
+      model: 'claude-opus-5',
+      modelSource: 'observed',
+      createClaimSocket: () => sock,
+    }).claimSessionLease();
+    sock.emit('open');
+
+    const frame = frameOf(sock);
+    expect(frame['model']).toBe('claude-opus-5');
+    expect(frame['model_source']).toBe('observed');
+  });
 });
 
 describe('claimSessionLease — settlement (lane 01M1F7Y4N)', () => {
