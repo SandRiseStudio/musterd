@@ -58,6 +58,23 @@ About 15%, with both direct arms consistent. Two reasons the share of the frame 
 
 **It is still not enough on its own, and that is the decision this number exists for.** 17.42 against a 20 fps cap. Stacked with a clip covering ~1% of the stage the same box reaches 19.2 draws/s, so the two cuts compose — neither is sufficient alone. ~56 ms remains after the static room is blitted: the actors, the interior lighting and vignette passes, and the blits themselves.
 
+## The fidelity number was measured on the wrong canvas and the wrong rasterizer, and the box is four times kinder (2026-09-18; falsify: run `spriteParity()` on the box against `/broadcast` and read `beyondRounding` as a share of the stage — a share at or above the laptop's 0.29% would mean software raster is no kinder than the GPU) <!-- claim: other -->
+
+`docs/perf/office-sprite-parity-2026-09-17.json` was the artifact certifying the fidelity bar, and it was taken on a GPU laptop against `/office-preview`'s **1,377,600**-pixel canvas. The stream is **2,073,600** pixels in software raster — neither the right canvas nor the right rasterizer, and the direction of that error was unknown until it was run.
+
+Run on the box against `/broadcast` (`spriteParity()`, both paths painted into fresh 1920x1080 surfaces):
+
+| | laptop (GPU, 1,377,600 px) | box (software, 2,073,600 px) |
+|---|---|---|
+| differing | 176,769 — 12.83% | 192,241 — 9.27% |
+| of which ±1 | — | 190,753 — **99.2% of all differences** |
+| beyond rounding | 4,028 — 0.292% | 1,488 — **0.072%** |
+| maxDelta | 88 | 100 |
+
+**The box is 4.1x kinder on the statistic that matters** and marginally worse on the extreme. 99.2% of every difference is a single step — the unpremultiply rounding this page already documents, invisible by construction. What is left is **1,488 pixels of 2,073,600**, scattered, at up to 100/255.
+
+**It is still not pixel-identical, and no measurement will make it so.** A blit is a second composite; that is the mechanism, not a bug to be fixed. So the decision this number exists for is a product one: `equal: false` stands, and the question is whether 0.072% of the stage at up to 100/255 is a price worth paying for +24% on a box that otherwise cannot hold 20 fps. That is nick's call, and the bar as written ("pixel-identical") does not survive it either way.
+
 ## Measure a sprite's box, do not estimate it (2026-09-17; falsify: set `SPRITE_PAD` to 200 and re-run the gate — the differences do not move) <!-- claim: other -->
 
 The spec planned to derive each sprite's bounding box from footprint geometry plus a fixed padding. `measureBounds` (in `sprite-cache.ts`) instead dry-runs the draw function against a context that tracks only the CTM and the extent of every point touched — path commands, rects, arcs, ellipses, images, and an estimate for text. It is JS-only and runs once per cache miss.
