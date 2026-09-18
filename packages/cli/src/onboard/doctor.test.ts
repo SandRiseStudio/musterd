@@ -1667,7 +1667,7 @@ describe('footprint note (ADR 242) — orphaned sidecars, warn-only', () => {
 /**
  * ADR 171 increment 2 — detection delivery.
  *
- * The doctor's drift lines reached nobody: the `SessionStart` hook runs this probe and nothing else,
+ * The doctor's drift lines reached nobody: the SessionStart handlers run this probe and nothing else,
  * so guidance/hook drift was visible only to whoever deliberately typed `musterd init --check`. The
  * probe now carries artifact drift too. Its contract is the constraint: pure file I/O (no network,
  * no git, and no `detect()`, which shells out to `claude mcp get`), silent when clean, always exit 0,
@@ -2047,6 +2047,29 @@ describe('runSessionProbe self-heal (spec 2026-09-16, ADR 408)', () => {
       });
       expect(lines.join('')).toBe('musterd: held\n');
       expect(posted).toHaveLength(1);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
+  it('refreshes the drift cache when self-heal throws', async () => {
+    const bare = mkdtempSync(join(tmpdir(), 'musterd-heal-throws-'));
+    const refreshed: Array<{ cwd: string; daemonBuild: string | undefined }> = [];
+    try {
+      const code = await runSessionProbe({
+        cliRef: sha('a'),
+        daemonBuild: async () => sha('a'),
+        cwd: bare,
+        selfHeal: () => {
+          throw new Error('repair failed');
+        },
+        refreshDrift: (cwd, daemonBuild) => {
+          refreshed.push({ cwd, daemonBuild });
+        },
+      });
+
+      expect(code).toBe(0);
+      expect(refreshed).toEqual([{ cwd: bare, daemonBuild: sha('a') }]);
     } finally {
       rmSync(bare, { recursive: true, force: true });
     }

@@ -29,8 +29,8 @@ interrupt hook was on an old build; and four seats were missing `mcp__musterd` f
 permission floor, which fails a non-interactive session closed on the tool it needs most.
 
 All of this while `runSessionProbe` (`packages/cli/src/onboard/doctor.ts:1239`, the `--check-build`
-flag every SessionStart hook runs) had been printing the exact repair commands at every one of those
-seats' session starts. Detection is not the defect. Three things are:
+probe intended for every SessionStart path) had been printing the exact repair commands at every one
+of those seats' session starts. Detection is not the defect. Three things are:
 
 1. **The line is advisory.** It says "run these three commands" to an agent that is mid-orientation
    with a few hundred unread acts. The census says the command is not run.
@@ -99,6 +99,13 @@ alternative — the census above — is that corrections to the guidance reach a
 behaviour that lives in the CLI reaches every seat whose hook is already installed; behaviour placed
 in the hook *string* reaches only seats that re-run provisioning. So this ships with no hook-text
 change and no `FEATURE_EPOCH` bump.
+
+The hook string is not the only runtime contract. Each harness-specific SessionStart execution path
+must call the same probe through a lazy, fail-open CLI seam: Codex `codex-hook start`, Claude/Grok
+`session start`, and Cursor `session observe --orient`. This backstop matters when a machine-wide
+hook is absent, when a harness's capture hook is the only one that fires, and when the generated hook
+text predates the probe. The named workspace from the parsed hook payload is passed through; the
+handler never substitutes an unrelated process cwd.
 
 One new step between "inspect" and "print":
 
@@ -187,6 +194,11 @@ session first.
   never written; a surface resolving outside `cwd` is skipped *and reported*, never swallowed; the
   post-repair re-inspect is asserted (a repair that leaves drift shows it in the line); the audit row
   carries the right counts and reasons; a daemon that is down does not fail the session start.
+- **Harness startup seams** — Codex `start`, session `start`, and Cursor `observe --orient` each
+  invoke the shared probe with the payload-anchored workspace; a probe exception remains fail-open.
+- **Receipt failure path** — `runSessionProbe` attempts the drift-cache write even when self-heal
+  throws, so the adapter can distinguish a recorded drift state from a probe that never reached the
+  cache write.
 - **Atomic write** — a fixture whose staged JSON fails validation leaves the original file
   byte-identical and the backup untouched.
 - **Adapter, `inboxCheck.test.ts`** — `structuredContent.workspace` present and correct with drift,

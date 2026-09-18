@@ -4,12 +4,14 @@ import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { findWorkspaceDir } from './helpers.js';
 import { checkHookInterrupt, emitSessionOrientation, pushAttestation } from './session.js';
+import { runSessionStartProbe, type SessionStartProbe } from './sessionProbe.js';
 
 export type CodexHookDeps = {
   start?: (event: Extract<CodexHookEvent, { event: 'start' }>) => Promise<void> | void;
   end?: (event: Extract<CodexHookEvent, { event: 'end' }>) => Promise<void> | void;
   observe?: (event: Extract<CodexHookEvent, { event: 'post-tool-use' }>) => Promise<void> | void;
   interrupt?: (dir: string | null) => Promise<string | null> | string | null;
+  probe?: SessionStartProbe;
 };
 
 type CodexHookCommand = 'start' | 'end' | 'post-tool-use';
@@ -47,6 +49,8 @@ export async function handleCodexHook(
   const event = parseCodexHookEvent(raw, expected);
   if (!event) return null;
   if (event.event === 'start') {
+    const workspace = localBinding(event.cwd)?.dir ?? event.cwd;
+    await runSessionStartProbe(workspace, deps.probe);
     await (deps.start ?? captureStart)(event);
     return null;
   }

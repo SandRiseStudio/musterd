@@ -1271,12 +1271,13 @@ export function inspectArtifactDrift(cwd: string): {
 /**
  * `musterd init --check-build`: the SessionStart probe (ADR 135 build skew + ADR 171 artifact drift).
  *
- * **Why the flag is still called `--check-build`.** It now reports more than the build, but every
- * hook installed across the fleet invokes it by that name, and renaming it would strand each seat
- * until it re-provisioned — the exact rot ADR 171 exists to close. Keeping the flag is also what lets
- * this capability arrive with **no hook-text change and no `FEATURE_EPOCH` bump**: behaviour that
- * lives in the CLI reaches every seat whose hook is already installed, while behaviour placed in the
- * hook *string* reaches only seats that re-run provisioning. Prefer the CLI side of that line.
+ * **Why the flag is still called `--check-build`.** It now reports more than the build, and the
+ * installed hook handlers invoke the shared behavior by that name. Renaming it would strand each
+ * seat until it re-provisioned — the exact rot ADR 171 exists to close. Keeping the flag is also
+ * what lets this capability arrive with **no hook-text change and no `FEATURE_EPOCH` bump**:
+ * behavior that lives in the CLI reaches every seat whose handler is already installed, while
+ * behavior placed in the hook *string* reaches only seats that re-run provisioning. Prefer the CLI
+ * side of that line.
  *
  * The contract is unchanged and load-bearing: silent when clean, **always exit 0**, never throws, and
  * bounded output — this stdout lands in model context every session, so drift is reported as ONE line
@@ -1318,11 +1319,11 @@ export async function runSessionProbe(deps?: {
       // daemon down / unreachable — silence, never noise at session start
     }
   }
+  const cwd = deps?.cwd ?? process.cwd();
   try {
     // Spec 2026-09-16 / ADR 408: repair, THEN report. Guidance and in-worktree hooks self-heal;
     // the permission floor and any file outside the worktree never do, and the line says so. The
     // contract above is unchanged — silent when clean, exit 0, one bounded line.
-    const cwd = deps?.cwd ?? process.cwd();
     const build = ref ?? 'unstamped';
     const heal =
       deps?.selfHeal ?? ((c: string, b: string) => selfHealWorkspace(c, defaultSelfHealDeps(b)));
@@ -1333,6 +1334,9 @@ export async function runSessionProbe(deps?: {
       await post(out.report).catch(() => undefined);
     }
     if (out.line) process.stdout.write(`${out.line}\n`);
+  } catch {
+    // A health probe never fails a session start, and never invents drift from a folder it cannot read.
+  } finally {
     // AFTER the repair, never before — the cache must hold what REMAINS (ADR 408 inc 4).
     //
     // Measured on the live arm 2026-09-16, and the unit tests could not see it: written before the
@@ -1341,9 +1345,11 @@ export async function runSessionProbe(deps?: {
     // warned about drift that no longer existed and prescribed a repair already done — the same
     // failure class as #1479, a correct fix reported as failing, arriving through the surface built
     // to prevent it. The repair is the whole point of running first; the report must follow it.
-    (deps?.refreshDrift ?? refreshWorkspaceDrift)(cwd, daemonRef);
-  } catch {
-    // A health probe never fails a session start, and never invents drift from a folder it cannot read.
+    try {
+      (deps?.refreshDrift ?? refreshWorkspaceDrift)(cwd, daemonRef);
+    } catch {
+      // A cache write is evidence, not a reason to fail a harness session.
+    }
   }
   return 0;
 }
