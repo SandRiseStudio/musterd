@@ -163,7 +163,13 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
       sock.emit('open');
       sock.emit(
         'message',
-        JSON.stringify({ type: 'occupied', seat, presence_id: '01J', server_time: 7, memory: null }),
+        JSON.stringify({
+          type: 'occupied',
+          seat,
+          presence_id: '01J',
+          server_time: 7,
+          memory: null,
+        }),
       );
       vi.advanceTimersByTime(15_000);
       const beat = sock.sent.map((s) => JSON.parse(s)).find((f) => f.type === 'heartbeat');
