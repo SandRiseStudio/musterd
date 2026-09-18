@@ -1303,7 +1303,8 @@ describe('blockedFailureNotice — lane 01M2RRQJDA', () => {
   it('escalates at 1h and 6h, and says how many attempts and how long', () => {
     let state = blockedFailureNotice('', DIRTY, t0).state;
     const fired: { at: string; count: number }[] = [];
-    // 16 ticks at 12-minute spacing spans 3h12m — the real episode.
+    // 36 ticks at 12-minute spacing spans 7h12m — long enough to reach the 6h rung. The REAL
+    // 08-19 episode is 3h12m and stops one rung short, which is why its total is 2 and not 3.
     for (let i = 1; i <= 36; i++) {
       const now = t0 + i * 12 * 60_000;
       const r = blockedFailureNotice(state, DIRTY, now);
@@ -1316,6 +1317,25 @@ describe('blockedFailureNotice — lane 01M2RRQJDA', () => {
     // Repetition carries new information: the attempt count and the elapsed time.
     expect(fired[0]?.at).toMatch(/h/);
     expect(fired[1]?.count).toBeGreaterThan(fired[0]?.count ?? 0);
+  });
+
+  it('stands down past the last rung instead of repeating daily', () => {
+    // The comment on BLOCKED_ESCALATION_MS used to promise a daily repeat past 24h, and `due` — the
+    // first NEWLY crossed threshold — has never done that: once 24h is behind the last notice,
+    // nothing matches. Standing down is ADR 230's shape for a daemon confirmed down (say it, then
+    // stop), so the code is right and it was the comment that was wrong. This is the falsifier.
+    let state = blockedFailureNotice('', DIRTY, t0).state;
+    const fired: string[] = [];
+    // Hourly ticks across four days — three rungs, then silence for the remaining three days.
+    for (let i = 1; i <= 96; i++) {
+      const r = blockedFailureNotice(state, DIRTY, t0 + i * H);
+      state = r.state;
+      if (r.notify) fired.push(r.notify.forHuman);
+    }
+    expect(fired.length).toBe(3);
+    // Nothing after the 24h rung, however long the block lasts.
+    const afterAWeek = blockedFailureNotice(state, DIRTY, t0 + 7 * 24 * H);
+    expect(afterAWeek.notify).toBeNull();
   });
 
   it('re-announces immediately when the cause CHANGES — a new blocker is new news', () => {
