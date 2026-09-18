@@ -149,3 +149,11 @@ miley's note accepting lane `01M1S6GZ96` (#1334): `openAcceptanceLoad` counts ev
 
 What would change the choice: a measured case where a seat is steered away from work by a lane whose stall belongs to its owner (a merge still open, say), with the acceptor holding nothing they could act on. The right fix then is on the lane — abandon it, or arm the sweep — rather than an age cut-off in the picker.
 
+
+## After a re-route the relieved acceptor's orientation brief still named the lane as owed — `owed_reviews` did not honour the superseded-ask set the verdict edge already did (2026-09-18; falsify: mint an acceptance ask to A, re-route it to B via `lane.review_rerouted`, run `musterd next` as A — if the lane appears under owed reviews, this is unfixed) <!-- claim: defect -->
+
+Measured on #1541 (lane `01M2RKFG60`). A 414 reap-reroute superseded wanderer's ask and minted `01M2SCMGK3` to ryder at 21:33. wanderer's brief the next morning still said "12h verdict still owed"; they judged the lane and accepted at 09:06 (a first accept on the superseded ask was inert). ryder read the standing ask at 09:12 and declined at 09:15 — inert, since ADR 202 lets no decline undo an accept. Two full acceptance reviews, opposite verdicts, nine minutes.
+
+- **The relief was sent and ignored.** `rerouteAcceptances` delivers a `resolve` to the old acceptor ("nothing is owed on it") and writes `superseded_ask` on the `lane.review_rerouted` audit row. `supersededAcceptanceAsks()` reads that row; the verdict edge and `openAcceptanceAsk` consult it. `deriveNext`'s `owed_reviews` and `deriveNextSummary`'s `owed` did not — both filtered on lane state alone, and after a re-route two ask rows share one lane, which lane state cannot separate.
+- **Why the brief and not the inbox mattered.** The `resolve` is one act with no interrupt weight, on inboxes that on this team run thousands deep. The seat orients from `next`, and `next` kept saying the review was theirs.
+- **Fix (lane `01M2TNWK0K`).** Both reads exclude asks in the superseded set — one predicate, three readers. Test: the same reroute leaves the lane in B's brief and summary and out of A's; dropping either exclusion turns exactly that test red.

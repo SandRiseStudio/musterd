@@ -16,7 +16,7 @@ import {
   readyForReviewHadNoCandidate,
 } from './lanes.js';
 import { getMemberByRole } from './members.js';
-import { annotateClose, closeVerdicts } from './review.js';
+import { annotateClose, closeVerdicts, supersededAcceptanceAsks } from './review.js';
 import { openSeedsForBrief } from './seeds.js';
 
 /**
@@ -128,6 +128,14 @@ export function deriveNextSummary(
         WHERE m.team_id = ? AND m.act = 'ask' AND mt.name = ?
           AND l.state IN ('awaiting_acceptance', 'ready_for_review')
           AND (l.owner_seat IS NULL OR l.owner_seat != ?)
+          -- Lane 01M2TNWK0K: the same superseded-ask exclusion the brief applies, kept in SQL so
+          -- the summary stays one bounded query. Mirrors supersededAcceptanceAsks() in review.ts.
+          AND NOT EXISTS (
+            SELECT 1 FROM audit a
+             WHERE a.team_id = m.team_id
+               AND a.action = 'lane.review_rerouted'
+               AND a.target = l.id
+               AND json_extract(a.detail, '$.superseded_ask') = m.id)
         ORDER BY m.ts ASC, m.id ASC`,
     )
     .all(teamId, member, member);
@@ -218,6 +226,11 @@ export function deriveNext(
       // self-submitted lane on a one-seat team), but reviewing your own work is the thing the
       // counterpart exists to prevent, so it is not a reminder — it is a wrong instruction.
       if (!lane || !isAwaitingAcceptance(lane.state) || lane.owner_seat === member) return [];
+      // Lane 01M2TNWK0K: a re-route leaves TWO ask rows on one lane, and lane state alone cannot
+      // say which is standing. The verdict edge and `openAcceptanceAsk` already refuse the
+      // superseded one; the brief must too, or the relieved seat's `next` keeps saying "verdict
+      // owed" — which is how wanderer and ryder both judged #1541, nine minutes apart.
+      if (supersededAcceptanceAsks(db, teamId, lane.id).has(r.ask_id)) return [];
       return [{ lane, from: r.from_name, ask_id: r.ask_id, ts: r.ts }];
     });
 
