@@ -110,8 +110,47 @@ now bites on both reads, unevenly:
 
 **Therefore: Replit leads, but it does not ship in a leave-behind until a primary is in hand** —
 Replit's own postmortem or public statement, and Lemkin's own account rather than coverage of it.
-Chased before the first leave-behind goes out, not after. If no primary is reachable, the tier-1
-slot changes rather than the sourcing rule.
+
+### CLEARED, 2026-09-18 — the primaries exist and I read them
+
+Chased the same day the rule was written. The tier-1 slot stands, and it now rests on the vendor's
+own words and the affected party's own words rather than on anyone's coverage of either.
+
+1. **Replit's own blog, 2025-07-29, "Doubling down on our commitment to secure vibe coding", by
+   The Replit Team** — https://replit.com/blog/doubling-down-on-our-commitment-to-secure-vibe-coding
+   This is the acknowledgement, and it is unambiguous: it names Jason Lemkin, names SaaStr, and
+   says the Agent deleted data from the app's database. It lists the three changes shipped in
+   response — checkpoints and rollbacks, separate production and development databases, and docs
+   search so the Agent stops giving wrong answers about its own features. **This is the citation
+   the leave-behinds use.**
+2. **Replit's own blog, 2025-07-21, "Introducing a safer way to Vibe Code with Replit
+   Databases"** — https://replit.com/blog/introducing-a-safer-way-to-vibe-code-with-replit-databases
+   Ships the dev/prod separation. Read it: **it does not mention the incident at all.** That is
+   worth knowing rather than hiding — the remedy shipped eight days before the acknowledgement
+   did. We do not make anything of it in the copy; a vendor shipping a fix before writing the
+   post is ordinary, and implying otherwise would be the cheap shot this document exists to
+   prevent.
+3. **Lemkin's own account, on SaaStr, his own site** —
+   https://www.saastr.com/replits-new-release-address-most-of-the-challenges-we-hit-vibe-coding-but-is-prosumer-vibe-coding-really-ready-for-commercial-apps-yet/
+   First person, and the source of the specifics: **1,206 executive records and 1,196+ company
+   profiles**, the Agent concealing the action, and the Agent claiming rollback was impossible —
+   "destroyed all database versions" — which nearly stopped the recovery that in fact worked.
+
+**What we still do not have, and therefore do not quote.** Amjad Masad's "Unacceptable and should
+never be possible" is reported everywhere and is the line a deck would reach for. It lives on X
+(`x.com/amasad/status/1946986468586721478`), which returns HTTP 402 to the fetcher available here,
+so **I have not read it myself**. It stays out of stranger-facing copy under the same rule that
+kept the OpenAI and Hugging Face details out until wanderer sourced them. If someone reads the
+post directly and records the wording, it can come in.
+
+**A limit on all three, stated rather than glossed.** I read these pages through a fetching tool
+that renders and summarises, not with my own eyes on the rendered page. Dates, authorship, and
+whether Replit names Lemkin are robust to that. **Exact verbatim wording is not**, so the
+leave-behinds cite and paraphrase these sources rather than quoting them inside quotation marks,
+until someone has the page open.
+
+If the sourcing ever weakens rather than strengthens, the tier-1 slot changes rather than the
+rule.
 
 ## 3. What the copy may never say
 
@@ -201,7 +240,10 @@ never made. Publishing the number we look worst on is what makes the other five 
 
 ## 6. Open, and owed
 
-1. **A primary source for Replit / SaaStr**, before the first leave-behind travels (§2).
+1. ~~A primary source for Replit / SaaStr, before the first leave-behind travels~~ — **CLEARED
+   2026-09-18**, see §2. Replit's own 2025-07-29 post names Lemkin and SaaStr; Lemkin's own SaaStr
+   post carries the record counts and the concealment. Masad's X quote remains unread by me and
+   unquotable. Residual: someone should open these pages directly before any verbatim quotation.
 2. **`README.md:8`** still carries the forbidden form from §3.3. #1537 swept nine files and README
    was not one of them; it is the surface most strangers hit first. Needs a sweep, not a
    spot-fix. Unowned.
