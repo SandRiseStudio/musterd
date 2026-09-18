@@ -3,6 +3,7 @@ import {
   ToolCallEventSchema,
   type SyncPullEvent,
   type SyncPullLaneEvent,
+  isWireAttestationSource,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { z } from 'zod';
@@ -839,8 +840,8 @@ export function foldBatch(
           return finish();
         }
         db.prepare(
-          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq, actor_model, actor_model_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           e.id,
           teamId,
@@ -853,6 +854,11 @@ export function foldBatch(
           now,
           event.origin_node,
           event.origin_seq,
+          // The origin's stamp (lane 01M2PAFNAS): it saw the actor's model; this node may not.
+          e.actor_model ?? null,
+          e.actor_model && isWireAttestationSource(e.actor_model_source)
+            ? e.actor_model_source
+            : null,
         );
         applied += 1;
         cursor = event.hub_seq;
@@ -874,8 +880,8 @@ export function foldBatch(
           return finish();
         }
         db.prepare(
-          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq, actor_model, actor_model_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           e.id,
           teamId,
@@ -888,6 +894,11 @@ export function foldBatch(
           now,
           event.origin_node,
           event.origin_seq,
+          // The origin's stamp (lane 01M2PAFNAS): it saw the actor's model; this node may not.
+          e.actor_model ?? null,
+          e.actor_model && isWireAttestationSource(e.actor_model_source)
+            ? e.actor_model_source
+            : null,
         );
         applied += 1;
         cursor = event.hub_seq;
@@ -934,8 +945,8 @@ export function foldBatch(
           return finish();
         }
         db.prepare(
-          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq, actor_model, actor_model_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           e.id,
           teamId,
@@ -948,6 +959,11 @@ export function foldBatch(
           now,
           event.origin_node,
           event.origin_seq,
+          // The origin's stamp (lane 01M2PAFNAS): it saw the actor's model; this node may not.
+          e.actor_model ?? null,
+          e.actor_model && isWireAttestationSource(e.actor_model_source)
+            ? e.actor_model_source
+            : null,
         );
         applied += 1;
         cursor = event.hub_seq;
@@ -986,8 +1002,8 @@ export function foldBatch(
           return finish();
         }
         db.prepare(
-          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq, actor_model, actor_model_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           e.id,
           teamId,
@@ -1000,6 +1016,11 @@ export function foldBatch(
           now,
           event.origin_node,
           event.origin_seq,
+          // The origin's stamp (lane 01M2PAFNAS): it saw the actor's model; this node may not.
+          e.actor_model ?? null,
+          e.actor_model && isWireAttestationSource(e.actor_model_source)
+            ? e.actor_model_source
+            : null,
         );
         applied += 1;
         cursor = event.hub_seq;
@@ -1044,8 +1065,8 @@ export function foldBatch(
           }
         }
         db.prepare(
-          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq, actor_model, actor_model_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           e.id,
           teamId,
@@ -1058,6 +1079,11 @@ export function foldBatch(
           now,
           event.origin_node,
           event.origin_seq,
+          // The origin's stamp (lane 01M2PAFNAS): it saw the actor's model; this node may not.
+          e.actor_model ?? null,
+          e.actor_model && isWireAttestationSource(e.actor_model_source)
+            ? e.actor_model_source
+            : null,
         );
         applied += 1;
         cursor = event.hub_seq;
@@ -1087,8 +1113,8 @@ export function foldBatch(
           return finish();
         }
         db.prepare(
-          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq, actor_model, actor_model_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           e.id,
           teamId,
@@ -1101,6 +1127,11 @@ export function foldBatch(
           now,
           event.origin_node,
           event.origin_seq,
+          // The origin's stamp (lane 01M2PAFNAS): it saw the actor's model; this node may not.
+          e.actor_model ?? null,
+          e.actor_model && isWireAttestationSource(e.actor_model_source)
+            ? e.actor_model_source
+            : null,
         );
         applied += 1;
         cursor = event.hub_seq;
@@ -1131,8 +1162,8 @@ export function foldBatch(
           return finish();
         }
         db.prepare(
-          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq, actor_model, actor_model_source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           e.id,
           teamId,
@@ -1145,6 +1176,11 @@ export function foldBatch(
           now,
           event.origin_node,
           event.origin_seq,
+          // The origin's stamp (lane 01M2PAFNAS): it saw the actor's model; this node may not.
+          e.actor_model ?? null,
+          e.actor_model && isWireAttestationSource(e.actor_model_source)
+            ? e.actor_model_source
+            : null,
         );
         applied += 1;
         cursor = event.hub_seq;

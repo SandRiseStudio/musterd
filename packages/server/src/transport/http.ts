@@ -94,6 +94,7 @@ import {
   GovernedLaunchAuthorizationIssueSchema,
   GovernedPolicySchema,
   GovernedPolicyReadResponseSchema,
+  WIRE_ATTESTATION_SOURCES,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -2074,6 +2075,13 @@ export async function handleHttp(
             id: r.id,
             ts: r.ts,
             actor: r.actor,
+            // Lane 01M2PAFNAS: what the actor attested when the row was written, so /audit can
+            // label it seen / said / unattested (attestation-copy-spec §3).
+            actor_model: r.actor_model ?? null,
+            actor_model_source:
+              r.actor_model && isWireAttestationSource(r.actor_model_source)
+                ? r.actor_model_source
+                : null,
             action: r.action,
             target: r.target,
             result: r.result,
@@ -3274,6 +3282,11 @@ export async function handleHttp(
           workspace_key: z.string().max(200).optional(),
           // Model attestation (ADR 101), mirroring the WS claim frame — attested, never verified.
           model: z.string().max(120).optional(),
+          // The tier behind `model` (ADR 301), mirroring the WS claim frame. Until lane 01M2PAFNAS
+          // (2026-09-17) this schema omitted it, so every occupancy born through the mirror carried
+          // a model with no tier — the third field this "stateless mirror" had resolved-then-dropped
+          // (workspace_key, provenance, now this). Meaningless without `model`; dropped beside none.
+          model_source: z.enum(WIRE_ATTESTATION_SOURCES).optional(),
           // Build attestation (ADR 135), mirroring the WS claim frame. No requests-table carry: a
           // grant-less claim that goes through approval gets its build installed by the very next
           // authed request's `x-musterd-build` ambient touch (sticky COALESCE).
@@ -3510,6 +3523,7 @@ export async function handleHttp(
           workspace: body.workspace ?? null,
           driver: null,
           model: body.model ?? null,
+          model_source: body.model ? (body.model_source ?? null) : null,
           build: body.build ?? null,
           epoch: body.epoch ?? null,
         };
@@ -3787,8 +3801,10 @@ export async function handleHttp(
           from_session: `http:${ulid()}`,
           target: encodedTarget,
           surface: body.surface,
-          // Carry the attestation across the approval gap (ADR 101).
+          // Carry the attestation across the approval gap (ADR 101) — tier included, so approval
+          // does not launder an observation into an unknown.
           model: body.model ?? null,
+          model_source: body.model ? (body.model_source ?? null) : null,
           // A specific-seat claim collapses to one pending request per seat (no reconnect pile-up).
           collapseByTarget: 'seat' in body.target,
         });

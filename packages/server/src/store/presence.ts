@@ -1,4 +1,9 @@
-import type { Provenance, PresenceStatus, Surface } from '@musterd/protocol';
+import {
+  isWireAttestationSource,
+  type Provenance,
+  type PresenceStatus,
+  type Surface,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { REMOTE_PRESENCE_TTL_MS } from '../config.js';
@@ -481,6 +486,9 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         workspace: p.workspace ?? null,
         driver: p.driver ?? null,
         model: p.model ?? null,
+        // The tier rides only beside a model, and only when it is a tier this wire knows: a row
+        // holding a value no client of ours ever wrote is read as "unknown", not passed through.
+        model_source: p.model && isWireAttestationSource(p.model_source) ? p.model_source : null,
         build: p.build ?? null,
         epoch: p.epoch ?? null,
         wake_lease: p.wake_lease ?? null,
