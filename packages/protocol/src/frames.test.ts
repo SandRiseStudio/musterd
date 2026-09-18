@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WSClientFrame, WSServerFrame } from './frames.js';
+import { HeartbeatFrame, WSClientFrame, WSServerFrame } from './frames.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 describe('WS frames', () => {
@@ -145,5 +145,27 @@ describe('WS frames', () => {
   it('rejects an unknown surface on a heartbeat', () => {
     const r = WSClientFrame.safeParse({ type: 'heartbeat', surface: 'pager' });
     expect(r.success).toBe(false);
+  });
+});
+
+describe('heartbeat guidance re-attestation (ADR 417)', () => {
+  it('carries the guidance epoch the workspace is running now', () => {
+    expect(HeartbeatFrame.parse({ type: 'heartbeat', guidance_epoch: 25 }).guidance_epoch).toBe(25);
+  });
+
+  it('absent means no change, never a clear — the rule `model` already carries', () => {
+    expect(HeartbeatFrame.parse({ type: 'heartbeat' }).guidance_epoch).toBeUndefined();
+  });
+
+  it('rejects a malformed stamp version rather than storing it', () => {
+    expect(HeartbeatFrame.safeParse({ type: 'heartbeat', guidance_epoch: -1 }).success).toBe(false);
+    expect(HeartbeatFrame.safeParse({ type: 'heartbeat', guidance_epoch: 2.5 }).success).toBe(
+      false,
+    );
+  });
+
+  it('rides the client-frame union, not just the bare schema', () => {
+    const f = WSClientFrame.parse({ type: 'heartbeat', guidance_epoch: 25 });
+    expect(f.type === 'heartbeat' && f.guidance_epoch).toBe(25);
   });
 });

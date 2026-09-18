@@ -120,6 +120,18 @@ export const ClaimFrame = z.object({
    */
   epoch: z.number().int().nonnegative().optional(),
   /**
+   * The guidance epoch this seat is RUNNING (ADR 417) — the `<!-- musterd:content vN -->` stamp in
+   * this workspace's own guidance files, NOT `GUIDANCE_CONTENT_VERSION`, which is only what the
+   * client's build would write. The distinction is the whole field: the files are the text that was
+   * in the model's context when it decided something; the constant is a capability, not a fact.
+   *
+   * Omitted for unstamped or unprovisioned workspaces and by older clients; absent reads as unknown
+   * and never blocks (and must never default to 0, which would read as maximally stale). Re-attested
+   * on the heartbeat, because a `--refresh-guidance` mid-session is real. Self-reported and never
+   * verified — the same limit `model_source` carries.
+   */
+  guidance_epoch: z.number().int().nonnegative().optional(),
+  /**
    * The wake lease that spawned this session (ADR 241), read from `MUSTERD_WAKE_LEASE`. Attested
    * like `model`/`build`; omitted by every session a wake did not cause, and by older clients.
    * The host's verification matches it against the lease it is actuating — the correlation that

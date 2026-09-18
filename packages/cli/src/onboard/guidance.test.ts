@@ -1,7 +1,11 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { GUIDANCE_CONTENT_VERSION, parseContentStamp } from '@musterd/protocol';
+import {
+  GUIDANCE_CONTENT_VERSION,
+  GUIDANCE_INSTALL_PATHS,
+  parseContentStamp,
+} from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import {
   CANONICAL_ORIENT_PATH,
@@ -15,6 +19,7 @@ import {
 import { claudeCode } from './harnesses/claudeCode.js';
 import { codex } from './harnesses/codex.js';
 import { cursor } from './harnesses/cursor.js';
+import { HARNESSES } from './harnesses/index.js';
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), 'musterd-guidance-'));
@@ -243,5 +248,24 @@ describe('orient guidance unit (ADR 333)', () => {
     expect(removed).toContain(rel);
     expect(removed).toContain(CANONICAL_ORIENT_PATH);
     expect(existsSync(join(dir, '.claude/skills/musterd-orient'))).toBe(false);
+  });
+});
+
+describe('GUIDANCE_INSTALL_PATHS drift guard (ADR 417)', () => {
+  // The CLI's harness definitions decide what gets WRITTEN; `@musterd/protocol` owns the list the
+  // epoch reader VISITS, because `@musterd/mcp` claims seats too and cannot import the CLI. Two
+  // lists, one meaning — so a path added to a harness here and forgotten there would make the
+  // reader silently blind to it, and a census would read high. This is the guard against that.
+  it('covers every path guidanceTargets produces for every harness', () => {
+    const declared = new Set(GUIDANCE_INSTALL_PATHS);
+    const written = guidanceTargets(HARNESSES);
+    const missing = written.filter((rel) => !declared.has(rel));
+    expect(missing).toEqual([]);
+  });
+
+  it('declares no path no harness would ever write', () => {
+    const written = new Set(guidanceTargets(HARNESSES));
+    const orphans = GUIDANCE_INSTALL_PATHS.filter((rel) => !written.has(rel));
+    expect(orphans).toEqual([]);
   });
 });

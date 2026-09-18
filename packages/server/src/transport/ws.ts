@@ -34,6 +34,7 @@ import {
   hasLivePresence,
   heartbeat,
   presenceById,
+  reattestGuidanceEpoch,
   reattestModel,
   reattestSurface,
   release,
@@ -734,6 +735,10 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             model_source: frame.model ? (frame.model_source ?? null) : null,
             build: frame.build ?? null,
             epoch: frame.epoch ?? null,
+            // ADR 417: what this seat's WORKSPACE is running, read from its own files — not the
+            // ceiling `epoch` says this build could write. The two disagree exactly when a seat is
+            // stale, which is the whole point of carrying both.
+            guidance_epoch: frame.guidance_epoch ?? null,
             wake_lease: frame.wake_lease ?? null,
           });
           // First occupancy stamps the durable *held* marker (ADR 058) — the claim path is the v0.3
@@ -954,6 +959,11 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               if (frame.surface) {
                 reattestSurface(ctx.db, conn.presenceId, frame.surface);
               }
+              // ADR 417: the guidance a seat RUNS can change under a live session — self-heal fires
+              // once, at session start, so a long session outlives the rule it started under and a
+              // refresh rewrites its files while the socket stays open. Absent ⇒ no change. No audit
+              // row by design (ADR 417 §Observability): this is occupancy state, not an event.
+              reattestGuidanceEpoch(ctx.db, conn.presenceId, frame.guidance_epoch);
             } else {
               // The row behind this socket is gone — the reaper removed it while the socket stayed
               // open — and the session lease that joined on it is dead with it, so every hook probe

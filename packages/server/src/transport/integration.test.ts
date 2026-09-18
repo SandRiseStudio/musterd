@@ -3478,6 +3478,105 @@ describe('model attestation (ADR 101)', () => {
     expect(afterHeal.envelope.meta.model_source).toBe('observed');
   });
 
+  it('the roster ANSWERS the currency census — guidance_epoch reaches a reader (ADR 417)', async () => {
+    // The amended acceptance for this lane is that the nine-worktree census is answerable as a
+    // QUERY rather than a shell loop over nine checkouts. Tasks 1-5 make the data exist; this is the
+    // assertion that a reader can actually ask, and it is what the acceptance is checked against.
+    //
+    // The field rides `presences[]`, not the member: it is a property of an OCCUPANCY. Files carry
+    // the stamp, and one seat holding two workspaces attests two different epochs — a member-level
+    // field would have to pick one and would be lying about the other (agreed with dolly,
+    // 01M2SB9C3Z; the same reasoning that put `model` there).
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    const a = new TestWs();
+    const l = new TestWs();
+    await Promise.all([a.open(), l.open()]);
+    a.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(tok, 'Ada'),
+      surface: 'claude-code',
+      guidance_epoch: 24,
+    });
+    await a.waitFor('occupied');
+    // Lin claims from an unprovisioned workspace: nothing to attest, so nothing is said.
+    await l.claim('dawn', team.json.agent_key, 'Lin', 'codex', await standingGrant(tok, 'Lin'));
+
+    const roster = await get('/teams/dawn/members');
+    const epochOf = (name: string) =>
+      roster.json.members.find((m: any) => m.name === name).presences[0].guidance_epoch;
+
+    // A stale seat is legible as stale, and an unstamped one as UNKNOWN — null, never 0, which
+    // would sort it below every real answer and report it as the most out-of-date seat on the team.
+    expect(epochOf('Ada')).toBe(24);
+    expect(epochOf('Lin')).toBeNull();
+    a.close();
+    l.close();
+  });
+
+  it('the guidance epoch rides the claim AND every heartbeat, and silence never clears it (ADR 417)', async () => {
+    // The other half of the seam `client.guidanceEpoch.e2e.test.ts` closes on the HTTP mirror. Self-
+    // heal fires once, at session start, so a long session outlives the rule it started under: a
+    // refresh rewrites the seat's guidance files while its socket stays open, and the roster has to
+    // follow. That is the ONE behaviour `epoch` never needs — a compiled-in constant cannot change
+    // mid-occupancy — so it gets its own case rather than riding the model's.
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    const grant = await standingGrant(tok, 'Ada');
+    const a = new TestWs();
+    await a.open();
+    // Raw frame rather than the `claim` helper: its parameters are positional, and the comment on
+    // `modelSource` records what inserting one in the middle already cost once.
+    a.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      guidance_epoch: 24,
+    });
+    const occupied = await a.waitFor('occupied');
+    const presenceId = occupied.presence_id as string;
+    const stored = () =>
+      server.db
+        .prepare<
+          [string],
+          { guidance_epoch: number | null }
+        >('SELECT guidance_epoch FROM presence WHERE id = ?')
+        .get(presenceId)!.guidance_epoch;
+
+    // 1. The claim's attestation lands on the row.
+    expect(stored()).toBe(24);
+
+    // 2. A heartbeat carrying a NEWER epoch moves it — the seat refreshed mid-session and said so.
+    a.send({ type: 'heartbeat', guidance_epoch: 26 });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(stored()).toBe(26);
+
+    // 3. A heartbeat carrying NONE leaves it standing. Absence is not an assertion (ADR 236) — and
+    //    this is the exact shape that erased `model_source` every 15 seconds before ADR 301.
+    a.send({ type: 'heartbeat' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(stored()).toBe(26);
+
+    // 4. No audit row, by design (ADR 417 §Observability): a guidance epoch is occupancy state, not
+    //    an event. `presence` is where occupancy state lives, and the roster is its instrument.
+    const teamRow = getTeamBySlug(server.db, 'dawn')!;
+    expect(
+      listAudit(server.db, teamRow.id).filter((r) => r.action.startsWith('occupancy.guidance')),
+    ).toEqual([]);
+    a.close();
+  });
+
   it('claim attests, acts carry the server-side meta.model stamp, heartbeat re-attests + audits', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;

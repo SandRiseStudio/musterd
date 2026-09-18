@@ -18,7 +18,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('68');
+    expect(ver?.value).toBe('69');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -89,6 +89,23 @@ describe('db', () => {
     expect(nullable?.notnull).toBe(0);
   });
 
+  it('v69 adds the attested guidance epoch on presence (ADR 417)', () => {
+    const db = openDb(':memory:');
+    const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
+    expect(cols).toContain('guidance_epoch');
+    // Nullable, and deliberately NOT `NOT NULL DEFAULT 0`: an unstamped workspace and an older
+    // client both genuinely have no epoch to attest, and 0 is the exact silhouette of maximal
+    // staleness. Absence must stay distinguishable from the oldest real answer.
+    const nullable = db
+      .prepare<
+        [],
+        { notnull: number; dflt_value: unknown }
+      >("SELECT [notnull], dflt_value FROM pragma_table_info('presence') WHERE name = 'guidance_epoch'")
+      .get();
+    expect(nullable?.notnull).toBe(0);
+    expect(nullable?.dflt_value).toBeNull();
+  });
+
   it('v19 adds the resumable-attestation columns on residency (ADR 131 inc 4)', () => {
     const db = openDb(':memory:');
     const cols = (db.prepare('PRAGMA table_info(residency)').all() as { name: string }[]).map(
@@ -128,7 +145,7 @@ describe('db', () => {
       `INSERT INTO seed_thread_entries (id, seed_id, kind, body, member_id, created_at)
        VALUES ('t1', 's1', 'clarification', 'why?', ?, 2)`,
     ).run(member.id);
-    expect(runMigrations(db)).toBe(68);
+    expect(runMigrations(db)).toBe(69);
     const col = (db.pragma('table_info(seeds)') as { name: string; notnull: number }[]).find(
       (c) => c.name === 'slack_user_id',
     );
@@ -316,7 +333,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(68); // runs v18…v68 (governed authorization substrate, audit actor attestation)
+    expect(runMigrations(db)).toBe(69); // runs v18…v69 (governed authorization substrate, audit actor attestation, guidance epoch)
 
     const scope = (id: string) =>
       db
@@ -380,7 +397,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(68);
+    expect(runMigrations(db)).toBe(69);
 
     const policy = (id: string) =>
       db
@@ -712,7 +729,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     stage(db, 'm1', 1, 1);
 
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(68);
+    expect(runMigrations(db)).toBe(69);
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
     db.close();
@@ -727,7 +744,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     db.exec('DROP INDEX idx_messages_origin; DROP TABLE sync_pull_cursor;');
     db.prepare("UPDATE schema_meta SET value = '55' WHERE key = 'schema_version'").run();
 
-    expect(runMigrations(db)).toBe(68);
+    expect(runMigrations(db)).toBe(69);
 
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_pull_cursor'").get(),
@@ -743,7 +760,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
   it('v58 stamps audit with the origin pair, unique only where a stamp exists', () => {
     const db = withRemoteNode();
     db.prepare("UPDATE schema_meta SET value = '57' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(68);
+    expect(runMigrations(db)).toBe(69);
 
     const insert = db.prepare(
       `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
@@ -813,7 +830,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
       INSERT INTO seat_nodes VALUES ('m', 't', 'nA', 5);
     `);
     db.prepare("UPDATE schema_meta SET value = '62' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(68);
+    expect(runMigrations(db)).toBe(69);
     expect(db.prepare('SELECT member_id, node_id, bound_at FROM seat_nodes').all()).toEqual([
       { member_id: 'm', node_id: 'nA', bound_at: 5 },
     ]);

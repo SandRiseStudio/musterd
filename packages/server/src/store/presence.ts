@@ -23,6 +23,7 @@ export interface PresenceSummary {
     model: string | null;
     build: string | null;
     epoch: number | null;
+    guidance_epoch: number | null;
     wake_lease: string | null;
     /** The machine this row lives on (presence replication, 2026-09-02); null = this daemon. */
     node: string | null;
@@ -56,6 +57,9 @@ export interface AttachContext {
   build?: string | null;
   /** Client-attested feature epoch (ADR 148); absent → null (older client). The roster's skew signal. */
   epoch?: number | null;
+  /** Client-attested guidance epoch of the seat's WORKSPACE (ADR 417) — what it is running, not what
+   *  it could write. Absent → null; absence is not an assertion and is never read as epoch 0. */
+  guidance_epoch?: number | null;
   /** The wake lease this session was spawned by (ADR 241), attested from `MUSTERD_WAKE_LEASE`.
    *  Absent → null, and null never matches a verifying lease: absence is not an assertion. */
   wake_lease?: string | null;
@@ -140,13 +144,14 @@ export function attach(
       model_source: ctx.model ? (ctx.model_source ?? null) : null,
       build: ctx.build ?? null,
       epoch: ctx.epoch ?? null,
+      guidance_epoch: ctx.guidance_epoch ?? null,
       wake_lease: ctx.wake_lease ?? null,
       node: null,
       created_at: now,
     };
     db.prepare(
-      `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, model_source, build, epoch, wake_lease, node, created_at)
-       VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @model_source, @build, @epoch, @wake_lease, @node, @created_at)`,
+      `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, model_source, build, epoch, guidance_epoch, wake_lease, node, created_at)
+       VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @model_source, @build, @epoch, @guidance_epoch, @wake_lease, @node, @created_at)`,
     ).run(row);
     const seat = seatOf(db, memberId);
     if (seat) {
@@ -165,6 +170,7 @@ export function attach(
           model_source: row.model_source,
           build: row.build,
           epoch: row.epoch,
+          guidance_epoch: row.guidance_epoch,
         },
       });
     }
@@ -380,7 +386,7 @@ export function touchAmbientPresence(
       // `model_source` is COALESCEd on the SAME condition as `model` (`ctx.model ? … : null`), so the
       // pair moves or stays together. Sticky-independently would be worse than not recording it: a
       // new model under a stale tier is a stamp that lies about its own provenance.
-      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, wake_lease = ?, model = COALESCE(?, model), model_source = COALESCE(?, model_source), build = COALESCE(?, build), epoch = COALESCE(?, epoch) WHERE id = ?',
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, wake_lease = ?, model = COALESCE(?, model), model_source = COALESCE(?, model_source), build = COALESCE(?, build), epoch = COALESCE(?, epoch), guidance_epoch = COALESCE(?, guidance_epoch) WHERE id = ?',
     ).run(
       Date.now(),
       'online',
@@ -393,6 +399,11 @@ export function touchAmbientPresence(
       ctx.model ? (ctx.model_source ?? null) : null,
       ctx.build ?? null,
       ctx.epoch ?? null,
+      // ADR 417. COALESCE like its siblings, but for a different reason: `epoch` is sticky because a
+      // compiled-in constant CANNOT change mid-occupancy, while this one can and is expected to — a
+      // refresh rewrites the seat's files under a live session. So a heartbeat carrying a value moves
+      // the row forward, and one carrying none leaves the last attested value standing.
+      ctx.guidance_epoch ?? null,
       existing.id,
     );
   } else {
@@ -491,6 +502,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         model_source: p.model && isWireAttestationSource(p.model_source) ? p.model_source : null,
         build: p.build ?? null,
         epoch: p.epoch ?? null,
+        guidance_epoch: p.guidance_epoch ?? null,
         wake_lease: p.wake_lease ?? null,
         attached_at: p.created_at,
         node: p.node ?? null,
@@ -625,6 +637,30 @@ export function reattestModel(
 }
 
 /**
+ * Re-attest the workspace guidance epoch on a live presence (ADR 417). The heartbeat's half of the
+ * claim: self-heal runs once, at session start, so a long session outlives the rule it started
+ * under — a refresh rewrites the seat's guidance files while it is still connected, and the roster
+ * must follow. `undefined`/`null` is NO CHANGE, never a clear: a client too old to attest, or a
+ * workspace with nothing to read, is silent, and silence is not an assertion (ADR 236).
+ *
+ * No audit row by design (ADR 417 §Observability): a guidance epoch is occupancy state, not an
+ * event. The `presence.reattested` emit is for the replication fold and live watchers, not a log.
+ */
+export function reattestGuidanceEpoch(
+  db: Database,
+  presenceId: string,
+  guidanceEpoch: number | null | undefined,
+): { previous: number | null } | undefined {
+  if (guidanceEpoch === undefined || guidanceEpoch === null) return undefined;
+  const row = presenceById(db, presenceId);
+  if (!row) return undefined;
+  if ((row.guidance_epoch ?? null) === guidanceEpoch) return undefined;
+  db.prepare('UPDATE presence SET guidance_epoch = ? WHERE id = ?').run(guidanceEpoch, presenceId);
+  emitReattested(db, presenceId);
+  return { previous: row.guidance_epoch ?? null };
+}
+
+/**
  * `presence.reattested` for a LOCAL row after its model or surface changed (presence replication,
  * 2026-09-02). Carries the whole attestation triple so a peer's fold needs no prior state beyond
  * the row itself. Callers return early when nothing changed, so no duplicate rows.
@@ -644,6 +680,7 @@ function emitReattested(db: Database, presenceId: string): void {
       model: after.model,
       model_source: after.model_source,
       surface: after.surface,
+      guidance_epoch: after.guidance_epoch,
     },
   });
 }

@@ -3293,6 +3293,11 @@ export async function handleHttp(
           build: z.string().max(64).optional(),
           // Feature epoch (ADR 148), mirroring the WS claim frame — the roster's skew signal.
           epoch: z.number().int().nonnegative().optional(),
+          // Guidance epoch (ADR 417), mirroring the WS claim frame: the stamp in the seat's OWN
+          // workspace files, not the ceiling `epoch` says its build could write. The fourth field
+          // this mirror would otherwise have resolved-then-dropped — the client has been sending it
+          // since #1552 and a route that omits it from the schema drops it green on both sides.
+          guidance_epoch: z.number().int().nonnegative().optional(),
           // ADR 131 §6, mirroring the WS claim frame — what ANIMATES this session, not who it is.
           // The 2026-09-04 workspace repair left this field behind, so the mirror still was not one:
           // every row born here read `provenance: null` while every WS-claimed and every
@@ -3526,6 +3531,7 @@ export async function handleHttp(
           model_source: body.model ? (body.model_source ?? null) : null,
           build: body.build ?? null,
           epoch: body.epoch ?? null,
+          guidance_epoch: body.guidance_epoch ?? null,
         };
         // Single-active is kind-scoped (ADR 042), matching the WS path. Only an AUTHORIZED agent
         // claim may invoke newest-wins (ADR 017). Keeping the transition behind the grant/self/re-seat
