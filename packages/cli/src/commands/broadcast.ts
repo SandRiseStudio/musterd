@@ -526,6 +526,111 @@ export function makeFrameWatchdog(
 }
 
 /**
+ * The floor under the scene's own draw rate — the degradation that is not a freeze.
+ *
+ * `makeFrameWatchdog` asks *when did a frame last ARRIVE*, and that catches the picture stopping
+ * dead. It cannot catch the picture running at half speed, because half speed is not a gap: on
+ * 2026-09-17 the live capture drew **8.06 frames/s inside a 20 fps stream** for hours and every
+ * armed counter read healthy — `fps=` and `speed=` clean (the pump re-emits `latest` on a wall
+ * clock), the ADR 159 queue watchdog satisfied (queue growth was NEGATIVE), and the frame watchdog
+ * silent because frames kept arriving, just fewer of them. 60 % of encoded frames carried no new
+ * draw. nick saw it before any instrument did, which is the whole problem.
+ *
+ * **Draws, not arrivals.** A rate floor on delivered frames cannot work: screencast delivers only
+ * on a new composite, so a genuinely still room legitimately delivers almost nothing, and a floor
+ * that fires on a calm office is a floor nobody leaves armed. The scene itself knows the
+ * difference — while its rAF loop runs it is *trying* to draw at the requested cadence, and when it
+ * parks it hands over to the drift heartbeat, which ticks `beats`. So `beats` advancing is the
+ * room choosing to be calm, and a window in which it advanced is not evidence of anything.
+ *
+ * **Reports, never stops.** A half-rate stream is worth far more than no stream, so this is the one
+ * counter that does not reach for `forceStop`. Loud exactly once, for the same reason the ack
+ * refusal reporter is: the run continues degraded for hours, and a line per window buries the first
+ * one, which is the only one that says when it began.
+ */
+export const DRAW_FLOOR_FPS = 12;
+
+/**
+ * Sized from measurement on the performance-4x box, not taste. Healthy (2026-09-16, after the
+ * `coalesceStep` fix): **18 draws/s median**. Degraded (2026-09-17, same box, 484 samples over
+ * 483 s): **8.06 mean**. Twelve sits ~33 % under the healthy median and 50 % over the degraded
+ * mean — far enough below healthy that ordinary variance cannot reach it, far enough above the
+ * failure that the failure cannot hide under it.
+ *
+ * Falsify by running a healthy capture and reading `drawFps` p5 out of the perf JSONL: if p5 dips
+ * under 12 on a box we call healthy, this is too high and the run it cried on says so.
+ */
+export const DRAW_FLOOR_WINDOW_MS = 60_000;
+
+/**
+ * A minute is deliberate. The failure is sustained, and shorter windows buy nothing but false
+ * alarms: a few slow seconds cost the viewer nothing, and the office's own bursts (a walk, a cue,
+ * a settle) move the instantaneous rate around far more than the fault does.
+ */
+/**
+ * The office's own counters, as the page serializes them. Kept separate from the CDP round-trip so
+ * the parsing — which is where a bad reading turns into a false alarm — is testable without Chrome.
+ *
+ * `undefined` for anything it cannot read, never zeros: the scene may not be mounted yet, and a
+ * zero draw rate is the exact shape of the fault this feeds, so a blind probe must never be
+ * mistaken for a stopped one.
+ */
+export function parseOfficeStats(
+  raw: unknown,
+): { ticks: number; draws: number; beats: number } | undefined {
+  if (typeof raw !== 'string') return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  const { ticks, draws, beats } = parsed as Record<string, unknown>;
+  if (typeof ticks !== 'number' || typeof draws !== 'number' || typeof beats !== 'number') {
+    return undefined;
+  }
+  return { ticks, draws, beats };
+}
+
+/** How often the page's counters are read. Six readings to a window is enough to anchor it and
+ * cheap enough to leave armed forever. */
+export const DRAW_FLOOR_SAMPLE_MS = 10_000;
+
+export function makeDrawRateFloor(
+  onDegraded: (achievedFps: number, floorFps: number, overMs: number) => void,
+  floorFps: number = DRAW_FLOOR_FPS,
+  windowMs: number = DRAW_FLOOR_WINDOW_MS,
+): { sample: (s: { draws: number; beats: number }, nowMs: number) => void; disarm: () => void } {
+  let anchor: { at: number; draws: number; beats: number } | null = null;
+  let reported = false;
+  let armed = true;
+  return {
+    sample: (s, nowMs) => {
+      if (!armed) return;
+      if (anchor === null) {
+        anchor = { at: nowMs, draws: s.draws, beats: s.beats };
+        return;
+      }
+      const elapsed = nowMs - anchor.at;
+      if (elapsed < windowMs) return;
+      // The room parked somewhere in this window, so what it drew says nothing about what it
+      // could have drawn. Re-anchor and judge the next one.
+      const parked = s.beats > anchor.beats;
+      const achieved = (s.draws - anchor.draws) / (elapsed / 1000);
+      if (!parked && achieved < floorFps && !reported) {
+        reported = true;
+        onDegraded(achieved, floorFps, elapsed);
+      }
+      anchor = { at: nowMs, draws: s.draws, beats: s.beats };
+    },
+    disarm: () => {
+      armed = false;
+    },
+  };
+}
+
+/**
  * Best-effort, synchronous kill of a child's whole process group. Both children spawn
  * `detached: true`, so each leads its own group and `kill(-pid)` reaches it plus anything it
  * spawned. This is the backstop for the ungraceful stop: when the parent dies to an external
@@ -644,12 +749,7 @@ function startPerfRecording(
           expression: 'JSON.stringify(window.__office?.stats?.() ?? null)',
           returnByValue: true,
         });
-        const raw = (r['result'] as { value?: unknown } | undefined)?.value;
-        const parsed: unknown = typeof raw === 'string' ? JSON.parse(raw) : null;
-        if (!parsed || typeof parsed !== 'object') return undefined;
-        const { ticks, draws } = parsed as { ticks?: unknown; draws?: unknown };
-        if (typeof ticks !== 'number' || typeof draws !== 'number') return undefined;
-        return { ticks, draws };
+        return parseOfficeStats((r['result'] as { value?: unknown } | undefined)?.value);
       } catch {
         return undefined; // scene not mounted yet, or the socket went away mid-capture
       }
@@ -1189,6 +1289,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
   let pumpTimer: NodeJS.Timeout | undefined;
   let buildTimer: NodeJS.Timeout | undefined;
   let perfTimer: NodeJS.Timeout | undefined;
+  let drawFloorTimer: NodeJS.Timeout | undefined;
   let live = false; // flips when the pump starts feeding ffmpeg
   /** When the pump actually started — the clock `socketLossExitCode` judges restart-eligibility by. */
   let runStartedAt = Date.now();
@@ -1385,6 +1486,7 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
     if (pumpTimer) clearInterval(pumpTimer);
     if (buildTimer) clearInterval(buildTimer);
     if (perfTimer) clearInterval(perfTimer);
+    if (drawFloorTimer) clearInterval(drawFloorTimer);
     ffmpeg.stdin?.end();
     cdp?.close(); // an open DevTools socket is a live handle; nothing else closes it
     killGroup(chrome);
@@ -1433,7 +1535,22 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
         ),
     );
     const frameWatch = makeFrameWatchdog(onFrameStall);
-    disarmFrameWatch = frameWatch.disarm;
+    // Reports, never stops — so unlike the freeze watchdog this one hands `forceStop` nothing. A
+    // half-rate stream is worth far more to a viewer than no stream.
+    const drawFloor = makeDrawRateFloor((achieved, floor, overMs) =>
+      process.stderr.write(
+        `${theme.err('✗')} the office drew ${achieved.toFixed(1)} frames/s over the last ` +
+          `${Math.round(overMs / 1000)}s, under the ${floor}/s floor, while its loop was running — ` +
+          `the stream is padding the difference with repeats and every other counter reads ` +
+          `healthy. The picture is at roughly ${Math.round((100 * achieved) / opts.fps)}% of ` +
+          `${opts.fps}fps.\n`,
+      ),
+    );
+    disarmFrameWatch = () => {
+      frameWatch.disarm();
+      drawFloor.disarm();
+      if (drawFloorTimer) clearInterval(drawFloorTimer);
+    };
     page.on('Page.screencastFrame', (p) => {
       const frame = Buffer.from(String(p['data']), 'base64');
       perf?.frame(frame.byteLength);
@@ -1478,6 +1595,23 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
       perfTimer = setInterval(() => void perf.tick(), PERF_SAMPLE_MS);
       perfTimer.unref(); // measurement never holds the stream open
     }
+    // The floor's own probe, and it is always on — the whole finding of 2026-09-17 is that the
+    // instrument which could see the degradation was opt-in, so nothing was watching it on an
+    // ordinary run. One CDP round-trip every 10s against a counter the page already keeps is a
+    // cost the pipeline cannot measure; being blind to a half-rate picture is not.
+    drawFloorTimer = setInterval(() => {
+      void page
+        .send('Runtime.evaluate', {
+          expression: 'JSON.stringify(window.__office?.stats?.() ?? null)',
+          returnByValue: true,
+        })
+        .then((r) => {
+          const stats = parseOfficeStats((r['result'] as { value?: unknown } | undefined)?.value);
+          if (stats) drawFloor.sample(stats, Date.now());
+        })
+        .catch(() => {}); // a probe that cannot reach the page says nothing, and must not throw
+    }, DRAW_FLOOR_SAMPLE_MS);
+    drawFloorTimer.unref(); // measurement never holds the stream open
     live = true; // signals now stop gracefully — there are frames worth finalizing
 
     baselineBuild = await fetchDaemonBuild(opts.server);
