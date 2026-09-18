@@ -9,6 +9,7 @@ import {
 } from '../brand/siteMeta';
 import { GetStarted } from '../components/GetStarted';
 import { LightHero } from '../components/site/LightHero';
+import { OfficeProof } from '../components/site/OfficeProof';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import { StreamSection } from '../components/site/StreamSection';
@@ -43,6 +44,9 @@ function Home() {
     <main className="site-page">
       <SiteNav />
       <LightHero />
+      {/* First thing below the fold: the hero keeps the first screen because the install command is
+          the one thing on this page with a job (spec §3). */}
+      <OfficeProof />
       <StreamSection />
       <WhatIs />
       <GetStarted />
