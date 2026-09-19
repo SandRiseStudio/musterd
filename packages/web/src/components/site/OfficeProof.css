@@ -1,0 +1,64 @@
+/* The office section: a still, a caption and a handoff. Semantic tokens only. */
+
+.op {
+  padding-top: var(--section-y);
+  padding-bottom: 0;
+}
+
+.op__title {
+  font-family: var(--font-display);
+  font-size: clamp(1.2rem, 2.4vw, 1.55rem);
+  color: var(--text);
+  margin: 0 0 0.6rem;
+}
+
+.op__body {
+  color: var(--text-dim);
+  line-height: 1.5;
+  font-size: 0.92rem;
+  margin: 0 0 1rem;
+  max-width: 44rem;
+}
+
+.op__code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--accent-ink);
+}
+
+.op__figure {
+  margin: 0 0 0.75rem;
+}
+
+/* The asset is 1200x630, cropped for a share card, so it sits small inside its own gradient
+   (spec §5). Capping the width keeps it from reading as a hero it was never framed to be. */
+.op__still {
+  display: block;
+  width: 100%;
+  max-width: 46rem;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--mustard-100);
+}
+
+/* `--text-dim`, not a one-off grey: spec §6.6 names this the string on the page most likely to
+   fail contrast, and the measured ink tokens are what `pnpm a11y:check` sweeps. */
+.op__caption {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  margin: 0.5rem 0 0;
+  max-width: 46rem;
+}
+
+.op__link {
+  color: var(--accent-ink);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 720px) {
+  .op__body,
+  .op__caption {
+    font-size: 0.88rem;
+  }
+}
