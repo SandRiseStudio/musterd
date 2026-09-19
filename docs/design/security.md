@@ -108,7 +108,7 @@ The mode remains `off` by default, so the substrate is available for explicit go
 claiming to enforce every request. The handoff credential is shown once and stored only as a hash; audit
 and request logs contain metadata and model identifiers, never credentials or prompt/response bodies.
 Launcher adapters, live Tailscale/Aperture changes, and a future `required` cutover remain separate
-work.
+work. The complete four-increment status is tracked in the [paved-road delivery increments](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md#11-delivery-increments).
 
 ## Out of scope (roadmap, named so we don't design into a corner)
 

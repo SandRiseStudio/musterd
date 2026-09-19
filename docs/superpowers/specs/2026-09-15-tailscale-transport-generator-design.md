@@ -1,8 +1,8 @@
 # Tailscale transport generator — Increment 2b design
 
 **Date:** 2026-09-15  
-**Status:** proposed  
-**Scope:** design only; implementation requires an ADR and approved implementation plan.
+**Status:** implemented as Increment 2b under [ADR 402](../../decisions/402-tailscale-transport-generator.md)
+**Scope:** shipped design boundary; the generator remains a manual, deterministic, secret-free review artifact and does not activate runtime enforcement.
 
 ## Outcome
 

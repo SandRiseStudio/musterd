@@ -58,6 +58,15 @@ marker; and a fixture `future.harness` adapter participates in selection/reconci
 attaching as Surface `other`. Exercises only shipped commands and launcher contracts — never
 reconciler internals.
 
+### Paved-road acceptance boundary
+
+The optional Tailscale + Aperture paved road does not yet have an automated end-to-end scenario under
+`tests/scenarios/`. Package-level tests cover the read-only doctor, both deterministic generators, and
+the Increment 3 protocol/server authorization substrate. No test currently proves a supported Surface
+launching through a live Tailscale workload and Aperture request to provider and cost evidence, and
+Increment 4 API provisioning has no implementation or test surface. The complete acceptance remains
+open in the [paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md#13-acceptance-criteria-full-release--not-yet-met).
+
 ## Per-module acceptance (must pass before the next package in build order)
 
 - **protocol**: every act's meta rule enforced (accept/decline require `in_reply_to`; unknown act rejected; unknown meta preserved); `Envelope` round-trips; version literal pinned.
