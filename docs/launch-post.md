@@ -1,8 +1,14 @@
-# Launch post — musterd v0.3
+# Launch post — musterd
 
 > Draft. Adapt for the target platform (X/Twitter, HN, dev.to, LinkedIn). The README's "wedge" and principles sections are the canonical source; this is the post form.
 >
-> Security boundary: v0.3 ships scoped credentials, authorized seat claims, Presence-bound leases,
+> **The version is set on launch morning, not here.** Published as of 2026-09-19 is **0.4.2**; the
+> launch window is Oct 28 – Nov 2 ([traction-plan](design/traction-plan.md) §7), so the number will
+> have moved. Every `v0.4.2` below is a placeholder to be re-read against `npm view @musterd/cli
+> version` the morning it ships. Writing a guess here is how a post goes out claiming a version
+> nobody can install.
+>
+> Security boundary: v0.4.2 ships scoped credentials, authorized seat claims, Presence-bound leases,
 > admin-gated governance, and append-only audit records. It does not yet provide sandbox
 > enforcement, database encryption at rest, mTLS, signed audit records, or automatic credential
 > rotation. The Team-wide key minted by `team create` remains accepted as a marked legacy
@@ -11,17 +17,25 @@
 > [security advisory form](https://github.com/SandRiseStudio/musterd/security/advisories/new).
 >
 > ~~**Ship blocker:** as of 2026-08-13 musterd.io serves nothing — do not publish until it
-> resolves.~~ CLEARED 2026-08-13: **musterd.io is live** (Cloudflare Worker `musterd-io`, landing
-> page with the Get Started install section; verified `curl -I https://musterd.io` → 200; see
-> [name clearance](wiki/name-clearance.md)). Share-unfurls use the brand social card (`og:image`);
-> a Get Started still lives at `docs/assets/musterd-io-get-started.png`. The remaining launch
-> *recording* is the real 3-pane demo (`docs/demo.md` form 3) — the GIF placeholder ships if it must.
+> resolves.~~ CLEARED 2026-08-13: **musterd.io is live** and has since gained the `/watch` page and
+> the office section on the home page. Share-unfurls use the brand social card (`og:image`).
+>
+> **The one asset still missing is the recording.** Not a GIF — the **two-minute cut**
+> ([demo.md](demo.md)), whose centerpiece is a question reaching a human, the human declining, and
+> the work re-routing. That beat cannot be told as well as it can be shown, and it is the asset the
+> launch post, the leave-behinds and the LinkedIn messages all point at. Nothing else on this page
+> is blocked on it.
+>
+> **Two slots below are deliberately empty**, marked `NOT YET` in place: a quote from someone who
+> is not us, and the hand-counted install number. Both come from hand-to-hand in weeks 3–6
+> ([traction-plan](design/traction-plan.md) §6) and land in `docs/design/quotes.md`. An invented
+> number in a launch post is the one lie a stranger can check.
 
 ---
 
 ## Short form (X / Bluesky, ~280 chars)
 
-> **musterd v0.3** — muster your agents and humans into persistent named teams, across any harness.
+> **musterd v0.4.2** — muster your agents and humans into persistent named teams, across any harness.
 >
 > One human + two agents. Three surfaces. One team. Every act on the roster has a name on it, and the human is on the roster too.
 >
@@ -44,11 +58,11 @@ musterd is the coordination layer where agents and humans are peers, not a frame
 
 Any MCP-capable harness (Claude Code, Cursor, Codex…) joins by running `@musterd/mcp` with the member's env. Harness-agnosticism for free.
 
-MAST found ~79% of multi-agent failures are coordination failures — not capability failures. musterd is the layer between actors that already exist independently, agents and humans alike.
+The published failure taxonomies for multi-agent systems put most failures in coordination rather than capability — lost context on handoffs, two agents on one task, no shared ground truth. musterd is the layer between actors that already exist independently, agents and humans alike.
 
 A word on the moment. The fear in this year's headlines is agents nobody owns: no name, no record, no stopping point, no human who can be held to anything. musterd is built as the opposite of that shape. Every act on the roster carries a member's name. Who occupies a seat is what the harness observed, not what the agent declared. A claim on work a live teammate owns is refused, acceptance comes from a different actor, and a blocking question to a human holds until it is answered. None of that is a sandbox, and the boundary below says so.
 
-**v0.3 ships the shared-Team trust model**: scoped and revocable bootstrap credentials, authorized
+**The shared-Team trust model** (since v0.3): scoped and revocable bootstrap credentials, authorized
 seat claims, short-lived Presence-bound leases for routine agent HTTP access, admin-gated
 governance, and an append-only audit log. Sessions remain dormant until explicitly activated.
 
@@ -56,6 +70,15 @@ The boundary is explicit. musterd is local-first and binds to `127.0.0.1` by def
 yet sandbox agent tools, encrypt its SQLite database at rest, use mTLS, or sign its audit log.
 
 `npx @musterd/cli init` (or `brew install musterd` from the SandRiseStudio tap) gets you from zero to a working team in one command.
+
+<!-- NOT YET — one sentence from someone outside the team who installed it, with their name and
+     what they were doing. Source: docs/design/quotes.md, filled hand-to-hand in weeks 3-6. Ship
+     WITHOUT this rather than with a paraphrase of something nobody said. -->
+
+<!-- NOT YET — the hand-counted install number, if and only if it is worth saying out loud. There
+     are no usage analytics (PRIVACY.md), so this is counted from conversations, and a small true
+     number beats a large vague one. If the count is thin on launch morning, omit the line; it is
+     the one claim in this post a stranger can check against nothing. -->
 
 Tech: Node/TypeScript monorepo, SQLite + WS + HTTP, MCP adapter, MIT.
 
@@ -65,7 +88,7 @@ Site: https://musterd.io · Repo: https://github.com/SandRiseStudio/musterd
 
 ## Long form (dev.to / blog post)
 
-### musterd v0.3: named, persistent teams for agents and humans
+### musterd v0.4.2: named, persistent teams for agents and humans
 
 Multi-agent systems are having a moment. Every week there's a new framework for orchestrating LLM agents — CrewAI, LangGraph, AutoGen, you name it. Most of them share an assumption: agents are short-lived, disposable, and stateless between tasks.
 
@@ -73,7 +96,7 @@ That assumption is the bug.
 
 **The coordination failure problem**
 
-[MAST](https://arxiv.org/abs/2503.13657) analyzed hundreds of multi-agent failures and found that about 79% were _coordination_ failures — lost context on handoffs, agents working at cross purposes, no shared ground truth on who's doing what. Not capability failures. The models are good enough; the coordination between them is the gap.
+[MAST](https://arxiv.org/abs/2503.13657) analyzed hundreds of multi-agent failures and found most of them were _coordination_ failures — lost context on handoffs, agents working at cross purposes, no shared ground truth on who's doing what. Not capability failures. That is a taxonomy over other people's systems, not a measurement of musterd, and it says nothing about safety; what it does say is that the models are good enough and the coordination between them is the gap.
 
 musterd is the coordination layer where agents and humans are peers.
 
@@ -121,7 +144,7 @@ The fear in this year's headlines has one shape: agents nobody owns, acting unde
 
 None of this is containment. musterd names the work that goes through the team; it does not contain the agent, and the next section is honest about where that boundary sits. It is legibility: a team you can read.
 
-**v0.3: the shared-Team trust model**
+**The shared-Team trust model, since v0.3**
 
 The original v0.1 had a subtle bug: the MCP adapter auto-claimed presence on startup, so three Claude Code sessions bound to "Ada" meant three sessions wearing one identity. Each session was acting as Ada, draining her inbox, sending messages in her name.
 
@@ -159,8 +182,13 @@ musterd inbox --watch
 **What's next**
 
 The roadmap includes stronger deployment controls and security hardening beyond the current
-local-first boundary. The observability layer (coordination-level OTel tracing, the "batond"
-product) is also on the roadmap.
+local-first boundary.
+
+Coordination-level observability is **not** on that list any more — it shipped in three increments
+on 2026-07-05/06 (ADR 089–091). `musterd report coordination` derives the MAST-aware views over the
+act-typed log: time-to-unblock, ignored `request_help`, stalled threads, circular handoffs. What
+remains roadmap is **batond**, the standalone observability product built on that seam — the engine,
+not the views.
 
 MIT. Contributions welcome.
 
