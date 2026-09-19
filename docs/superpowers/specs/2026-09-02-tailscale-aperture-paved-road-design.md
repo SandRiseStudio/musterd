@@ -4,7 +4,7 @@
 
 **Seed:** `01M0ZXBSKGMADATTQJ13PWZ6SA` — “Paved roads - aperture (tailscale)”
 
-**Status:** approved exploration design; Increment 1 is implemented as `musterd integration doctor` under [ADR 385](../../decisions/385-optional-tailscale-aperture-doctor.md); later increments require their own ADRs and plans
+**Status:** approved exploration design; Increment 1 is implemented as `musterd integration doctor` under [ADR 385](../../decisions/385-optional-tailscale-aperture-doctor.md); Increment 2a and 2b are implemented as the reviewed Aperture and Tailscale generators under [ADR 400](../../decisions/400-aperture-policy-generator.md) and [ADR 402](../../decisions/402-tailscale-transport-generator.md); Increment 3 is partially implemented as the protocol/server authorization substrate under [ADR 411](../../decisions/411-governed-model-authorization-substrate.md); Increment 4 is not implemented. The complete governed-launch acceptance in §13 remains open, and any later work requires its own ADRs and plans.
 
 **Security boundary:** product architecture only; no active scanning, production access, or
 infrastructure mutation was performed
@@ -314,30 +314,36 @@ Figma terminal contract; this spec defines behavior, not an unreviewed terminal 
   retention, providers, default grants, quotas, and identity prerequisites.
 - Make no external changes.
 
-### Increment 2 — reviewed configuration artifacts
+### Increment 2 — reviewed configuration artifacts (implemented as 2a + 2b)
 
-- **2a — Aperture policy generation (implemented):** generate the secret-free, musterd-managed
+- **2a — Aperture policy generation (implemented under ADR 400):** generate the secret-free, musterd-managed
   Aperture fragment and complete Member workload mapping from the committed roster and
   governed-model policy.
-- **2b — Tailscale transport generation:** generate secret-free workload-tag ownership, exact
+- **2b — Tailscale transport generation (implemented under ADR 402):** generate secret-free workload-tag ownership, exact
   workload-to-Aperture HTTPS ACLs, and opaque Member-to-transport-node-key mapping from the
   committed transport manifest.
 - Validate exact identities, deny-by-default grants, zero retention, exact transport tags, and least
   privilege. Neither generator discovers runtime nodes, changes daemon settings, calls an external
   service, or applies configuration; the operator reviews and applies both artifacts.
 
-### Increment 3 — governed model launcher
+### Increment 3 — governed model launcher (partial: authorization substrate implemented)
 
-- Manage persistent per-Member-per-machine bridge identities.
-- Launch Claude Code and Codex through Aperture.
-- Add work-context authorization, fail-closed decisions, metadata-only audit correlation, and native
-  Aperture quotas.
-- Activate the Team transactionally from `off` to `required` only after every in-scope Member passes.
+- **Implemented in the substrate slice (ADR 411):** server-owned secret-free model policy; durable
+  Member-to-machine-node checks; human-issued one-shot `msla_` launch handoffs; matching Presence
+  consumption and revocation; bounded Lane/Act authorization; stable structured refusals; and
+  metadata-only audit correlation. Enforcement remains `off` by default.
+- **Not implemented:** persistent runtime bridge/device management; governed Claude Code or Codex
+  launchers; live Tailscale/Aperture configuration or application; provider routing and native
+  Aperture quota execution; and transactional activation from `off` to `required`.
+- The original Increment 3 acceptance therefore remains open: a live governed launch has not yet been
+  proven end to end through a supported Surface, Tailscale workload, Aperture request, provider, and
+  cost record.
 
-### Increment 4 — optional API provisioning
+### Increment 4 — optional API provisioning (not implemented)
 
 - Apply reviewed Tailscale and Aperture changes through narrow credentials.
 - Verify after apply and expose drift without auto-repair.
+- No `integration apply` surface or external control-plane mutation is currently shipped.
 
 Every increment that changes protocol schemas, storage, federation, authorization, dependencies, or CLI
 output needs its own ADR before implementation. Build order remains protocol → server → CLI → MCP, and
@@ -358,7 +364,7 @@ It must still state that local shell, filesystem, browser, and independently con
 outside musterd's enforcement. Built-in Tailnet and Tailscale SSH connectors require their own threat
 model and cannot inherit approval from the model-routing design.
 
-## 13. Acceptance criteria
+## 13. Acceptance criteria (full release — not yet met)
 
 The first complete model-governance release is accepted only when:
 

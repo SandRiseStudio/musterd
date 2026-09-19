@@ -1,8 +1,8 @@
 # Aperture-first governed-model generator — Increment 2 design
 
 **Date:** 2026-09-14  
-**Status:** approved  
-**Scope:** design only; implementation requires the ordered ADRs in §9
+**Status:** approved; implemented as Increment 2a under [ADR 400](../../decisions/400-aperture-policy-generator.md)
+**Scope:** shipped design boundary; the generator and doctor comparison remain manual, deterministic, secret-free, and enforcement-off
 
 ## 1. Outcome
 
@@ -228,7 +228,7 @@ sources are additive identities, not an AND-set of tags. A grant containing both
 Current fixtures also use Aperture role `agent`, while current Aperture configuration accepts `user` or
 `admin`.
 
-Implementation proceeds in two ordered lanes:
+Implementation proceeded in two ordered lanes:
 
 1. **Increment 1 correction.** Write an ADR, require the exact Member tag as the sole source, require
    Aperture role `user`, and make the doctor reject a shared tag or any second/broad source. Land this
