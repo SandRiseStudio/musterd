@@ -94,6 +94,7 @@ import {
   GovernedLaunchAuthorizationIssueSchema,
   GovernedPolicySchema,
   GovernedPolicyReadResponseSchema,
+  HarnessIdSchema,
   WIRE_ATTESTATION_SOURCES,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
@@ -5721,6 +5722,22 @@ export async function handleHttp(
         // Headline by class, not recency (ADR 225 amendment): the wake queue's newest-first order
         // is not the notice's — see `headlineInterrupt`.
         const { latest, huddleTopic, rest } = headlineInterrupt(pending, messages);
+        // Composed ONCE and both returned and recorded (ADR 423). The line is the only part of a
+        // delivery that cannot be reconstructed afterwards: it is derived from the queue state at
+        // this instant — `count`, the class mix, which act won `headlineInterrupt` — and that state
+        // is gone the moment the act discharges. Recomposing it later from the acts table would
+        // produce a plausible string, not the one the seat received, which is the difference
+        // between evidence and a reconstruction.
+        const line = composeInterruptLine(latest, pending.length, huddleTopic, rest);
+        // Which rail asked. The caller declares it (`musterd inbox --interrupt-check --hook X`);
+        // until ADR 423 the flag only shaped the CLI's own stdout and never reached the server, so
+        // every row was rail-blind and the doorbell contract had to cite a measurer's name per
+        // harness. Parsed through the protocol schema at the boundary (AGENTS.md rule 4): this is
+        // caller-supplied text landing in a durable log, so an unparseable value is recorded as
+        // ABSENT rather than echoed — and never costs the seat its bell.
+        const railRaw = url.searchParams.get('rail');
+        const railParsed = railRaw === null ? null : HarnessIdSchema.safeParse(railRaw);
+        const rail = railParsed?.success === true ? railParsed.data : undefined;
         // Audit the delivery once per (recipient, act) — who grabbed the mic, when, at whom (§Obs).
         if (!hasInterruptRaised(ctx.db, team.id, member.name, latest.id)) {
           appendAudit(ctx.db, team.id, {
@@ -5733,12 +5750,14 @@ export async function handleHttp(
               act_kind: latest.act,
               tier: raiseClass(latest, huddleTopic),
               count: pending.length,
+              line,
+              ...(rail === undefined ? {} : { rail }),
             },
           });
         }
         return sendJson(res, 200, {
           raised: true,
-          line: composeInterruptLine(latest, pending.length, huddleTopic, rest),
+          line,
           count: pending.length,
           act: { id: latest.id, from: latest.from, act: latest.act },
         });

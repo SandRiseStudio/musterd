@@ -126,3 +126,28 @@ what the columns hold.
   convention 1.
 - [the instrument discharges the act](the-instrument-discharges-the-act.md) — the same failure family:
   a measurement reading a field that answers a different question.
+
+## A record kept as a verb is invisible to a table search
+
+Before asking whether musterd records something, list the `audit` actions — not the tables. Three
+delivery-side records live as actions in this one table and none of them shows up in a `.schema`
+listing: `interrupt.raised`, `interrupt.refused` ([ADR 391](../decisions/391-refused-interrupt-probe-attribution.md)),
+`inbox.rendered` ([ADR 088](../decisions/088-interrupt-line-tool-boundary-inbox-check.md) Amendment 3).
+
+Measured 2026-09-16 (izzo, lane `01M2NH5WT9`): "39 tables in `~/.musterd/musterd.db`, none of them a
+delivery record" — a true sentence that produced a false conclusion. A lane was opened to build a
+delivery record for `GET /inbox/interrupt-check`, and a proposed shape, an ADR and a migration were
+drafted for it. `interrupt.raised` had been written by that same handler since 2026-07-05 (ADR 088
+increment 1, #109); the laptop daemon held 253 rows spanning 2026-07-06 onward when the lane was
+claimed on 2026-09-19 (dolly). The contract the lane set out to fix had *already cited one of those
+rows* as evidence — the native append-half measurement in
+[the doorbell contract](../design/daemon-doorbell-contract.md) clause 1 names `interrupt.raised`,
+actor nick, target compo — without anyone reading it as the general record.
+
+The table list is the wrong index for this question (2026-09-19; falsify: `SELECT DISTINCT action FROM audit` returns rows for a capability a `.schema` read concluded was absent). <!-- claim: other -->
+
+The cost is not the wasted draft, which was caught. It is that the *stale* thing goes unfixed while
+the missing thing gets built: the real defect here was a contract clause citing the wrong evidence
+for five harnesses, and it would have survived a successful build of the duplicate record. See
+[correct by coincidence](correct-by-coincidence.md) for the sibling shape — an instrument that
+agrees with the truth until the question changes.

@@ -397,7 +397,10 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
     if (!explicit || !identity) return 0;
     seat = identity.name;
-    const res = await http.interruptCheck(team);
+    // Explicit ternary, not a conditional spread: a spread here would let a mistyped key vanish
+    // from typecheck, which is the exact blind spot docs/wiki/conditional-spread-blind-spot.md was
+    // written about — and the field it would silently drop is the one this lane exists to record.
+    const res = await http.interruptCheck(team, hookFlag ? { rail: hookFlag } : {});
     if (res.raised && res.line) emit(res.line);
   } catch (err) {
     // Best-effort: the interrupt probe must never fail the tool call it rides on — with ONE thing it

@@ -4346,6 +4346,62 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(audit[0]!.detail).toContain('steer');
   });
 
+  it('ADR 423 (lane 01M2NH5WT9): the delivery row carries the VERBATIM line and the rail that asked', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+
+    await post(
+      '/teams/dawn/messages',
+      { envelope: urgentEnv('nick', 'Bob', 'u-verbatim') },
+      nickTok,
+    );
+
+    const raised = await get('/teams/dawn/inbox/interrupt-check?rail=claude-code', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(raised.json.raised).toBe(true);
+
+    const audit = auditRows('dawn').filter((r) => r.action === 'interrupt.raised');
+    expect(audit).toHaveLength(1);
+    const detail = JSON.parse(audit[0]!.detail as string) as { line?: string; rail?: string };
+    // The line is the only field that is NOT reconstructable later: it depends on the queue state
+    // at this instant (count, class mix, which act was `latest`), and that state is gone the moment
+    // the act discharges. Byte-for-byte against what the seat actually received.
+    expect(detail.line).toBe(raised.json.line);
+    // The rail is what the contract's clause-1 table needs to cite per harness. It is NOT in hand
+    // at the server by construction — `--hook` shapes the CLI's stdout and was never sent.
+    expect(detail.rail).toBe('claude-code');
+  });
+
+  it('ADR 423: an unparseable rail is recorded as absent, never echoed into the audit log', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+
+    await post(
+      '/teams/dawn/messages',
+      { envelope: urgentEnv('nick', 'Bob', 'u-badrail') },
+      nickTok,
+    );
+
+    const raised = await get(
+      '/teams/dawn/inbox/interrupt-check?rail=' + encodeURIComponent('Claude Code <script>'),
+      bobTok,
+      { 'x-musterd-no-touch': '1' },
+    );
+    expect(raised.json.raised).toBe(true);
+
+    const audit = auditRows('dawn').filter((r) => r.action === 'interrupt.raised');
+    const detail = JSON.parse(audit[0]!.detail as string) as { line?: string; rail?: string };
+    expect(detail.rail).toBeUndefined();
+    expect(audit[0]!.detail).not.toContain('script');
+    // The delivery itself is unaffected — a bad rail label must never cost the seat its bell.
+    expect(detail.line).toBe(raised.json.line);
+  });
+
   it('interrupt line (lane 01M2P69FHZ): names the act id and a by-id read, so the follow-up is one call at any inbox size', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
