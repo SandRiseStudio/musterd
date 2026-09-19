@@ -335,6 +335,8 @@ alone; the host does not invent a cause it did not read._
 
 _2026-09-19 (ADR 424, lane 01M2SB89AR): the `resumable` badge this section's increment 4 introduced is now withdrawn by evidence — a `residency.woke` row newer than the capture with `session: fresh` nulls the roster's `resumable_at` until the next capture or a resumed wake. Measured that day: 0 of 42 wakes in five days had resumed while every enrolled seat read `resumable`, because a single wake life (529–1583 KiB) is two to six times the 256 KiB hygiene bound. The enrollment row and this section's attestation contract are unchanged._
 
+_2026-09-19 (ADR 426, lane 01M2XD2WCE): `argTail` also passes `--setting-sources project,local` under both policies. A wake had been loading the human's user layer — twenty plugins' skills, per-call hooks and MCP servers — which measured as 200 KiB of transcript and 36k tokens of context on an empty life ($1.52 → $0.23 with the flag). The seat's own hooks and permission floor live in `.claude/settings.local.json` and the MCP entry in `~/.claude.json` by repo root, so nothing a wake needs was in that layer. The skip-permissions invariant is unchanged._
+
 ## Observability & Evaluation
 
 **Traces** — one `musterd.residency.wake` span per actuation (lease → spawn → occupied →
