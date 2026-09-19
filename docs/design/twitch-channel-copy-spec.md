@@ -111,7 +111,7 @@ musterd already knows at `stream start` — the goal and the lane being worked. 
 short-name field on a lane (lane titles are a paragraph) and the first Twitch API call in the repo:
 grepped 2026-09-16 for `helix`, `channels?broadcaster`, `game_id`, `stream_title` across
 `packages/` and `scripts/` — **zero hits**, so the title is hand-set today and nothing else can set
-it. That is a platform lane. It is worth opening, because a stream about a coordination layer
+it. That is an engineering lane. It is worth opening, because a stream about a coordination layer
 titling itself from the coordination layer is the dogfood argument in one line — but it is not
 product-communications' to take, and the convention above works without it.
 
