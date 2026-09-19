@@ -332,19 +332,26 @@ supervisor genuinely does not know which one fired. **A restart reason the super
 one it must not assert** — the same failure as a counter that reads healthy while the picture is
 frozen, one layer up.
 
-### The 6.5-minute freeze is not reachable on `main`, and that surprised me (2026-09-16; falsify: stringify the ack's `sessionId` on main and watch it die on an unhandled rejection instead of freezing) <!-- claim: other -->
+### ~~The 6.5-minute freeze is not reachable on `main`, and that surprised me (2026-09-16; falsify: stringify the ack's `sessionId` on main and watch it die on an unhandled rejection instead of freezing)~~ STILL TRUE ABOUT THE FREEZE, INVALID ABOUT `main` SINCE 2026-09-16 — #1500 (`2f1eae77`) attached the `.catch()`, so the falsifier as written no longer reproduces (2026-09-19; falsify: stringify the `sessionId` on `main` and watch it report once and stop, not exit on an unhandled rejection) <!-- claim: other -->
 
 The first falsifier I wrote reproduced the original bug — a stringified `sessionId` — and it did
-**not** freeze the stream. It crashed the process. On `main` the ack is `void page.send(...)` with
-no `.catch()`, so Chrome's "Invalid parameters" becomes an unhandled rejection and Node exits. The
+**not** freeze the stream. It crashed the process. ~~On `main` the ack is `void page.send(...)` with
+no `.catch()`, so Chrome's "Invalid parameters" becomes an unhandled rejection and Node exits.~~
+**INVALID SINCE 2026-09-16, struck 2026-09-19.** That sentence described `main` for about six hours.
+#1500 (`2f1eae77`) landed `page.send(...).catch(ackRefused)`, so on `main` today a refused ack is
+reported exactly once and the process does **not** exit on an unhandled rejection — delivery stops,
+and `makeFrameWatchdog` force-stops with the code `socketLossExitCode` chose. It is struck rather
+than deleted because it was on `main` and someone may have read it. The
 six-and-a-half-minute silent freeze was a property of the closed #1466 branch, whose gate added a
 `.catch()` that swallowed exactly that rejection.
 
 Two things follow. The watchdog is still right, because a refused ack is only ONE way frames stop
 arriving and the others (a wedged compositor, a renderer hang, a silently stopped screencast) raise
 nothing at all — which is why the real falsifier had to be `Page.stopScreencast`, not a bad ack.
-And, noted but **not fixed here**: that unhandled rejection exits 1, so a supervised stream will not
-restart from a recoverable ack failure that `socketLossExitCode` would otherwise call restartable.
+And, ~~noted but **not fixed here**: that unhandled rejection exits 1, so a supervised stream will not
+restart from a recoverable ack failure that `socketLossExitCode` would otherwise call restartable.~~
+**FIXED 2026-09-16 by #1500** — the gap this paragraph left open is the lane it became
+(`01M2NWVH4G`, accepted 2026-09-19).
 
 ## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream) <!-- claim: defect -->
 
