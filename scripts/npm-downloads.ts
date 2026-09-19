@@ -20,10 +20,20 @@
  *     - OLD VERSIONS. In that same week the CLI was fetched across EIGHT versions including
  *       0.0.0 and 0.0.1. Nobody installs 0.0.0; mirrors walk the version list.
  *
- *   So the headline number is inflated roughly 40× against the thing we actually want to know —
- *   did a stranger install this — and a reader who quotes "223 downloads last month" in a launch
- *   post or an application would be wrong by that factor. This script reports the number that
- *   survives both tells: downloads of the CURRENT version only, with the lockstep days named.
+ *   So the headline number is inflated against the thing we actually want to know — did a stranger
+ *   install this. THE INFLATION HAS NO FIXED FACTOR, and quoting one is the mistake this script
+ *   exists to prevent: the ratio depends entirely on whether a mirror burst falls inside the window
+ *   you measured. Measured 2026-09-19: on the same seven days it was 2.0× (24 all-version against
+ *   12 on the current version); against the last thirty days, ~4× (215 against a ~51/month
+ *   current-version run-rate); in the Aug 3 burst week, ~40× (339 against a ~8–11/week floor). All
+ *   three are real and none predicts the next window — so quote a ratio only with the window it
+ *   was measured over, or do not quote it. This script reports the number that survives both
+ *   tells: downloads of the CURRENT version only, with the lockstep days named.
+ *
+ *   (The 223-and-40× pairing this comment used to carry was two measurements of different windows
+ *   glued into one claim — 223 is a month, 40× is a burst week. Corrected 2026-09-19 alongside
+ *   traction-plan §6, PR #1576; wanderer caught that the script still had the old form after the
+ *   plan was fixed.)
  *
  * Falsifier for the whole premise: if a burst day ever shows the CLI leading its dependencies and
  * the downloads landing on the current version, the mirror reading is wrong for that day and this
