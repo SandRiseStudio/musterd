@@ -52,14 +52,6 @@ calls your agents make. It would not have stopped a prompt injection or a compro
 Whatever keeps an agent off production, you still need it — and anyone selling you names as
 containment is worth pressing on that, us included. Press it on this page.
 
-## The cost we will not dress up
-
-We have a controlled measurement of coordinated-versus-uncoordinated waste, and it flatters us. It
-is not in this page, because it is from July 2026 and some 994 commits old, and we are re-running
-it before it travels. What we will say now without a number: one agent alone still wins on cost and
-on wall-clock. If your bottleneck is the bill rather than the collisions, that is an argument
-against us, and we would rather you heard it from us.
-
 ## What is not there yet
 
 - Attested-versus-declared model identity reaches the protocol and the audit record, but **no

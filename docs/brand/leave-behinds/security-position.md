@@ -226,8 +226,15 @@ never made. Publishing the number we look worst on is what makes the other five 
 
 ## 5. What this decides for each outbound piece
 
-- **All three leave-behinds** open on tier 1 and carry the boundary sentence. The §3 list is a
-  hard constraint on every draft.
+- **The platform-team and adjacent-startup leave-behinds** open on tier 1. All three carry the
+  boundary sentence, and the §3 list is a hard constraint on every draft.
+  ~~All three leave-behinds open on tier 1.~~ **Amended 2026-09-18**: the investor page opens on
+  the wedge and the scope decision, with Replit carried as a companion reference rather than as its
+  lead. That follows this same section's investor-specific line, which is the more specific
+  instruction, and contradicts its own opening sentence — so the sentence changes rather than the
+  page quietly winning against it. wanderer caught the conflict on the second read
+  (`01M2VD2Z1B`); it is the 38× lesson one turn on, and a bar that bends in the copy but not in the
+  document is two documents.
 - **Platform team** gets the decline / claim-refusal / cross-actor-acceptance argument as protocol
   verbs, which is where wanderer says it is strongest.
 - **Adjacent startup** gets the same story with the tier-1 contrast doing the work.
@@ -269,6 +276,38 @@ sentence, and it is also Band's half of the competitive fork (positioning.md: *"
 agents; musterd makes them a team"*). Canonical and still wrong as an opening line, because it puts
 us on the competitor's side of the fork in the reader's first breath. Both pages now lead with what
 is ours: it does not run or orchestrate your agents — it makes the ones you already run into a team.
+
+### The second read, on the other two pages (2026-09-18, `01M2VD2Z1B`)
+
+wanderer read investor.md and adjacent-startup.md after the first four corrections were in. Five
+more findings, all taken.
+
+1. **A number that disagreed with itself.** The traction section glued together two different
+   measurements: the registry's 223-a-month figure and a "~40× inflation" that is actually a
+   burst-week all-versions ratio. 8–11/week of the current version is 32–47 a month; 223 ÷ 40 is
+   about 5.6. Both cannot be the real floor, and a reader who does the division stops trusting the
+   rest of the honesty — which is the worst possible place to lose them. **Neither number is on the
+   page now.** It says the registry's totals are higher and that they count mirror crawls of
+   versions nobody published. Same class as "names the loss" on the first read: the caveats were
+   right in the repo and the sentence still overclaimed.
+2. **Three sentences that performed the honesty instead of being it** — "the section to check",
+   "we do not quote it" in a bullet that then quoted it, and "the product is further along than the
+   distribution". Instructing a reader how to receive frankness is the move, not the frankness.
+   Cut.
+3. **The boundary-as-bet argument hoped "finishable" was attractive.** It is a reason a founder
+   declines the control plane, not a reason an investor prefers the smaller company — and money in
+   this cell has already gone to the bigger product. The page now names that objection and answers
+   it with the thing the funded products do not do: they stay inside one owner's walls, with no
+   identity that crosses owners and no teammate who can decline.
+4. **The ask read as refusing money.** "Not money, and not today", stacked on a section saying
+   there is no pricing, handed an investor a user-research card. It now sequences rather than
+   declines: install first, because a round grows from teams that have tried it.
+5. **637 vs 6 was undated** — it is all-time as of 2026-07-16, and a page travelling in October
+   would have been quoting a July snapshot as if it were now. Dated on both pages that carry it.
+
+Also on the startup page: a second cost section had accumulated, unique to the reader most
+sensitive to cost, on a page that already said overhead, no support contract, and you are reading
+the source at 2am. One cost section is honest; two is talking them out. Removed.
 
 ## 6. Open, and owed
 

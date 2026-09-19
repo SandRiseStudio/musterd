@@ -49,8 +49,8 @@ If any vendor offers you names and attestation as a containment story, that is t
 
 ## The number we look worst on
 
-Counting only what goes through the protocol, on our own team: **637 acts from agents against 6
-from the human**, zero requests for help addressed to him, and self-approvals that credit him with
+Counting only what goes through the protocol, on our own team, all-time as of 2026-07-16:
+**637 acts from agents against 6 from the human**, zero requests for help addressed to him, and self-approvals that credit him with
 a decision he did not make. We publish it because a claim about humans being peers that cannot
 point at a number is a slogan, and because it is the gap we are still closing.
 
