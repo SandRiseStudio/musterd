@@ -1,6 +1,6 @@
 # 420 — Waiting ledger empties on render, not on answer
 
-- Status: proposed
+- Status: accepted (2026-09-19, human acceptance by nick, act 01M2XBEQNK8Y8T4Y7H4JK6XGJ3 in reply to ask 01M2XB8CW0HX7N3SQ87QGE1T3Q)
 - Date: 2026-09-18
 
 ## Context
