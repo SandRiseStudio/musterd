@@ -119,15 +119,24 @@ hit; they are what the inputs nick controls should produce, and the inputs are t
 product has no usage analytics ([PRIVACY.md](../../PRIVACY.md)), so installs and "active a week
 later" are hand-counted from conversations, with three passive proxies read every Sunday:
 
-- **npm downloads — the current version only**, via `pnpm npm:downloads`. Baseline 2026-09-17:
-  8–11 downloads a week of `0.4.2` per package, and days at zero. *Do not quote the headline
-  number.* `downloads/point/last-month` answered **223** for the CLI against a true floor of 0–3 a
-  day, because registry mirrors walk the whole `@musterd` scope: the bursts move all five packages
-  in near-lockstep (339 / 307 / 356 / 326 in the week of Aug 3) and, in one quiet week, the CLI was
-  fetched across **eight versions including 0.0.0 and 0.0.1**. Roughly 40× inflation, in the
-  direction that flatters us. The script prints the current-version column and names the lockstep
-  days. *Falsify: a burst day where the CLI leads its own dependencies and the downloads land on
-  the current version is a real install spike, not a mirror — which is what a launch should look
+- **npm downloads — the current version only**, via `pnpm npm:downloads`. Measured 2026-09-19:
+  **12 downloads a week** of `0.4.2` for the CLI (10–12 across the five packages), and days at
+  zero. *Do not quote the headline number* — it counts every version anyone fetched, and registry
+  mirrors walk the whole `@musterd` scope: the bursts move all five packages in near-lockstep
+  (339 / 307 / 356 / 326 in the week of Aug 3) and, in one quiet week, the CLI was fetched across
+  **eight versions including 0.0.0 and 0.0.1**.
+
+  **There is no single inflation multiplier, and writing one down is the mistake.** Measured on the
+  same seven days (2026-09-12→18), the headline was 24 against 12 on the current version —
+  **2.0×**. Against the last thirty days the headline was 215, about **4×** the current-version
+  run-rate. In the Aug 3 burst week it was **~40×** (339 all-version against a ~8–11/week current
+  floor). All three are real; none of them describes the next window, because the ratio is a
+  property of whether a mirror burst lands inside the one you measured. Quote the ratio only with
+  the window it was measured over, or do not quote it. Read the current-version column; treat the
+  gap between it and the all-version column as the mirror floor, which is what the script prints.
+
+  *Falsify: a burst day where the CLI leads its own dependencies and the downloads land on the
+  current version is a real install spike, not a mirror — which is what a launch should look
   like.*
 - **GitHub** stars and unique visitors (0 and 7 on 2026-09-16).
 - **musterd.io** Get Started page views (beacon live since 2026-09-14).
