@@ -228,3 +228,63 @@ describe('fmtNext — recorded intentions lead the up-next section (ADR 373 incr
     expect(fmtNext(brief(null))).toContain('nothing in flight');
   });
 });
+
+/**
+ * Lane 01M2XAXRP3: a carried lane whose work is already on main is reported as UNSUBMITTED, with
+ * the evidence and the next act, on the carrying line itself. Measured 2026-09-19: miley's seat
+ * memory said "carrying" for three lanes that had shipped (#1474, #1500, #1550) and orientation
+ * read the note before the board or the repo. The reconciliation is seat-side git
+ * (`landed.ts`); this pins that the brief SAYS it once it knows.
+ */
+describe('fmtNext — a carried lane whose work landed is unsubmitted, not carried', () => {
+  function carrying(): NextBrief {
+    const b = brief(null);
+    b.in_flight = [
+      {
+        id: '01M2M75BQH81NH40WJ69DZXY1W',
+        state: 'claimed',
+        title: '/watch',
+        owner_seat: 'miley',
+        project: 'agents',
+        scope: [],
+        depends_on: [],
+        branch: 'miley/watch-page',
+        goal_id: null,
+        merged: null,
+      } as unknown as Lane,
+      {
+        id: '01M2RTF9F2NJEA5ABNK77VD02A',
+        state: 'active',
+        title: 'sprite cache',
+        owner_seat: 'miley',
+        project: 'agents',
+        scope: [],
+        depends_on: [],
+        branch: null,
+        goal_id: null,
+        merged: null,
+      } as unknown as Lane,
+    ];
+    return b;
+  }
+
+  it('marks the landed lane with its evidence and names lane_submit as the next act', () => {
+    const out = fmtNext(
+      carrying(),
+      new Map([
+        ['01M2M75BQH81NH40WJ69DZXY1W', { evidence: 'main cites it: 83015333 /watch (#1474)' }],
+      ]),
+    );
+    const lines = out.split('\n');
+    const at = lines.findIndex((l) => l.includes('01M2M75BQH81NH40WJ69DZXY1W'));
+    expect(lines[at + 1]).toContain('LANDED, unsubmitted — main cites it: 83015333 /watch (#1474)');
+    expect(lines[at + 2]).toContain("lane_submit {id:'01M2M75BQH81NH40WJ69DZXY1W'");
+    // The other carried lane is untouched — absent evidence is silence, never "not landed".
+    const other = lines.findIndex((l) => l.includes('01M2RTF9F2NJEA5ABNK77VD02A'));
+    expect(lines[other + 1] ?? '').not.toContain('LANDED');
+  });
+
+  it('renders exactly as before when nothing is reconciled (default argument)', () => {
+    expect(fmtNext(carrying())).not.toContain('LANDED');
+  });
+});

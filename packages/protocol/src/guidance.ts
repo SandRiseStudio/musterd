@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 26;
+export const GUIDANCE_CONTENT_VERSION = 27;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -554,7 +554,11 @@ export function renderOrientSkill(): string {
     '',
     '1. `team_inbox_check` — your first team_* call; it claims the seat and shows what waits.',
     '2. If the orientation block showed a memory headline, `team_memory_read` and pick up where',
-    '   the previous session left off.',
+    '   the previous session left off — then `team_next` BEFORE you repeat any of it. Memory is',
+    '   a point-in-time note with no revision path; the board and the repo are the truth. Each',
+    "   carrying line is reconciled against origin/main by this workspace's git: one marked",
+    '   `LANDED, unsubmitted` is not work to build — `lane_submit` it (lane 01M2XAXRP3: three',
+    '   lanes memory called "carrying" on 2026-09-19 had shipped days earlier).',
     '3. **Handle now (tier 1) — everything addressed to this seat.** Directed asks /',
     '   request_help / steers: answer them (`team_send` accept/decline/reply as the act',
     '   demands). An acceptance or review request routed to you: DO the review — it is yours by',
@@ -569,7 +573,8 @@ export function renderOrientSkill(): string {
     '   incident lanes: read the lane, post one status_update',
     '   with what you found. Do not start other work into a shared red.',
     '4. **Surface, do not handle (tier 2) — work nobody routed to you.** Carried lanes, up-next,',
-    '   claimable open lanes: one compact readout for the human. Do not claim unaddressed work.',
+    '   claimable open lanes: one compact readout for the human, from the reconciled `team_next`',
+    '   of step 2, never from memory alone. Do not claim unaddressed work.',
     "5. `team_send {act:'status_update'}` — one line.",
     "6. **Label from THIS session's tool list** — not from which harness you think you are on",
     '   (ADR 418). `list_sessions` AND `set_session_title` → run the musterd-label-sessions',

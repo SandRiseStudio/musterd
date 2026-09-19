@@ -222,3 +222,26 @@ Shipped as guidance v20 (`renderOrientSkill`), with a behavioural test pinning t
 snapshot discipline carrying the bump. The §Experiment falsifier gains two cases: a seat that
 orients onto a waiting review request and asks the human whether to take it, and two seats that
 review the same request because neither announced it.
+
+## Amendment — 2026-09-19: step 2 reconciles memory against the repo before the seat repeats it
+
+Lane `01M2XAXRP3`. Measured that morning, three for three: miley oriented, read seat memory, and
+reported three lanes as carried. All three had shipped (#1474, #1500, #1550) and had merely never
+been submitted. Every note was true when written — ADR 259 already says seat memory is
+continuity, not truth — but the ritual read memory in step 2 and reported "carried lanes" in
+step 4 without consulting the board or the repo in between. The failure is ordering, not
+discipline, and a wiki page nobody reads at 9am fixes nothing on its own.
+
+The Decision is unchanged: tier 1 handles addressed work, tier 2 surfaces the rest. What moves is
+**what step 2 reads before step 4 speaks**. Step 2 now sends the seat to `team_next` after
+`team_memory_read` and before it repeats anything, and step 4's readout comes from that brief,
+never from memory alone. The brief earns that trust by reconciling each carried lane against
+`origin/main` with the seat's own Workspace git (`packages/mcp/src/landed.ts`) — the daemon has
+no git of the seat's repo, and ADR 294/297 forbid a sweep — and rendering `↳ LANDED,
+unsubmitted — <evidence>` with `lane_submit` named as the next act. Evidence is a main commit
+that declares the lane or a pushed branch gone from origin; absent evidence prints nothing.
+
+Shipped as guidance v27 (`renderOrientSkill`). The §Experiment falsifier gains one case: a seat
+whose memory names a lane whose PR has landed unsubmitted, oriented fresh — the `LANDED` line must
+appear under it. The three cases, the two false positives caught before landing, and the case
+still missed are in `docs/wiki/memory-outlives-the-merge.md`.

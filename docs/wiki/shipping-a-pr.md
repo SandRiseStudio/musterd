@@ -6,6 +6,10 @@ One enforced git loop (ADR 106): branch from fresh origin/main → PR → `gh pr
 
 Branch `feat/`|`fix/`|`docs/` from fresh `origin/main`; commits are throwaway (squash-merge). Fast local smoke only — CI is the authority. `gh pr create` → `gh pr merge --squash --auto --delete-branch`, walk away. Sync a stale branch by `git rebase origin/main` + `git push --force-with-lease`; never `merge main`, never bare `--force`. Required checks on main: `gates` + `Cursor Bugbot`; linear history; squash-only.
 
+## Declare the lane in the squash body, in the first five lines
+
+Open the PR body (which becomes the squash body) with `Lane \`01M2XXXXXX\`.` — the short id, on its own line, near the top — or put `(lane 01M2XXXXXX)` in the title. This is what `team_next` reads back to tell a seat its carried lane already landed ([memory outlives the merge](memory-outlives-the-merge.md)). A mention mid-sentence ("declining lane 01M2…") or deep in the body is deliberately not counted, so a PR that never declares its lane (#1474 did not) is invisible to that check once its branch is cleared (2026-09-19).
+
 ## A PR's review count is not this team's review record
 
 Seat reviews are musterd acts, so a fully-reviewed PR routinely shows **0 reviews and 0 comments** on GitHub. Do not read an empty forge as an unreviewed PR, and post substantive reviews to both stores with each pointing at the other — see [the ledger and the forge](ledger-and-forge.md).
