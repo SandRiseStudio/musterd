@@ -669,8 +669,13 @@ export class HttpClient {
    * for this seat? Sub-50ms, read-only, cursor-untouched. Returns `{ raised: false }` on the common
    * silent path, or the **daemon-composed** one-line notice + the act's structured header when raised.
    */
-  interruptCheck(slug: string): Promise<InterruptCheck> {
-    return this.request('GET', `/teams/${slug}/inbox/interrupt-check`);
+  interruptCheck(slug: string, opts: { rail?: string } = {}): Promise<InterruptCheck> {
+    // `rail` names the harness hook driving this probe (ADR 423). It is the one thing the server
+    // cannot observe for itself — the same probe, byte for byte, is issued by every harness — and
+    // it is what lets the doorbell contract cite a delivery row per rail instead of a measurer's
+    // name and a date. Omitted when unknown: the server records an absent rail rather than a guess.
+    const qs = opts.rail ? `?rail=${encodeURIComponent(opts.rail)}` : '';
+    return this.request('GET', `/teams/${slug}/inbox/interrupt-check${qs}`);
   }
   /** Whole-team timeline (the firehose's history side, ADR 061) — every envelope, not just my inbox. */
   messages(

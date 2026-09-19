@@ -343,3 +343,29 @@ describe('HttpClient.claim (SPEC A.7, ADR 075/077) — status dispatch', () => {
     ).rejects.toBeInstanceOf(CliError);
   });
 });
+
+/**
+ * ADR 423 (lane 01M2NH5WT9). The fourth resolved-then-dropped field on this family of routes, and
+ * the one that had never been resolved at all: `--hook <harness>` shaped the CLI's own stdout and
+ * was never sent, so every `interrupt.raised` row since 2026-07-05 was rail-blind and the doorbell
+ * contract had to cite a measurer's name per harness instead of a row. Asserted on the URL the
+ * client builds, because that is where the previous three were lost.
+ */
+describe('HttpClient.interruptCheck rail (ADR 423)', () => {
+  it('names the rail on the query string when the hook declared one', async () => {
+    const fn = stubFetch(200, { raised: false });
+    const http = new HttpClient('http://d', 'mscr_x');
+    await http.interruptCheck('dawn', { rail: 'claude-code' });
+    expect(String((fn.mock.calls[0] as [string])[0])).toContain(
+      '/teams/dawn/inbox/interrupt-check?rail=claude-code',
+    );
+  });
+
+  it('sends no rail at all when the probe was not run from a hook — absent, never guessed', async () => {
+    const fn = stubFetch(200, { raised: false });
+    const http = new HttpClient('http://d', 'mscr_x');
+    await http.interruptCheck('dawn');
+    expect(String((fn.mock.calls[0] as [string])[0])).toContain('/inbox/interrupt-check');
+    expect(String((fn.mock.calls[0] as [string])[0])).not.toContain('rail');
+  });
+});
