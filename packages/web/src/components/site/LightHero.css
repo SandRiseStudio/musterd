@@ -9,19 +9,17 @@
 
 .lh__inner {
   padding-block: calc(var(--section-y) * 1.15);
-  max-width: 44rem;
-}
-
-.lh__mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0 0 1rem;
-  color: var(--text);
-  font-weight: 700;
+  /* NO max-width. This div carries `.shell`, and overriding the rail here is what made the hero
+   * step in: `.shell` is 1120px, 44rem is 704px, and centring both put the hero's left edge
+   * (1120 - 704) / 2 = 108px inside the left edge of the nav above it and every h2 below it.
+   * Measured 2026-09-19 at 1440: nav and all four section headings at x=316, hero at x=424.
+   * A rail is a left edge, not a measure — the measure belongs to the text, below. */
 }
 
 .lh__title {
+  /* The 44rem the container used to impose, now where it belongs: this keeps the tagline
+   * breaking across two lines exactly as before while the block's left edge joins the spine. */
+  max-width: 44rem;
   font-family: var(--font-display);
   font-size: clamp(1.7rem, 4.2vw, 2.5rem);
   line-height: 1.1;

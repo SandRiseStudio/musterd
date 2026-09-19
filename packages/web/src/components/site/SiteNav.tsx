@@ -18,18 +18,24 @@ export const NAV_LINKS = [
 // full navigation is the correct (and cheapest) transition.
 export function SiteNav() {
   return (
-    <header className="sitenav shell">
-      <a className="sitenav__home mono" href="/" aria-label="musterd home">
-        <MusterdChip size={18} className="sitenav__chip" />
-        musterd
-      </a>
-      <nav className="sitenav__links" aria-label="Site">
-        {NAV_LINKS.map((l) => (
-          <a key={l.href} href={l.href}>
-            {l.label}
-          </a>
-        ))}
-      </nav>
+    // The BAND is full-width and the rail is inside it. The header used to be the `.shell`
+    // itself, so its background and bottom border stopped where the content did and the bar
+    // floated in the middle of a wide window — at 2000px it began 533px from the edge, which is
+    // what a reader notices first. A page's chrome spans the window; its content sits on the rail.
+    <header className="sitenav">
+      <div className="sitenav__inner shell">
+        <a className="sitenav__home mono" href="/" aria-label="musterd home">
+          <MusterdChip size={18} className="sitenav__chip" />
+          musterd
+        </a>
+        <nav className="sitenav__links" aria-label="Site">
+          {NAV_LINKS.map((l) => (
+            <a key={l.href} href={l.href}>
+              {l.label}
+            </a>
+          ))}
+        </nav>
+      </div>
     </header>
   );
 }

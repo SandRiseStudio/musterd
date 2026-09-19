@@ -9,7 +9,15 @@
   background: var(--surface-solid);
 }
 
+/* The band: full window width, so the chrome reaches both edges on any viewport. It carries no
+ * max-width of its own — that is `.sitenav__inner`'s job — and nothing but background belongs
+ * here, or the rail stops being the single thing that decides the page's left edge. */
 .sitenav {
+  background: var(--surface-solid);
+}
+
+/* The rail: the nav's contents, on the same left edge as every section below them. */
+.sitenav__inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
