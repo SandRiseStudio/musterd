@@ -50,14 +50,31 @@ const cwd = '/w';
 describe('declaresLane — a landing declares its lane; a correction only mentions it', () => {
   const short = '01M2XAXRP3';
   it('accepts the squash-body opener `Lane `id`.` and the subject `(lane id)`', () => {
-    expect(declaresLane({ subject: 's', body: 'why\n\nLane `01M2XAXRP3`. The mechanism' }, short)).toBe(true);
-    expect(declaresLane({ subject: 's', body: 'Lane: 01M2XAXRP38F88KC6TMJJDE7JB' }, short)).toBe(true);
-    expect(declaresLane({ subject: 'inbox honors --limit (lane 01M2XAXRP3) (#1560)', body: '' }, short)).toBe(true);
+    expect(
+      declaresLane({ subject: 's', body: 'why\n\nLane `01M2XAXRP3`. The mechanism' }, short),
+    ).toBe(true);
+    expect(declaresLane({ subject: 's', body: 'Lane: 01M2XAXRP38F88KC6TMJJDE7JB' }, short)).toBe(
+      true,
+    );
+    expect(
+      declaresLane({ subject: 'inbox honors --limit (lane 01M2XAXRP3) (#1560)', body: '' }, short),
+    ).toBe(true);
   });
   it('rejects the mentions the first live probe took for landings (#1568, #1578)', () => {
-    expect(declaresLane({ subject: 's', body: 'Found by ryder, declining lane 01M2XAXRP3 on this' }, short)).toBe(false);
-    expect(declaresLane({ subject: 's', body: 'wanderer flagged this while accepting lane `01M2XAXRP3` (#1500' }, short)).toBe(false);
-    const deep = Array(46).fill('x').join('\n') + '\nLane `01M2XAXRP3` is open and unowned for the mechanism';
+    expect(
+      declaresLane(
+        { subject: 's', body: 'Found by ryder, declining lane 01M2XAXRP3 on this' },
+        short,
+      ),
+    ).toBe(false);
+    expect(
+      declaresLane(
+        { subject: 's', body: 'wanderer flagged this while accepting lane `01M2XAXRP3` (#1500' },
+        short,
+      ),
+    ).toBe(false);
+    const deep =
+      Array(46).fill('x').join('\n') + '\nLane `01M2XAXRP3` is open and unowned for the mechanism';
     expect(declaresLane({ subject: 's', body: deep }, short)).toBe(false);
   });
   it('parseLog splits NUL/RS records', () => {
@@ -76,7 +93,11 @@ describe('reconcileLanded — a carried lane whose work is already on main', () 
       run: fake(
         {
           fetch: 0,
-          log: rec('2f1eae77aaaaaaaa', 'The ack’s rejection … (#1500)', 'Fixes the race.\n\nLane `01M2NWVH4G`. Closes the defect'),
+          log: rec(
+            '2f1eae77aaaaaaaa',
+            'The ack’s rejection … (#1500)',
+            'Fixes the race.\n\nLane `01M2NWVH4G`. Closes the defect',
+          ),
         },
         calls,
       ),
@@ -103,7 +124,12 @@ describe('reconcileLanded — a carried lane whose work is already on main', () 
   it('says nothing for a branch that still exists on origin', async () => {
     const got = await reconcileLanded([lane({ branch: 'miley/wip' })], {
       cwd,
-      run: fake({ fetch: 0, log: '', config: 'refs/heads/miley/wip\n', 'ls-remote': 'abc\trefs/heads/miley/wip\n' }),
+      run: fake({
+        fetch: 0,
+        log: '',
+        config: 'refs/heads/miley/wip\n',
+        'ls-remote': 'abc\trefs/heads/miley/wip\n',
+      }),
     });
     expect(got.size).toBe(0);
   });
@@ -130,8 +156,16 @@ describe('reconcileLanded — a carried lane whose work is already on main', () 
       run: fake({
         fetch: 0,
         log:
-          rec('3f89f741bbbbbbbb', 'A present-tense claim outlived the fix (#1578)', 'wanderer flagged this while accepting lane `01M2NWVH4G`') +
-          rec('2f1eae77aaaaaaaa', 'The ack’s rejection (#1500)', 'x\n\nLane `01M2NWVH4G`. Closes it'),
+          rec(
+            '3f89f741bbbbbbbb',
+            'A present-tense claim outlived the fix (#1578)',
+            'wanderer flagged this while accepting lane `01M2NWVH4G`',
+          ) +
+          rec(
+            '2f1eae77aaaaaaaa',
+            'The ack’s rejection (#1500)',
+            'x\n\nLane `01M2NWVH4G`. Closes it',
+          ),
       }),
     });
     expect(got.get('01M2NWVH4GCYHHZ6SEEX83Q9Y9')?.evidence).toBe(

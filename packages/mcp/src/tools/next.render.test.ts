@@ -240,12 +240,30 @@ describe('fmtNext — a carried lane whose work landed is unsubmitted, not carri
   function carrying(): NextBrief {
     const b = brief(null);
     b.in_flight = [
-      { id: '01M2M75BQH81NH40WJ69DZXY1W', state: 'claimed', title: '/watch', owner_seat: 'miley',
-        project: 'agents', scope: [], depends_on: [], branch: 'miley/watch-page', goal_id: null,
-        merged: null } as unknown as Lane,
-      { id: '01M2RTF9F2NJEA5ABNK77VD02A', state: 'active', title: 'sprite cache', owner_seat: 'miley',
-        project: 'agents', scope: [], depends_on: [], branch: null, goal_id: null,
-        merged: null } as unknown as Lane,
+      {
+        id: '01M2M75BQH81NH40WJ69DZXY1W',
+        state: 'claimed',
+        title: '/watch',
+        owner_seat: 'miley',
+        project: 'agents',
+        scope: [],
+        depends_on: [],
+        branch: 'miley/watch-page',
+        goal_id: null,
+        merged: null,
+      } as unknown as Lane,
+      {
+        id: '01M2RTF9F2NJEA5ABNK77VD02A',
+        state: 'active',
+        title: 'sprite cache',
+        owner_seat: 'miley',
+        project: 'agents',
+        scope: [],
+        depends_on: [],
+        branch: null,
+        goal_id: null,
+        merged: null,
+      } as unknown as Lane,
     ];
     return b;
   }
@@ -253,7 +271,9 @@ describe('fmtNext — a carried lane whose work landed is unsubmitted, not carri
   it('marks the landed lane with its evidence and names lane_submit as the next act', () => {
     const out = fmtNext(
       carrying(),
-      new Map([['01M2M75BQH81NH40WJ69DZXY1W', { evidence: 'main cites it: 83015333 /watch (#1474)' }]]),
+      new Map([
+        ['01M2M75BQH81NH40WJ69DZXY1W', { evidence: 'main cites it: 83015333 /watch (#1474)' }],
+      ]),
     );
     const lines = out.split('\n');
     const at = lines.findIndex((l) => l.includes('01M2M75BQH81NH40WJ69DZXY1W'));

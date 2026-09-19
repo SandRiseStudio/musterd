@@ -109,10 +109,7 @@ export function parseLog(stdout: string): { sha: string; subject: string; body: 
 }
 
 /** Does this commit DECLARE the lane (not merely mention it)? */
-export function declaresLane(
-  c: { subject: string; body: string },
-  shortId: string,
-): boolean {
+export function declaresLane(c: { subject: string; body: string }, shortId: string): boolean {
   const id = shortId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (new RegExp(`\\(lane \`?${id}`).test(c.subject)) return true;
   const head = new RegExp(`^Lane:? \`?${id}`);

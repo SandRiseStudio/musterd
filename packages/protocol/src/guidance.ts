@@ -556,7 +556,7 @@ export function renderOrientSkill(): string {
     '2. If the orientation block showed a memory headline, `team_memory_read` and pick up where',
     '   the previous session left off — then `team_next` BEFORE you repeat any of it. Memory is',
     '   a point-in-time note with no revision path; the board and the repo are the truth. Each',
-    '   carrying line is reconciled against origin/main by this workspace\'s git: one marked',
+    "   carrying line is reconciled against origin/main by this workspace's git: one marked",
     '   `LANDED, unsubmitted` is not work to build — `lane_submit` it (lane 01M2XAXRP3: three',
     '   lanes memory called "carrying" on 2026-09-19 had shipped days earlier).',
     '3. **Handle now (tier 1) — everything addressed to this seat.** Directed asks /',
