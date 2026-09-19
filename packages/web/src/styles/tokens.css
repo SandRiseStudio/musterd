@@ -75,7 +75,15 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* Layout */
-  --maxw: 920px;
+  /* 920 -> 1120 on 2026-09-19. The 920 rail was sized (ADR 302) when every public page was type
+   * and nothing else, and it held up until #1567 put the office still on the homepage: a wide,
+   * detailed illustration squeezed into 920px while a 2000px window left 1,067px of it empty.
+   * Measured at 2000px before the change, the content occupied 46% of the viewport and the nav's
+   * wordmark started 589px from the window edge, which reads as a broken layout rather than a
+   * chosen one. Raising the RAIL does not widen any measure: `.prose` stays 68ch, the /watch
+   * blocks stay 58ch, and `.lh__sub` stays 36rem — each block owns its own line length, and this
+   * token only decides where the page's left edge sits. */
+  --maxw: 1120px;
   --gutter: clamp(20px, 5vw, 56px);
 
   /* Vertical rhythm for the public site. One token so section spacing is a decision, not 8 ad-hoc

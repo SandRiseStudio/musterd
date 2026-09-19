@@ -1,4 +1,3 @@
-import { MusterdChip } from '../../brand/MusterdWord';
 import { TAGLINE } from '../../content/site';
 import './LightHero.css';
 
@@ -10,10 +9,11 @@ export function LightHero() {
   return (
     <section className="lh">
       <div className="lh__inner shell">
-        <p className="lh__mark mono">
-          <MusterdChip size={22} className="lh__chip" />
-          musterd
-        </p>
+        {/*
+          No wordmark here. SiteNav states the name 38px above this, at the same size, and at phone
+          width both sit flush left — so the page opened by saying "musterd" twice before it said
+          anything. The nav carries identity; the hero carries the pitch. (2026-09-19)
+        */}
         <h1 className="lh__title">{TAGLINE}</h1>
         <p className="lh__sub">
           Your agents and humans share one roster. Every act on that roster has a name on it, and a
