@@ -13,6 +13,7 @@ import {
 import { resolveProject } from '@musterd/protocol/project';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
+import { reconcileLanded, type Landed } from '../landed.js';
 import { SHA_FORMAT, verifyMerge } from '../mergeVerify.js';
 import { errorResult, textResult } from './format.js';
 
@@ -82,6 +83,7 @@ export function registerLanes(
   server: McpServer,
   client: MusterdClient,
   verify: typeof verifyMerge = verifyMerge,
+  reconcile: typeof reconcileLanded = reconcileLanded,
 ): void {
   server.registerTool(
     'lane_open',
@@ -544,7 +546,13 @@ export function registerLanes(
     },
     async () => {
       try {
-        return textResult(fmtNext(await client.next()));
+        const brief = await client.next();
+        // Lane 01M2XAXRP3: reconcile what the board calls carried against what this repo says
+        // landed, BEFORE the seat reads it. The brief is the daemon's projection and the daemon
+        // has no git; this adapter runs in the seat's own workspace, the same place
+        // `lane_submit` verifies a merge (`verify` above, cwd = process.cwd()).
+        const landed = await reconcile(brief.in_flight, { cwd: process.cwd() });
+        return textResult(fmtNext(brief, landed));
       } catch (err) {
         return errorResult(err);
       }
@@ -553,7 +561,7 @@ export function registerLanes(
 }
 
 /** Coarse elapsed time — the reader needs "hours, not minutes", never a precise duration. */
-export function fmtNext(b: NextBrief): string {
+export function fmtNext(b: NextBrief, landed: ReadonlyMap<string, Landed> = new Map()): string {
   const lines: string[] = [`next — as ${b.member}`];
   // Incident banner FIRST, above everything (spec 2026-08-14 §4): most of the measured waste in the
   // motivating episode was seats starting sessions into a shared red they assumed was theirs. Same
@@ -596,7 +604,21 @@ export function fmtNext(b: NextBrief): string {
   }
   if (b.in_flight.length) {
     lines.push(`\ncarrying (${b.in_flight.length}):`);
-    for (const l of b.in_flight) lines.push('  ' + fmtLane(l));
+    for (const l of b.in_flight) {
+      lines.push('  ' + fmtLane(l));
+      // A lane whose work is on main is not carried — it is UNSUBMITTED (lane 01M2XAXRP3). Said
+      // here, on the line the seat is about to repeat to the human, because seat memory said
+      // "carrying" for three lanes that had shipped days earlier and orientation read the note
+      // first. The evidence is named so a reader can doubt it; the next act is named so the
+      // seat does not start rebuilding.
+      const hit = landed.get(l.id);
+      if (hit) {
+        lines.push(`    ↳ LANDED, unsubmitted — ${hit.evidence}`);
+        lines.push(
+          `      not work to build: lane_submit {id:'${l.id}', pr, sha, authorized_by} (or lane_release if it was not yours)`,
+        );
+      }
+    }
   }
   // value-layer design: ambient review debt — the oldest lanes waiting on ANY seat's acceptance
   // (owed_reviews above is the directed slice). Same `?? []` daemon-skew tolerance as the rest.

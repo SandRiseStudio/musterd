@@ -177,6 +177,7 @@ describe('version-bump discipline (ADR 085)', () => {
     24: 'e483f3745643ee00', // orient step 3 names the ACKNOWLEDGE: `wait` on a lane_review ask takes it without deciding, audited as lane.review_acknowledged (lane 01M2P2E2H6) — the old "say 'on it' with a status_update" told humans and not the board
     25: 'cdf87bd806cb0789', // the channel rule stops forbidding the CLI it also prescribes (lane 01M2RP18EV): `session orient-stamp` has no MCP verb, so "do not drive both" was a rule every compliant seat had to break — and the identity that swaps is the one bound to the WORKING DIRECTORY (measured: whoami in agents-stanley → stanley, in agents-miley → miley, in ~ → nick read-only), not the channel
     26: 'd1af927ac631680d', // ADR 418: orient labels from this session's tool list then always stamps; labeling skills skip silently when the tools are absent
+    27: '1d7d5b5f5792efc0', // orient step 2 reconciles memory against the repo via team_next before the seat repeats it (lane 01M2XAXRP3): a carried lane whose work is on main is LANDED, unsubmitted — lane_submit, not a build
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
