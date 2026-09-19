@@ -128,6 +128,12 @@ describe('buildWakeArgs (the spawn argv invariants)', () => {
   it('no permission-mode override: the workspace’s own settings govern', () => {
     expect(args).not.toContain('--permission-mode');
   });
+  it("loads project and local settings only — never the human's user layer (ADR 426)", () => {
+    // 2026-09-19 A/B, one prompt, no tool call: default argv 383 KiB / 58.7k context tokens /
+    // $1.52; with this flag 182 KiB / 22.5k / $0.23. The user layer was the human's twenty plugins
+    // — skills, per-Bash-call hooks, MCP servers — loaded into a headless run that never uses them.
+    expect(args[args.indexOf('--setting-sources') + 1]).toBe('project,local');
+  });
 });
 
 describe('buildResumeArgs (the resume argv invariants, inc 4)', () => {
@@ -141,6 +147,9 @@ describe('buildResumeArgs (the resume argv invariants, inc 4)', () => {
   it('identical permission posture to fresh: reply-only tools, default permission mode', () => {
     expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__musterd');
     expect(args).not.toContain('--permission-mode');
+  });
+  it('identical settings posture to fresh: project and local only (ADR 426)', () => {
+    expect(args[args.indexOf('--setting-sources') + 1]).toBe('project,local');
   });
   it('NEVER a skip-permissions flag — on EITHER arg builder (ADR 131 §6)', () => {
     expect(args.join(' ')).not.toMatch(/skip-permissions|dangerously/i);
@@ -161,6 +170,7 @@ describe('WakeArgOpts (inc 5): tool policy + turn cap ride the argv', () => {
       expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__musterd');
       expect(args.join(' ')).not.toMatch(/skip-permissions|dangerously/i);
       expect(args).not.toContain('--permission-mode');
+      expect(args[args.indexOf('--setting-sources') + 1]).toBe('project,local');
     }
   });
   it('--max-turns lands when bounded; reply-only stays the default posture', () => {

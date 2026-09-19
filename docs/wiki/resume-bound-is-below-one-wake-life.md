@@ -37,6 +37,14 @@ Where the bytes are, one 802 KiB dolly life (09-17): 385 KiB `attachment` lines 
 - It does not say the wake-failure rate is related. Transcript size is not on a fresh spawn's critical path (retracted 2026-09-18 in lane 01M2SB89AR's evidence).
 - `~/.musterd/host.err.log` "pre-ADR-281 v1 binding" lines for dolly are stale; her binding is version 2. Read the file, not the log about the file.
 
+## Where the bytes come from, and the one flag that removes a third of them (2026-09-19, lane 01M2XD2WCE; falsify: rerun the A/B below in any seat worktree) <!-- claim: other -->
+
+Twelve single-life wake transcripts, averaged: `hook_success` 110 KiB (~140 records per life, 687 bytes each even when the hook printed nothing — `hookify`, `security-guidance` and `cognee` run on every Bash call), `skill_listing` 68, `prompt_snapshot` 47, `deferred_tools_delta` 47, `output_style` 35 (re-attached every turn), `mcp_instructions_delta` 33, `total_tokens_reminder` 30 (every turn), `hook_additional_context` 26. Tool results: `Bash` 53 (42 calls), `team_inbox_check` 23 (13 KiB per call), `Read` 9, `lane_board` 7. Of the total, 195–362 KiB per life traces to the human's *user* settings layer — plugins and output style — and 3–15 KiB to musterd's own hooks.
+
+The transcript overstates the model's context: those lives ended at 54k–190k context tokens for 459–1583 KiB, about 8 bytes per token, because hook records and reminders are transcript metadata the model never sees.
+
+A/B, one prompt, no tool call, this worktree: default argv → 383 KiB transcript, 58,727 context tokens created, $1.52. `--setting-sources project,local` → 182 KiB, 22,487 tokens (+10k cache read), $0.23. The musterd MCP server (keyed by repo root in `~/.claude.json`, not a settings layer), the worktree's 21 committed skills, and the project-local hooks all survived; the eleven claude.ai connector servers also survived, being account-level. So an *empty* life under the old argv was already 1.5× the bound. [ADR 426](../decisions/426-wake-loads-project-settings-only.md) puts the flag on every wake spawn. What a *working* life weighs after it is the lane's acceptance measurement, owed here.
+
 ## The open call (2026-09-19, lane 01M2SB89AR)
 
 ~~Open as of 2026-09-19 morning.~~ DECIDED 2026-09-19 by nick: both. The label half is [ADR 424](../decisions/424-resumable-label-honest.md) — the daemon withdraws the roster's `resumable_at` once a `residency.woke` row newer than the capture says `session: fresh`, and the next capture or a resumed wake re-arms it; no renderer or protocol field changes. The life-size half is lane 01M2XD2WCE, unowned. Falsify the label fix: `musterd status` on an enrolled seat whose last woke row is `fresh` must not print `resumable`.

@@ -106,6 +106,13 @@ function argTail(opts: WakeArgOpts): string[] {
   return [
     '--allowedTools',
     'mcp__musterd',
+    // ADR 426: a wake loads what musterd provisioned for the seat (`.claude/settings.local.json`:
+    // hooks, permission floor) and what the repo commits — never the human's user layer. Measured
+    // 2026-09-19 on one prompt with no tool call: the user layer alone was 200 KiB of transcript
+    // and 36k tokens of context per turn ($1.52 → $0.23 for the empty life). The musterd MCP
+    // entry is keyed by repo root in ~/.claude.json (ADR 165), not a settings layer, so it rides.
+    '--setting-sources',
+    'project,local',
     ...(opts.maxTurns !== undefined ? ['--max-turns', String(opts.maxTurns)] : []),
     '--output-format',
     'json',
