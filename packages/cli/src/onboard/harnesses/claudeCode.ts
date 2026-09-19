@@ -33,6 +33,7 @@ import {
   repoSharedResourceKey,
   type HarnessAdapter,
 } from '../reconcile/fragments.js';
+import { roleBridgesFor } from '../roleSkills.js';
 import { BUILTIN_TOOLKITS, parseToolkit, toolkitHomes, type Toolkit } from '../toolkit.js';
 
 const exec = promisify(execFile);
@@ -956,6 +957,8 @@ export const claudeCode: Harness = {
     // ADR 333: Claude Code's native skill catalog. Other harnesses get their own shell or the
     // canonical `.musterd/skill/orient.md`; this path is no longer "the only copy".
     orientSkillPath: '.claude/skills/musterd-orient/SKILL.md',
+    // ADR 334: a seat whose roster role has a committed skill gets a bridge here.
+    roleSkillPattern: '.claude/skills/<role>/SKILL.md',
   },
 
   // Claude Code hands its hooks a `transcript_path`, and the newest assistant turn in that file
@@ -1320,7 +1323,11 @@ export const claudeCodeAdapter: HarnessAdapter = {
     const hooks = localHooksPayload();
     const globals = globalHooksPayload();
     const permissions = permissionsPayload(ctx);
-    const guidancePayload = guidanceFileMap(claudeCode.guidance!, ctx.team ?? '');
+    const guidancePayload = guidanceFileMap(
+      claudeCode.guidance!,
+      ctx.team ?? '',
+      roleBridgesFor(ctx.worktreeRoot, [claudeCode]),
+    );
     const localContainer = `folder ${ctx.worktreeRoot} ${localSettingsRel()}`;
     return [
       {
@@ -1441,7 +1448,11 @@ export const claudeCodeAdapter: HarnessAdapter = {
           ctx.fs,
           ctx.worktreeRoot,
           (intent.payload as Record<string, string> | undefined) ??
-            guidanceFileMap(claudeCode.guidance!, ctx.team ?? ''),
+            guidanceFileMap(
+              claudeCode.guidance!,
+              ctx.team ?? '',
+              roleBridgesFor(ctx.worktreeRoot, [claudeCode]),
+            ),
         );
       default:
         return { state: 'absent' };
@@ -1542,7 +1553,11 @@ export const claudeCodeAdapter: HarnessAdapter = {
           ctx.fs,
           ctx.worktreeRoot,
           (intent.payload as Record<string, string> | undefined) ??
-            guidanceFileMap(claudeCode.guidance!, ctx.team ?? ''),
+            guidanceFileMap(
+              claudeCode.guidance!,
+              ctx.team ?? '',
+              roleBridgesFor(ctx.worktreeRoot, [claudeCode]),
+            ),
           mutation.kind === 'remove' ? 'remove' : 'write',
         );
         return;
