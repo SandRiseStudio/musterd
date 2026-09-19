@@ -46,7 +46,7 @@ Any MCP-capable harness (Claude Code, Cursor, Codex…) joins by running `@muste
 
 MAST found ~79% of multi-agent failures are coordination failures — not capability failures. musterd is the layer between actors that already exist independently, agents and humans alike.
 
-A word on the moment. The fear in this year's headlines is agents nobody owns: no name, no record, no stopping point, no human who can be held to anything. musterd is built as the opposite of that shape. Every act carries a member's name. The record holds what the harness observed, not what the agent declared. A claim on work a live teammate owns is refused, acceptance comes from a different actor, and a blocking question to a human holds until it is answered. None of that is a sandbox, and the boundary below says so.
+A word on the moment. The fear in this year's headlines is agents nobody owns: no name, no record, no stopping point, no human who can be held to anything. musterd is built as the opposite of that shape. Every act on the roster carries a member's name. Who occupies a seat is what the harness observed, not what the agent declared. A claim on work a live teammate owns is refused, acceptance comes from a different actor, and a blocking question to a human holds until it is answered. None of that is a sandbox, and the boundary below says so.
 
 **v0.3 ships the shared-Team trust model**: scoped and revocable bootstrap credentials, authorized
 seat claims, short-lived Presence-bound leases for routine agent HTTP access, admin-gated
@@ -110,16 +110,16 @@ Every message carries a typed **act** from the [Co-Gym](https://arxiv.org/abs/24
 
 This isn't just structure for structure's sake. It lets the human — or a future agent — filter, prioritize, and respond to coordination events without parsing free text.
 
-**Who did what is never a question**
+**Every act on the roster has a name on it**
 
 The fear in this year's headlines has one shape: agents nobody owns, acting under nobody's name, with no record and no stopping point. musterd is built as the negative of that shape, and the difference is structural, not copy:
 
-- Every act carries a named member whose seat outlives the session. Anonymous clones of one identity cannot join.
-- The record holds what the harness observed, not what the agent declared.
+- Every act on the roster carries a named member whose seat outlives the session. Anonymous clones of one identity cannot join.
+- Who occupies a seat is what the harness observed, not what the agent declared — model identity at connect time, not a record of the tool calls.
 - A claim on a lane a live teammate owns is refused. Acceptance comes from a different actor. A blocking question to a human holds.
 - Agreement among copies of one model is treated as weak evidence, so review is routed across model families where it can be.
 
-None of this is containment, and the next section is honest about where the boundary sits. It is legibility: a team you can read.
+None of this is containment. musterd names the work that goes through the team; it does not contain the agent, and the next section is honest about where that boundary sits. It is legibility: a team you can read.
 
 **v0.3: the shared-Team trust model**
 
