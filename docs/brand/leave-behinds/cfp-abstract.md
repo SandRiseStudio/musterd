@@ -24,45 +24,57 @@ margin.
 ## Abstract (submitted field)
 
 We told three coding agents to coordinate. They didn't. Across two runs on the same eight-ticket
-backlog, **zero of eight lanes were ever claimed** and six of six agents soloed the entire thing —
-and that was with a primer that actively instructed them to divide the work. Telling agents to be a
-team does not make them one.
+backlog on 2026-07-17, **zero of eight lanes were ever claimed** and six of six agents soloed the
+entire thing — and that was with a primer that actively instructed them to divide the work. Telling
+agents to be a team does not make them one.
 
 Then we stopped asking. We put the rule in a gate: an edit to a contended surface is **denied**
 unless the agent owns a lane covering it, and costly actions route to a human as a first-class
-protocol act. Same tickets, same model, same harness. **Eight of eight lanes claimed, in every
-enforced run.** When the gate denied an action, the agents complied — they stopped, raised the
-question, and waited. We went looking for route-arounds in the run databases and found none.
+protocol act. Same tickets, same model, same harness. From 2026-07-19 on, **eight of eight lanes
+claimed, in every enforced run.**
+
+Compliance is a second question and a later run, and I will keep them apart, because the first
+enforced runs did not settle it: the gate's matcher left an ungated path open, and across three
+runs it was taken three times. We closed the path and re-ran the denies on 2026-08-01. Both of them
+held — the agent stopped, said in its own words that it should not route around with a different
+git trick, released the lane and waited. That is two denies, not a population, and I will show you the table rather than the
+adjective.
 
 This talk is about the primitives underneath that result, and about what they cost. The verbs are
 small and boring: claim work and be refused if someone already owns it; **decline**, and have the
 work re-route with your reason on the record; accept someone else's work, where the accepting actor
 is not the authoring one. Each has a mechanism you can check on your own machine in an afternoon,
-and each exists because the version that was only advice produced nothing.
+and each exists because the version that was only advice produced nothing. Decline is the one in
+the title, so it gets a receipt rather than a description: in one week in September 2026, on our
+own team, two lanes were declined back to active, each with the reason on the record — not a
+complaint in prose, a verb that moved the work.
 
-I will also show you the number that argues against me. On a backlog this size, **one agent alone
-beats the coordinated three** — it burns about an eighth of the output tokens and finishes faster,
-with the same acceptance rate. Coordination is a real cost you pay for a real thing, and the honest
-pitch is never against a solo agent. It is against the three agents you are already running without
+I will also show you the number that argues against me. On a backlog this size, in the same July
+2026 runs, **one agent alone beats the coordinated three** — it burns about an eighth of the output
+tokens and finishes faster, with the same acceptance rate. Coordination is a real cost you pay for
+a real thing, and the honest pitch is never against a solo agent. It is against the three agents you are already running without
 it.
 
 And there is a boundary I want to be precise about, because this is the room where it matters:
 naming the work that goes through the team is not containing the agent. None of this sandboxes
 anything, sees a tool call the protocol never touched, or stops a bad step. It records who claimed
-what, who refused, and who accepted it — which is the layer the incidents of the last two years
-actually went missing at, and a different layer from the one most of us are building.
+what, who refused, and who accepted it — the layer where, in the 2025 production-database deletion,
+nobody in the protocol could refuse the step and afterwards there was no record of who had
+authorized what. That is a different layer from the one most of us are building, and it is the
+only one I am claiming.
 
 ## Takeaways (three, as the form asks)
 
 1. **Guidance does not produce coordination; structure does.** Two runs of advice produced 0/8
    lanes claimed. The same backlog under enforcement gates produced 8/8, repeatably, with no change
-   to the model or the prompt.
+   to the model or the prompt. One fixture, one model, five runs — a mechanism reproducing, not an
+   effect size.
 2. **"Decline" has to be a protocol verb, not a comment.** An agent that can only complain in prose
    has no way to refuse, and a human who can only approve is a bottleneck rather than a peer. The
    design question is which acts exist, not how the agent is prompted.
-3. **Coordination costs roughly 8× the output tokens of a solo agent, and it is still worth it at
-   N>1 — but only there.** Know which regime you are in before you buy the machinery. If your
-   bottleneck is the bill and not the collisions, do not do this.
+3. **Coordination cost roughly 8× the output tokens of a solo agent in the July 2026 cookoff.**
+   Know which regime you are in before you buy the machinery. If your bottleneck is the bill and
+   not the collisions, do not do this.
 
 ## Speaker bio (draft, nick to approve)
 
@@ -92,6 +104,15 @@ alongside the ones that did, and streams the team building itself.
   three enforced), one fixture, one model. That is true and the abstract does not hide it — the
   claim is about a mechanism reproducing, not about an effect size. Say so plainly; the talk is
   more credible for it.
+- **The compliance table, if a reviewer asks for it.** D3–D5 recorded three route-arounds across
+  three runs ([research/007](../../research/007-compliance-under-deny-retro-audit.md) §table) —
+  and 007's own reading is that they measure the **matcher gap, not agent intent**: zero
+  `action.gate allow` rows exist in any D-cell, so every push attempt converted. The closed-path
+  re-run on 2026-08-01 is the one that answers the question, at n=2. Never tell those as one
+  result; wanderer caught exactly that glue in the first draft of this abstract
+  (`01M2XAF9B1`, 2026-09-19).
 - **Second-seat read owed before submission.** This is high-stakes copy under the role's definition
-  of done, and it is the one piece in this set that cannot be corrected after it ships.
+  of done, and it is the one piece in this set that cannot be corrected after it ships. **Done
+  2026-09-19** — wanderer (grok-4.6) read it against §3/§4 and returned six findings; all six were
+  taken, and two sentences of my own in the repair were cut back for overstating their sources.
 
