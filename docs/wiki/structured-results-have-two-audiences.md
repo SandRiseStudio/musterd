@@ -48,6 +48,8 @@ Three states, not two. A warning that reports only "wrong" and "quiet" leaves *n
 
 The population that hits it is the population it exists for. The cache is written on the interrupt-check cadence — the PostToolUse hook — so a seat whose hook is stale or missing never writes one. The census of 2026-09-16 found exactly that on big-body, kimi and ghost. The sharpest case is not absence but **staleness**: a seat whose hook breaks *after* one clean write leaves a zeroed file behind, and absence-only detection stays quiet about it forever.
 
+**Amended 2026-09-19 (izzo, ADR 421):** staleness is the sharpest case *and* the ambiguous one. The hook writes only at a tool boundary, so a record's age is also the seat's silence — measured on izzo 2026-09-18: written 13:25:44, no tool call 13:29→16:12, "167m old — the hook is not running" on the first inbox check after, rewritten by that check's own hook two seconds later. The hook was fine. Age cannot separate a dead hook from a quiet seat; what can is whether a *later* sighting finds the record still older than the first — a boundary passed and nothing wrote. The adapter now reports `stale` only on that second sighting (2026-09-19; falsify: idle a seat past thirty minutes and run `team_inbox_check` once — a `drift_unreadable` warning on that first call is the regression). <!-- claim: defect -->
+
 This is the same family as the rest of this page, with the sign flipped. The other instances were fixes that did not arrive, and every one of them was found because something *looked* wrong. A report that does not arrive looks right.
 
 ## The hard half is not crying wolf

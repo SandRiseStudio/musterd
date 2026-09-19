@@ -318,13 +318,17 @@ export type ToolWarning =
 /**
  * How old a drift cache may be before it stops being evidence about the present.
  *
- * The CLI re-inspects on a 10-minute TTL (`DRIFT_CACHE_TTL_MS`), so a running writer never leaves a
- * cache older than that. Three missed cycles is the threshold: far enough above the TTL that an
- * ordinary quiet stretch or a slow machine never trips it, close enough that a stopped writer is
- * named within the hour. Deliberately NOT imported from `@musterd/cli` — the adapter takes no cli
- * dependency (ADR 408 inc 4) — so this is a duplicated constant, and if the TTL moves this must be
- * re-checked against it. That coupling is the price of the boundary, and it is named rather than
- * hidden.
+ * The CLI re-inspects on a 10-minute TTL (`DRIFT_CACHE_TTL_MS`) — but only at a tool boundary, because
+ * the writer is the PostToolUse hook. So a record older than the threshold means ONE of two things:
+ * the hook is not running, or the seat made no tool call for that long — and a seat waiting on a
+ * review is quiet for hours (measured on izzo 2026-09-18: written 13:25:44, no tool call
+ * 13:29→16:12, "167m old" at the first inbox check after, rewritten by that check's own hook two
+ * seconds later). Age alone cannot separate the two; `driftUnreadableOf` separates them by
+ * remembering the first sighting and speaking only once a boundary has passed with no write
+ * (ADR 421). Three missed cycles remains the threshold at which a sighting starts counting.
+ * Deliberately NOT imported from `@musterd/cli` — the adapter takes no cli dependency (ADR 408
+ * inc 4) — so this is a duplicated constant, and if the TTL moves this must be re-checked against
+ * it. That coupling is the price of the boundary, and it is named rather than hidden.
  */
 export const DRIFT_STALE_AFTER_MS = 30 * 60 * 1000;
 
@@ -359,9 +363,18 @@ export type DriftUnreadableWarning = {
  * carrying `.musterd/binding.json` or `.musterd/workspace.json`, which is precisely what the walk-up
  * accepts. Anywhere else has no drift record because it never should have one.
  */
+/**
+ * When THIS adapter first read each workspace's record as stale, by workspace dir. One entry per
+ * process: the adapter lives as long as the session, and every `team_*` call it serves is itself
+ * a tool boundary the hook rides — which is exactly the observation the rule needs. Injectable so
+ * a test can hold its own.
+ */
+const staleFirstSeen = new Map<string, number>();
+
 export function driftUnreadableOf(
   cwd: string | undefined,
   now: number = Date.now(),
+  seen: Map<string, number> = staleFirstSeen,
 ): DriftUnreadableWarning | null {
   if (cwd === undefined) return null;
   const dir = join(cwd, '.musterd');
@@ -386,10 +399,24 @@ export function driftUnreadableOf(
     return unreadable('unparseable');
   }
   const age = now - cache.inspected_at;
-  // A future timestamp is clock skew, not a stopped writer — Math.max keeps it from reading as fresh
-  // forever without inventing a second failure mode for it.
-  if (age > DRIFT_STALE_AFTER_MS) return unreadable('stale', age);
-  return null;
+  if (age <= DRIFT_STALE_AFTER_MS) {
+    seen.delete(cwd);
+    return null;
+  }
+  // Stale. Whether the hook is dead or the seat was merely quiet is not in the file; it is in what
+  // happens NEXT (ADR 421). This call is a tool boundary, so a living hook rewrites the record
+  // before the next one — and the next sighting decides:
+  //   · first sighting → remember it, say nothing;
+  //   · a later sighting, record still older than the first → a boundary passed and nothing wrote,
+  //     which is a hook that is not running — say so, now that it is earned;
+  //   · a later sighting, record newer than the first → the hook wrote and the seat idled past the
+  //     threshold AGAIN — this is a new first sighting.
+  const first = seen.get(cwd);
+  if (first === undefined || cache.inspected_at >= first) {
+    seen.set(cwd, now);
+    return null;
+  }
+  return unreadable('stale', age);
 }
 
 function unreadable(
@@ -399,12 +426,15 @@ function unreadable(
   // Says neither "you are drifted" (not known) nor nothing (a lie), and names the most likely cause,
   // because the reader's next move depends on it: the writer runs from the hook, so an unreadable
   // record is usually a hook that is not running rather than a provisioning problem of its own.
+  // For `stale` the cause is not merely likely — `driftUnreadableOf` only reaches here once a tool
+  // boundary has passed with no write (ADR 421), and the sentence says what was seen.
   const why =
     reason === 'absent'
       ? 'no drift record has been written'
       : reason === 'unparseable'
         ? 'its drift record cannot be read'
-        : `its drift record is ${String(Math.round((age_ms ?? 0) / 60000))}m old`;
+        : `its drift record is ${String(Math.round((age_ms ?? 0) / 60000))}m old and a tool ` +
+          `boundary has passed since this seat first read it stale, with no rewrite`;
   return {
     kind: 'drift_unreadable',
     reason,

@@ -79,6 +79,22 @@ Both halves hold at once: the floor entry was **not** rewritten, and `repairable
 
 Drift the session start cannot repair reaches the seat as a `manual` warning, not a `session-start` one (2026-09-16). Falsify: remove one floor entry from a seat's `.claude/settings.local.json`, run the probe, and read the warning — `repairable_at: 'session-start'`, or a rewritten floor entry, breaks this. <!-- claim: other -->
 
+## The record's age is the seat's silence — a stale cache is not a dead hook (2026-09-18, izzo)
+
+The `drift_unreadable` "stale" warning (lane `01M2NYV805`) assumed a running writer never leaves the cache older than its TTL. The writer is the PostToolUse hook, which runs only at a tool boundary — so a seat that makes no tool call writes nothing, however healthy. Read from the session transcript's own hook records:
+
+```
+13:25:42  PostToolUse:Bash hook_success            → drift.json written 13:25:44 (the hook)
+13:29:34  last tool call (team_send)
+          … no tool call of any kind …
+16:12:54  team_inbox_check  → "drift record is 167m old … the hook is not running"
+16:12:57  drift.json rewritten — by the hook riding THAT call
+```
+
+`age_ms` 10,031,148 = 16:12:55 − 13:25:44 to the second. Reproduced 2026-09-19: aged the file by hand to twenty minutes, the harness rewrote it one second after the next Bash call; the hook command run by hand from the harness shell also writes. The adapter reads the file *inside* the tool call and the hook that refreshes it runs *after* the call returns, so the first read after any idle is too early by construction, and no threshold fixes that. ADR 421: the adapter remembers the first stale sighting and reports only when a later sighting finds the record still older than it — a boundary passed with no write (2026-09-19; falsify: idle a wired seat past thirty minutes, `team_inbox_check` twice — a warning on the first call is the rule regressing; one on the second means the hook did not write across a boundary, which on a wired seat is a real dead hook, not this defect). <!-- claim: defect -->
+
+Two things worth not relearning while reading such a transcript: Claude Code records a `hook_success` attachment only when the hook printed something, so a silent hook run leaves no record at all — the cognee hook's `{}` shows every call, the musterd interrupt hook shows only its deaf lines — and the deaf line (`the interrupt line is deaf — this seat's session lease is dead`) is emitted *after* the drift write in `interruptCheck`, so a deaf seat still refreshes the record.
+
 ## What it will never touch
 
 The ADR 261 permission floor, and any file outside the seat's worktree (the machine-wide Claude Code settings, Codex's git-common-dir `hooks.json`) — spec 2026-09-16, ADR 408 decision 2. Falsify: leave a seat's `.claude/settings.local.json` one floor entry short, run the probe, and check the entry is STILL absent and the line names `--refresh-permissions`.
