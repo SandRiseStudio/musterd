@@ -6,6 +6,7 @@ import {
   HOST_STALE_MS,
   listHostSeen,
   recordHostSeen,
+  recordSessionAttestation,
   seatWakeabilityFacts,
 } from './residency.js';
 import { teamFamilyPosture } from './review.js';
@@ -201,5 +202,53 @@ describe('teamFamilyPosture — the ADR 191 wake pool now sees host and workspac
     expect(p.wake_pool.find((c) => c.seat === 'gptbot')?.wakeability).toBe(
       'enrolled_dead_workspace',
     );
+  });
+});
+
+describe('seatWakeabilityFacts — the resumable badge is withdrawn by a fresh wake (ADR 424)', () => {
+  const CAPTURE = NOW - 3_600_000;
+
+  it('a capture with no wake since keeps its attestation time', () => {
+    const { db, team, agent, enrol } = seed();
+    const bot = agent('gptbot');
+    enrol(bot.id);
+    recordSessionAttestation(db, team.id, bot.id, 'claude-code', CAPTURE);
+    expect(seatWakeabilityFacts(db, team.id, NOW).get(bot.id)?.resumable_at).toBe(CAPTURE);
+  });
+
+  it('a fresh wake AFTER the capture withdraws it — the roster stops promising a resume the ladder refused', () => {
+    const { db, team, agent, enrol } = seed();
+    const bot = agent('gptbot');
+    enrol(bot.id);
+    recordSessionAttestation(db, team.id, bot.id, 'claude-code', CAPTURE);
+    wakeRow(db, team.id, 'residency.woke', 'gptbot', { session: 'fresh' }, CAPTURE + 60_000);
+    expect(seatWakeabilityFacts(db, team.id, NOW).get(bot.id)?.resumable_at).toBeNull();
+  });
+
+  it('a resumed wake after the capture leaves it standing', () => {
+    const { db, team, agent, enrol } = seed();
+    const bot = agent('gptbot');
+    enrol(bot.id);
+    recordSessionAttestation(db, team.id, bot.id, 'claude-code', CAPTURE);
+    wakeRow(db, team.id, 'residency.woke', 'gptbot', { session: 'resumed' }, CAPTURE + 60_000);
+    expect(seatWakeabilityFacts(db, team.id, NOW).get(bot.id)?.resumable_at).toBe(CAPTURE);
+  });
+
+  it('a fresh wake BEFORE the capture is not evidence against it — a new capture re-arms the badge', () => {
+    const { db, team, agent, enrol } = seed();
+    const bot = agent('gptbot');
+    enrol(bot.id);
+    wakeRow(db, team.id, 'residency.woke', 'gptbot', { session: 'fresh' }, CAPTURE - 60_000);
+    recordSessionAttestation(db, team.id, bot.id, 'claude-code', CAPTURE);
+    expect(seatWakeabilityFacts(db, team.id, NOW).get(bot.id)?.resumable_at).toBe(CAPTURE);
+  });
+
+  it('a woke row without a session axis is not evidence of anything (ADR 236)', () => {
+    const { db, team, agent, enrol } = seed();
+    const bot = agent('gptbot');
+    enrol(bot.id);
+    recordSessionAttestation(db, team.id, bot.id, 'claude-code', CAPTURE);
+    wakeRow(db, team.id, 'residency.woke', 'gptbot', { act: 'a1' }, CAPTURE + 60_000);
+    expect(seatWakeabilityFacts(db, team.id, NOW).get(bot.id)?.resumable_at).toBe(CAPTURE);
   });
 });

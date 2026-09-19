@@ -206,7 +206,10 @@ export const MemberSummarySchema = MemberSchema.extend({
    * When the seat last attested a capturable harness session (ADR 131 §5) — the resumable badge's
    * input (inc 5, finding b). A TIMESTAMP, not a boolean, deliberately: captures age past the
    * harness's ~30d GC horizon, so renderers apply freshness instead of trusting a stale `true`.
-   * Null/absent: never captured, or not enrolled. Optional for back-compat.
+   * Null/absent: never captured, not enrolled — or captured and then contradicted: the last wake
+   * since the capture came back `fresh`, so the daemon withdraws the claim until the next capture
+   * or a resumed wake (ADR 424). The enrollment row's own timestamp is untouched by that.
+   * Optional for back-compat.
    */
   resumable_at: z.number().int().nullish(),
   /**
