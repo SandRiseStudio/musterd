@@ -4,16 +4,16 @@
 
 ## Status — 2026-09-19
 
-- **Product:** v0.2 behavior remains stable. The optional Tailscale + Aperture paved road is not a complete runtime path; its current boundary is reviewed artifacts plus an opt-in authorization substrate.
+- **Product:** v0.2 behavior remains stable. The optional Tailscale + Aperture paved road is not a complete runtime path; its current boundary is reviewed artifacts, an opt-in authorization substrate, and a non-spawning CLI handoff adapter.
 - **Paved-road Increment 1:** implemented as the read-only `musterd integration doctor` for Tailscale transport and Aperture configuration posture ([ADR 385](decisions/385-optional-tailscale-aperture-doctor.md)).
 - **Paved-road Increment 2a:** implemented as deterministic, secret-free Aperture policy and Member mapping generation ([ADR 400](decisions/400-aperture-policy-generator.md)).
 - **Paved-road Increment 2b:** implemented as deterministic, secret-free Tailscale transport policy and workload mapping generation ([ADR 402](decisions/402-tailscale-transport-generator.md)).
-- **Paved-road Increment 3:** partially implemented as the protocol/server authorization substrate ([ADR 411](decisions/411-governed-model-authorization-substrate.md)). It covers server-owned policy, one-shot `msla_` launch handoffs, enrolled node and Presence checks, bounded Lane/Act context, structured refusal, and metadata-only audit. It does not launch Claude Code or Codex, bind a live Tailscale/Aperture runtime, route provider requests, or activate `required` enforcement.
+- **Paved-road Increment 3:** partially implemented as the protocol/server authorization substrate plus typed CLI and pure Claude Code/Codex handoff plan ([ADR 411](decisions/411-governed-model-authorization-substrate.md), [ADR 425](decisions/425-governed-launcher-adapter-handoff.md)). It covers server-owned policy, one-shot `msla_` launch handoffs, enrolled node and Presence checks, bounded Lane/Act context, structured refusal, metadata-only audit, endpoint validation, and direct-provider-credential stripping. It does not spawn a harness, consume a launch, bind a live Tailscale/Aperture runtime, route provider requests, or activate `required` enforcement.
 - **Paved-road Increment 4:** not implemented. There is no API-driven Tailscale/Aperture provisioning or apply surface.
 - **Protocol:** `SPEC.md` remains **`musterd/0.3`**; Appendix A.12 defines the strict governed policy, one-shot launch handoff, work contexts, and structured decisions from ADR 411.
 - **Published:** `@musterd/*@0.2.0` on npm (git tag `v0.2.0`).
 - **Quality:** Package-level tests cover the protocol schemas, generator/doctor behavior, and governed server routes. No automated end-to-end scenario currently proves the original full path from a supported Surface through Tailscale and Aperture to provider/cost evidence.
-- **Open:** governed launcher adapters, live Tailscale/Aperture runtime binding and configuration, provider/cost correlation, a future `required` cutover, Increment 4 provisioning, and the optional **real 3-pane demo** recording remain separate work.
+- **Open:** live governed launcher execution/bridge binding, launch consumption and provider/cost correlation, live Tailscale/Aperture runtime binding and configuration, a future `required` cutover, Increment 4 provisioning, and the optional **real 3-pane demo** recording remain separate work.
 
 ## The original plan (recap)
 

@@ -50,10 +50,10 @@
 - Consumes: `GovernedPolicySchema`, `GovernedPolicyResponseSchema`, `GovernedPolicyReadResponseSchema`, `GovernedLaunchAuthorizationIssueSchema`, and `GovernedLaunchAuthorizationMintSchema` from `@musterd/protocol`.
 - Produces: `getGovernedPolicy(slug)`, `setGovernedPolicy(slug, policy)`, `issueGovernedLaunch(slug, body)`, and `revokeGovernedLaunch(slug, launchId)` on `HttpClient`.
 
-- [ ] **Step 1: Write the failing tests.** Assert that policy read/write and launch issue call the exact governed paths, that the launch body is passed unchanged to the server request seam, that a mint response is parsed as `GovernedLaunchAuthorizationMint`, and that a malformed response throws a protocol-schema `CliError`.
-- [ ] **Step 2: Run the focused client test to verify it fails.** Run `pnpm --filter @musterd/cli exec vitest run src/client.governed.test.ts`; expected failure is missing methods or missing response validation.
-- [ ] **Step 3: Implement the minimal methods.** Use the existing private `request` helper, parse every returned body with the corresponding protocol schema, and keep revoke’s `{ ok: boolean }` response narrow. Do not print or include the plaintext launch token in errors.
-- [ ] **Step 4: Re-run the focused client test.** Run the same command; expected result is PASS.
+- [x] **Step 1: Write the failing tests.** Assert that policy read/write and launch issue call the exact governed paths, that the launch body is passed unchanged to the server request seam, that a mint response is parsed as `GovernedLaunchAuthorizationMint`, and that a malformed response throws a protocol-schema `CliError`.
+- [x] **Step 2: Run the focused client test to verify it fails.** Run `pnpm --filter @musterd/cli exec vitest run src/client.governed.test.ts`; expected failure is missing methods or missing response validation.
+- [x] **Step 3: Implement the minimal methods.** Use the existing private `request` helper, parse every returned body with the corresponding protocol schema, and keep revoke’s `{ ok: boolean }` response narrow. Do not print or include the plaintext launch token in errors.
+- [x] **Step 4: Re-run the focused client test.** Run the same command; expected result is PASS.
 
 ### Task 2: Build the Claude Code and Codex handoff adapters
 
@@ -65,10 +65,10 @@
 - Consumes: a validated `GovernedLaunchAuthorizationMint`, explicit `server`, `team`, `agentKey`, `apertureBaseUrl`, `model`, `workspace`, and a small base `ProcessEnv`.
 - Produces: `buildGovernedLaunchPlan(input): GovernedLaunchPlan`, where `command` is `claude` or `codex`, `args` are harness-specific, and `env` is the sanitized child environment.
 
-- [ ] **Step 1: Write the failing adapter matrix.** Cover Claude Code (`ANTHROPIC_BASE_URL`, `MUSTERD_LAUNCH_SURFACE=claude-code`, `claude --model …`), Codex (`OPENAI_BASE_URL`, `MUSTERD_LAUNCH_SURFACE=codex`, `codex exec --json --model … -C …`), provider-key stripping, safe runtime-variable retention, exact governed handoff variables, URL rejection, and unsupported Surface rejection.
-- [ ] **Step 2: Run the focused adapter test to verify it fails.** Run `pnpm --filter @musterd/cli exec vitest run src/integrations/governed-launch.test.ts`; expected failure is the missing module/export.
-- [ ] **Step 3: Implement the minimal pure builder.** Validate the mint with `GovernedLaunchAuthorizationMintSchema`; validate the endpoint as HTTPS unless it is loopback; copy only the safe runtime allow-list (`HOME`, `PATH`, `TMPDIR`, locale/terminal values, and harness config-home paths); set the exact `MUSTERD_*` identity and one-shot handoff values; set only the harness-specific Aperture base URL; and never log, persist, or redact-and-reprint secrets inside the builder.
-- [ ] **Step 4: Re-run the focused adapter test.** Run the same command; expected result is PASS with deterministic plan bytes for both supported Surfaces.
+- [x] **Step 1: Write the failing adapter matrix.** Cover Claude Code (`ANTHROPIC_BASE_URL`, `MUSTERD_LAUNCH_SURFACE=claude-code`, `claude --model …`), Codex (`OPENAI_BASE_URL`, `MUSTERD_LAUNCH_SURFACE=codex`, `codex exec --json --model … -C …`), provider-key stripping, safe runtime-variable retention, exact governed handoff variables, URL rejection, and unsupported Surface rejection.
+- [x] **Step 2: Run the focused adapter test to verify it fails.** Run `pnpm --filter @musterd/cli exec vitest run src/integrations/governed-launch.test.ts`; expected failure is the missing module/export.
+- [x] **Step 3: Implement the minimal pure builder.** Validate the mint with `GovernedLaunchAuthorizationMintSchema`; validate the endpoint as HTTPS unless it is loopback; copy only the safe runtime allow-list (`HOME`, `PATH`, `TMPDIR`, locale/terminal values, and harness config-home paths); set the exact `MUSTERD_*` identity and one-shot handoff values; set only the harness-specific Aperture base URL; and never log, persist, or redact-and-reprint secrets inside the builder.
+- [x] **Step 4: Re-run the focused adapter test.** Run the same command; expected result is PASS with deterministic plan bytes for both supported Surfaces.
 
 ### Task 3: Update implementation-facing documentation and decision record
 
@@ -82,19 +82,18 @@
 - Consumes: the implementation in Tasks 1–2 and the approved paved-road design.
 - Produces: a synchronized record that calls this a partial handoff/preflight slice, not a live governed-launch acceptance.
 
-- [ ] **Step 1: Write ADR 425 with Context, Problem, Decision, Consequences, and Observability & Evaluation.** State that the adapter builds an ephemeral process plan only; it does not activate policy, consume a launch, launch a provider request, apply external configuration, or claim a complete §13 result.
-- [ ] **Step 2: Update the CLI architecture tree and paved-road status.** Add the new source file with its one-job description and state that Increment 3 now includes the typed client/adapter handoff while live bridge/MCP/provider/cost execution remains open.
-- [ ] **Step 3: Rewrite the current implementation snapshot.** Keep the status derivable and concise; link ADR 425 rather than duplicating its rationale.
-- [ ] **Step 4: Run `pnpm vocab:check` and `pnpm format:check`.** Expected result is PASS with no architecture-tree or canonical-vocabulary drift.
+- [x] **Step 1: Write ADR 425 with Context, Problem, Decision, Consequences, and Observability & Evaluation.** State that the adapter builds an ephemeral process plan only; it does not activate policy, consume a launch, launch a provider request, apply external configuration, or claim a complete §13 result.
+- [x] **Step 2: Update the CLI architecture tree and paved-road status.** Add the new source file with its one-job description and state that Increment 3 now includes the typed client/adapter handoff while live bridge/MCP/provider/cost execution remains open.
+- [x] **Step 3: Rewrite the current implementation snapshot.** Keep the status derivable and concise; link ADR 425 rather than duplicating its rationale.
+- [x] **Step 4: Run `pnpm vocab:check` and `pnpm format:check`.** Expected result is PASS with no architecture-tree or canonical-vocabulary drift.
 
 ### Task 4: Package verification and handoff
 
 **Files:**
 - Modify: none beyond Tasks 1–3.
 
-- [ ] **Step 1: Run the protocol gate.** Run `pnpm --filter @musterd/protocol test` because the adapter consumes protocol contracts even though it adds no schema.
-- [ ] **Step 2: Run the CLI gate.** Run `pnpm --filter @musterd/cli test` and confirm the existing integration/help suites remain green.
-- [ ] **Step 3: Run the required fast gates.** Run `pnpm typecheck && pnpm format:check`, then `pnpm -r build` if the local change requires a generated dist verification.
-- [ ] **Step 4: Inspect the diff for secrets and scope.** Run `git diff --check` and a targeted search for `msla_`, `msnode_`, `mskey_`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` in tracked output; only tests/fixtures and code-level variable names may contain them, never generated artifacts or logs.
-- [ ] **Step 5: Commit the implementation with the seat trailer.** Use a focused commit message ending with `Co-authored-by: big-body (musterd seat) <big-body@revive.musterd>` and `Refs ADR-425`.
-
+- [x] **Step 1: Run the protocol gate.** Run `pnpm --filter @musterd/protocol test` because the adapter consumes protocol contracts even though it adds no schema.
+- [x] **Step 2: Run the CLI gate.** Run `pnpm --filter @musterd/cli test` and confirm the existing integration/help suites remain green.
+- [x] **Step 3: Run the required fast gates.** Run `pnpm typecheck && pnpm format:check`, then `pnpm -r build` if the local change requires a generated dist verification.
+- [x] **Step 4: Inspect the diff for secrets and scope.** Run `git diff --check` and a targeted search for `msla_`, `msnode_`, `mskey_`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` in tracked output; only tests/fixtures and code-level variable names may contain them, never generated artifacts or logs.
+- [x] **Step 5: Commit the implementation with the seat trailer.** Use a focused commit message ending with `Co-authored-by: big-body (musterd seat) <big-body@revive.musterd>` and `Refs ADR-425`.

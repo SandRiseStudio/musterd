@@ -13,6 +13,11 @@ import {
   type NodeList,
   GoalSchema,
   GrantMintSchema,
+  GovernedLaunchAuthorizationIssueSchema,
+  GovernedLaunchAuthorizationMintSchema,
+  GovernedPolicySchema,
+  GovernedPolicyResponseSchema,
+  GovernedPolicyReadResponseSchema,
   LaneBoardSchema,
   LaneResultSchema,
   SeedListSchema,
@@ -63,6 +68,11 @@ import {
   type Envelope,
   type Goal,
   type GoalList,
+  type GovernedLaunchAuthorizationIssue,
+  type GovernedLaunchAuthorizationMint,
+  type GovernedPolicy,
+  type GovernedPolicyResponse,
+  type GovernedPolicyReadResponse,
   type GrantMint,
   type IssueGrant,
   type LaneBoard,
@@ -86,6 +96,7 @@ import {
   type WSServerFrame,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
+import { z } from 'zod';
 import { buildClaimFrame, parseClaimResponse } from './claim-client.js';
 import type { ClaimOutcome } from './claim-client.js';
 import {
@@ -98,6 +109,8 @@ import {
 } from './errors.js';
 import { workspaceGuidanceEpoch } from './guidanceAttestation.js';
 import { cliBuild } from './version.js';
+
+const GovernedLaunchRevokeResponseSchema = z.object({ ok: z.boolean() }).strict();
 
 /** The `/inbox/interrupt-check` response (ADR 088). `raised: false` is the silent common path. */
 export interface InterruptCheck {
@@ -1243,6 +1256,54 @@ export class HttpClient {
       policy: Policy;
       stored: PolicyOverride;
     };
+  }
+
+  /** The governed model policy (ADR 411) — admin read with an explicit nullable no-policy state. */
+  async getGovernedPolicy(slug: string): Promise<GovernedPolicyReadResponse> {
+    const json = await this.request('GET', `/teams/${slug}/governed/policy`);
+    const parsed = GovernedPolicyReadResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('governed policy response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /** Replace the server-owned governed model policy (ADR 411). */
+  async setGovernedPolicy(slug: string, policy: GovernedPolicy): Promise<GovernedPolicyResponse> {
+    const body = GovernedPolicySchema.parse(policy);
+    const json = await this.request('POST', `/teams/${slug}/governed/policy`, body);
+    const parsed = GovernedPolicyResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('governed policy response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /** Issue a one-shot governed launch handoff (ADR 411). The plaintext token is never logged. */
+  async issueGovernedLaunch(
+    slug: string,
+    input: GovernedLaunchAuthorizationIssue,
+  ): Promise<GovernedLaunchAuthorizationMint> {
+    const body = GovernedLaunchAuthorizationIssueSchema.parse(input);
+    const json = await this.request('POST', `/teams/${slug}/governed/launches`, body);
+    const parsed = GovernedLaunchAuthorizationMintSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('governed launch response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /** Revoke an active governed launch handoff (ADR 411). */
+  async revokeGovernedLaunch(slug: string, launchId: string): Promise<{ ok: boolean }> {
+    const json = await this.request(
+      'DELETE',
+      `/teams/${slug}/governed/launches/${encodeURIComponent(launchId)}`,
+    );
+    const parsed = GovernedLaunchRevokeResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('governed launch revoke response did not match the protocol schema', 1);
+    }
+    return parsed.data;
   }
   /** The guardian tier map (ADR 263 follow-up) — the scoped member read the probe's service seat
    *  is allowed, unlike the admin-only full policy above (which carries the secret webhook). */
