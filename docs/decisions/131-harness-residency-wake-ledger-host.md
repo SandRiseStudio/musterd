@@ -333,6 +333,8 @@ line — as `… — harness: <text>`, bounded to the wire's 200 characters, so 
 `residency.wake_failed` row name the cause. Timeouts and live children still carry the verdict
 alone; the host does not invent a cause it did not read._
 
+_2026-09-19 (ADR 424, lane 01M2SB89AR): the `resumable` badge this section's increment 4 introduced is now withdrawn by evidence — a `residency.woke` row newer than the capture with `session: fresh` nulls the roster's `resumable_at` until the next capture or a resumed wake. Measured that day: 0 of 42 wakes in five days had resumed while every enrolled seat read `resumable`, because a single wake life (529–1583 KiB) is two to six times the 256 KiB hygiene bound. The enrollment row and this section's attestation contract are unchanged._
+
 ## Observability & Evaluation
 
 **Traces** — one `musterd.residency.wake` span per actuation (lease → spawn → occupied →

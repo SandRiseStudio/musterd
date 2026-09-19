@@ -580,8 +580,8 @@ export function seatWakeabilityFacts(
         ${MINTED_HERE}
       ORDER BY ts DESC, id DESC LIMIT 1`,
   );
-  const lastWoke = db.prepare<[string, string], { ts: number }>(
-    `SELECT ts FROM audit
+  const lastWoke = db.prepare<[string, string], { ts: number; detail: string }>(
+    `SELECT ts, detail FROM audit
       WHERE team_id = ? AND action = 'residency.woke' AND target = ?
         ${MINTED_HERE}
       ORDER BY ts DESC, id DESC LIMIT 1`,
@@ -596,7 +596,26 @@ export function seatWakeabilityFacts(
     // an observed silence, not an assumed one.
     const host_reachable = seen === undefined ? undefined : now - seen < HOST_STALE_MS;
     let workspace_readable = true;
+    let resumable_at = r.resumable_at;
     if (member) {
+      // ADR 424: the badge input is withdrawn by evidence. A `residency.woke` row newer than the
+      // capture whose `session` axis is `fresh` is a wake that did NOT continue the transcript —
+      // the ladder skipped it (over the bound, past the horizon) or never looked (ADR 209
+      // portable). Measured 2026-09-19: 0 of 42 wakes in five days resumed while every enrolled
+      // seat read `resumable`. The enrollment row keeps the true attestation time; only what the
+      // roster asserts changes. A resumed wake, or none since the capture, leaves it standing.
+      if (resumable_at != null) {
+        const woke = lastWoke.get(teamId, member.name);
+        if (woke !== undefined && woke.ts > resumable_at) {
+          let session: string | undefined;
+          try {
+            session = (JSON.parse(woke.detail) as { session?: string }).session;
+          } catch {
+            /* unreadable detail is not evidence of anything */
+          }
+          if (session === 'fresh') resumable_at = null;
+        }
+      }
       const failed = lastFailure.get(teamId, member.name);
       if (failed) {
         let wakeability: string | undefined;
@@ -616,7 +635,7 @@ export function seatWakeabilityFacts(
       host: r.host,
       host_reachable,
       workspace_readable,
-      resumable_at: r.resumable_at,
+      resumable_at,
     });
   }
   return out;
