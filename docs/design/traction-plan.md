@@ -399,7 +399,7 @@ portfolio: [PRODUCT.md](../../PRODUCT.md), [ADR 320](../decisions/320-positionin
   Google, Apple; 3-day window; Slack on). Broad net; nobody is reading it.
 - `~/lab/ai-training`: the AI training material nick has run for groups — a second proof of the
   "explains agents to people" skill.
-- `~/pminterview`: the interview kit — resume (VMware Cloud PM 2021–24: launched a $300M ARR SaaS
+- `~/pminterview`: the interview material — resume (VMware Cloud PM 2021–24: launched a $300M ARR SaaS
   subscription with three engineering teams; AWS PM intern; Fannie Mae developer-tools tech lead;
   UT Austin MBA), STAR talking points for MoveTrail and musterd, JD-specific prep from earlier loops
   (Arize AI, ServiceNow AIOps, Snowflake Intelligence, Authorium), and two demo builds
