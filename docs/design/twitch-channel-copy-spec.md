@@ -162,7 +162,7 @@ on the set this replaces.
 
 ## 5. The About surface — bio, then panels
 
-### 5.1 Profile bio (the About description, 300-character cap)
+### 5.1 `Profile` bio (Twitch's own label for the About description, 300-character cap)
 
 Set at `twitch.tv/settings/profile` → **Bio** — account settings, not the Creator Dashboard.
 

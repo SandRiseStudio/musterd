@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GLOSSARY } from '../docs/glossary/terms.ts';
-import { checkVocab, DESIGN_BASELINE, USER_FACING_BASELINE } from './check-vocab.ts';
+import {
+  checkVocab,
+  DESIGN_BASELINE,
+  DESIGN_TERMINOLOGY_BASELINE,
+  USER_FACING_BASELINE,
+} from './check-vocab.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -27,16 +32,20 @@ function repo(files: Record<string, string>): string {
   // brand.md alone needs a real §5 or glossaryDrift fires; a test may overwrite it below.
   for (const rel of USER_FACING_BASELINE) write(dir, rel, '');
   for (const name of DESIGN_BASELINE) write(dir, `docs/design/${name}`, '');
+  for (const name of DESIGN_TERMINOLOGY_BASELINE) write(dir, `docs/design/${name}`, '');
   const glossary = GLOSSARY.filter((g) => g.status === 'canonical')
     .map((t) => `**${t.term[0]!.toUpperCase()}${t.term.slice(1)}** — .`)
     .join('\n');
   const linted = GLOSSARY.filter((g) => g.status === 'banned')
     .map((t) => `**${t.term}**`)
     .join(', ');
+  // `<!-- vocab:ok -->` is load-bearing, not decoration: since 2026-09-19 design docs carry the
+  // terminology table, and this sentence must name the banned words in BOLD for lintedSetDrift to
+  // parse them — so the scan would read the gate's own definition as four violations.
   write(
     dir,
     'docs/design/brand.md',
-    `## 5. Glossary\n\nLinted outright: ${linted}.\n\n${glossary}\n`,
+    `## 5. Glossary\n\nLinted outright: ${linted}. ${'<!-- vocab:ok -->'}\n\n${glossary}\n`,
   );
   for (const [rel, body] of Object.entries(files)) write(dir, rel, body);
   return dir;
@@ -120,6 +129,57 @@ describe('ADR 296 terminology table', () => {
     expect(r.ok).toBe(false);
     expect(r.errors.some((e) => e.includes('new-help.ts') && e.includes('profile'))).toBe(true);
     expect(r.errors.some((e) => e.includes('README.md'))).toBe(false);
+  });
+});
+
+describe('design docs carry the terminology table (lane 01M2XERV15)', () => {
+  it('reconstructs the hole: before 2026-09-19 a linted word in a design doc passed', () => {
+    // The gate added docs/design/*.md with tables: ['work-item'] alone, so the four words ADR 296
+    // lints OUTRIGHT were never checked in the directory holding brand.md and the copy specs.
+    // Found via an off-glossary skill NAME in a file vocab:check called clean (ryder's #1588).
+    const root = repo({ 'docs/design/new-spec.md': 'One worktree per agent.\n' });
+    const r = checkVocab(root);
+    expect(r.ok).toBe(false);
+    expect(r.errors.some((e) => e.includes('new-spec.md') && e.includes('worktree'))).toBe(true);
+  });
+
+  it('a design doc on the terminology baseline is still work-item gated', () => {
+    // The exemption is narrow: one table off, not the file ignored.
+    const root = repo({ 'docs/design/legacy.md': 'One worktree per sprint.\n' });
+    const r = checkVocab(root, { designTerminologyBaseline: ['legacy.md'] });
+    expect(r.errors.some((e) => e.includes('legacy.md') && e.includes('worktree'))).toBe(false);
+    expect(r.errors.some((e) => e.includes('legacy.md') && e.includes('sprint'))).toBe(true);
+  });
+
+  it('a git-literal mention survives — the flag is not the concept', () => {
+    const root = repo({
+      'docs/design/new-spec.md': 'Run `git config extensions.worktreeConfig true` first.\n',
+    });
+    expect(checkVocab(root).ok).toBe(true);
+  });
+
+  it("brand.md's own linted-set sentence cannot satisfy both checks without the suppression", () => {
+    // lintedSetDrift REQUIRES the banned words in bold; the scan reads bold as a use. The two
+    // checks contradict each other on one line, and `<!-- vocab:ok -->` is the only resolution.
+    const root = repo({});
+    const brand = join(root, 'docs/design/brand.md');
+    writeFileSync(brand, readFileSync(brand, 'utf8').replace(' <!-- vocab:ok -->', ''));
+    const r = checkVocab(root);
+    expect(r.ok).toBe(false);
+    expect(r.errors.some((e) => e.includes('brand.md') && e.includes('worktree'))).toBe(true);
+  });
+
+  it('a dead terminology-baseline entry fails as rot', () => {
+    const root = repo({});
+    const r = checkVocab(root, {
+      designTerminologyBaseline: [...DESIGN_TERMINOLOGY_BASELINE, 'deleted-spec.md'],
+    });
+    expect(r.ok).toBe(false);
+    expect(
+      r.errors.some(
+        (e) => e.includes('DESIGN_TERMINOLOGY_BASELINE') && e.includes('deleted-spec.md'),
+      ),
+    ).toBe(true);
   });
 });
 

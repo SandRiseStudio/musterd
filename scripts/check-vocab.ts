@@ -37,6 +37,45 @@ export const TERMINOLOGY_GATE_FROM = 300;
 export const PLANS_GATE_FROM = '2026-07-06';
 export const GRANDFATHERED_PLANS: string[] = [];
 export const DESIGN_BASELINE = new Set([]);
+/**
+ * Design docs the TERMINOLOGY table does not yet enforce — the tier-1 burn-down's last tier, not a
+ * silent exemption, in the same shape as USER_FACING_BASELINE.
+ *
+ * Until 2026-09-19 `docs/design/*.md` was gated on the work-item table ALONE, so the four words
+ * ADR 296 lints outright were never checked in the directory holding brand.md, the copy specs and
+ * the positioning material — the documents product-communications writes FROM. `pnpm vocab:check`
+ * reported green over all of it. Found while reading an off-glossary skill NAME
+ * (`seat-worktree-identity`) in a file the gate called clean (lane 01M2XERV15, ryder's #1588).
+ *
+ * Turning the table on surfaced 117 violations across 25 files. Four were fixed in the same commit
+ * — brand.md, skills-that-travel.md, traction-plan.md, twitch-channel-copy-spec.md — and the 21
+ * below are frozen so the gate binds NEW design prose today rather than waiting on a burn-down.
+ * Every entry is a claim that someone will read the file and fix or justify each use;
+ * `baselineRot()` fails if one names a file that no longer exists.
+ */
+export const DESIGN_TERMINOLOGY_BASELINE = new Set([
+  '2026-08-20-macos-console.md',
+  '2026-09-01-codrive-graduation.md',
+  '2026-09-01-human-surface.md',
+  'agent-primer.md',
+  'brainstorm-arc-reachability-to-ontology.md',
+  'cookoff-cell-runbook.md',
+  'cookoff-experiment.md',
+  'cookoff-measurement.md',
+  'daemon-doorbell-contract.md',
+  'dogfood-scenarios.md',
+  'gate-b-costly-action-local-merge-scope.md',
+  'harness-residency.md',
+  'human-role-reevaluation.md',
+  'install-topology.md',
+  'landscape.md',
+  'lanes-and-the-multi-agent-tax.md',
+  'mcp-tool-surface.md',
+  'membership-model.md',
+  'model-attestation-truth.md',
+  'provisioning-recipe.md',
+  'roles-and-stewardship.md',
+]);
 
 const WORK_ITEM_BANNED: { re: RegExp; word: string }[] = [
   { re: /\bepics?\b/i, word: 'epic' },
@@ -59,6 +98,8 @@ export interface VocabCheckOptions {
   userFacingBaseline?: string[];
   /** Override the frozen design baseline (tests). */
   designBaseline?: string[];
+  /** Override the frozen design TERMINOLOGY baseline (tests). */
+  designTerminologyBaseline?: string[];
 }
 
 export interface VocabCheckResult {
@@ -91,7 +132,12 @@ interface GatedFile {
   tables: Table[];
 }
 
-function gatedFiles(root: string, baseline: Set<string>, design: Set<string>): GatedFile[] {
+function gatedFiles(
+  root: string,
+  baseline: Set<string>,
+  design: Set<string>,
+  designTerminology: Set<string>,
+): GatedFile[] {
   const out: GatedFile[] = [];
 
   const adrDir = join(root, 'docs', 'decisions');
@@ -120,12 +166,11 @@ function gatedFiles(root: string, baseline: Set<string>, design: Set<string>): G
 
   const designDir = join(root, 'docs', 'design');
   for (const entry of listDir(designDir)) {
-    if (entry.endsWith('.md') && !design.has(entry))
-      out.push({
-        abs: join(designDir, entry),
-        rel: `docs/design/${entry}`,
-        tables: ['work-item'],
-      });
+    if (entry.endsWith('.md') && !design.has(entry)) {
+      const tables: Table[] = ['work-item'];
+      if (!designTerminology.has(entry)) tables.push('terminology');
+      out.push({ abs: join(designDir, entry), rel: `docs/design/${entry}`, tables });
+    }
   }
 
   const userFacingDirs = [
@@ -265,7 +310,12 @@ function lintedSetDrift(section: string): string[] {
  * Same shape as the controls registry's `neverExercisedSince` aging: the mechanism to notice
  * must itself be checked for staleness.
  */
-function baselineRot(root: string, baseline: Set<string>, design: Set<string>): string[] {
+function baselineRot(
+  root: string,
+  baseline: Set<string>,
+  design: Set<string>,
+  designTerminology: Set<string>,
+): string[] {
   const errors: string[] = [];
   const check = (rel: string, listName: string) => {
     if (!existsSync(join(root, rel)))
@@ -273,6 +323,7 @@ function baselineRot(root: string, baseline: Set<string>, design: Set<string>): 
   };
   for (const rel of baseline) check(rel, 'USER_FACING_BASELINE');
   for (const name of design) check(`docs/design/${name}`, 'DESIGN_BASELINE');
+  for (const name of designTerminology) check(`docs/design/${name}`, 'DESIGN_TERMINOLOGY_BASELINE');
   for (const name of GRANDFATHERED_PLANS)
     check(`docs/superpowers/plans/${name}`, 'GRANDFATHERED_PLANS');
   return errors;
@@ -281,7 +332,8 @@ function baselineRot(root: string, baseline: Set<string>, design: Set<string>): 
 export function checkVocab(root: string, opts: VocabCheckOptions = {}): VocabCheckResult {
   const baseline = new Set(opts.userFacingBaseline ?? USER_FACING_BASELINE);
   const design = new Set(opts.designBaseline ?? DESIGN_BASELINE);
-  const files = gatedFiles(root, baseline, design);
+  const designTerminology = new Set(opts.designTerminologyBaseline ?? DESIGN_TERMINOLOGY_BASELINE);
+  const files = gatedFiles(root, baseline, design, designTerminology);
   const tables = [
     { name: 'work-item' as const, bans: WORK_ITEM_BANNED, label: 'structural noun (ADR 098)' },
     {
@@ -292,7 +344,7 @@ export function checkVocab(root: string, opts: VocabCheckOptions = {}): VocabChe
   ];
   const errors: string[] = [];
   for (const file of files) errors.push(...scanFile(file, tables));
-  errors.push(...baselineRot(root, baseline, design));
+  errors.push(...baselineRot(root, baseline, design, designTerminology));
   errors.push(...glossaryDrift(root));
   return { ok: errors.length === 0, errors, checked: files.length };
 }
@@ -312,7 +364,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   process.stdout.write(
     `All ${r.checked} gated file(s) use the canonical vocabulary ` +
       `(work-item ADRs < ${String(GATE_FROM).padStart(3, '0')}, terminology ADRs < ${String(TERMINOLOGY_GATE_FROM).padStart(3, '0')}, ` +
-      `plans < ${PLANS_GATE_FROM}, ${DESIGN_BASELINE.size} baseline design docs and ` +
+      `plans < ${PLANS_GATE_FROM}, ${DESIGN_BASELINE.size} baseline design docs, ` +
+      `${DESIGN_TERMINOLOGY_BASELINE.size} design docs not yet terminology-gated and ` +
       `${USER_FACING_BASELINE.size} user-facing files grandfathered).\n`,
   );
 }
