@@ -158,6 +158,15 @@ Merged from both reads, de-duplicated. This list governs the three leave-behinds
 form, the GitHub stock reply and the CFP abstract, and it is the same list `homepage-copy-spec.md`
 §2 enforces on the site.
 
+**This section is the reasoning; `scripts/lib/forbidden-claims.ts` is the rule** (added 2026-09-20).
+Until then the list lived twice — here as prose and as four regexes inside `check-claims.ts` — which
+is the shape that drifts, on a list governing a conference abstract that cannot be edited after it
+ships. The module carries all fifteen with their numbers, so the two can be read against each other,
+and tiers them honestly: four are `gated` (a regex with no false positives on the current corpus)
+and eleven are `review` (true, load-bearing, and not safely regexable — the first draft of the
+"every act" rule fired on six sentences that were not the claim). Promotion needs a regex plus a
+clean mutation run, not confidence. Edit the numbered items below and the module in the same commit.
+
 1. Containment, in any form: that musterd sandboxes, stops tool use, prevents prompt injection, or
    prevents npm / GitHub Actions compromise.
 2. **"Who did what is never a question."** Tool use is the question and we do not have it.

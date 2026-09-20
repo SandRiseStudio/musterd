@@ -49,41 +49,20 @@ const GATED: string[] = [
 /** Files under a gated directory that are still not stranger-facing. */
 const SKIP = /(?:\.test\.[tj]sx?|\.png|\.jpg|\.svg|\.woff2?|\.ico)$/;
 
-interface Ban {
-  re: RegExp;
-  why: string;
-  instead: string;
-}
+/**
+ * The rule lives in `lib/forbidden-claims.ts`, not here.
+ *
+ * Until 2026-09-20 these four regexes WERE the rule, while `security-position.md` §3 carried the
+ * other eleven as prose — two copies of one list, which is the shape that drifts. The list is now
+ * one typed module; this gate runs its regexable subset, and a site-side check can run the same
+ * four against served HTML (miley's lane `01M2XD2RPG`, after musterd.io served four wrong strings
+ * for most of 2026-09-19 while this gate reported green on the repo).
+ */
+import { GATED_CLAIMS } from './lib/forbidden-claims.ts';
 
-const BANS: Ban[] = [
-  {
-    re: /who did what is never a question/i,
-    why: 'promises the containment ADR 320 decision 5 refuses — tool use IS the question, and musterd never sees it',
-    instead: '“Every act on the roster has a name on it”',
-  },
-  {
-    re: /(?:nothing|no one|nobody)[^.\n]{0,40}\bis anonymous\b|\bno anonymous workers?\b/i,
-    why: 'an absolute claim about anonymity that the roster cannot make for anything off it',
-    instead: '“musterd names the work that goes through the team; it does not contain the agent”',
-  },
-  {
-    /*
-     * Only when "every act" is doing NAMING work. The first draft of this rule banned the
-     * bare phrase and fired on six sentences that were not the claim at all — "every act,
-     * decision record and merge lands in the open repository" is about the repo being
-     * public, not about who owns an act. A gate with six false positives on its first run
-     * gets suppressed everywhere and then catches nothing.
-     */
-    re: /\bevery act\b(?!\s+on (?:the|that) roster\b)[^.!?]{0,60}?\b(?:has a name|carries a (?:member|named)|names its member|carries a name)\b/i,
-    why: 'unscoped “every act” as a naming claim — true only of acts the daemon accepted',
-    instead: '“every act on the roster …”',
-  },
-  {
-    re: /\bthe record holds what the harness observed\b/i,
-    why: 'reads as a tool-call transcript; what is attested is which model occupied a seat, at connect time',
-    instead: '“who occupies a seat is what the harness observed, not what the agent declared”',
-  },
-];
+type Ban = (typeof GATED_CLAIMS)[number];
+
+const BANS: readonly Ban[] = GATED_CLAIMS;
 
 /**
  * An unbalanced set of code fences means this checker CANNOT tell code from prose in the file,
