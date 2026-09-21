@@ -11,6 +11,7 @@
 import type { NotifyItem } from '../notify/os.js';
 import type { GuardianClass, GuardianTier, Incident } from './classify.js';
 import {
+  clearRaise,
   raiseReason,
   recordAttempt,
   recordRaise,
@@ -26,8 +27,23 @@ export interface ActDeps {
   tiers: Record<GuardianClass, GuardianTier>;
   runService: (args: string[]) => Promise<{ ok: boolean }>;
   osNotify: (n: NotifyItem) => void;
-  /** In-band ask from the guardian seat to the `platform` holder (ADR 227 routing). */
-  sendAsk: (body: string) => Promise<void>;
+  /**
+   * In-band ask from the guardian seat to the `platform` holder (ADR 227 routing).
+   *
+   * Returns the act id when the send reports one, so a later discharge can name the thread it
+   * closes (ADR 432). `void`/`null` is honoured and means "no thread to close" — the raise still
+   * happened and simply cannot be auto-discharged, which is the pre-432 behaviour.
+   */
+  sendAsk: (body: string) => Promise<string | void | null>;
+  /**
+   * Close the thread of a raise whose condition has cleared (ADR 432).
+   *
+   * A `resolve`, not an `accept`: ADR 232 bars a service seat from the peer verbs, so `resolve` —
+   * thread-terminal by ADR 025 and not a peer verb — is the only discharge guardian can express.
+   * Optional so a caller that has not wired it degrades to the pre-432 behaviour rather than
+   * failing a tick.
+   */
+  sendResolve?: (thread: string, body: string) => Promise<void>;
   /** Best-effort audit POST; callers must survive its failure. */
   audit: (action: string, detail: Record<string, unknown>) => Promise<void>;
   /**
@@ -106,10 +122,11 @@ export async function actOn(incidents: Incident[], d: ActDeps): Promise<Guardian
         : '';
 
     d.osNotify({ id: `guardian-${cls}-${now}`, title: `musterd guardian: ${cls}`, body: why });
-    await d.sendAsk(
+    const actId = await d.sendAsk(
       `guardian: ${cls} — ${why}${evidence !== undefined ? `\n\n${evidence}` : ''}${withheld}`,
     );
-    if (damped) stamp = recordRaise(stamp, cls, reason, now);
+    if (damped)
+      stamp = recordRaise(stamp, cls, reason, now, typeof actId === 'string' ? actId : null);
     return true;
   };
 
@@ -161,6 +178,61 @@ export async function actOn(incidents: Incident[], d: ActDeps): Promise<Guardian
       acted.push({ class: cls, action: 'alerted' });
     } else {
       acted.push({ class: cls, action: 'suppressed' });
+    }
+  }
+
+  // ADR 432: a class this tick did NOT classify is a class this guardian has just observed healthy,
+  // and that observation is the discharge of its own outstanding raise.
+  //
+  // WHY IT HAS TO BE HERE. Guardian is a `service` seat and ADR 232 bars a service seat from the
+  // peer verbs by design — it never accepts, not even its own ask. So an incident ask has a
+  // human-based discharge and no condition-based one, and the human never sees a reason to act
+  // because by the time they look the daemon is back. 55 asks on the hub daemon on 2026-09-21, 30
+  // of them from August, every one describing a condition that had long cleared. ADR 429's
+  // obligation rule then pins all 55 into every bounded inbox read, forever, which is what made a
+  // slow leak into a standing cost.
+  //
+  // DERIVED, NEVER STORED — the ADR 090/423 property. Nothing is written onto the ask. The ledger
+  // gains a `guardian.cleared` row and the stamp forgets the memo; if the condition returns, the
+  // next tick raises a NEW ask with a later position and it is owed again, with nothing to un-set.
+  //
+  // THE DIRECTION THIS MUST NOT ERR IN. Only a class absent from `incidents` clears. A condition
+  // that persists is re-classified every tick and so is never absent, so a real open incident
+  // cannot go quiet — it is the damper, not this, that keeps a persisting outage from repeating
+  // itself, and the damper already carries the withheld count on its next raise.
+  //
+  // It sends no act. The discharge is a ledger fact; announcing recovery would answer inbox volume
+  // with more inbox, which is the problem this lane exists inside.
+  const open = Object.keys(stamp.lastRaise) as GuardianClass[];
+  if (open.length > 0) {
+    const firing = new Set(incidents.map((i) => i.class));
+    for (const cls of open) {
+      if (firing.has(cls)) continue;
+      const memo = stamp.lastRaise[cls];
+      // The ledger row first: it is local and cannot fail the tick. The `resolve` is the part that
+      // reaches the team, and it is best-effort for the same reason every other send here is — the
+      // daemon may BE the incident, and a guardian that throws while recovering is worse than one
+      // that stays quiet about a recovery.
+      await audit('guardian.cleared', {
+        class: cls,
+        raised_at: memo?.raisedAt ?? null,
+        suppressed: memo?.suppressed ?? 0,
+        act: memo?.actId ?? null,
+      });
+      const thread = memo?.actId;
+      if (typeof thread === 'string' && thread.length > 0 && d.sendResolve !== undefined) {
+        try {
+          await d.sendResolve(thread, `guardian: ${cls} — cleared; this raise is closed`);
+        } catch (e) {
+          d.log(
+            `resolve for ${cls} failed (${String(e)}) — the raise stays open; next tick retries`,
+          );
+          // Keep the memo: an un-sent resolve means the ask is still owed, and forgetting it here
+          // would leave a pinned obligation with nothing left that knows to close it.
+          continue;
+        }
+      }
+      stamp = clearRaise(stamp, cls);
     }
   }
 
