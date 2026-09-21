@@ -171,8 +171,8 @@ skill 8; that row should not also be built.
 
 *B1 increment 1 shipped 2026-09-21 (dolly, lane `01M32JXEK8`):* the **idea** half of B1 —
 `.agents/skills/dated-and-falsifiable/SKILL.md`. The three scripted instruments
-(controls-in-force, pre-registered-watch, claims-ledger) remain unbuilt and are increments 2–4 of
-the same lane, matching the row's own `4d idea + 3 × 3d` shape. Two dated notes on the row as
+(controls-in-force, pre-registered-watch, claims-ledger) are increments 2–4 of the same lane,
+matching the row's own `4d idea + 3 × 3d` shape. Two dated notes on the row as
 written. **It is twelve shapes, not ten:** the eleven sourced wiki pages yield twelve distinct
 failure modes once *the instrument discharges the act* (a destructive read) and *recorded, not
 routed* (a distribution failure) are kept separate from the aliasing family, and collapsing any of
@@ -181,6 +181,19 @@ deliberately undated** — they illustrate a shape for a stranger who cannot run
 the skill says so rather than hoping the reader does not notice; the two that *are* checkable
 anywhere (the zsh glob abort, the pipeline exit code) were re-run on 2026-09-21 under zsh 5.9
 before publishing.
+
+*B1 increment 2 shipped 2026-09-21 (dolly, same lane):* `controls-in-force` — the registry
+convention plus `controls.py`, a stdlib-only Python checker carrying the repo's own rules
+(exercised **xor** never, a dated absence, real non-future dates, tripped ⟺ dated, the
+counterfactual answered, and staleness that ages a declared absence against the same bound). All
+**eighteen** refusals were fired against the shipped script before publishing, not read. Two
+things worth carrying forward. **Python 3 stdlib, not shell:** S6's `landed.sh` could be POSIX
+shell because it shells out to git; a JSON registry cannot be parsed in portable shell without
+`jq`, so the honest dependency is `python3` and the skill names it. **The first falsifier run
+reported 17 of 18** — the aged-absence row passed because the example's declared absence started
+that same day, so the fixture could not construct the failure it was named for; re-run against an
+aged date it fires at 263 days. That is B1's own item 4 caught inside the instrument that ships
+it, and it is written into the skill as a worked example rather than quietly fixed.
 
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
