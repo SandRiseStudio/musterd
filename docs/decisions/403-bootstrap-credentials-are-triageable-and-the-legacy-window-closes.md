@@ -1,6 +1,6 @@
 # 403 — A leaked bootstrap credential is triageable without opening it, and ADR 344's legacy window closes
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-15
 - Relates to: [ADR 344](344-scoped-rotatable-agent-bootstrap-credentials.md) (scoped, rotatable
   agent bootstrap credentials), [ADR 337](337-agent-http-session-authority.md) (routine agent authority),
