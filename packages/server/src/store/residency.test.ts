@@ -1,10 +1,11 @@
-import { makeEnvelope, type Act } from '@musterd/protocol';
+import { makeEnvelope, WakeContextPacketSchema, type Act } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { appendAudit, listAudit } from './audit.js';
 import { openLane, updateLane } from './lanes.js';
 import { addMember, getMemberByName } from './members.js';
+import { saveMemory } from './memory.js';
 import { insertMessage } from './messages.js';
 import { attach } from './presence.js';
 import {
@@ -55,7 +56,7 @@ function msg(
   act: Act,
   id: string,
   ts: number,
-  opts: { thread?: string; meta?: Record<string, unknown> } = {},
+  opts: { thread?: string; body?: string; meta?: Record<string, unknown> } = {},
 ) {
   insertMessage(
     db,
@@ -68,7 +69,7 @@ function msg(
       from: from.name,
       to: to ? { kind: 'member', name: to.name } : { kind: 'team' },
       act,
-      body: 'x',
+      body: opts.body ?? 'x',
       thread: opts.thread ?? null,
       meta: opts.meta ?? null,
       ts,
@@ -155,10 +156,41 @@ describe('buildWakeContext (ADR 209)', () => {
     expect(buildWakeContext(db, team, ada, { act_id: 'm1' })).toMatchObject({
       wake: { kind: 'reply', act_id: 'm1' },
       objective: { action: 'reply' },
-      fetch: ['inbox_thread', 'seat_memory'],
+      fetch: [],
       delivery: { requirement: 'portable', intended: 'fresh' },
     });
     expect(() => buildWakeContext(db, team, bob, { act_id: 'm1' })).toThrow(/forbidden/i);
+  });
+
+  it('v2: carries the waking thread, the open ledger and the memory body; fetch names only what did not fit (ADR 430)', () => {
+    const { db, team, nick, ada } = seed();
+    saveMemory(db, ada.id, { headline: 'h', body: 'carrying lane X' });
+    msg(db, team, nick, ada, 'message', 'v1', 1_000, { body: 'first' });
+    msg(db, team, nick, ada, 'steer', 'v2', 1_001, { thread: 'v1', body: 'do the thing' });
+    const packet = buildWakeContext(db, team, ada, { act_id: 'v2' });
+    expect(packet.version).toBe(2);
+    expect(packet.context?.thread?.acts.map((a) => [a.from, a.body])).toEqual([
+      ['nick', 'first'],
+      ['nick', 'do the thing'],
+    ]);
+    expect(packet.context?.memory).toEqual({ body: 'carrying lane X', truncated: false });
+    expect(packet.budget?.used_bytes).toBeGreaterThan(0);
+    expect(packet.fetch).toEqual([]); // everything fit
+    expect(WakeContextPacketSchema.parse(packet)).toEqual(packet);
+  });
+
+  it('v2: a lane wake carries the lane block and still points at the git artifact', () => {
+    const { db, team, ada } = seed();
+    const lane = openLane(db, team.id, team.slug, ada.name, {
+      title: 'L',
+      detail: 'D',
+      branch: 'feat/x',
+      claim: true,
+    });
+    const packet = buildWakeContext(db, team, ada, { lane_id: lane.id });
+    expect(packet.context?.lane).toMatchObject({ detail: 'D', truncated: false });
+    expect(packet.fetch).toEqual(['git_artifact']);
+    expect(WakeContextPacketSchema.parse(packet)).toEqual(packet);
   });
 
   it('derives handoff, review, and owned work-order packets without stored bodies', () => {
@@ -179,7 +211,7 @@ describe('buildWakeContext (ADR 209)', () => {
       wake: { kind: 'handoff' },
       objective: { action: 'continue_lane' },
       state: { lane: { id: lane.id, branch: 'feat/context' } },
-      fetch: ['inbox_thread', 'lane_detail', 'git_artifact', 'seat_memory'],
+      fetch: ['git_artifact'],
     });
     expect(buildWakeContext(db, team, ada, { act_id: 'r1' })).toMatchObject({
       wake: { kind: 'review' },
@@ -221,7 +253,7 @@ describe('buildWakeContext (ADR 209)', () => {
       wake: { kind: 'review', act_id: 'rev1' },
       objective: { action: 'review' },
       state: { lane: { id: lane.id, owner_seat: ada.name, branch: 'feat/reviewed' } },
-      fetch: ['inbox_thread', 'lane_detail', 'git_artifact', 'seat_memory'],
+      fetch: ['git_artifact'],
     });
   });
 });

@@ -4687,10 +4687,31 @@ export async function handleHttp(
             action: 'residency.context_read',
             target: target.act_id ?? target.lane_id ?? '?',
             result: 'allow',
+            // ADR 430: the shape of what was handed over — sizes and counts, never a body,
+            // headline or title. `bytes` is the whole packet; `bytes_by` the v2 block's parts.
             detail: {
               kind: context.wake.kind,
               version: context.version,
               bytes: Buffer.byteLength(JSON.stringify(context), 'utf8'),
+              ...(context.budget ? { used_bytes: context.budget.used_bytes } : {}),
+              ...(context.context
+                ? {
+                    thread_acts: context.context.thread?.acts.length ?? 0,
+                    omitted: context.context.thread?.omitted ?? 0,
+                    bytes_by: {
+                      memory: context.context.memory
+                        ? Buffer.byteLength(JSON.stringify(context.context.memory), 'utf8')
+                        : 0,
+                      thread: context.context.thread
+                        ? Buffer.byteLength(JSON.stringify(context.context.thread), 'utf8')
+                        : 0,
+                      lane: context.context.lane
+                        ? Buffer.byteLength(JSON.stringify(context.context.lane), 'utf8')
+                        : 0,
+                      open: Buffer.byteLength(JSON.stringify(context.context.open), 'utf8'),
+                    },
+                  }
+                : {}),
               fetch: context.fetch,
               fetch_count: context.fetch.length,
               delivery: context.delivery,
