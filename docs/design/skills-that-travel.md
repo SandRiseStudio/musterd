@@ -163,6 +163,12 @@ fixed in the same commit.
 | S8 | **capture-rough-explore-once** | Capture the raw idea verbatim with deterministic cleanup only — no reasoning, no tagging, no dedup at capture time ("a seed that arrives pre-judged is a lane someone has to argue with instead of edit"); then one explorer, one decision-blocking question at a time answerable only by the submitter, one exhaustive brief that becomes an ordinary unowned work item | ADRs 248, 291, 311, 312, 318, 319 | No always-on capture channel; nothing enforces one explorer at a time | 3–4d |
 | S9 | **mast-checklist** | Read a multi-agent transcript against the MAST failure taxonomy — ignored `request_help`, circular handoffs, stalled threads, broadcast-only journaling — plus Co-Gym's human-loop classes; the worked example is your own last session. Cites the papers | ADRs 056, 050; `research-foundation.md`; MAST (arXiv 2503.13657), Co-Gym (arXiv 2412.15701); finding 002 — "and it caught us" | On a raw transcript it is a human read, not a metric | 3d |
 
+*Shipped 2026-09-21 (dolly):* S1 `skill-home-and-provenance` (lane `01M32JZHGG`, #1604) and
+S6 `definition-of-done` (lane `01M32K99CR`) are built and live at `.agents/skills/<name>/`. S6
+ships `landed.sh` — ADR 300's verification as a daemon-free script, all five tiers exercised
+against real repositories including `not_ancestor` in a scratch repo. Per §6.3, S6 absorbs §3
+skill 8; that row should not also be built.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
