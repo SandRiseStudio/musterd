@@ -8,8 +8,8 @@ import {
   type LaneState,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { repliedByRecipientWhere, undischargedSql } from './discharge.js';
 import { getCursor } from './cursors.js';
+import { repliedByRecipientWhere, undischargedSql } from './discharge.js';
 import type { MessageRow } from './rows.js';
 
 /**
