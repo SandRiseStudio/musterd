@@ -52,8 +52,6 @@ export interface SignalDeps {
   launchctlPrint: () => Promise<string>;
   /** Lines of `path` whose timestamp is at/after `epochMs`. */
   readSince: (path: string, epochMs: number) => Promise<string[]>;
-  /** mtime of `path` in epoch ms, null when absent. */
-  statMtime: (path: string) => Promise<number | null>;
   /** The machine's 1-minute load average and core count (lane 01M2GTB0RA); absent = no reader wired. */
   loadAverage?: () => { one: number; cores: number };
   /** What THIS build expects — drift is measured against the probe's own code. `schema: null`
@@ -61,8 +59,12 @@ export interface SignalDeps {
   expected: { dbPath: string; schema: number | null };
   daemonErrLogPath: string;
   publisherBuildLogPath: string;
-  /** Stamp updated on the last successful /live publish. */
-  publisherOkStampPath: string;
+  /**
+   * Last `maxLines` lines of `path`, newest last; `[]` when absent. Unlike {@link readSince} this
+   * is NOT mtime-gated — the publisher's state is whatever its log last said, however long ago it
+   * said it, and a quiet publisher is not a recovered one.
+   */
+  readTail: (path: string, maxLines: number) => Promise<string[]>;
   /** Newest guardian/autorefresh refresh instant, from the shared stamp; null when none. */
   lastRefreshAt: () => Promise<number | null>;
   /** ADR 274's explicit, bounded daemon-restart state. Read only after a confirmed health miss. */
@@ -84,6 +86,45 @@ export interface SignalDeps {
  * healthy machine (ADR 389 Consequences).
  */
 export const SAMPLE_SECONDS = 3;
+
+/**
+ * How much of the publisher log the outcome read looks at.
+ *
+ * Sized against the thing that pushes outcomes out of view: a FAILED build dumps its whole
+ * transcript (~450 lines, measured 2026-09-21), a successful one appends two. 2000 keeps several
+ * failures' worth of margin, so the newest outcome line is in the window even after a run of them.
+ * The old reader's 400 could not promise that — a single failure transcript was longer than the
+ * window it had to be found in.
+ */
+export const PUBLISHER_TAIL_LINES = 2000;
+
+/**
+ * Every line the publisher SCRIPT writes is prefixed by `date '+%F %T'` (`~/.musterd/live/build.sh`,
+ * ADR 132); every line the BUILD writes — vite's asset table, pnpm, check-prerendered-routes'
+ * diagnosis — is not. Anchoring on that prefix is the whole trick, and it is what the predicate
+ * this replaced lacked: a bare `/error|failed/i` over the same text cannot tell a publisher saying
+ * "I failed" from a gate explaining what a failure looks like.
+ */
+const PUBLISHER_OUTCOME =
+  /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (published |web build failed|worktree re-create FAILED|cannot cd to )/;
+
+/**
+ * What the publisher last finished doing — `unknown` when it has not yet said, which is NOT
+ * `published` (ADR 173: absent is unknown, never zero). A guardian that read silence as health
+ * would go quiet about a publisher that had never once run.
+ *
+ * Read bottom-up so the answer is the LAST COMPLETED outcome. A build in flight has written its
+ * `building <sha>` line and no outcome yet, and deliberately does not change the verdict: mid-build
+ * is not evidence either way, and treating it as failure would raise once per retry.
+ */
+export function lastPublisherOutcome(lines: readonly string[]): 'published' | 'failed' | 'unknown' {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = PUBLISHER_OUTCOME.exec(lines[i] ?? '');
+    if (m === null) continue;
+    return m[1] === 'published ' ? 'published' : 'failed';
+  }
+  return 'unknown';
+}
 
 /** Tolerant parse of `launchctl print` — absent fields are zeros, never a throw. */
 export function parseLaunchctlPrint(out: string): {
@@ -229,15 +270,11 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
 
   const errLines = await d.readSince(d.daemonErrLogPath, bootedAt).catch(() => []);
 
-  // A publisher failure is fresh only while the failure log is newer than the last success stamp.
-  const buildMtime = await d.statMtime(d.publisherBuildLogPath).catch(() => null);
-  const okMtime = await d.statMtime(d.publisherOkStampPath).catch(() => null);
-  const failLines =
-    buildMtime !== null ? await d.readSince(d.publisherBuildLogPath, bootedAt).catch(() => []) : [];
+  // The publisher's state is its LAST OUTCOME, read from its own vocabulary (ADR 435).
   const freshFailure =
-    failLines.some((l) => /error|failed/i.test(l)) &&
-    buildMtime !== null &&
-    (okMtime === null || buildMtime > okMtime);
+    lastPublisherOutcome(
+      await d.readTail(d.publisherBuildLogPath, PUBLISHER_TAIL_LINES).catch(() => []),
+    ) === 'failed';
 
   const httpErrorRateSinceBoot = errLines.filter(
     (l) => /"status":5\d\d/.test(l) || /musterd\.errors/.test(l),

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CONFIRM_TIMEOUT_MS,
   collectSignals,
+  lastPublisherOutcome,
   parseLaunchctlPrint,
   type SignalDeps,
 } from './signals.js';
@@ -25,11 +26,10 @@ function deps(over: Partial<SignalDeps> = {}): SignalDeps {
     }),
     launchctlPrint: async () => 'state = running\n\truns = 1\n\tlast exit code = 0\n',
     readSince: async () => [],
-    statMtime: async () => null,
     expected: { dbPath: '/Users/nick/.musterd/musterd.db', schema: 39 },
     daemonErrLogPath: '/tmp/err.log',
     publisherBuildLogPath: '/tmp/build.log',
-    publisherOkStampPath: '/tmp/build.ok',
+    readTail: async () => [],
     lastRefreshAt: async () => null,
     ...over,
   };
@@ -140,22 +140,33 @@ describe('collectSignals', () => {
     expect(s.errLinesSinceBoot).toBe(0);
   });
 
-  it('publisher freshFailure = failure log newer than the last success stamp', async () => {
-    const fresh = await collectSignals(
-      deps({
-        statMtime: async (p) => (p === '/tmp/build.log' ? NOW - 1_000 : NOW - 60_000),
-        readSince: async (p) => (p === '/tmp/build.log' ? ['ERROR build failed'] : []),
-      }),
-    );
+  // The predecessor of these asserted an mtime comparison against `publisher.ok` — a file NOTHING
+  // in the repo has ever written. The test injected a `statMtime` for it and passed, which is
+  // exactly why the missing writer shipped: a fixture supplied the operand production never had.
+  // These read the publisher's real log vocabulary instead, so a wiring that stops producing it
+  // fails here.
+  const FAILED =
+    '2026-09-21 14:09:18 web build failed; keeping the previously published bundle. Build output:';
+  const PUBLISHED = '2026-09-21 14:15:25 published 5df33745 \u2192 /Users/nick/.musterd/live/web';
+
+  it('publisher freshFailure = the last completed outcome was a failure', async () => {
+    const fresh = await collectSignals(deps({ readTail: async () => [FAILED] }));
     expect(fresh.publisherLog.freshFailure).toBe(true);
 
-    const stale = await collectSignals(
-      deps({
-        statMtime: async (p) => (p === '/tmp/build.log' ? NOW - 60_000 : NOW - 1_000),
-        readSince: async (p) => (p === '/tmp/build.log' ? ['ERROR build failed'] : []),
-      }),
-    );
-    expect(stale.publisherLog.freshFailure).toBe(false);
+    const recovered = await collectSignals(deps({ readTail: async () => [FAILED, PUBLISHED] }));
+    expect(recovered.publisherLog.freshFailure).toBe(false);
+  });
+
+  // The regression this lane exists for: five clean publishes after one failure, and guardian still
+  // called it broken on every tick because the failure TEXT was still in the window.
+  it('a publish after a failure clears the signal even with the failure still in the window', async () => {
+    const lines = [
+      FAILED,
+      ...Array.from({ length: 400 }, (_, i) => `[vite] asset ${i}`),
+      PUBLISHED,
+    ];
+    const s = await collectSignals(deps({ readTail: async () => lines }));
+    expect(s.publisherLog.freshFailure).toBe(false);
   });
 });
 
@@ -327,5 +338,61 @@ describe('one confirming probe on a longer bound separates a slow daemon from a 
     );
     expect(s.health).not.toBeNull();
     expect(confirms).toBe(0);
+  });
+});
+
+describe('lastPublisherOutcome', () => {
+  const ts = (rest: string) => `2026-09-21 14:09:18 ${rest}`;
+
+  it('is unknown when the publisher has said nothing \u2014 absent is not healthy', () => {
+    expect(lastPublisherOutcome([])).toBe('unknown');
+    expect(lastPublisherOutcome(['[vite] building for production...'])).toBe('unknown');
+  });
+
+  it('reads the LAST completed outcome, not the first', () => {
+    expect(
+      lastPublisherOutcome([ts('published aaa1111 \u2192 /web'), ts('web build failed; x')]),
+    ).toBe('failed');
+    expect(
+      lastPublisherOutcome([ts('web build failed; x'), ts('published aaa1111 \u2192 /web')]),
+    ).toBe('published');
+  });
+
+  it('counts the script other hard failures', () => {
+    expect(
+      lastPublisherOutcome([ts('worktree re-create FAILED \u2014 /live will serve stale')]),
+    ).toBe('failed');
+    expect(lastPublisherOutcome([ts('cannot cd to /Users/nick/agents-live')])).toBe('failed');
+  });
+
+  // THE BUG, as a test. Every one of these lines matched the old `/error|failed/i` predicate, and
+  // none of them is the publisher reporting an outcome: three are a retry that then SUCCEEDED, and
+  // two are check-prerendered-routes' own prose explaining what a failure looks like. A gate that
+  // documents itself was helping hold guardian's incident open.
+  it('is not fooled by build transcript text that merely contains the words', () => {
+    const transcript = [
+      '[prerender] Encountered error, retrying: /character-sheet in 1000ms',
+      '[prerender] Encountered error, retrying: /audit in 1000ms',
+      '[prerender] Encountered error, retrying: /live in 1000ms',
+      'Scroll up to the [prerender] lines for the routes that errored. A page that fails four times is a real bug.',
+      'check-prerendered-routes \u2014 the build exited 0 having NOT emitted 3 of 11 route(s):',
+    ];
+    expect(lastPublisherOutcome(transcript)).toBe('unknown');
+    expect(lastPublisherOutcome([ts('published aaa1111 \u2192 /web'), ...transcript])).toBe(
+      'published',
+    );
+  });
+
+  // A failure dumps its transcript AFTER its own line; the transcript must not outvote it.
+  it('a failure transcript does not overturn the failure that produced it', () => {
+    expect(lastPublisherOutcome([ts('web build failed; x'), '[vite] some asset table'])).toBe(
+      'failed',
+    );
+  });
+
+  it('ignores an in-flight build with no outcome yet', () => {
+    expect(
+      lastPublisherOutcome([ts('published aaa1111 \u2192 /web'), ts('building bbb2222')]),
+    ).toBe('published');
   });
 });
