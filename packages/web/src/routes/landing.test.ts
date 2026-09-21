@@ -12,33 +12,35 @@ describe('landing page', () => {
   it('no longer pulls the /live stylesheet', () => {
     expect(src()).not.toContain('Live.css');
   });
-  // The office is the first thing below the fold and above the player (homepage-copy-spec §3):
-  // the hero keeps the first screen because the install command is what that screen is for.
-  it('shows the office between the hero and the player', () => {
+  // ADR 428: ONE office, and the stream is it. The hero still keeps the first screen — the install
+  // command is what that screen is for — and the stream follows it immediately. `OfficeProof` is
+  // gone; a second office block is the defect this asserts against coming back.
+  it('puts the stream directly after the hero, and has no second office block', () => {
     const order = src();
-    expect(order).toContain('OfficeProof');
-    expect(order.indexOf('<LightHero')).toBeLessThan(order.indexOf('<OfficeProof'));
-    expect(order.indexOf('<OfficeProof')).toBeLessThan(order.indexOf('<StreamSection'));
+    expect(order).not.toContain('OfficeProof');
+    expect(order.indexOf('<LightHero')).toBeLessThan(order.indexOf('<StreamSection'));
+    expect(order.indexOf('<StreamSection')).toBeLessThan(order.indexOf('<WhatIs'));
   });
 });
 
-// homepage-copy-spec §4.2 / §5. The picture is the point of this section, and two properties of it
-// are load-bearing rather than cosmetic.
-describe('the office section', () => {
-  const office = readFileSync(
-    new URL('../components/site/OfficeProof.tsx', import.meta.url),
+/**
+ * The one office slot (ADR 428). These assertions moved here from the deleted `OfficeProof` and
+ * kept their reasons: the constraints belong to the still, not to whichever component holds it.
+ */
+describe('the office slot in the stream section', () => {
+  const stream = readFileSync(
+    fileURLToPath(new URL('../components/site/StreamSection.tsx', import.meta.url)),
     'utf8',
   );
   // Comments stripped for the negative assertions below: a guard against a string RENDERING must
   // not fire on the prose explaining why it does not. Caught by this file on 2026-09-18, where the
   // doc comment's "a visitor between sessions saw nothing" tripped the state-neutrality check.
-  const rendered = office.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const rendered = stream.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-  // Criterion 4: the alt text is already written, shipping and reviewed on /watch. Retyping it is
-  // how two surfaces start describing the same image differently.
+  // The alt text is already written, shipping and reviewed on /watch. Retyping it is how two
+  // surfaces start describing the same image differently.
   it('renders the still with the IMPORTED alt, never a retyped one', () => {
-    expect(office).toContain('WATCH_COPY.stillAlt');
-    expect(office).toContain('alt={WATCH_COPY.stillAlt}');
+    expect(stream).toContain('alt={WATCH_COPY.stillAlt}');
     expect(rendered).not.toMatch(/alt="[^"]/);
   });
 
@@ -46,29 +48,35 @@ describe('the office section', () => {
   // marketing page must not charge that to a visitor (lane 01M2TM6C6XF6). If someone ever mounts
   // the scene here, this is the test that should stop them.
   it('uses the static capture, not the office scene', () => {
-    expect(office).toContain('office-still.png');
+    expect(stream).toContain('office-still.png');
     expect(rendered).not.toMatch(/office-scene|mountOffice|OfficeScene/);
   });
 
-  // Below the fold, so it must not be able to shift layout while it loads (criterion 5).
-  it('cannot shift layout: explicit dimensions, lazy and async', () => {
-    expect(office).toMatch(/width=\{1200\}/);
-    expect(office).toMatch(/height=\{630\}/);
-    expect(office).toContain('loading="lazy"');
-    expect(office).toContain('decoding="async"');
+  // Explicit dimensions still, but the priority INVERTED: above the fold since ADR 428, so lazy
+  // would deprioritise the first picture on the page.
+  it('cannot shift layout, and is eager now that it is above the fold', () => {
+    expect(stream).toMatch(/width=\{1200\}/);
+    expect(stream).toMatch(/height=\{630\}/);
+    expect(stream).toContain('fetchPriority="high"');
+    expect(rendered).not.toContain('loading="lazy"');
   });
 
   // The two closing sentences answer "whose office is this?" — without them a picture of OUR
-  // office reads as a virtual office for the reader's agents (ADR 320 §1).
+  // office reads as a virtual office for the reader's agents (ADR 320 §1). They moved out of
+  // OfficeProof with the picture, because they were always about the picture.
   it('keeps the sentences that say whose office this is', () => {
-    expect(office).toContain('This is our team');
-    expect(office).toContain('npx @musterd/cli init');
+    expect(stream).toContain('This is our team');
+    expect(stream).toContain('npx @musterd/cli init');
   });
 
-  // The caption is true whether the channel is live or dark, and invents no schedule (spec §2).
-  it('captions the still with a state-neutral line', () => {
-    expect(office).toContain('A still from the stream. The office is live while the team is working.');
-    expect(rendered).not.toMatch(/between sessions|offline/i);
+  // The still is what `unknown` and `dark` both show, so the caption rendered alongside it must be
+  // true in either — it may not claim the channel is live, and may not invent a schedule (spec §2).
+  it('never claims live while the still is the thing on screen', () => {
+    expect(stream).toContain("liveness !== 'live'");
+    const live = stream.slice(stream.indexOf('showStill'));
+    expect(live).toContain('Live now.');
+    // The dark/unknown caption is the one that ships prerendered; it must not assert liveness.
+    expect(stream).toContain('The team works in sessions, so the channel is dark between them.');
   });
 });
 
@@ -142,13 +150,22 @@ describe('the player facade never asserts a state it cannot read', () => {
    */
   const code = (source: string) =>
     source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  it.each([
-    ['StreamSection', stream],
-    ['WatchPage', watch],
-  ])('%s ships no live claim in its facade', (_name, raw) => {
-    const source = code(raw);
+  it('WatchPage ships no live claim in its facade', () => {
+    const source = code(watch);
     expect(source).not.toMatch(/>LIVE</);
     expect(source).not.toMatch(/live broadcast/);
     expect(source).toContain('musterd on Twitch');
+  });
+
+  // StreamSection has no facade since ADR 428 — the still IS what shows before and without a live
+  // signal, so the rule it has to keep is the same one stated differently: nothing it renders may
+  // claim the channel is live unless liveness actually said so.
+  it('StreamSection claims live only inside the live branch', () => {
+    const source = code(stream);
+    expect(source).not.toMatch(/>LIVE</);
+    expect(source).not.toMatch(/live broadcast/);
+    const live = source.indexOf('Live now.');
+    expect(live).toBeGreaterThan(-1);
+    expect(source.slice(0, live)).toContain('showStill');
   });
 });

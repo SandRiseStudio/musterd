@@ -9,7 +9,6 @@ import {
 } from '../brand/siteMeta';
 import { GetStarted } from '../components/GetStarted';
 import { LightHero } from '../components/site/LightHero';
-import { OfficeProof } from '../components/site/OfficeProof';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import { StreamSection } from '../components/site/StreamSection';
@@ -44,9 +43,10 @@ function Home() {
     <main className="site-page">
       <SiteNav />
       <LightHero />
-      {/* First thing below the fold: the hero keeps the first screen because the install command is
-          the one thing on this page with a job (spec §3). */}
-      <OfficeProof />
+      {/* The hero keeps the first screen — the install command is the one thing on this page with
+          a job — and the stream follows it immediately (ADR 428). The office used to appear twice
+          here, as a still above and a player below; there is one slot now and the still is that
+          slot's offline state. */}
       <StreamSection />
       <WhatIs />
       <GetStarted />
