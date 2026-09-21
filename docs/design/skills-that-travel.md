@@ -408,6 +408,27 @@ predates the field*, so writing omission for a declared absence collapsed two ca
 reading. **Absent and declared-absent are different facts and need different encodings.** Nine
 falsifier cases exercised.
 
+*S7 shipped 2026-09-21 (dolly, lane `01M32K9MVA`):* `emitted-is-not-published` — ADR 184's posture
+whole, plus `export.py`, which makes it structural rather than cultural. **Allowlist only, never a
+denylist**, because a denylist publishes every field you forgot to think about. It refuses a
+prose-shaped field in the allowlist, `--include-prose` with no consent record, and an unreadable
+consent record — **failing closed**, which is the clause most likely to be implemented as a warning
+by someone reading only the prose. Pseudonyms are keyed by release, so the same author is stable
+inside one and different across two: a scheme stable ACROSS releases is a join key, which is the
+thing pseudonymisation was meant to remove.
+
+Checked against lane `01M12FKJBM` (the human-gated HuggingFace cut) as the lane asked: nothing here
+contradicts it — S7 states the same four release conditions ADR 184 §4 sets, so if that lane amends
+them the skill follows rather than competes. The agent-prose values question ships as a values
+question with our answer (**no**) and an invitation to disagree in writing, rather than as a
+technical default.
+
+**Third shell trap of the arc, and a new one.** The first falsifier run reported all six refusals as
+"no `--allow`", including cases that passed it — because **zsh does not word-split an unquoted
+parameter expansion**, so a whole flag string went through as one argument. Not B1 item 2's glob or
+pipe; a third member of that family, and again a fixture lying rather than code. Re-run with a
+proper argument array, all six fire correctly.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
