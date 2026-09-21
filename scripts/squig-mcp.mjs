@@ -12,7 +12,6 @@
  * file next to the canvas (mode 0600) and is never written here to stdout.
  */
 import { spawn } from 'node:child_process';
-import { homedir } from 'node:os';
 import {
   chmodSync,
   closeSync,
@@ -23,6 +22,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 

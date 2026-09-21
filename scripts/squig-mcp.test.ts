@@ -65,7 +65,13 @@ describe('squig companion launcher', () => {
       ),
     ).toBe('/usr/bin/node');
     expect(
-      resolveNodeBinary(undefined, '/home/me', '/usr/bin/node', 20, (path: string) => path === brew),
+      resolveNodeBinary(
+        undefined,
+        '/home/me',
+        '/usr/bin/node',
+        20,
+        (path: string) => path === brew,
+      ),
     ).toBe(brew);
     expect(
       resolveNodeBinary(
