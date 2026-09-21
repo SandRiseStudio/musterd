@@ -19,13 +19,19 @@ export async function hasRunnable(
   cmd: string,
   args: string[],
 ): Promise<{ ok: boolean; out: string }> {
+  // Both streams, stdout first: a CLI's `--help` is help on either stream (opencode 1.18.31 writes
+  // `run --help` to stderr with an empty stdout), and a probe that reads stdout alone refuses a
+  // working CLI. stdout leads so a version printed there is matched before any stderr noise.
   try {
-    const { stdout } = await exec(cmd, args, { timeout: 8000 });
-    return { ok: true, out: stdout };
-    // reason: exec rejection is an untyped error-like with optional stdout/message.
+    const { stdout, stderr } = await exec(cmd, args, { timeout: 8000 });
+    return { ok: true, out: `${stdout}${stderr}` };
+    // reason: exec rejection is an untyped error-like with optional stdout/stderr/message.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err: any) {
-    return { ok: false, out: String(err?.stdout ?? err?.message ?? '') };
+    return {
+      ok: false,
+      out: String(err?.stdout ?? '') + String(err?.stderr ?? err?.message ?? ''),
+    };
   }
 }
 
