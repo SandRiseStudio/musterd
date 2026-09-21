@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { TWITCH_CHANNEL, TWITCH_URL } from './twitchEmbed';
-import { loadTwitchSdk, subscribeLiveness, type Liveness } from './twitchLiveness';
+import { TWITCH_CHANNEL, TWITCH_COLLECTION, TWITCH_URL } from './twitchEmbed';
+import {
+  loadTwitchSdk,
+  replayWhenDark,
+  subscribeLiveness,
+  type Liveness,
+} from './twitchLiveness';
 import { WATCH_COPY } from './watchCopy';
 import './WatchPage.css';
 
@@ -53,6 +58,9 @@ export function WatchPage() {
    * the page must never GUESS which of §4.1's two strings applies.
    */
   const [liveness, setLiveness] = useState<Liveness>('unknown');
+  /** Whether a replay is genuinely playing — see StreamSection for why it is not folded into
+   *  `liveness`, and `replayWhenDark` for why asking is not the same as getting. */
+  const [replaying, setReplaying] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -102,6 +110,12 @@ export function WatchPage() {
         subscribeLiveness(player, twitch.Player, (state) => {
           if (!cancelled) setLiveness(state);
         });
+        /* Same replay as the homepage, and deliberately the same module: two surfaces deciding
+           independently what a dark channel shows is how the two drift into disagreeing about
+           what the reader is looking at. */
+        replayWhenDark(player, twitch.Player, TWITCH_COLLECTION, () => {
+          if (!cancelled) setReplaying(true);
+        });
       })
       .catch(() => {
         /* blocked, offline, or refused — `unknown` is the honest answer and already the state */
@@ -117,9 +131,11 @@ export function WatchPage() {
         <p className="watch-hero__eyebrow mono">
           {liveness === 'live'
             ? WATCH_COPY.eyebrowLive
-            : liveness === 'dark'
-              ? WATCH_COPY.eyebrowDark
-              : WATCH_COPY.eyebrow}
+            : replaying
+              ? WATCH_COPY.eyebrowReplay
+              : liveness === 'dark'
+                ? WATCH_COPY.eyebrowDark
+                : WATCH_COPY.eyebrow}
         </p>
         <h1 className="watch-hero__title">{WATCH_COPY.h1}</h1>
         <p className="watch-hero__lede">
@@ -167,6 +183,8 @@ export function WatchPage() {
         <p className="watch-player__state">
           {liveness === 'live' ? (
             WATCH_COPY.stateLive
+          ) : replaying ? (
+            WATCH_COPY.stateReplay
           ) : (
             <>
               {WATCH_COPY.stateDark}{' '}

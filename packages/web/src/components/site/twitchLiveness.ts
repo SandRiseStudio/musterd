@@ -16,12 +16,15 @@ export const TWITCH_SDK_SRC = 'https://player.twitch.tv/js/embed/v1.js';
  */
 export interface TwitchPlayerLike {
   addEventListener: (event: string, cb: () => void) => void;
+  /** Swap the player's source to a collection. Optional: an older SDK may not expose it. */
+  setCollection?: (collectionId: string, videoId?: string) => void;
 }
 export interface TwitchGlobal {
   Player: (new (el: HTMLElement | string, opts: Record<string, unknown>) => TwitchPlayerLike) & {
     ONLINE: string;
     OFFLINE: string;
     READY: string;
+    PLAY: string;
   };
 }
 
@@ -73,4 +76,39 @@ export function loadTwitchSdk(doc: Document = document): Promise<TwitchGlobal> {
     doc.head.appendChild(el);
   }
   return ready;
+}
+
+/**
+ * When the channel goes dark, play a collection of past sessions instead — and say so only once it
+ * is actually playing.
+ *
+ * TWO EVENTS, AND THE SECOND ONE IS THE POINT. Asking for the collection is not the same as
+ * getting it: the id may be wrong, the collection may be empty or private, Twitch may decline. So
+ * OFFLINE only REQUESTS the swap, and `onReplay` fires on the player's own PLAY event afterwards.
+ * A caller that shows a replay caption on the request rather than on the play would caption a
+ * black rectangle — which is the exact defect ADR 428 removed from this slot, wearing new clothes.
+ *
+ * `switched` guards PLAY the other way round: a live channel fires PLAY too, and without the flag
+ * a live stream would be captioned as a replay the moment it started. Only a PLAY that follows our
+ * own swap counts.
+ *
+ * `setCollection` is optional on the interface because a viewer's SDK may predate it. Absent, the
+ * swap simply never happens, `onReplay` never fires, and the caller keeps the still — the same
+ * outcome as a blocked script, which the caller already handles.
+ */
+export function replayWhenDark(
+  player: TwitchPlayerLike,
+  events: { OFFLINE: string; PLAY: string },
+  collectionId: string,
+  onReplay: () => void,
+): void {
+  let switched = false;
+  player.addEventListener(events.OFFLINE, () => {
+    if (switched || !player.setCollection) return;
+    switched = true;
+    player.setCollection(collectionId);
+  });
+  player.addEventListener(events.PLAY, () => {
+    if (switched) onReplay();
+  });
 }
