@@ -77,7 +77,18 @@ Forbidden on this page, now and later:
 
 ## 3. Section order
 
-One insertion and nothing else moves:
+> **SUPERSEDED 2026-09-21 by [ADR 428](../decisions/428-one-office-above-the-fold.md)** (lane
+> `01M32GK3SZ`). The order below shipped and was measured at 390×844 on a live channel: the still
+> and the player fitted in one viewport 418px apart, so the page rendered the same room twice.
+> There is now ONE office and it is the stream. The live order is:
+>
+> ```
+> SiteNav → LightHero → StreamSection → WhatIs → GetStarted → Teasers → SiteFooter
+> ```
+>
+> The paragraph below about the hero keeping the first screen is unchanged and still governs.
+
+~~One insertion and nothing else moves:~~
 
 ```
 SiteNav → LightHero → OfficeProof (new) → StreamSection → WhatIs → GetStarted → Teasers → SiteFooter
@@ -97,6 +108,13 @@ No string changes. Stated here so a reviewer diffing the page knows the omission
 on it, and a human is on it too") and `landing.test.ts` pins it.
 
 ### 4.2 The office — new section
+
+> **SUPERSEDED 2026-09-21 by [ADR 428](../decisions/428-one-office-above-the-fold.md).**
+> `OfficeProof` is deleted. Everything below that was load-bearing moved into `StreamSection` and
+> is still enforced — the two closing sentences, the imported alt, the static capture over the live
+> canvas — by `landing.test.ts` and `streamSection.test.ts`. What did NOT survive: this section's
+> H2, and the caption, which is now state-dependent because the section can read liveness. The
+> record below is kept for the reasoning, not as instructions.
 
 H2: `The team that builds musterd`
 
@@ -177,6 +195,12 @@ Three changes from the current body, each with a reason:
 ### 4.5 Get started, Teasers, Footer — unchanged
 
 ## 5. The office still
+
+> **AMENDED 2026-09-21 by [ADR 428](../decisions/428-one-office-above-the-fold.md).** The still
+> survives — the reasoning below is exactly why it had to — but it is no longer a figure in its own
+> section. It is the stream slot's OFFLINE state, stacked on the player and shown whenever liveness
+> is not `live`. Two details below are now inverted by the move above the fold: it is eager with
+> `fetchPriority="high"`, not `loading="lazy"`.
 
 **Ship the existing asset.** `packages/web/src/brand/office-still.png`, 1200×630, 166 KB, in the
 tree since #1474. It is a real capture: five labelled desks (`nick`, `miley`, `sloane`, `izzo`,
