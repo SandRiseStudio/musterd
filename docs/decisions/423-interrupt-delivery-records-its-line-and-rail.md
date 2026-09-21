@@ -116,6 +116,15 @@ Two fields are missing from a row that has everything else.
   the caller declared none" — decision 2's "absent also means absent" is now provable per row rather
   than only true of the pre-423 baseline. Falsifier: any `interrupt.raised` row written after this
   change whose `detail` has no `rail` key.
+- **2026-09-21 — the falsifier was run, and it holds.** Grouping every `interrupt.raised` row on the
+  hub daemon by the JSON type of `detail.rail`: **258 rows with the key ABSENT**, spanning
+  2026-07-06 01:24:33 to 2026-09-21 17:53:15, and **not one after that instant**; **8 rows with the
+  key present as `null`**, 18:28:24 onward; **5 rows carrying a rail** (`claude-code`), from
+  2026-09-20 19:41:47. The absent/`null` boundary falls exactly at the daemon refresh that picked
+  this change up, so the two shapes separate cleanly by time as well as by meaning, and the bullet
+  above is now a measurement rather than an intention. Re-run:
+  `sqlite3 ~/.musterd/musterd.db "select coalesce(json_type(detail,'\$.rail'),'KEY ABSENT') as shape, count(*), datetime(min(created_at)/1000,'unixepoch'), datetime(max(created_at)/1000,'unixepoch') from audit where action='interrupt.raised' group by shape;"`
+  — a `KEY ABSENT` row whose max timestamp is later than 2026-09-21 17:53:15 disproves it.
 - `interrupt.raised` still dedupes per (recipient, act), so **repeat rings of the same act are
   invisible** — the row answers "was it delivered", never "how many times did it ring". Unchanged by
   this ADR and recorded here so the next reader does not mistake one row for one ring.
