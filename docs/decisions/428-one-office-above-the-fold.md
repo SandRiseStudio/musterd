@@ -1,6 +1,9 @@
-# ADR 428: one office above the fold — the stream is the proof, the still is its offline state
+# 428 — One office above the fold: the stream is the proof, the still is its offline state
 
-Date: 2026-09-21 · Lane `01M32GK3SZ` · Supersedes the section-order and office-section decisions in [homepage-copy-spec](../design/homepage-copy-spec.md) §3, §4.2 and §5.
+- Status: proposed
+- Date: 2026-09-21
+- Lane: `01M32GK3SZ`
+- Supersedes: the section-order and office-section decisions in [homepage-copy-spec](../design/homepage-copy-spec.md) §3, §4.2 and §5
 
 ## Context
 
