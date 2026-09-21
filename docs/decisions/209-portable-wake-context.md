@@ -147,6 +147,11 @@ this ADR and `SPEC.md` carry the accepted, not-yet-shipped contract.
   read first was unreadable on every wake whose line named the act only in prose. An id is a
   structured field under ADR 088 §4; no body text enters the line. Falsifier: wake any enrolled
   seat and read the first tool call in its `wake_turns` row — it must carry the id from the line.
+- 2026-09-21 ([ADR 430](430-wake-context-packet-v2.md), lane 01M32FHX6J): the packet now carries
+  attributed, budgeted bodies — the waking thread's last acts, the open ledger, the lane block and
+  the memory body — under a 12 KiB cap. The "no bodies" rule is narrowed to the reason it had:
+  no bodies in the *spawn prompt* (ADR 088 §4), which is unchanged. Bounded and derived at read
+  time, as §1 required, are what still hold.
 
 ## Observability & Evaluation
 

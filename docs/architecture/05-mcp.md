@@ -401,7 +401,7 @@ src/
     members.ts    // works while dormant/pending
     availability.ts // team_availability — set your OWN availability (ADR 044), the MCP twin of `musterd availability`; not a WRITE_TOOL, a muted seat may still say it is away (surface survey #1245 item 6)
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
-    wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 209)
+    wakeContext.ts // team_wake_context — recipient-scoped orientation packet (ADR 209); renders the v2 context block — thread attributed, open ledger, lane, memory — and names `fetch` follow-ups only for what did not fit (ADR 430)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256); counterpart resolve omits merged (ADR 305); lane_submit empty_pool copy (ADR 404)
     seeds.ts      // three team_seed_* tools: shared tray/read plus compact lifecycle update (ADR 318/319)
     teamMemory.ts // team_insight_save + team_insight_search — findings for the whole team, pull-only retrieval (ADR 327)

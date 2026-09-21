@@ -74,7 +74,7 @@ src/
   notify/
     slack.ts          // ask-stream Slack delivery: formatAskSlackText + postSlackWebhook — the daemon's one outbound call, fire-and-forget, opt-in via policy ask_slack_webhook (ADR 149)
   transport/
-    http.ts           // HTTP route table (02-protocol HTTP API), including governed policy/launch/Aperture decisions (ADR 411) and POST /wake-context's recipient-only body-free index (ADR 209; allow+deny `residency.context_read` audit); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121) + x-musterd-build for all credentials (ADR 135); counterpart terminal PATCH strips merged (ADR 305)
+    http.ts           // HTTP route table (02-protocol HTTP API), including governed policy/launch/Aperture decisions (ADR 411) and POST /wake-context's recipient-only packet (ADR 209; v2 carries attributed, budgeted bodies via `deriveContext`, ADR 430; allow+deny `residency.context_read` audit records sizes and counts, never a body); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121) + x-musterd-build for all credentials (ADR 135); counterpart terminal PATCH strips merged (ADR 305)
     ws.ts             // WS upgrade, handshake state machine, frame dispatch
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
     test-auth.ts      // HTTP-test fixture: claim a named agent seat and return its msac_ credential plus msls_ Presence proof (ADR 337)

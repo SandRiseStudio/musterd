@@ -29,7 +29,6 @@ import { listInterruptCandidates } from './interruptCandidates.js';
 import { getLane, listLanes } from './lanes.js';
 import { getMemberById } from './members.js';
 import { memoryEnvelope } from './memory.js';
-import { deriveContext } from './wakeContextBody.js';
 import {
   deferrals,
   listTeamMessages,
@@ -40,6 +39,7 @@ import {
 import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
 import type { MemberRow, MessageRow } from './rows.js';
 import { getPolicy } from './teams.js';
+import { deriveContext } from './wakeContextBody.js';
 
 /**
  * The wake ledger (ADR 131, increment 2). The daemon side of harness residency: enrollment rows
