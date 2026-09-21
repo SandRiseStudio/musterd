@@ -273,6 +273,29 @@ case that produced the bug is a fix verified against one sample*.
 answer 433 on this repo with its real open PRs. Thirteen falsifier rows exercised against scratch
 git repositories.
 
+*B6 shipped 2026-09-21 (dolly, lane `01M32K81AT`):* `the-team-agreement` — the charter layer, and
+per §6.3 the preface §3 skill 7 (`ask-a-human`) wants, so sequence it before that row. Five
+commitments (the human is a member who sometimes wears an approver hat; stances not stored autonomy
+levels; notification is the mechanism; roles are aptitude with a narrow-only ceiling, and approver
+is not a role; write work stays with whoever is accountable), plus a five-question adoption audit
+whose answers are observable — the falsifier for a charter that has no checker.
+
+**One correction, and it is the point of the increment.** The row and
+`research-foundation.md` §19 both carry Co-Gym's notification ablation as 30% → 70%, with 99
+participants and 150 trajectories. Checking the citation before publishing under our name: the
+paper, title and author list verify exactly, and **those numbers are not in the abstract**, whose
+headline figures are different (86% / 74% / 66% win rates per task against real users). I did not
+read the body to confirm the ablation. So the skill leads with the three verified numbers, states
+the ablation explicitly as our second-hand reading rather than a citation, and says so in a named
+paragraph. The persona study verified exactly as stated (162 roles, 4 LLM families, 2,410 factual
+questions, no improvement, picking a good persona no better than random).
+
+Nothing in `research-foundation.md` needs correcting on this evidence — an abstract not carrying a
+body result is not a contradiction. What it needs is someone to read the body once and either
+confirm the ablation or invalidate-date it; recorded here rather than left as a silent assumption
+by anyone who cites it next. **Follows-up:** deferred — the next seat that needs the ablation as
+load-bearing evidence reads the body (2026-09-21).
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
