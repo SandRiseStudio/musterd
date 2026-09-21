@@ -1,0 +1,15 @@
+{
+  "app": "squig",
+  "version": 1,
+  "fileName": "team canvas",
+  "look": {
+    "theme": "internet-blue",
+    "paper": "subtle",
+    "font": "hand",
+    "grid": true
+  },
+  "nodes": {},
+  "order": [],
+  "variations": [],
+  "comments": []
+}

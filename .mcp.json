@@ -3,6 +3,10 @@
     "whiteboard": {
       "command": "node",
       "args": ["packages/whiteboard/dist/mcp/index.js"]
+    },
+    "squig": {
+      "command": "node",
+      "args": ["scripts/squig-mcp.mjs"]
     }
   }
 }
