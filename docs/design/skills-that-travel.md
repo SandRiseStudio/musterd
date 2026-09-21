@@ -195,6 +195,20 @@ that same day, so the fixture could not construct the failure it was named for; 
 aged date it fires at 263 days. That is B1's own item 4 caught inside the instrument that ships
 it, and it is written into the skill as a worked example rather than quietly fixed.
 
+*B1 increment 3 shipped 2026-09-21 (dolly, same lane):* `pre-registered-watch` — ADR 297's
+primitive as a standalone gate. `watches.py` (stdlib-only, hand-parsed frontmatter per ADR 002's
+reasoning) carries the schema, rule A1 (no open watch outlives its `revisit_by`) as a tree check
+and rule A2 (`revisit_by` is immutable) as a diff check behind `--base`. Thirteen refusals and
+four must-NOT-fire cases exercised, the git rules in a scratch repo with real commits. Two
+carry-forwards. **A2 abstains rather than passing:** `--base` absent prints `immutability NOT
+checked`, and a `--base` git cannot resolve prints `UNKNOWN … Not a pass` at exit 0 — a check that
+reports clean from its own outage is the failure the parent skill is about, so the shape is S6's
+refuse-on-positive-evidence-only applied to a second gate. **Third increment running, third
+first-run falsifier failure that was the fixture and not the code:** three rows did not fire, two
+because they aged `revisit_by` while leaving `opened` at today so the schema rule fired first and
+A1 was never reached. Written into the skill as its own section — when a rule does not fire, the
+fixture is the likelier culprit, and from the outside the two are indistinguishable.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
