@@ -177,12 +177,11 @@ describe.skipIf(!canSample)('arm (a) — live: an induced SQLite wedge is daemon
       launchctlPrint: async () =>
         `\tstate = running\n\tpid = ${pid}\n\truns = 15\n\tlast exit code = (never exited)\n`,
       readSince: async () => [],
-      statMtime: async () => null,
       sampleStack: async (p, seconds) => runSampleTool(p, Math.min(seconds, 2)),
       expected: { dbPath: '/nonexistent/musterd.db', schema: null },
       daemonErrLogPath: '/nonexistent/err.log',
       publisherBuildLogPath: '/nonexistent/build.log',
-      publisherOkStampPath: '/nonexistent/build.ok',
+      readTail: async () => [],
       lastRefreshAt: async () => null,
     };
     const signals = await collectSignals(deps);

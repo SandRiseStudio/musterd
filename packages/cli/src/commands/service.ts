@@ -2223,6 +2223,14 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
       return [];
     }
   };
+  /** Unbounded in time, bounded in lines: the publisher's last outcome however old it is (ADR 435). */
+  const readTail = async (path: string, maxLines: number): Promise<string[]> => {
+    try {
+      return readFileSync(path, 'utf8').split('\n').slice(-maxLines);
+    } catch {
+      return [];
+    }
+  };
   const statMtime = async (path: string): Promise<number | null> => {
     try {
       const { statSync } = await import('node:fs');
@@ -2259,7 +2267,6 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
             return ctx.run('launchctl', printArgs(uid, SERVICE_LABEL)).stdout;
           },
           readSince,
-          statMtime,
           /**
            * `sample <pid> <seconds>` — read-only, bounded, no signal sent (ADR 389 §1). The spawn
            * lives in sample.ts (`runSampleTool`) so the falsifier test runs the SAME command the
@@ -2272,7 +2279,7 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
           expected: { dbPath: join(home, 'musterd.db'), schema: null },
           daemonErrLogPath: join(home, 'daemon.err.log'),
           publisherBuildLogPath: join(home, 'live', 'build.log'),
-          publisherOkStampPath: join(gHome, 'publisher.ok'),
+          readTail,
           lastRefreshAt: async () => statMtime(join(home, 'autorefresh', '.attempted-sha')),
           readHandover: async () => readHandover(refreshHandoverPath(), Date.now()),
         });
