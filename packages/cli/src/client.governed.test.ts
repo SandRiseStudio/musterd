@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   GovernedLaunchAuthorizationIssue,
   GovernedLaunchAuthorizationMint,
   GovernedPolicy,
 } from '@musterd/protocol';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpClient } from './client.js';
 
 const policy: GovernedPolicy = {

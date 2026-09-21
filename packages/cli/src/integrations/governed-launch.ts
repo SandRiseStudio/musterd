@@ -10,7 +10,10 @@ const GovernedHarnessSchema = z.enum(['claude-code', 'codex']);
 const NonEmptyValueSchema = z
   .string()
   .min(1)
-  .refine((value) => !/[\u0000\r\n]/.test(value), 'value must not contain control characters');
+  .refine(
+    (value) => !value.includes('\u0000') && !value.includes('\r') && !value.includes('\n'),
+    'value must not contain control characters',
+  );
 
 export type GovernedHarness = z.infer<typeof GovernedHarnessSchema>;
 

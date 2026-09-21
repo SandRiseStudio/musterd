@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { GovernedLaunchAuthorizationMint } from '@musterd/protocol';
+import { describe, expect, it } from 'vitest';
 import { buildGovernedLaunchPlan } from './governed-launch.js';
 
 const mint: GovernedLaunchAuthorizationMint = {
