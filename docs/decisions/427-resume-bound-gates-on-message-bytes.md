@@ -42,6 +42,8 @@ Codex, OpenCode, Cursor and Grok backends are unchanged: none of them applies a 
 - Transcript resume remains inherently per-harness. This ADR revives it on Claude Code. The harness-independent continuity a seat needs to be reachable on any harness is goal `seat-continuity` increments 3–5 (`docs/superpowers/plans/2026-09-21-seat-continuity.md`), not this ADR.
 - ADR 131 gains a dated note under "Append + context hygiene"; SPEC.md's wake-report paragraph names the new field.
 
+- _2026-09-21, after landing (#1594, `e155dc0`): the first resumed wake since 2026-09-14 — ryder, 305.4 KiB on disk / 121.3 KiB of conversation, `session=resumed`, $1.24 (inside the 07-29 fresh range). Recorded on the wiki page. Found in the same measurement: the `residency.woke` row carries no `resume_weight_bytes` (nor `transcript_bytes`) because the host emits delivery measurements only under `intended_delivery` (ADR 209 §3), which a legacy-ladder steer does not carry; the Eval query above therefore reads empty on the wakes this ADR governs. Fix is to send the measurements whenever the ladder ran, not only when delivery is tracked — a host-only change, recorded here rather than silently widened._
+
 ## Observability & Evaluation
 
 - **Traces:** every `residency.woke` audit row carries `resume_weight_bytes` beside `transcript_bytes` whenever the host weighed the file; the host log's skip line names both numbers on a weighed refusal (`… 449.8 KiB on disk, 293 KiB of conversation (hygiene bound 256 KiB)`). Absent `resume_weight_bytes` on a row means the file was at or under the bound and was never read.
