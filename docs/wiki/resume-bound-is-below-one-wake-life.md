@@ -43,7 +43,41 @@ Twelve single-life wake transcripts, averaged: `hook_success` 110 KiB (~140 reco
 
 The transcript overstates the model's context: those lives ended at 54k–190k context tokens for 459–1583 KiB, about 8 bytes per token, because hook records and reminders are transcript metadata the model never sees.
 
-A/B, one prompt, no tool call, this worktree: default argv → 383 KiB transcript, 58,727 context tokens created, $1.52. `--setting-sources project,local` → 182 KiB, 22,487 tokens (+10k cache read), $0.23. The musterd MCP server (keyed by repo root in `~/.claude.json`, not a settings layer), the worktree's 21 committed skills, and the project-local hooks all survived; the eleven claude.ai connector servers also survived, being account-level. So an *empty* life under the old argv was already 1.5× the bound. [ADR 426](../decisions/426-wake-loads-project-settings-only.md) puts the flag on every wake spawn. What a *working* life weighs after it is the lane's acceptance measurement, owed here.
+A/B, one prompt, no tool call, this worktree: default argv → 383 KiB transcript, 58,727 context tokens created, $1.52. `--setting-sources project,local` → 182 KiB, 22,487 tokens (+10k cache read), $0.23. The musterd MCP server (keyed by repo root in `~/.claude.json`, not a settings layer), the worktree's 21 committed skills, and the project-local hooks all survived; the eleven claude.ai connector servers also survived, being account-level. So an *empty* life under the old argv was already 1.5× the bound. [ADR 426](../decisions/426-wake-loads-project-settings-only.md) puts the flag on every wake spawn. What a *working* life weighs after it is the lane's acceptance measurement, taken below.
+
+## What a working life weighs after ADR 426: 284–340 KiB — the flag cut 2–4× and still cleared nothing (2026-09-21, lane 01M2XD2WCE; falsify: wake any two enrolled seats and `stat -f %z` the transcript whose first user prompt begins `musterd wake —`; one under 256 KiB falsifies the "still over" half) <!-- claim: defect -->
+
+The acceptance measurement owed above. Two seats woken 2026-09-21 16:55Z by one `steer` each (leases `01M32E9Q8V20SVC6D7Q550KA16`, `01M32E9Q9EJ1ZEKS30G8YEDW8C`), both `session=fresh provenance=wake`, both settled `exit=0` — dolly 16.8s/$0.43, miley 36.6s/$0.66. Each ran a normal orientation: `team_wake_context`, `team_inbox_check`, `team_memory_read`, a `status_update`, and stopped. Single-life transcripts, one top-level `musterd wake —` prompt each:
+
+| seat  | one life   | records | over the 256 KiB bound by |
+| ----- | ---------- | ------- | ------------------------- |
+| dolly | 283.5 KiB  | 48      | 27.5 KiB (1.11×)          |
+| miley | 339.8 KiB  | 66      | 83.8 KiB (1.33×)          |
+
+Against the 529–1583 KiB pre-flag lives in the table above, the flag is worth roughly 2–4×. It is not worth the bound. **A post-ADR-426 wake still cannot be resumed (2026-09-21; falsify: a `residency.woke` row whose `session` is `resumed` and whose date is later than 2026-09-14), so the resume ladder still admits zero lives** — the lane's stated bar (one life under 256 KiB on two seats) is **missed on both seats**. <!-- claim: defect -->
+
+The flag did do what [ADR 426](../decisions/426-wake-loads-project-settings-only.md) said it would, which is worth separating from the bar it failed to clear. The user settings layer is gone from the wake: the skill listing is 20 skills / 7.5 KiB (was ~68 KiB averaged) and contains no `superpowers:` or `cognee-memory:` entry; `hook_success` is 3.1 KiB across 3 records (was ~110 KiB across ~140), and all three are musterd's own project hooks. Both of the big user-layer line items named above are closed.
+
+What is left is not mostly musterd's, and that is the finding:
+
+Follows-up: deferred — opened against `team_inbox_check` backlog weight when a human decides the resume ladder is worth reviving, given the flag alone did not revive it (2026-09-21)
+
+| where the 284 KiB goes (dolly)                 | KiB   | whose         |
+| ---------------------------------------------- | ----- | ------------- |
+| `prompt_snapshot` ×2                            | 62.5  | harness       |
+| `deferred_tools_delta` ×1                       | 36.5  | harness       |
+| `mcp_instructions_delta` ×1                     | 29.8  | harness + MCP servers |
+| `skill_listing` ×2                              | 19.9  | project       |
+| `instructions` (CLAUDE.md + AGENTS.md)          | 11.1  | project       |
+| all other attachments (17 types)                | 25.7  | mixed         |
+| tool results — `team_inbox_check`               | 26.0  | **musterd**   |
+| tool results — `team_memory_read`               | 3.5   | **musterd**   |
+| tool results — other musterd calls              | 0.9   | **musterd**   |
+| assistant text + thinking + tool calls          | 2.4   | the model     |
+
+129 KiB — 45% of the life — is three harness attachments that exist before the seat does anything: two snapshots of the system prompt and the tool and MCP schema text. A wake that made *no* tool call at all would still weigh ~190 KiB, which is 74% of the bound spent on arriving.
+
+Musterd's own controllable share is now 30 KiB of tool results, and `team_inbox_check` is 26 of it — a single call, on a seat that has read nothing new, because the call returns the same ancient directed backlog every time and ignores its `limit` argument (8.5k elided unread on this team, oldest 2026-07-14). Removing that one call's weight puts dolly under the bound with 1.5 KiB to spare and leaves miley 57 KiB over. So it is a necessary lever and not a sufficient one: the remaining path to a resumable life runs through what the harness injects, not through musterd.
 
 ## The open call (2026-09-19, lane 01M2SB89AR)
 
