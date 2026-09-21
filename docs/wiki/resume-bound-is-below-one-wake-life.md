@@ -60,7 +60,7 @@ The flag did do what [ADR 426](../decisions/426-wake-loads-project-settings-only
 
 What is left is not mostly musterd's, and that is the finding:
 
-Follows-up: deferred — opened against `team_inbox_check` backlog weight when a human decides the resume ladder is worth reviving, given the flag alone did not revive it (2026-09-21)
+Follows-up: 01M32FH5YQD4EVTG6ARSS0S0SG
 
 | where the 284 KiB goes (dolly)                 | KiB   | whose         |
 | ---------------------------------------------- | ----- | ------------- |
@@ -78,6 +78,14 @@ Follows-up: deferred — opened against `team_inbox_check` backlog weight when a
 129 KiB — 45% of the life — is three harness attachments that exist before the seat does anything: two snapshots of the system prompt and the tool and MCP schema text. A wake that made *no* tool call at all would still weigh ~190 KiB, which is 74% of the bound spent on arriving.
 
 Musterd's own controllable share is now 30 KiB of tool results, and `team_inbox_check` is 26 of it — a single call, on a seat that has read nothing new, because the call returns the same ancient directed backlog every time and ignores its `limit` argument (8.5k elided unread on this team, oldest 2026-07-14). Removing that one call's weight puts dolly under the bound with 1.5 KiB to spare and leaves miley 57 KiB over. So it is a necessary lever and not a sufficient one: the remaining path to a resumable life runs through what the harness injects, not through musterd.
+
+## The bound was measuring the wrong unit — a 284 KiB file is a 47k-token conversation (2026-09-21, lane 01M32FGSXK; falsify: `python3` over the same two transcripts summing `input_tokens + cache_read_input_tokens + cache_creation_input_tokens` of the last assistant record — a figure over 100k for either falsifies "cheap") <!-- claim: other -->
+
+Read from the last assistant record's `usage` in each 2026-09-21 wake life: dolly ended at **46,824** tokens of context (283.5 KiB file), miley at **57,752** (339.8 KiB). The `user`+`assistant` records — what `--resume` replays — are ~94 and ~146 KiB. The rest is the attachment metadata tabled above, written so the file is self-describing and never re-read. The 07-29 calibration bracketed the dollar crossover at 373–450 KiB of *file* on lives that were ~70–80 KiB and almost entirely conversation; the ladder then inherited a byte threshold whose meaning the file quietly changed underneath it. So "a post-ADR-426 wake still cannot be resumed" above is true of the code and false of the cost (2026-09-21; falsify: a resumed wake of either life costing more than the $0.91–1.51 fresh range in the 07-29 table): both lives are inside the cheap region. <!-- claim: other -->
+
+[ADR 427](../decisions/427-resume-bound-gates-on-message-bytes.md) makes the rung judge the replayed bytes, leaves the number alone, and reports `resume_weight_bytes` beside `transcript_bytes` so the eval can split them. Whether a real wake then resumes — and what it costs against the fresh range — is that lane's acceptance evidence, owed on this page.
+
+This also reframes the goal. Transcript resume is per-harness by construction (Claude Code resumes a jsonl, Codex a thread id, and the Codex rung already fails "thread id missing or mismatched"), so reviving it on one harness is increment 1 of five, not the answer: goal `seat-continuity`, plan `docs/superpowers/plans/2026-09-21-seat-continuity.md`.
 
 ## The open call (2026-09-19, lane 01M2SB89AR)
 

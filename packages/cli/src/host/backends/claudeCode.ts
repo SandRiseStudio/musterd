@@ -14,6 +14,7 @@ import {
   RESUME_GC_HORIZON_MS,
   type LocalSessionLiveness,
 } from '../../session/liveness.js';
+import { resumeWeightBytes } from '../../session/transcript-model.js';
 import type {
   ActuatorBackend,
   BackendContext,
@@ -137,6 +138,43 @@ export interface ClaudeCodeDeps {
   readContinuity?: (dir: string, owner: RegistryOwner) => ContinuityRegistry;
   /** Injectable transcript stat (default: the real filesystem) for the ADR 210 byte/age ladder. */
   statTranscript?: (path: string) => { bytes: number; mtimeMs: number } | undefined;
+  /** Injectable conversation weigh (default: {@link resumeWeightBytes}) — ADR 427. Read only when
+   *  the file is over the bound; `undefined` means "could not weigh", which judges as the file. */
+  weighTranscript?: (path: string) => number | undefined;
+}
+
+/** What the hygiene rung concluded, in the unit ADR 427 fixed. `weight` is present only when the
+ *  conversation was actually weighed, so the wake report never claims a measurement it skipped. */
+type HygieneJudgement =
+  | { over: false; weight?: number }
+  | { over: true; weight?: number; skip: string };
+
+/**
+ * The ADR 131 §5 hygiene clause, judged on what a resume replays (ADR 427). A file at or under the
+ * bound is admitted without a read — its conversation cannot outweigh it. A file over the bound is
+ * weighed: its `user` + `assistant` bytes are what `--resume` re-ingests, and 45% of a wake life's
+ * file is attachment metadata the model never sees again. A file that cannot be weighed is judged
+ * as the file — the conservative direction, which refuses rather than guesses.
+ */
+function judgeHygiene(
+  deps: ClaudeCodeDeps,
+  path: string | undefined,
+  fileBytes: number,
+  bound: number,
+): HygieneJudgement {
+  if (fileBytes <= bound) return { over: false };
+  const weight = path === undefined ? undefined : (deps.weighTranscript ?? resumeWeightBytes)(path);
+  if (weight === undefined)
+    return { over: true, skip: `${fmtBytes(fileBytes)} (hygiene bound ${fmtBytes(bound)})` };
+  if (weight > bound)
+    return {
+      over: true,
+      weight,
+      skip:
+        `${fmtBytes(fileBytes)} on disk, ${fmtBytes(weight)} of conversation ` +
+        `(hygiene bound ${fmtBytes(bound)})`,
+    };
+  return { over: false, weight };
 }
 
 /** Stat a transcript for the exact-match ladder; a missing/unreadable file reads as absent. */
@@ -162,7 +200,9 @@ function exactMatchRung(
   spec: WakeSpec,
   transcriptMaxBytes: number,
   now: number,
-): { id: string; result: WakeExactMatchResult } | { skip: string; result: WakeExactMatchResult } {
+):
+  | { id: string; result: WakeExactMatchResult; weight?: number }
+  | { skip: string; result: WakeExactMatchResult; weight?: number } {
   const threadId = spec.order.thread_id;
   // An eligible order with no thread is a daemon older than the thread_id field: nothing to look
   // up, and nothing that reads as a local miss either.
@@ -187,14 +227,13 @@ function exactMatchRung(
     return { skip: 'the local binding names no transcript', result: 'stale' };
   const stat = (deps.statTranscript ?? statTranscriptOnDisk)(hit.transcript_path);
   if (!stat) return { skip: 'the bound transcript is missing', result: 'stale' };
-  if (stat.bytes > transcriptMaxBytes)
-    return {
-      skip: `bound transcript is ${fmtBytes(stat.bytes)} (hygiene bound ${fmtBytes(transcriptMaxBytes)})`,
-      result: 'stale',
-    };
+  const hygiene = judgeHygiene(deps, hit.transcript_path, stat.bytes, transcriptMaxBytes);
+  const weight = hygiene.weight !== undefined ? { weight: hygiene.weight } : {};
+  if (hygiene.over)
+    return { skip: `bound transcript is ${hygiene.skip}`, result: 'stale', ...weight };
   if (now - stat.mtimeMs > RESUME_GC_HORIZON_MS)
-    return { skip: 'the bound transcript is past the GC horizon', result: 'stale' };
-  return { id: hit.session_id, result: 'bound' };
+    return { skip: 'the bound transcript is past the GC horizon', result: 'stale', ...weight };
+  return { id: hit.session_id, result: 'bound', ...weight };
 }
 
 /**
@@ -511,11 +550,14 @@ function runAttempt(
  * caller bug handled defensively in `wake`).
  */
 function resumeLadder(
+  deps: ClaudeCodeDeps,
   liveness: LocalSessionLiveness,
   transcriptMaxBytes: number,
-): { id: string; via: 'slot' | 'enumerated' } | { skip: string | null } {
+):
+  | { id: string; via: 'slot' | 'enumerated'; weight?: number }
+  | { skip: string | null; weight?: number } {
   if (liveness.state === 'none') return { skip: null }; // the pre-capture world — quiet fresh
-  const slot = slotRung(liveness, transcriptMaxBytes);
+  const slot = slotRung(deps, liveness, transcriptMaxBytes);
   if ('id' in slot) return { ...slot, via: 'slot' };
   // ADR 166 increment 3 — the resume question, split from the guard. When the slot cannot name a
   // usable resume target but enumeration judged this workspace resumable, resume the enumerated
@@ -524,31 +566,35 @@ function resumeLadder(
   // the resume question's cheap failure direction.
   const e = liveness.enumerated;
   if (liveness.state === 'resumable' && e?.id !== undefined && e.bytes !== undefined) {
-    if (e.bytes > transcriptMaxBytes)
-      return {
-        skip: `newest transcript is ${fmtBytes(e.bytes)} (hygiene bound ${fmtBytes(transcriptMaxBytes)})`,
-      };
-    return { id: e.id, via: 'enumerated' };
+    const hygiene = judgeHygiene(deps, e.path, e.bytes, transcriptMaxBytes);
+    const weight = hygiene.weight !== undefined ? { weight: hygiene.weight } : {};
+    if (hygiene.over) return { skip: `newest transcript is ${hygiene.skip}`, ...weight };
+    return { id: e.id, via: 'enumerated', ...weight };
   }
   return slot;
 }
 
 /** The slot capture's rung — the pre-increment-3 checks, unchanged in order and wording. */
 function slotRung(
+  deps: ClaudeCodeDeps,
   liveness: LocalSessionLiveness,
   transcriptMaxBytes: number,
-): { id: string } | { skip: string } {
+): { id: string; weight?: number } | { skip: string; weight?: number } {
   const s = liveness.session;
   if (!s) return { skip: 'no captured session to resume (verdict was enumerated)' };
   if (s.harness !== 'claude-code') return { skip: `captured harness is "${s.harness}"` };
   if (liveness.state === 'gc-expired') return { skip: 'capture past the 30d GC horizon' };
   if (!s.transcript_path || liveness.transcriptBytes === undefined)
     return { skip: 'captured transcript is missing' };
-  if (liveness.transcriptBytes > transcriptMaxBytes)
-    return {
-      skip: `transcript is ${fmtBytes(liveness.transcriptBytes)} (hygiene bound ${fmtBytes(transcriptMaxBytes)})`,
-    };
-  return { id: s.id };
+  const hygiene = judgeHygiene(
+    deps,
+    s.transcript_path,
+    liveness.transcriptBytes,
+    transcriptMaxBytes,
+  );
+  const weight = hygiene.weight !== undefined ? { weight: hygiene.weight } : {};
+  if (hygiene.over) return { skip: `transcript is ${hygiene.skip}`, ...weight };
+  return { id: s.id, ...weight };
 }
 
 /**
@@ -652,6 +698,17 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       // `exact_match` rides EVERY outcome this wake can produce, and is deliberately outside the
       // `deliveryTracked` gate: it is the axis ADR 210's Eval splits eligible wakes on, so an
       // eligible wake that ended fresh has to say WHY. Absent ⇒ the wake was never eligible.
+      // Absent is legacy: mixed daemon/host versions retain the existing resume ladder. An explicit
+      // portable/fresh order bypasses every transcript read decision and spawns fresh immediately.
+      const wantsResume = spec.order.intended_delivery !== 'fresh';
+      // The resume decision itself (increment 4) — taken here so the ADR 427 conversation weight it
+      // judged can ride `deliveryMetadata` on every outcome; the branch on it is below.
+      const rung = exactEligible
+        ? exact
+        : wantsResume
+          ? resumeLadder(deps, liveness, bound)
+          : { skip: null as string | null };
+      const judgedWeight = 'weight' in rung ? rung.weight : undefined;
       const deliveryMetadata = () => ({
         ...('result' in exact ? { exact_match: exact.result } : {}),
         ...(!deliveryTracked
@@ -660,6 +717,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
               ...(liveness.transcriptBytes !== undefined
                 ? { transcript_bytes: liveness.transcriptBytes }
                 : {}),
+              ...(judgedWeight !== undefined ? { resume_weight_bytes: judgedWeight } : {}),
               ...(liveness.transcriptMtime !== undefined
                 ? // `mtimeMs` is fractional on APFS, so this difference is a float. The wire schema
                   // now rounds it, but send the integer we mean rather than relying on that: the
@@ -672,17 +730,9 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
                 : {}),
             }),
       });
-      // Absent is legacy: mixed daemon/host versions retain the existing resume ladder. An explicit
-      // portable/fresh order bypasses every transcript read decision and spawns fresh immediately.
-      const wantsResume = spec.order.intended_delivery !== 'fresh';
       let resumeAttempted = false;
 
       // ── The resume upgrade (increment 4) ──────────────────────────────────────────────────
-      const rung = exactEligible
-        ? exact
-        : wantsResume
-          ? resumeLadder(liveness, bound)
-          : { skip: null as string | null };
       if (exactEligible && 'skip' in rung) {
         if (rung.skip)
           ctx.log(`exact-match resume skipped for ${seat}: ${rung.skip} — fresh spawn`);

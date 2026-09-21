@@ -91,6 +91,8 @@ function harness(children: FakeChild | FakeChild[], deps: Partial<ClaudeCodeDeps
     confirmBeatMs: 5,
     // Deterministic capture state: default = the pre-capture world (fresh path, quiet).
     readSession: () => ({ state: 'none' }),
+    // No fixture path exists on disk; "could not weigh" keeps every pre-ADR-427 pin judging the file.
+    weighTranscript: () => undefined,
     ...deps,
   });
   return { backend, calls };
@@ -493,6 +495,119 @@ describe('claudeCodeBackend.wake', () => {
     expect(actuation.outcome.occupied).toBe(false);
     expect(actuation.outcome.deferred).toBe(true);
     expect(actuation.outcome.reason).toMatch(/claude CLI not found/);
+  });
+});
+
+describe('claudeCodeBackend.wake — the hygiene bound judges the conversation, not the file (ADR 427)', () => {
+  const occupied = () =>
+    ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
+
+  it('slot rung: a 284 KiB file whose conversation is 94 KiB RESUMES — the 2026-09-21 dolly life', async () => {
+    const child = new FakeChild();
+    const weighed: string[] = [];
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable({ transcriptBytes: 290_304 }),
+      weighTranscript: (path) => {
+        weighed.push(path);
+        return 96_256;
+      },
+    });
+    const c = occupied();
+    const actuation = await backend.wake(
+      spec({ order: order({ intended_delivery: 'resume' }) }),
+      c,
+    );
+    expect(weighed).toEqual(['/ws/scout/.claude/t.jsonl']);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('cap-1234');
+    // Both numbers reach the ledger so ADR 131's eval can split file from conversation.
+    expect(actuation.outcome).toMatchObject({
+      session: 'resumed',
+      transcript_bytes: 290_304,
+      resume_weight_bytes: 96_256,
+    });
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('slot rung: a conversation over the bound still rolls to fresh, and the skip names both numbers', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable({ transcriptBytes: 460_597 }),
+      weighTranscript: () => 300_032,
+    });
+    const c = occupied();
+    const actuation = await backend.wake(
+      spec({ order: order({ intended_delivery: 'resume' }) }),
+      c,
+    );
+    expect(calls[0]!.args).not.toContain('--resume');
+    expect(c.lines.join('\n')).toMatch(
+      /transcript is 449\.8 KiB on disk, 293 KiB of conversation \(hygiene bound 256 KiB\)/,
+    );
+    expect(actuation.outcome).toMatchObject({ session: 'fresh', resume_weight_bytes: 300_032 });
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('a file at or under the bound is never read — its conversation cannot outweigh it', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable({ transcriptBytes: RESUME_TRANSCRIPT_MAX_BYTES }),
+      weighTranscript: () => {
+        throw new Error('must not weigh a file the bound already admits');
+      },
+    });
+    const actuation = await backend.wake(
+      spec({ order: order({ intended_delivery: 'resume' }) }),
+      occupied(),
+    );
+    expect(calls[0]!.args).toContain('--resume');
+    expect(actuation.outcome.resume_weight_bytes).toBeUndefined(); // not weighed ⇒ not claimed
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('a file that cannot be weighed is judged as the file — refuse, never guess', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable({ transcriptBytes: 290_304 }),
+      weighTranscript: () => undefined,
+    });
+    const c = occupied();
+    const actuation = await backend.wake(spec(), c);
+    expect(calls[0]!.args).not.toContain('--resume');
+    expect(c.lines.join('\n')).toMatch(/transcript is 283\.5 KiB \(hygiene bound 256 KiB\)/);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('enumerated rung: weighs the newest transcript by its own path', async () => {
+    const child = new FakeChild();
+    const weighed: string[] = [];
+    const { backend, calls } = harness(child, {
+      readSession: () => ({
+        state: 'resumable' as const,
+        source: 'enumerated' as const,
+        enumerated: {
+          state: 'resumable' as const,
+          id: 'enum-heavy-file',
+          path: '/ws/scout/.claude/enum.jsonl',
+          mtime: Date.now() - 20 * 60_000,
+          bytes: 347_879,
+          count: 1,
+        },
+      }),
+      weighTranscript: (path) => {
+        weighed.push(path);
+        return 150_000;
+      },
+    });
+    const actuation = await backend.wake(spec(), occupied());
+    expect(weighed).toEqual(['/ws/scout/.claude/enum.jsonl']);
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('enum-heavy-file');
+    child.exit(0);
+    await actuation.settled;
   });
 });
 
@@ -1114,6 +1229,31 @@ describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', ()
     const actuation = await backend.wake(spec({ order: eligible() }), c);
     expect(calls[0]!.args).not.toContain('--resume');
     expect(c.lines.join('\n')).toMatch(/hygiene bound/i);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('an exact match over the byte bound but under the conversation bound RESUMES (ADR 427)', async () => {
+    const child = new FakeChild();
+    const weighed: string[] = [];
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable(),
+      readContinuity: () => registry([binding()]),
+      statTranscript: () => ({ bytes: 5_000_000, mtimeMs: Date.now() }),
+      weighTranscript: (path) => {
+        weighed.push(path);
+        return 200_000;
+      },
+    });
+    const c = ctx(async () => ({ occupied: true, provenance: 'wake', lease_matched: true }));
+    const actuation = await backend.wake(spec({ order: eligible() }), c);
+    expect(weighed).toEqual(['/ws/scout/.claude/thread.jsonl']);
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('thread-session-9');
+    expect(actuation.outcome).toMatchObject({
+      session: 'resumed',
+      exact_match: 'bound',
+      resume_weight_bytes: 200_000,
+    });
     child.exit(0);
     await actuation.settled;
   });

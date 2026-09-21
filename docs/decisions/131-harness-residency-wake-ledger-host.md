@@ -337,6 +337,11 @@ _2026-09-19 (ADR 424, lane 01M2SB89AR): the `resumable` badge this section's inc
 
 _2026-09-19 (ADR 426, lane 01M2XD2WCE): `argTail` also passes `--setting-sources project,local` under both policies. A wake had been loading the human's user layer — twenty plugins' skills, per-call hooks and MCP servers — which measured as 200 KiB of transcript and 36k tokens of context on an empty life ($1.52 → $0.23 with the flag). The seat's own hooks and permission floor live in `.claude/settings.local.json` and the MCP entry in `~/.claude.json` by repo root, so nothing a wake needs was in that layer. The skip-permissions invariant is unchanged._
 
+_Amendment (2026-09-21, the §5 hygiene clause's unit; [ADR 427](427-resume-bound-gates-on-message-bytes.md), lane 01M32FGSXK): the bound is
+judged on the transcript's `user`+`assistant` record bytes — what a resume replays — not on
+`stat().size`; a Claude Code transcript is 45% attachment metadata the model never re-reads, so a
+284 KiB file was a 47k-token conversation the ladder refused. The 256 KiB number is unchanged._
+
 ## Observability & Evaluation
 
 **Traces** — one `musterd.residency.wake` span per actuation (lease → spawn → occupied →

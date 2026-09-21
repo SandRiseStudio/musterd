@@ -3144,6 +3144,9 @@ export async function handleHttp(
                 ...(body.transcript_bytes !== undefined
                   ? { transcript_bytes: body.transcript_bytes }
                   : {}),
+                ...(body.resume_weight_bytes !== undefined
+                  ? { resume_weight_bytes: body.resume_weight_bytes }
+                  : {}),
                 ...(body.transcript_age_ms !== undefined
                   ? { transcript_age_ms: body.transcript_age_ms }
                   : {}),
@@ -3196,6 +3199,9 @@ export async function handleHttp(
             ...(body.exact_match ? { exact_match: body.exact_match } : {}),
             ...(body.transcript_bytes !== undefined
               ? { transcript_bytes: body.transcript_bytes }
+              : {}),
+            ...(body.resume_weight_bytes !== undefined
+              ? { resume_weight_bytes: body.resume_weight_bytes }
               : {}),
             ...(body.transcript_age_ms !== undefined
               ? { transcript_age_ms: body.transcript_age_ms }

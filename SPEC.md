@@ -400,8 +400,9 @@ lane therefore never receives one. Rate limiting is unchanged: the act id remain
 key.
 
 Wake reports MAY add `delivery_outcome: "fresh"|"resumed"|"fresh_fallback"`, plus non-content
-measurements `transcript_bytes` and `transcript_age_ms`. No report carries a session ID or transcript
-path. A `fresh_fallback` outcome means a resume attempt failed and the fallback fresh session
+measurements `transcript_bytes`, `transcript_age_ms` and — when the host weighed the transcript's
+replayable records against the hygiene bound (ADR 427) — `resume_weight_bytes`. No report carries a
+session ID or transcript path. A `fresh_fallback` outcome means a resume attempt failed and the fallback fresh session
 occupied.
 
 ## A.11 Shared Seeds before Lanes (unreleased — ADR 291)
