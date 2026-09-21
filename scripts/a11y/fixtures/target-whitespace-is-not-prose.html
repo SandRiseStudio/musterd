@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>target control — whitespace is not a sentence</title>
+<!--
+  MUST FAIL. Three undersized inline links that are the ONLY content of their container: the sole
+  other text nodes around them are the newlines and indentation of this very file.
+
+  Written after CI's linter caught the bug this arm now guards. The inline test strips whitespace
+  before asking "is there prose outside this target", and the strip was written inside a template
+  literal as /[\s ]+/ — where \s collapses to a bare s. The regex removed the LETTER S and
+  non-breaking spaces, and left ordinary spaces and newlines standing as "prose". Every stacked
+  link with a newline after it was one formatting change away from claiming the sentence exemption
+  (2026-09-21, lane 01M32HG5GJ).
+
+  The five arms that existed all passed WITH that bug — none of them had pretty-printed markup
+  around an inline link, so none of them could see it. That is the gap this file closes, and it is
+  why the arm is here rather than only in the unit tests: the escape only misbehaves once it has
+  been through a template literal into a page, which is exactly what no unit test does.
+-->
+<style>
+  body { margin: 0; padding: 20px; font: 16px/1.4 system-ui, sans-serif; }
+  .stack a { display: inline; }
+  .stack div { height: 18px; }
+</style>
+<div class="stack">
+  <div>
+    <a href="#one">One</a>
+  </div>
+  <div>
+    <a href="#two">Two</a>
+  </div>
+  <div>
+    <a href="#three">Three</a>
+  </div>
+</div>

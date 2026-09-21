@@ -116,7 +116,7 @@ sweep defaulting to 1440 would be green by construction.
 node scripts/a11y/target-size-falsifier.mjs
 ```
 
-Five arms over fixtures whose verdict is known in advance. `contrast.md` set the precedent and the
+Six arms over fixtures whose verdict is known in advance. `contrast.md` set the precedent and the
 wiki's rule 3 states it: **a check that passes either way is a ritual.** The gate is green on
 `main` — that is either because the site conforms or because the gate cannot see, and only a
 control that fails tells them apart.
@@ -124,12 +124,23 @@ control that fails tells them apart.
 | Arm                       | Must   | Aimed at                                                 |
 | ------------------------- | ------ | -------------------------------------------------------- |
 | `undersized-crowded`      | fail 1 | the plain size clause, outside the chrome                |
+| `whitespace-is-not-prose` | fail 1 | newlines around a link reading as a sentence             |
 | `overlapping-pair`        | fail 1 | two 44×44 buttons overlapping — a size-only gate passes  |
 | `inline-block-cta`        | fail 1 | the exemption drifting back to permissive                |
 | `house-floor-nav`         | fail 1 | conforming markup must fail HOUSE, never "below AA"      |
 | `conforming`              | pass 0 | size, spacing and inline conformance all pass            |
 
 The passing arm is the one that keeps the gate installed. "It fails the bad ones" is half a claim.
+
+**Two of the six were written after the gate got something wrong**, which is the honest reason to
+trust the other four less than you would like. `inline-block-cta` came from the exemption swallowing
+`/watch`'s CTA. `whitespace-is-not-prose` came from CI's linter: the whitespace strip was written
+`/[\s\u00a0]+/` **inside the in-page template literal**, where `\s` collapses to a bare `s` — so it
+removed the letter S and left ordinary spaces standing as prose, and every stacked link with a
+newline after it was one formatting change from claiming the exemption. All five arms that existed
+passed with that bug, because none had pretty-printed markup around an inline link. Note that no
+unit test could have caught it either: the escape only misbehaves after going through a template
+literal into a page.
 
 The geometry rules are also unit-tested without a browser
 ([`target-size-rules.test.ts`](../../scripts/a11y/target-size-rules.test.ts)): the spacing exception

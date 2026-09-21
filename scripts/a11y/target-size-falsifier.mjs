@@ -23,6 +23,10 @@
  *                          and the 01M32GF49Z fix produced exactly it by growing padding.
  *   inline-block-cta     — an undersized CTA in a section full of prose. The FIRST cut of this
  *                          gate's inline exception exempted it. This arm is aimed at the gate.
+ *   whitespace-is-not-prose — links whose only neighbours are newlines. A collapsed `\\s` escape
+ *                          inside the in-page template literal once made the strip remove the
+ *                          letter S instead of whitespace; CI's linter caught it and all five
+ *                          arms had passed with it. Also aimed at the gate.
  *
  * And one passing arm, which is the one that keeps the gate installed:
  *
@@ -106,6 +110,15 @@ const ARMS = [
        would forbid the healthy output and this arm would fail for being right. */
     forbid: /[1-9]\d* below AA 2\.5\.8/,
     why: 'a conforming 22px nav must fail the HOUSE floor and must NOT be called a WCAG failure',
+  },
+  {
+    file: 'target-whitespace-is-not-prose.html',
+    want: 1,
+    expect: /under 24×24/,
+    /* The bug this guards made whitespace read as prose, so the tell of a regression is the
+       exemption firing on links that have nothing but newlines around them. */
+    forbid: /EXEMPT — inline/,
+    why: 'newlines and indentation around a link are not a sentence',
   },
   {
     file: 'target-conforming.html',

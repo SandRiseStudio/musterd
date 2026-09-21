@@ -217,7 +217,8 @@ const MEASURE = /* js */ `(() => {
     if (!host) return false;
     for (const node of host.childNodes) {
       if (node === inner) continue;
-      if (node.nodeType === 3 && node.textContent.replace(/[\s\u00a0]+/g, '').length > 0) return true;
+      if (node.nodeType === 3 && node.textContent.replace(/[\\s\\u00a0]+/g, '').length > 0)
+        return true;
     }
     return false;
   };
