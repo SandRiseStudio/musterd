@@ -395,7 +395,7 @@ src/
     join.ts       // team_join  — claim a seat (as/role/policy) + go online (ADR 032)
     leave.ts      // team_leave — go offline (release seat, ~45s grace)
     send.ts       // refuses until ready (pending → claim; dormant → join)
-    inboxCheck.ts // refuses until ready (pending → claim; dormant → join); appends the ADR 135 build-skew warning, and pushes every warning — skew, wedge, provisioning drift — into ONE `warnings` array (a second structuredContent key is a key unknowing clients drop, #1479); the empty-inbox path carries the same findings as prose, which is its only channel
+    inboxCheck.ts // refuses until ready (pending → claim; dormant → join); folds the tail's ambient acts — teammates' @team status, transitions on lanes the seat does not own — to one line each (ADR 433), reading `lane_board {mine}` only when the slice carries a lane broadcast; appends the ADR 135 build-skew warning, and pushes every warning — skew, wedge, provisioning drift — into ONE `warnings` array (a second structuredContent key is a key unknowing clients drop, #1479); the empty-inbox path carries the same findings as prose, which is its only channel
     huddleRooms.ts // the room an arriving turn came from (ADR 378): folds the timeline with the protocol lens so a turn names its topic and the call that answers it — a FIELD on inbox_check, never a tool (ADR 144 selectability + standing-context cost)
     status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning
     members.ts    // works while dormant/pending

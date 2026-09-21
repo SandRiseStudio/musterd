@@ -118,3 +118,18 @@ The measurement lane 01M32FH5YQ owed, and it does not support the lane's premise
 What did change is what the bytes BUY. Those 22 digest lines walk the read cursor: ryder's moved to 12:21:05 and her backlog cleared, where the same budget previously went partly on re-showing acts that were already answered. Value per byte improved; byte count did not.
 
 **Caveats, both load-bearing** (2026-09-21; falsify: a wake-life measurement of stanley, ghost or grokbot, or any second seat woken for this change). (1) ryder is the seat ADR 429 helps least — 58 unread, 2 pinned before and 1 after. The 320 KB → 30 KB cases are stanley, ghost and grokbot, and none of the three is wakeable, so the change's best case remains unmeasured in a wake life. (2) Only one seat was woken, not two: dolly and miley were both live at the time and a live seat cannot be wake-measured. So lane 01M32FH5YQ's acceptance (c) — "a wake that has read nothing new gets an inbox result under 2 KiB" — is **not met**, and (d) is satisfied for one seat only. <!-- claim: other -->
+
+## The tail was the weight ADR 429 could not reach — folded, ryder's check replays at 8.3 KiB from 20.4 (2026-09-21, lane 01M32QF2X4; falsify: `sqlite3 ~/.musterd/musterd.db ".backup /tmp/m.db"`, then replay each seat's newest-50 unread through `planInboxCheck` from a post-ADR-433 `@musterd/mcp` dist and sum `formatMessage` over `shown` plus `formatDigestLine` over `folded` — a figure over half of the same rows rendered full falsifies this) <!-- claim: other -->
+
+The section above ends "a size win requires lowering the budget or changing how it is split". It had a third door: change what the tail RENDERS. ryder's 42 full rows were 17 lane transitions on lanes she does not own and 22 teammates' `@team status_update`; one act was hers. [ADR 433](../decisions/433-inbox-tail-folds-ambient-acts.md) folds those two classes to a digest line each — rendered, so the cursor still walks them (ADR 287) — and keeps in full anything directed to the reader, any plain `@team` message, and a transition on a lane the reader owns or depends on.
+
+Replayed on the daemon's own database (`.backup`, never `cp` — a WAL snapshot by `cp` silently drops uncheckpointed commits), each seat's real newest-50 unread through the new `planInboxCheck`, pre-change render emulated as newest-first, body-capped, to the 21k `SHOWN_BUDGET`:
+
+| seat     | before   | after    | full rows kept                                 | folded (lane + status) |
+| -------- | -------- | -------- | ---------------------------------------------- | ---------------------- |
+| ryder    | 20.4 KiB | 8.3 KiB  | 5: 2 DMs, her steer, a `wait`, 1 `@team` note  | 24 + 21                |
+| dolly    | 20.4 KiB | 11.7 KiB | 10: 3 `accept`, 2 `wait`, 1 DM, 4 `@team`      | 20 + 20                |
+| big-body | 20.4 KiB | 16.7 KiB | 9: 4 `ask` to him at the 1.2k cap, 2 DMs, …    | 22 + 19                |
+| stanley  | 20.4 KiB | 12.2 KiB | 13: 6 DMs, 3 directed status, 1 `accept`, …    | 20 + 17                |
+
+**This is a replay, not a wake.** The lane's acceptance names a real before/after on a light-inbox seat, and the fold runs in the MCP adapter, so the "after" needs a wake whose adapter carries ADR 433 — owed after merge, to be appended here dated. The number a wake will show is not 8.3 KiB: a behind seat then spends the freed budget on drain lines (that is the drain working, lane 01M2GT874Y), so the honest wake measure is `folded_ambient.length` against full rows, not bytes alone.

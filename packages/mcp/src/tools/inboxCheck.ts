@@ -109,7 +109,13 @@ export interface InboxCheckPlan {
    * step over what the fetch never returned.
    */
   digested: Envelope[];
-  /** Unread this call rendered in neither form. Non-zero means the cursor stops short of them. */
+  /**
+   * Ambient acts from the tail — teammates' @team status and transitions on lanes the reader does
+   * not own — rendered one line each instead of in full (ADR 433). Rendered, so the cursor walks
+   * them; newest-first when the budget cuts, so the freshest ambient survives.
+   */
+  folded: Envelope[];
+  /** Unread this call rendered in no form. Non-zero means the cursor stops short of them. */
   elided: number;
   /**
    * Message id to advance the read cursor to, or `null` to leave the cursor exactly where it is.
@@ -179,6 +185,53 @@ function isPinnedNeed(env: Envelope): boolean {
   return isObligationAct(env.act, env.to?.kind === 'member');
 }
 
+/**
+ * The lane a `[lane]` broadcast is about, or null for any other act (ADR 433).
+ *
+ * The daemon composes every lane transition it broadcasts to @team as a `message` whose meta carries
+ * one `lane_*` key naming the lane — `lane_open`, `lane_claim`, `lane_release`, `lane_state`,
+ * `lane_resolve` today — each with `.lane`. Read the STRUCTURE by prefix, never the `[lane]` body
+ * text: a human can type that prefix, and a new transition kind should fold without a client
+ * release. The directed shapes (`lane_handoff`, `lane_review`, `lane_warning`) are to a member and
+ * never reach `isAmbient`'s lane branch at all.
+ */
+export function laneIdOf(env: Envelope): string | null {
+  const meta = env.meta;
+  if (!meta || typeof meta !== 'object') return null;
+  for (const [key, v] of Object.entries(meta as Record<string, unknown>)) {
+    if (!key.startsWith('lane_') || !v || typeof v !== 'object') continue;
+    const id = (v as { lane?: unknown }).lane;
+    if (typeof id === 'string') return id;
+  }
+  return null;
+}
+
+/**
+ * Whether the tail owes the reader this act in FULL, or only a line (ADR 433).
+ *
+ * ADR 429 governed the pinned set and left the newest tail "newest N, whatever they are". On a
+ * light-inbox seat that is the whole reply: ryder's wake of 2026-09-21 12:21 rendered 42 acts in
+ * full of which one was hers — 17 lane transitions on lanes she does not own and 22 teammates'
+ * @team `status_update`s — and weighed 23.7 KiB across three lives whatever ADR 429 un-pinned,
+ * because the budget below is spent to the ceiling and a byte freed is a byte re-spent.
+ *
+ * Ambient, and so folded to one line: an @team `status_update` (a teammate reporting to the room —
+ * the roster's `working` flip, already one line by convention), and a lane transition on a lane the
+ * reader neither owns nor depends on (a board fact `team_next` already carries). NOT ambient: any
+ * directed act, any obligation (pinned above, never here), a plain @team `message` (a human wrote it
+ * to everyone on purpose), an `insight`, and a transition on one of the reader's own lanes.
+ *
+ * Folded is not dropped. A folded row is rendered — sender, act, id, body head — so ADR 287's
+ * cursor may walk it exactly as it walks a digest line, and `ids: [...]` reads it whole.
+ */
+export function isAmbient(env: Envelope, ownedLanes: ReadonlySet<string>): boolean {
+  if (env.to?.kind === 'member') return false;
+  if (isObligationAct(env.act, false)) return false;
+  const lane = laneIdOf(env);
+  if (lane !== null) return !ownedLanes.has(lane);
+  return env.act === 'status_update';
+}
+
 export function planInboxCheck(
   ordered: Envelope[],
   limit: number,
@@ -213,13 +266,25 @@ export function planInboxCheck(
    * a tail; it no longer forbids walking one the caller actually holds.
    */
   head: readonly Envelope[] = [],
+  /**
+   * Lanes this seat owns or depends on (ADR 433) — a transition on one of these is rendered in full;
+   * on any other lane it is folded. Empty when the caller had none or could not fetch the board,
+   * which folds every lane transition: still rendered, still walked, one line instead of a body
+   * plus its meta.
+   */
+  ownedLanes: ReadonlySet<string> = new Set(),
 ): InboxCheckPlan {
   const closedSet = new Set(closed);
   const pinned = ordered.filter((e) => isPinnedNeed(e) && !closedSet.has(e.id));
   const rest = ordered.filter((e) => !isPinnedNeed(e) || closedSet.has(e.id));
+  // The tail's relationship rule (ADR 433): what the reader is owed in full, and what it is owed a
+  // line of. Split BEFORE the newest-N so an ambient burst cannot push the reader's own rows out of
+  // the window — that is the same reason the pinned set is unioned above the fill.
+  const full = rest.filter((e) => !isAmbient(e, ownedLanes));
+  const ambient = rest.filter((e) => isAmbient(e, ownedLanes));
   // Newest fill of the non-pinned tail, union the waiting acts. If the server already pinned, this
   // keeps the handoff when a second slice would otherwise drop it as the oldest of 51.
-  const newest = rest.slice(Math.max(0, rest.length - limit));
+  const newest = full.slice(Math.max(0, full.length - limit));
 
   // Rows are DERIVED FROM THE BUDGET, never the other way round (lane 01M2JZYTAH). `limit` and the
   // pinned union above are both row counts, and neither bounds what the harness actually refuses:
@@ -243,6 +308,21 @@ export function planInboxCheck(
   const shown = [...byId.values()].sort(
     (a, b) => envelopePosition(a) - envelopePosition(b) || a.id.localeCompare(b.id),
   );
+  // The fold (ADR 433): ambient rows as one line each, newest first so a tight budget keeps the
+  // freshest, costed against the whole budget like the digest below — a folded row the budget
+  // cannot carry is not rendered and so not walked. The 0.7 split is deliberately not applied: the
+  // fold is the cheap form, and the budget it consumes is budget the full rows above never spent.
+  const foldedIds = new Set<string>();
+  const folded: Envelope[] = [];
+  for (const e of [...ambient].reverse()) {
+    if (byId.has(e.id)) continue;
+    const cost = formatDigestLine(e).length + 1;
+    if (spent + cost > RESULT_BUDGET) break;
+    folded.push(e);
+    foldedIds.add(e.id);
+    spent += cost;
+  }
+  folded.sort((a, b) => envelopePosition(a) - envelopePosition(b) || a.id.localeCompare(b.id));
   // The cursor may only walk a CONTIGUOUS prefix of the unread — the watermark is a single
   // position, so passing row k marks everything before k read whether or not it was rendered. With
   // a newest-N fill the rendered rows sit at the far end, so the prefix the cursor could walk was
@@ -264,7 +344,8 @@ export function planInboxCheck(
   const walk = head.length > 0 ? head : unreachable === 0 ? ordered : [];
   for (let i = 0; i < walk.length; i++) {
     const e = walk[i]!;
-    if (!shownIds.has(e.id)) {
+    // A folded row is rendered — the walk continues through it as it does through a shown one.
+    if (!shownIds.has(e.id) && !foldedIds.has(e.id)) {
       if (digested.length >= DIGEST_ROWS) break;
       const cost = formatDigestLine(e).length + 1;
       if (spent + cost > RESULT_BUDGET) break;
@@ -276,10 +357,11 @@ export function planInboxCheck(
   // A digested row drawn from the prefix may not be in `ordered` at all — it is one of the rows the
   // tail fetch left behind, and so is already counted inside `unreachable`. Either way it is now
   // rendered, so subtracting it once from the total is right in both cases.
-  const elided = ordered.length - shown.length - digested.length + unreachable;
+  const elided = ordered.length - shown.length - folded.length - digested.length + unreachable;
   return {
     shown,
     digested,
+    folded,
     elided,
     drainLimit: ordered.length + unreachable,
     // `null` on an empty inbox and on a bounded fetch — there is no contiguous rendered prefix to
@@ -383,16 +465,32 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
                 .then((r) => r.messages)
                 .catch(() => [] as Envelope[])
             : [];
+        // ADR 433: a transition on one of THIS seat's lanes is owed in full; on any other lane it
+        // folds. Pay for the board read only when the slice carries a lane broadcast at all — an
+        // inbox with none costs no extra request — and degrade to "fold every transition" if the
+        // read fails: still rendered, still walked, one line each.
+        const ownedLanes = new Set<string>();
+        if (ordered.some((e) => e.to?.kind !== 'member' && laneIdOf(e) !== null)) {
+          const mine = await client
+            .laneBoard({ mine: true })
+            .then((r) => r.lanes)
+            .catch(() => []);
+          for (const lane of mine) {
+            ownedLanes.add(lane.id);
+            for (const dep of lane.depends_on ?? []) ownedLanes.add(dep);
+          }
+        }
         const plan = planInboxCheck(
           ordered,
           args.limit ?? 50,
           fetched.unread_remaining ?? 0,
           closed,
           head,
+          ownedLanes,
         );
         const messages = plan.shown;
 
-        if (messages.length === 0 && plan.elided === 0) {
+        if (messages.length === 0 && plan.folded.length === 0 && plan.elided === 0) {
           // ADR 287 stopped the cursor consuming what a call never rendered. A message it DID
           // render is the other case: the cursor passes it legitimately, and the only way back is
           // `unread_only: false` — a flag whose existence nothing advertised, so a seat could not
@@ -498,6 +596,15 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         // The digest, after the full rows: the oldest unread this call walked the cursor over, one
         // line each. It reads as "what you missed while away", oldest first, and every id in it is
         // fetchable with `unread_only: false` if a line turns out to matter.
+        // The fold (ADR 433), between the full rows and the digest: what the team did around the
+        // reader, one line each. Named for what it is — teammates' status and other seats' lane
+        // transitions — so the reader knows why these are lines and where the full form lives.
+        const fold =
+          plan.folded.length > 0
+            ? `\n\n— ${plan.folded.length} ambient (teammates' status, lanes you do not own), ` +
+              `one line each, now read —\n` +
+              plan.folded.map(formatDigestLine).join('\n')
+            : '';
         const digest =
           plan.digested.length > 0
             ? `\n\n— ${plan.digested.length} older unread, now read (oldest first) —\n` +
@@ -535,6 +642,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const text =
           notice +
           messages.map(line).join('\n') +
+          fold +
           digest +
           rooms +
           warnings.map((w) => `\n${w.text}`).join('');
@@ -548,6 +656,8 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
             ...(plan.digested.length > 0
               ? { digested_unread: plan.digested.map((m) => m.id) }
               : {}),
+            // The ambient rows folded to a line (ADR 433) — ids only, same as the digest.
+            ...(plan.folded.length > 0 ? { folded_ambient: plan.folded.map((m) => m.id) } : {}),
             messages: messages.map((m) => ({
               id: m.id,
               from: m.from,
