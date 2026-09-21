@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import officeStill from '../../brand/office-still.png?url';
-import { TWITCH_CHANNEL, TWITCH_URL } from './twitchEmbed';
-import { type Liveness, loadTwitchSdk, subscribeLiveness } from './twitchLiveness';
+import { TWITCH_CHANNEL, TWITCH_COLLECTION, TWITCH_URL } from './twitchEmbed';
+import {
+  type Liveness,
+  loadTwitchSdk,
+  replayWhenDark,
+  subscribeLiveness,
+} from './twitchLiveness';
 import { WATCH_COPY } from './watchCopy';
 import './StreamSection.css';
 
@@ -43,6 +48,16 @@ export function StreamSection() {
    * the office captioned as a still, never presented as a live view.
    */
   const [liveness, setLiveness] = useState<Liveness>('unknown');
+  /**
+   * Whether a REPLAY is actually on screen — not whether one was asked for.
+   *
+   * Deliberately separate from `liveness`, which means what it has always meant: the state of the
+   * CHANNEL. A replay is a property of the player, and conflating the two would make `dark` mean
+   * two different things depending on whether a collection happened to load. Stays false when the
+   * collection is empty, private, wrong, or the SDK is too old to swap — in every one of those the
+   * still remains, which is the point (lane 01M32JE1ZP).
+   */
+  const [replaying, setReplaying] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -90,6 +105,11 @@ export function StreamSection() {
         subscribeLiveness(player, twitch.Player, (state) => {
           if (!cancelled) setLiveness(state);
         });
+        /* A dark channel shows yesterday's work instead of a photograph of the room. The still
+           stays beneath it and returns the moment anything about this fails. */
+        replayWhenDark(player, twitch.Player, TWITCH_COLLECTION, () => {
+          if (!cancelled) setReplaying(true);
+        });
       })
       .catch(() => {
         /* blocked, offline, or refused — `unknown` is the honest answer and already the state */
@@ -99,7 +119,10 @@ export function StreamSection() {
     };
   }, [visible]);
 
-  const showStill = liveness !== 'live';
+  /* The still covers the player unless something real is on it — a live stream, or a replay that
+     has genuinely started. `unknown` keeps the still, and so does a dark channel whose replay
+     never arrived. */
+  const showStill = liveness !== 'live' && !replaying;
 
   return (
     <section className="ss shell">
@@ -151,10 +174,17 @@ export function StreamSection() {
         </div>
         {/* One caption, and it must be true in BOTH states because it is rendered in both: it says
             what the reader is looking at without inventing a schedule (watch-page-copy-spec §2). */}
+        {/* THREE states now, not two, and each string is true only of its own. The replay case is
+            the one that had to be added: a recording of this office is indistinguishable from a
+            live view of it, so the caption is the only thing that tells a reader which they are
+            looking at. Ordered by specificity — live wins over replay, since a swap only ever
+            happens after the channel reported itself dark. */}
         <p className="ss__caption">
-          {showStill
-            ? 'The team works in sessions, so the channel is dark between them. This is a still of the office; the work lands in the open repository either way.'
-            : 'Live now. Every act you see lands in the open repository.'}
+          {liveness === 'live'
+            ? WATCH_COPY.stateLive
+            : replaying
+              ? WATCH_COPY.stateReplay
+              : 'The team works in sessions, so the channel is dark between them. This is a still of the office; the work lands in the open repository either way.'}
         </p>
       </div>
     </section>

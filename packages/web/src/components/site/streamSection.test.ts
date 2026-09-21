@@ -72,8 +72,11 @@ describe('the stream embed is deferred', () => {
  * reader with a blocked SDK keeps, so it must be the state that claims least.
  */
 describe('the still is the offline state, not a second office', () => {
-  it('shows the still whenever the channel is not known to be live', () => {
-    expect(src()).toContain("liveness !== 'live'");
+  it('shows the still whenever nothing real is on the player', () => {
+    // Widened by the replay (lane 01M32JE1ZP): "not live" is no longer sufficient, because a dark
+    // channel may now be playing an actual recording. The still must yield to a STARTED replay
+    // and to nothing else.
+    expect(src()).toContain("liveness !== 'live' && !replaying");
   });
 
   it('stacks the still on the player rather than replacing it, so the box cannot resize', () => {
@@ -83,5 +86,43 @@ describe('the still is the offline state, not a second office', () => {
     // The mount is never conditionally rendered — if it were, the player would be torn down and
     // rebuilt on every liveness change, and each rebuild re-asks Twitch for autoplay.
     expect(src()).not.toMatch(/\{showStill[^}]*<div className="ss__mount"/);
+  });
+});
+
+/**
+ * The replay (lane 01M32JE1ZP): a dark channel plays past sessions instead of showing a
+ * photograph of the room. The risk this introduces is not technical — it is that a recording of
+ * this office is indistinguishable from a live view of it, so the caption becomes the only thing
+ * telling a reader which they are looking at.
+ */
+describe('a dark channel replays real work, captioned as a replay', () => {
+  it('asks for the collection through the player rather than a second embed', () => {
+    // A second iframe would be a second office in one viewport — the exact composition ADR 428
+    // removed — and would not count as a viewer either (ADR 302's autoplay gate).
+    expect(src()).toContain('replayWhenDark(player, twitch.Player, TWITCH_COLLECTION');
+    expect(src()).not.toMatch(/<iframe/);
+  });
+
+  it('tracks the replay separately from the channel state', () => {
+    // `liveness` means the CHANNEL; `replaying` means the PLAYER. Folding one into the other
+    // would make `dark` mean two different things depending on whether a collection loaded.
+    expect(src()).toContain('const [replaying, setReplaying] = useState(false)');
+  });
+
+  it('captions three states, and never calls a replay live', () => {
+    expect(src()).toContain('WATCH_COPY.stateReplay');
+    expect(src()).toContain('WATCH_COPY.stateLive');
+    // Live is read FIRST: a swap only ever follows a dark report, so the two can never both be
+    // true — but the ordering is what makes that structural rather than incidental.
+    expect(src()).toMatch(/liveness === 'live'\s*\?\s*WATCH_COPY\.stateLive/);
+  });
+
+  it('the replay caption leads with the word replay and does not imply a schedule', () => {
+    const copy = readFileSync(fileURLToPath(new URL('./watchCopy.ts', import.meta.url)), 'utf8');
+    const line = /stateReplay:\s*\n?\s*'([^']+)'/.exec(copy)?.[1] ?? '';
+    expect(line.toLowerCase().startsWith('a replay')).toBe(true);
+    expect(line).toMatch(/dark right now/);
+    // No invented cadence — watch-page-copy-spec §2. The team keeps no schedule.
+    expect(line).not.toMatch(/tomorrow|every day|daily|weekly|back at/i);
   });
 });

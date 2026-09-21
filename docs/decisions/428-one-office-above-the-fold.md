@@ -38,6 +38,17 @@ A further constraint rules out the obvious fix. **Liveness is only knowable _thr
 
 ## Consequences
 
+
+- **2026-09-21 — the still is now the player's THIRD state, not its second** (lane 01M32JE1ZP, the
+  follow-up this ADR named). A dark channel plays a hand-curated Twitch collection of past
+  sessions, so the common case shows the team actually working rather than a photograph of the
+  room they work in. The still did not go away and could not: it remains beneath the replay and is
+  what a reader gets when the SDK is blocked, the collection is empty or private, or the swap is
+  refused — the §2/§3 guarantee is unchanged. A collection id is public, which is why this needed
+  no Twitch API credential, no build-time network call and no runtime endpoint on a prerendered
+  page; the cost is that the collection is curated by hand and goes stale silently. What it cannot
+  do is look broken. Falsifier: stop the stream, load musterd.io, and find a static image where
+  footage should be — or find a replay captioned as anything but a replay.
 - The ADR 302 viewer-count precondition is preserved and slightly strengthened: the IntersectionObserver gate is unchanged, and the SDK grants the autoplay permission the hand-built iframe was missing.
 - The still is now **above** the fold, which inverts its loading strategy: `fetchPriority="high"` and eager, where it was `loading="lazy"` below the fold. It is a 166 KB PNG and is now the page's first image.
 - The page is 445px shorter (3085 → 2640 at 390px) and has one fewer component.

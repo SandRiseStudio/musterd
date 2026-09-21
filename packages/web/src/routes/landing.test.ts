@@ -72,9 +72,12 @@ describe('the office slot in the stream section', () => {
   // The still is what `unknown` and `dark` both show, so the caption rendered alongside it must be
   // true in either — it may not claim the channel is live, and may not invent a schedule (spec §2).
   it('never claims live while the still is the thing on screen', () => {
-    expect(stream).toContain("liveness !== 'live'");
-    const live = stream.slice(stream.indexOf('showStill'));
-    expect(live).toContain('Live now.');
+    // The still now yields to a STARTED replay as well as to a live channel (lane 01M32JE1ZP).
+    expect(stream).toContain("liveness !== 'live' && !replaying");
+    // The live claim moved into WATCH_COPY when /watch and the homepage stopped keeping two
+    // copies of one sentence, so assert the GATE rather than the literal: the claim is reachable
+    // only from the live branch, whatever the string happens to say.
+    expect(stream).toMatch(/liveness === 'live'\s*\?\s*WATCH_COPY\.stateLive/);
     // The dark/unknown caption is the one that ships prerendered; it must not assert liveness.
     expect(stream).toContain('The team works in sessions, so the channel is dark between them.');
   });
@@ -164,8 +167,13 @@ describe('the player facade never asserts a state it cannot read', () => {
     const source = code(stream);
     expect(source).not.toMatch(/>LIVE</);
     expect(source).not.toMatch(/live broadcast/);
-    const live = source.indexOf('Live now.');
+    // `Live now.` is no longer inline — it is WATCH_COPY.stateLive, shared with /watch so the two
+    // surfaces cannot describe one state differently. The property under test is unchanged and is
+    // now checked directly: the live copy is reachable only when the player said `live`.
+    const live = source.indexOf('WATCH_COPY.stateLive');
     expect(live).toBeGreaterThan(-1);
-    expect(source.slice(0, live)).toContain('showStill');
+    expect(source.slice(0, live)).toMatch(/liveness === 'live'\s*\?\s*$/);
+    // And the replay is a THIRD branch, never folded into the live one.
+    expect(source).toContain('WATCH_COPY.stateReplay');
   });
 });

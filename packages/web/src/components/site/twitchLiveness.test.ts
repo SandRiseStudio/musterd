@@ -1,15 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { TWITCH_SDK_SRC, subscribeLiveness, type Liveness } from './twitchLiveness';
+import {
+  TWITCH_SDK_SRC,
+  replayWhenDark,
+  subscribeLiveness,
+  type Liveness,
+} from './twitchLiveness';
 import { WATCH_COPY } from './watchCopy';
 
 /** A stand-in for Twitch.Player that lets a test fire the events the real one fires. */
-function fakePlayer() {
+function fakePlayer(opts: { setCollection?: boolean } = {}) {
   const handlers = new Map<string, (() => void)[]>();
+  const collections: string[] = [];
   return {
     player: {
       addEventListener: (e: string, cb: () => void) =>
         handlers.set(e, [...(handlers.get(e) ?? []), cb]),
+      /* Omittable, because a viewer's SDK may predate the method — see replayWhenDark. */
+      ...(opts.setCollection === false
+        ? {}
+        : { setCollection: (id: string) => void collections.push(id) }),
     },
+    collections,
     fire: (e: string) => (handlers.get(e) ?? []).forEach((cb) => cb()),
   };
 }
@@ -72,5 +83,72 @@ describe('the copy each liveness state selects', () => {
   it('never uses the word offline — it reads as broken', () => {
     for (const s of [WATCH_COPY.eyebrow, WATCH_COPY.eyebrowLive, WATCH_COPY.eyebrowDark])
       expect(s).not.toMatch(/offline/i);
+  });
+});
+
+/**
+ * The replay wiring (lane 01M32JE1ZP). The thing worth testing is not "does it swap" but WHEN it
+ * claims to be replaying: a caption that says "replay" over a player that never started is the
+ * defect ADR 428 took out of this slot, in new clothes.
+ */
+describe('replayWhenDark', () => {
+  const R_EVENTS = { OFFLINE: 'offline', PLAY: 'play' };
+
+  it('asks for the collection when the channel goes dark', () => {
+    const { player, collections, fire } = fakePlayer();
+    replayWhenDark(player, R_EVENTS, 'coll-1', () => {});
+    expect(collections, 'nothing is swapped before the channel says it is dark').toEqual([]);
+    fire('offline');
+    expect(collections).toEqual(['coll-1']);
+  });
+
+  it('does NOT report a replay merely because it asked for one', () => {
+    // The whole point: the request is not the outcome. An empty, private or wrong collection
+    // never plays, and the caller must keep showing the office still rather than caption a void.
+    let replayed = false;
+    const { player, fire } = fakePlayer();
+    replayWhenDark(player, R_EVENTS, 'coll-1', () => (replayed = true));
+    fire('offline');
+    expect(replayed).toBe(false);
+  });
+
+  it('reports a replay once the player actually plays after the swap', () => {
+    let replayed = false;
+    const { player, fire } = fakePlayer();
+    replayWhenDark(player, R_EVENTS, 'coll-1', () => (replayed = true));
+    fire('offline');
+    fire('play');
+    expect(replayed).toBe(true);
+  });
+
+  it('does NOT call a LIVE stream a replay — PLAY before any swap is the channel itself', () => {
+    // A live channel fires PLAY too. Without the guard, a live stream would be captioned as
+    // yesterday's recording the moment it started, which is worse than showing no replay at all.
+    let replayed = false;
+    const { player, fire } = fakePlayer();
+    replayWhenDark(player, R_EVENTS, 'coll-1', () => (replayed = true));
+    fire('play');
+    expect(replayed).toBe(false);
+  });
+
+  it('swaps once, however many times the channel reports itself dark', () => {
+    const { player, collections, fire } = fakePlayer();
+    replayWhenDark(player, R_EVENTS, 'coll-1', () => {});
+    fire('offline');
+    fire('offline');
+    fire('offline');
+    expect(collections, 'a repeated OFFLINE must not restart the replay from the top').toEqual([
+      'coll-1',
+    ]);
+  });
+
+  it('degrades to doing nothing when the SDK has no setCollection', () => {
+    // Same outcome as a blocked script: no swap, no replay claim, and the caller keeps the still.
+    let replayed = false;
+    const { player, fire } = fakePlayer({ setCollection: false });
+    replayWhenDark(player, R_EVENTS, 'coll-1', () => (replayed = true));
+    fire('offline');
+    fire('play');
+    expect(replayed).toBe(false);
   });
 });

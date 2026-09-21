@@ -102,6 +102,12 @@ the word twice in eleven. The deployed page shipped the suffix on both (2026-09-
 - **Eyebrow (mono, small):** `live from the office` when the channel is live; `between sessions`
   when it is dark. Never the word "offline" — it reads as broken.
 
+  **Third state, added 2026-09-21 with the replay (lane 01M32JE1ZP):** `replaying an earlier
+  session`, used when a dark channel is actually playing a collection. `between sessions` stays
+  *true* in that state — the channel really is dark — but it reads as "nothing to see here"
+  directly above footage of the team working, which is the opposite of what the page is for. The
+  ordering is live → replaying → dark → neutral, and "replaying" outranks "dark" for that reason.
+
   **Neutral form, required when liveness is not wired:** `from the office`. True in either state,
   reads as a dateline rather than a status, and lets the H1 carry "live" instead of competing with
   the player's own badge. ~~The two states above shipped with no fallback (2026-09-16)~~ CORRECTED
@@ -129,12 +135,26 @@ Twitch` (unchanged).
 Below the player, one line, state-dependent:
 
 - Live: `Live now. Every act you see lands in the open repository.`
+- **Replaying** (2026-09-21, lane 01M32JE1ZP): `A replay of an earlier session — the channel is
+  dark right now. Every act in it landed in the open repository.`
 - Dark: `The team works in sessions, so the channel is dark between them. The work is public
   either way — every act, decision record and merge is in the repository.` with "repository"
   linking to `https://github.com/SandRiseStudio/musterd`.
 
 Liveness comes from the Twitch player's own state; if the implementation cannot read it, ship
 the dark line only — it is true in both states.
+
+**Why the replay line leads with the word and does not hedge.** A recording of this office is
+*indistinguishable* from a live view of it — same room, same desks, same people working — so the
+caption is the only thing that tells a reader which they have, and it is not a mistake a viewer
+can catch for themselves. This is the same failure §4.1's neutral eyebrow exists to prevent,
+arriving through a different door.
+
+**A replay is claimed only once it is PLAYING, never when it is requested.** The collection may be
+empty, private, wrong, or the viewer's SDK too old to switch sources; in every one of those the
+office still stays and the dark line with it. Captioning the request rather than the outcome would
+put "a replay of an earlier session" over a black rectangle — which is the exact defect
+[ADR 428](../decisions/428-one-office-above-the-fold.md) removed from that slot, in new clothes.
 
 ### 4.3 What you are looking at
 

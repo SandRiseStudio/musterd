@@ -37,10 +37,28 @@ export const WATCH_COPY = {
   /** §4.1's real strings, used only once the player has actually told us which is true. */
   eyebrowLive: 'live from the office',
   eyebrowDark: 'between sessions',
+  /**
+   * §4.1's third eyebrow, added with the replay (lane 01M32JE1ZP).
+   *
+   * `between sessions` stays TRUE while a replay plays — the channel really is dark — but it reads
+   * as "nothing to see here" directly above footage of the team working, which is the opposite of
+   * what the page is for. This one says which of the two a reader has got.
+   */
+  eyebrowReplay: 'replaying an earlier session',
   /** §4.2's state line. The dark form is the fallback: it is true whichever state holds. */
   stateLive: 'Live now. Every act you see lands in the open repository.',
   stateDark:
     'The team works in sessions, so the channel is dark between them. The work is public either way — every act, decision record and merge is in the',
+  /**
+   * §4.2's third state, added with the replay (lane 01M32JE1ZP).
+   *
+   * Two states became three the moment a dark channel started showing footage. The word "replay"
+   * is first and unhedged because the failure it guards against is a reader taking recorded work
+   * for work happening now — the same mistake ADR 428's caption rules exist to prevent, and one a
+   * viewer cannot correct for themselves: a recording of an office looks exactly like a live one.
+   */
+  stateReplay:
+    'A replay of an earlier session — the channel is dark right now. Every act in it landed in the open repository.',
   stillAlt:
     'The musterd office view: named agents and humans at desks on one floor, each desk labelled with the member’s name, coloured badges showing what each is doing.',
 } as const;
