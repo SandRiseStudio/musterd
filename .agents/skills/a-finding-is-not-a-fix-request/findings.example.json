@@ -1,0 +1,34 @@
+[
+  {
+    "summary": "The wiki falsifier cannot separate 'the fix failed' from 'the site is serving an older bundle'",
+    "severity": "note",
+    "finder": "dolly",
+    "routed_to": "a one-line amendment on the wiki page, offered to its author",
+    "why_not_required": "Nothing written before the diff demanded this, and the lane's own deliverable is correct. Discovery added information, not obligation."
+  },
+  {
+    "summary": "The sub-line renders 7.4px across the engraved band, under the 9px legibility floor the change's own text names",
+    "severity": "required",
+    "category": "named-pin",
+    "pin": "the PR's own description, quoted: 'never below the 9px floor' \u2014 and packages/web/src/office/nameplate.ts:212 where subPx = 9 * s is unfloored",
+    "finder": "dolly"
+  },
+  {
+    "summary": "The page attributes the rule to #1128; #1128 is a different change's fix",
+    "severity": "required",
+    "category": "honesty",
+    "pin": "docs/wiki/adr-flip-window.md:14 names #1128 as the source",
+    "finder": "dolly"
+  },
+  {
+    "summary": "Reviewer asked for retry/backoff around the fetch; the spec never named it",
+    "severity": "note",
+    "finder": "a reviewer",
+    "routed_to": "board item 'add backoff to the liveness fetch', under the reviewer's name",
+    "why_not_required": "Reasoned about, not reproduced, and nothing already written pins it. Reasoning about a failure is a note; reproducing it is a required.",
+    "decline": {
+      "fails_category": "probe-measured-regression",
+      "routed_to": "board item 'add backoff to the liveness fetch', under the reviewer's name"
+    }
+  }
+]
