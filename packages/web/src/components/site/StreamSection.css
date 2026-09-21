@@ -27,7 +27,20 @@
   max-width: 34rem;
 }
 
+/* Standalone anchors, not links inside a sentence, so WCAG 2.2 AA 2.5.8's inline exception does
+   NOT cover them — measured 2026-09-21 at 21px and 23px tall.
+ *
+ * 24px here, where the nav and footer take 44: these two links are STACKED 6.4px apart, and two
+ * 44px boxes around ink that close together must overlap by ~16px. An overlapping target is itself
+ * a 2.5.8 failure (obscured), so 44 would have traded one violation for another — measured, it did:
+ * the first cut of this fix put 15px of `.ss__watch` underneath `.ss__link`. 24px is the actual AA
+ * floor and it fits without moving the section's rhythm. Widening the ink gap instead would be a
+ * redesign of someone else's copy block, which this fix is not. */
 .ss__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  margin-block: -1.5px;
   color: var(--accent-ink);
   font-size: 0.9rem;
 }
@@ -92,9 +105,13 @@
 
 /* The link out to /watch. Sits under the Twitch link because it is the softer of the two asks:
    Twitch is where the thing IS, and this is the page that explains it. */
+/* 24px, and for the same stacking reason as `.ss__link` directly above it. */
 .ss__watch {
-  display: block;
-  margin-top: 0.4rem;
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  margin-top: calc(0.4rem - 1.5px);
+  margin-bottom: -1.5px;
   font-family: var(--font-display);
   font-size: 0.88rem;
   color: var(--text-dim);

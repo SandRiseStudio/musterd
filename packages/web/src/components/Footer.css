@@ -29,9 +29,18 @@
 }
 .footer__links {
   display: flex;
+  align-items: center;
   gap: 22px;
+  /* The 44px targets below are taller than the ink they hold; this pulls the row back to the
+     height it had, so the footer's rhythm is unchanged and only the hit box grew. */
+  margin-block: -11px;
 }
+/* Measured 2026-09-21 at 390px: 21px tall, under WCAG 2.2 AA 2.5.8's 24px floor. Same treatment
+   as the nav links — the box grows, the text does not move. Widths already cleared 24px. */
 .footer__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   font-size: 0.82rem;
   letter-spacing: 0.04em;
   color: var(--text-faint);

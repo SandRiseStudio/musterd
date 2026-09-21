@@ -17,17 +17,21 @@
 }
 
 /* The rail: the nav's contents, on the same left edge as every section below them. */
+/* The band's own height is held at 50px by arithmetic, not by the links' line boxes: the links
+ * carry a 44px tap target (below) and this padding is the remainder. Change one and change the
+ * other, or the nav grows — `site.test.ts` pins the sum at 50. */
 .sitenav__inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1.5rem;
-  padding-block: 0.8rem;
+  padding-block: 3px;
 }
 
 .sitenav__home {
   display: inline-flex;
   align-items: center;
+  min-height: 44px;
   gap: 0.45rem;
   color: var(--text);
   font-weight: 700;
@@ -41,7 +45,15 @@
   gap: 1.25rem;
 }
 
+/* 44px of HIT BOX, not of ink: the box grows around a line box that does not move, so the nav
+ * reads identically and a thumb gets a target it can actually land on. Measured 2026-09-21 at
+ * 390px, these were 22px tall — under WCAG 2.2 AA 2.5.8's 24px floor, on the first thing a thumb
+ * reaches on the page a stranger lands on. Only the block axis was short; the widths already
+ * cleared 24px, so nothing grows sideways into the neighbouring target's gap. */
 .sitenav__links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   color: var(--text-dim);
   font-family: var(--font-display);
   font-size: 0.95rem;
