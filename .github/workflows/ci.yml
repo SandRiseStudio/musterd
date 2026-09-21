@@ -103,9 +103,10 @@ jobs:
       # property of layout at one width, which is how 21-22px nav and footer targets shipped on
       # every route with the 23-sweep contrast gate green (2026-09-21, lane 01M32GF49Z). Rides in
       # this leaf rather than its own: ~15s over 7 routes, against the same dist and the same
-      # Chrome this job already has.
-      - name: A11y tap targets (390x844)
-        run: pnpm a11y:targets:check
+      # Chrome this job already has. Split across the two a11y leaves exactly as the contrast gate
+      # is, and for the same reason — the phases share nothing but the dist.
+      - name: A11y tap targets (390x844, prerendered)
+        run: pnpm a11y:targets:check --static-only
         env:
           CHROME_BIN: /usr/bin/google-chrome
 
@@ -128,6 +129,16 @@ jobs:
 
       - name: A11y contrast (connected board + live)
         run: pnpm a11y:check --connected-only
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+
+      # The connected half of the target-size gate. Not optional coverage: on its first run it
+      # found /live's whole topbar button row laid out at 19x30 against a `width: 30px` a flex
+      # parent was shrinking, and a genuine 2.5.8 failure on /board's insight `more` button —
+      # 26x16 with another target 0.0px from its centre. The static phase sees THREE targets on
+      # each of these routes; connected it sees 17 and 7 (2026-09-21, lane 01M32WGSG6).
+      - name: A11y tap targets (390x844, connected board + live)
+        run: pnpm a11y:targets:check --connected-only
         env:
           CHROME_BIN: /usr/bin/google-chrome
 

@@ -95,10 +95,47 @@ Worked examples, both directions:
 | `<section><h2>…</h2><p>…</p><a class="cta">…</a></section>` | judged   | `inline-block`; the prose is not on its line    |
 | `<li><a>Getting started</a></li>` in a prose list           | judged   | the `<li>` holds no text outside the anchor     |
 
+## Two phases
+
+1. **Prerendered routes**, off a static server it runs itself.
+2. **`/board` and `/live` connected**, against a throwaway daemon over a synthetic team
+   ([`fixture-team.sh`](../../scripts/a11y/fixture-team.sh)) — the same fixture the contrast gate
+   uses. `--static-only` skips it, `--connected-only` runs it alone, and each says so rather than
+   passing quietly.
+
+**Phase 2 earned its place on its first run** (2026-09-21, lane 01M32WGSG6). A static server
+reaches those two routes only before they connect — **three targets each**, two buttons and a
+link. Connected, `/board` renders **17** and `/live` **7**, and among them were three defects
+nothing had ever measured:
+
+- **`/live`'s entire topbar button row at 19×30.** The source says `width: 30px`. `.lc__topbar` is
+  a flex row, so the five buttons were flex items with the default `flex-shrink: 1`, and at 390px
+  the row ran out of room and squeezed every one of them. **A test that reads CSS source sees a
+  correct declaration.** Only a browser sees the 19. This is the single clearest argument for the
+  whole gate.
+- **`/board`'s `.lc-insight__more` at 26×16 with another target 0.0px from its centre** — a
+  genuine 2.5.8 failure, undersized *and* crowded, so neither the size clause nor the spacing
+  exception forgave it.
+- **`/board`'s view switcher at 20px tall.**
+
+All three were fixed in the same change, because a gate cannot land red.
+
+**A floor per connected route.** `/board` must measure ≥10 targets and `/live` ≥5 — measured, not
+guessed, against 17 and 7 connected versus 3 apiece at the sign-in screen. The sweep's own
+zero-target refusal cannot catch this: a sign-in screen renders **three** targets, which is not
+zero, so a page that never connected would otherwise pass exactly like a clean one.
+
+**The scene is pinned** (`?light=12&still`) for the reason the contrast gate pins it: a verdict
+that changes with the wall clock or with what the room happened to be doing cannot gate merges.
+Geometry is less light-sensitive than colour but not motion-insensitive — a walker mid-stride
+moves a target's box. One light rather than the bracket, since `?light=` changes paint, not layout.
+
 ## Running it
 
 ```bash
-pnpm a11y:targets:check                      # the gate: every route at 390×844
+pnpm a11y:targets:check                      # both phases, every route at 390×844
+pnpm a11y:targets:check --static-only        # prerendered only (no CLI build needed)
+pnpm a11y:targets:check --connected-only     # the fixture-daemon phase alone
 pnpm a11y:targets http://127.0.0.1:4849/     # one page
 pnpm a11y:targets <url> --viewport 320x568   # a narrower phone
 pnpm a11y:targets <url> --json out.json      # every judged row, for digging
@@ -151,10 +188,11 @@ is a defect or a conformance.
 
 - **One viewport, one render, one state.** Hover menus, open dropdowns, focus affordances and
   anything behind an interaction are not measured. Printed on every run.
-- **`/board` and `/live` reach their sign-in screen only.** The contrast gate grew a whole
-  fixture-daemon phase because that gap hid eleven failures; the same is likely true here — the
-  goal grid, the asks sheet and the nameplates are where the small controls live. Stated in the
-  gate's own summary every run, and wiring it is its own increment.
+- **The asks sheet and the nameplates are NOT covered.** `?asks-open` and `?plates-open` change
+  nothing at 390px — the sweep returns an identical target count with and without them — so those
+  surfaces do not mount at phone width. The contrast gate sweeps them at desktop width, where they
+  do. Measuring them here would need a second viewport, which is its own increment; until then a
+  green run says nothing about them.
 - **A page that renders no target at all is refused, not passed** (exit 2). Zero targets means the
   page never rendered — a 404, a stale `dist/`, a client that never mounted. Hit immediately: the
   first gate run got `0 measured, 0 below AA` and exit 0 from a `/roadmap` missing from a stale
