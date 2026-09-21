@@ -9,6 +9,7 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { getCursor } from './cursors.js';
+import { repliedByRecipientWhere, undischargedSql } from './discharge.js';
 import type { MessageRow } from './rows.js';
 
 /**
@@ -115,20 +116,26 @@ function anyAnswer(db: Database, msg: MessageRow): { act: string; id: string; ts
   return row ?? null;
 }
 
-/** This recipient's accept/decline naming the act via `meta.in_reply_to`, if any. */
+/**
+ * This recipient's own reply that discharges the act, if any — ADR 434's shapes 3 and 4, read off
+ * the one predicate in `discharge.ts`: any act of theirs naming it by `meta.in_reply_to`, or any
+ * act of theirs in its thread and newer than it. It used to admit only an `accept`/`decline`, so
+ * gptbot's "standing down" `message` (in_reply_to set, 13:19 and 13:43 on 2026-09-21) left the
+ * ledger's `answered` null and the batched lane leased the act three times.
+ */
 function answerBy(
   db: Database,
   msg: MessageRow,
   recipientId: string,
 ): { act: string; id: string; ts: number } | null {
   const row = db
-    .prepare<[string, string, string], { act: string; id: string; ts: number }>(
-      `SELECT act, id, ts FROM messages
-        WHERE team_id = ? AND from_member = ? AND act IN ('accept','decline')
-          AND json_extract(meta, '$.in_reply_to') = ?
-        ORDER BY ts ASC LIMIT 1`,
+    .prepare<[string, string], { act: string; id: string; ts: number }>(
+      `SELECT dy.act, dy.id, dy.ts FROM messages dy
+         JOIN messages m ON m.id = ?
+        WHERE ${repliedByRecipientWhere('m', '?')}
+        ORDER BY dy.created_at ASC, dy.id ASC LIMIT 1`,
     )
-    .get(msg.team_id, recipientId, msg.id);
+    .get(msg.id, recipientId);
   return row ?? null;
 }
 
@@ -435,14 +442,7 @@ export function openDirectedLedger(
           AND (m.act IN ('request_help','handoff')
                OR (m.to_kind = 'member' AND json_extract(m.meta, '$.urgent') = 1))
           AND m.act NOT IN ('accept','decline','resolve')
-          AND NOT EXISTS (
-            SELECT 1 FROM messages r
-             WHERE r.team_id = m.team_id AND r.act IN ('accept','decline')
-               AND json_extract(r.meta, '$.in_reply_to') = m.id)
-          AND NOT EXISTS (
-            SELECT 1 FROM messages v
-             WHERE v.team_id = m.team_id AND v.act = 'resolve'
-               AND v.thread_id = COALESCE(m.thread_id, m.id))
+          ${undischargedSql('m', 'm.to_member')}
         ORDER BY m.ts ASC`,
     )
     .all(teamId);

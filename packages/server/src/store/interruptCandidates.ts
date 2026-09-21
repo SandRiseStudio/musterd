@@ -17,8 +17,10 @@ import type { MessageRow } from './rows.js';
  * THE PREDICATE IS THE FOLD'S OWN, READ OFF IT. `pendingInterrupts` returns an act only if it is
  * `meta.urgent`, a `steer`, an obligation (`ask` carrying the daemon-set `meta.lane_review`), or a
  * turn in an open huddle this seat is in (ADR 378). It
- * can SUPPRESS one only via `resolve` (which closes a thread) or `accept`/`decline` (which discharge
- * by `meta.in_reply_to`). It can REDIRECT one only via `meta.eligible`, which replaces the default
+ * can SUPPRESS one only via `resolve` (which closes a thread), `accept`/`decline` (which discharge
+ * by `meta.in_reply_to`), or the seat's OWN reply — by `in_reply_to` on any act, or a later turn in
+ * the steer's thread (ADR 434; fetched below, since own sends never come from the window). It can
+ * REDIRECT one only via `meta.eligible`, which replaces the default
  * obligation rule. Nothing else it reads can change its answer, so admitting exactly these shapes
  * leaves the answer identical — which is what `interruptCandidates.test.ts` asserts against the
  * unnarrowed read, over a corpus built to contain every one of them.
@@ -89,6 +91,25 @@ export function listInterruptCandidates(
                OR json_extract(meta, '$.in_reply_to') IS NOT NULL)`,
     )
     .all(member.team_id, member.id, opts.cursorTs ?? 0);
+
+  // ADR 434 shape 4: my own turns in the threads of the steers this window carries. A steer inside
+  // a thread is answered by my next turn in that thread, `in_reply_to` or not — and my own acts
+  // never come from the window (`from_member != me`), so they are fetched by thread key, bounded
+  // by the steers actually present. A window with no threaded steer costs nothing extra.
+  const steerThreads = [
+    ...new Set(rows.filter((r) => r.act === 'steer').map((r) => r.thread_id ?? r.id)),
+  ];
+  const mineOnSteerThreads =
+    steerThreads.length === 0
+      ? []
+      : db
+          .prepare<unknown[], MessageRow>(
+            `SELECT * FROM messages
+              WHERE team_id = ? AND from_member = ?
+                AND thread_id IN (${steerThreads.map(() => '?').join(',')})`,
+          )
+          .all(member.team_id, member.id, ...steerThreads);
+  for (const r of mineOnSteerThreads) mineSuppress.push(r);
 
   // ADR 378 — the context a huddle turn cannot carry. A turn is an ordinary `message` in a thread:
   // whether I am IN that huddle lives on the ROOT act, and where I last spoke lives in MY OWN turns.
