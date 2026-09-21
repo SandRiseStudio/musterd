@@ -4,14 +4,15 @@ import { resolveAttestedProvenance } from './model.js';
 import {
   LOOP_EDGES,
   LoopEdgeSchema,
+  ResidencyPolicyOverrideSchema,
+  ResidencyPolicySchema,
+  WAKE_CONTEXT_BUDGET,
   WakeContextPacketSchema,
   WakeContextRequestSchema,
   WakeContextResponseSchema,
   WakeProgressBodySchema,
   WakeReportBodySchema,
   WakeTurnBodySchema,
-  ResidencyPolicyOverrideSchema,
-  ResidencyPolicySchema,
 } from './residency.js';
 
 describe('ResidencyPolicySchema (ADR 131 inc 5) — the knobs, defaults in ONE place', () => {
@@ -254,5 +255,58 @@ describe('WakeProgressBodySchema (ADR 262)', () => {
     expect(WakeProgressBodySchema.safeParse({}).success).toBe(false);
     expect(WakeProgressBodySchema.safeParse({ lease_id: '' }).success).toBe(false);
     expect(WakeProgressBodySchema.safeParse({ lease_id: 'L1', spawned: true }).success).toBe(false);
+  });
+});
+
+describe('WakeContextPacket v2 (ADR 430)', () => {
+  const v1 = {
+    version: 1,
+    wake: { kind: 'reply', act_id: 'a1' },
+    objective: { action: 'reply' },
+    state: {},
+    fetch: ['inbox_thread', 'seat_memory'],
+    delivery: { requirement: 'portable', intended: 'fresh' },
+  };
+
+  it('still parses a v1 packet unchanged', () => {
+    expect(WakeContextPacketSchema.parse(v1)).toEqual(v1);
+  });
+
+  it('parses a v2 packet with attributed bodies and a budget', () => {
+    const v2 = {
+      ...v1,
+      version: 2,
+      context: {
+        thread: {
+          acts: [{ id: 'a0', from: 'nick', act: 'message', ts: 1, body: 'hello', truncated: false }],
+          omitted: 3,
+        },
+        open: [{ kind: 'ask', id: 'q1', from: 'izzo', title: 'review #12', age_ms: 5_000 }],
+        memory: { body: 'carrying nothing', truncated: false },
+      },
+      budget: { limit_bytes: WAKE_CONTEXT_BUDGET.limit_bytes, used_bytes: 210 },
+      fetch: ['open_items'],
+    };
+    expect(WakeContextPacketSchema.parse(v2)).toEqual(v2);
+  });
+
+  it('refuses a v2 packet without a budget, and a v1 packet carrying context', () => {
+    expect(
+      WakeContextPacketSchema.safeParse({ ...v1, version: 2, context: { open: [] } }).success,
+    ).toBe(false);
+    expect(WakeContextPacketSchema.safeParse({ ...v1, context: { open: [] } }).success).toBe(false);
+  });
+
+  it('refuses an unattributed body', () => {
+    const bad = {
+      ...v1,
+      version: 2,
+      budget: { limit_bytes: 12_288, used_bytes: 1 },
+      context: {
+        open: [],
+        thread: { acts: [{ id: 'a0', act: 'message', ts: 1, body: 'x', truncated: false }], omitted: 0 },
+      },
+    };
+    expect(WakeContextPacketSchema.safeParse(bad).success).toBe(false);
   });
 });
