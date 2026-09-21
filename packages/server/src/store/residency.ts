@@ -13,6 +13,7 @@ import type {
   WakeOrder,
 } from '@musterd/protocol';
 import {
+  WAKE_CONTEXT_BUDGET,
   isAwaitingAcceptance,
   LANE_TERMINAL_STATES,
   ResidencyPolicyOverrideSchema,
@@ -38,6 +39,7 @@ import {
 import { hasLivePresence, listReclaimableMemberIds } from './presence.js';
 import type { MemberRow, MessageRow } from './rows.js';
 import { getPolicy } from './teams.js';
+import { deriveContext } from './wakeContextBody.js';
 
 /**
  * The wake ledger (ADR 131, increment 2). The daemon side of harness residency: enrollment rows
@@ -196,9 +198,10 @@ export function effectiveWakePolicy(
 }
 
 /**
- * Derive ADR 209's bounded orientation index for one recipient. It intentionally reads canonical
- * rows only: an Act body or memory body never crosses this seam. An unauthorized target is
- * indistinguishable from a missing one to the caller.
+ * Derive the bounded orientation packet for one recipient (ADR 209; v2 per ADR 430). It reads
+ * canonical rows only and stores nothing. Bodies cross this seam *attributed and budgeted* — the
+ * waking thread's recent acts, the recipient's own memory — under `context`; the audit that records
+ * the read never carries them. An unauthorized target is indistinguishable from a missing one.
  */
 export function buildWakeContext(
   db: Database,
@@ -228,8 +231,12 @@ export function buildWakeContext(
       .get(recipient.id, team.id, row.id, threadId);
     const memory = memoryEnvelope(db, recipient.id);
     const kind = meta.lane_review ? 'review' : meta.lane_handoff ? 'handoff' : 'reply';
+    const derived = deriveContext(db, team, recipient, {
+      threadId,
+      ...(lane ? { laneId: lane.id } : {}),
+    });
     return {
-      version: 1,
+      version: 2,
       wake: { kind, act_id: row.id },
       objective: {
         action: kind === 'review' ? 'review' : kind === 'handoff' ? 'continue_lane' : 'reply',
@@ -253,11 +260,10 @@ export function buildWakeContext(
           : {}),
         ...(memory ? { memory } : {}),
       },
-      fetch: [
-        'inbox_thread',
-        ...(lane ? (['lane_detail', 'git_artifact'] as const) : []),
-        'seat_memory',
-      ],
+      context: derived.context,
+      budget: { limit_bytes: WAKE_CONTEXT_BUDGET.limit_bytes, used_bytes: derived.used_bytes },
+      // v2: only what did not fit — plus the branch, which is never in the packet.
+      fetch: [...derived.fetch, ...(lane ? (['git_artifact'] as const) : [])],
       delivery: { requirement: 'portable', intended: 'fresh' },
     };
   }
@@ -265,8 +271,9 @@ export function buildWakeContext(
   if (!lane || lane.owner_seat !== recipient.name)
     throw new MusterdError('forbidden', 'forbidden wake context target');
   const memory = memoryEnvelope(db, recipient.id);
+  const derived = deriveContext(db, team, recipient, { laneId: lane.id });
   return {
-    version: 1,
+    version: 2,
     wake: { kind: 'work_order', lane_id: lane.id },
     objective: { action: lane.state === 'claimed' ? 'begin_lane' : 'continue_lane' },
     state: {
@@ -278,7 +285,9 @@ export function buildWakeContext(
       },
       ...(memory ? { memory } : {}),
     },
-    fetch: ['lane_detail', 'git_artifact', 'seat_memory'],
+    context: derived.context,
+    budget: { limit_bytes: WAKE_CONTEXT_BUDGET.limit_bytes, used_bytes: derived.used_bytes },
+    fetch: [...derived.fetch, 'git_artifact'],
     delivery: { requirement: 'portable', intended: 'fresh' },
   };
 }
@@ -734,13 +743,16 @@ function composeWakeLine(
   sender: string,
   actId?: string,
 ): string {
-  const orient =
+  // ADR 430 §7: the packet IS the orientation. Still ids only — sender, act, act id — no body
+  // text (ADR 088 §4).
+  const read =
     actId !== undefined
-      ? `Orient via team_wake_context {act_id: "${actId}"}`
-      : 'Orient via team_wake_context';
+      ? `Read \`team_wake_context {act_id: "${actId}"}\``
+      : 'Read `team_wake_context`';
   return (
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": a ${act} from "${sender}" is ` +
-    `waiting. ${orient}, read it via team_inbox_check (or 'musterd inbox'), and respond.`
+    `waiting. ${read} — it carries the thread, what else is open, and your memory. ` +
+    `Fetch more only for what it lists under \`fetch\`. Then act.`
   );
 }
 

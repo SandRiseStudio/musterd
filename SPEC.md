@@ -341,7 +341,7 @@ POST /teams/:slug/wake-context
 // server → recipient
 {
   "context": {
-    "version": 1,
+    "version": 2, // 1 from a daemon before ADR 430; then no `context`/`budget`
     "wake": {
       "kind": "reply|handoff|review|work_order",
       "act_id": "01J…"?,
@@ -361,6 +361,20 @@ POST /teams/:slug/wake-context
   }
 }
 ```
+
+**The `context` block (v2, ADR 430).** `WakeContextPacket` gains `version: 2`, an additive `context` block, and a `budget` field. `context`
+carries the waking thread's last eight acts (each `{id, from, act, ts, body, truncated}`, bodies cut
+at 600 characters, plus `omitted`), an `open` ledger of unanswered directed acts and owned lanes
+(`{kind, id, from?, title, age_ms}`, titles only, at most 12), on lane wakes the lane `detail` and the
+recipient's own newest `status_update` naming it, and the recipient's memory body. Every body is
+attributed to its sender and thread; the composed wake line and the interrupt line remain ids-only.
+The serialized `context` block is capped at 12,288 bytes, filled memory → thread → lane → open; a
+truncated or dropped category is named in `fetch`, which in v2 lists only what did not fit (new value
+`open_items`). `budget` reports `{limit_bytes, used_bytes}`. The packet is derived at read time from
+canonical rows, never stored. Authorization is unchanged from A.10. `residency.context_read` records
+`version`, `used_bytes`, per-category bytes, `thread_acts`, `omitted`, and emitted `fetch` categories
+and never a body, headline, or title; a refused read records `residency.context_denied` with the
+caller and target kind only. A recipient handed `version: 1` follows A.10's fetch ritual.
 
 The packet is a server-derived orientation index. It MUST NOT contain an Envelope body, a seat-memory
 body, a lane title, source text, or other agent-authored free text. The full bodies remain explicit,
@@ -472,20 +486,4 @@ ceiling. It returns `decision: "allow"` or `decision: "deny"` with stable refusa
 `denied_context_lane`, `denied_context_orientation`, and `denied_model`. Refusal status is structured
 and metadata-only; prompts, responses, provider payloads, and machine-local secrets never cross this
 boundary.
-
-## A.13 Continuity packet v2 (unreleased — ADR 430)
-
-`WakeContextPacket` gains `version: 2`, an additive `context` block, and a `budget` field. `context`
-carries the waking thread's last eight acts (each `{id, from, act, ts, body, truncated}`, bodies cut
-at 600 characters, plus `omitted`), an `open` ledger of unanswered directed acts and owned lanes
-(`{kind, id, from?, title, age_ms}`, titles only, at most 12), on lane wakes the lane `detail` and the
-recipient's own newest `status_update` naming it, and the recipient's memory body. Every body is
-attributed to its sender and thread; the composed wake line and the interrupt line remain ids-only.
-The serialized `context` block is capped at 12,288 bytes, filled memory → thread → lane → open; a
-truncated or dropped category is named in `fetch`, which in v2 lists only what did not fit (new value
-`open_items`). `budget` reports `{limit_bytes, used_bytes}`. The packet is derived at read time from
-canonical rows, never stored. Authorization is unchanged from A.10. `residency.context_read` records
-`version`, `used_bytes`, per-category bytes, `thread_acts`, `omitted`, and emitted `fetch` categories
-and never a body, headline, or title; a refused read records `residency.context_denied` with the
-caller and target kind only. A recipient handed `version: 1` follows A.10's fetch ritual.
 

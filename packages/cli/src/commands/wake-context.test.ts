@@ -52,7 +52,7 @@ describe('wake-context command (ADR 209)', () => {
     }
   }
 
-  it('returns a body-free packet as JSON and rejects missing targets', async () => {
+  it('returns the packet as JSON — v2 carries the body ATTRIBUTED — and rejects missing targets', async () => {
     await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
     await capture(() =>
       sendCommand(parseArgs(['--to', 'nick', '--act', 'message', 'wake body stays remote'])),
@@ -61,8 +61,17 @@ describe('wake-context command (ADR 209)', () => {
     const out = await capture(() =>
       wakeContextCommand(parseArgs(['--act', messages[0]!.id, '--json'])),
     );
-    expect(JSON.parse(out)).toMatchObject({ wake: { kind: 'reply', act_id: messages[0]!.id } });
-    expect(out).not.toContain('wake body stays remote');
+    const packet = JSON.parse(out);
+    expect(packet).toMatchObject({ version: 2, wake: { kind: 'reply', act_id: messages[0]!.id } });
+    // ADR 430: the body reaches the recipient in the packet, never unattributed — sender, act,
+    // timestamp ride with it. (Pre-430 this asserted the body was absent.)
+    expect(packet.context.thread.acts[0]).toMatchObject({
+      from: 'nick',
+      act: 'message',
+      body: 'wake body stays remote',
+      truncated: false,
+    });
+    expect(packet.budget.used_bytes).toBeGreaterThan(0);
     await expect(wakeContextCommand(parseArgs([]))).rejects.toThrow(/--act <id> \| --lane <id>/);
   });
 });

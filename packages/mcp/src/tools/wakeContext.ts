@@ -5,22 +5,58 @@ import type { MusterdClient } from '../client.js';
 import { errorResult, notReadyMessage, textResult } from './format.js';
 
 const DESCRIPTION =
-  'Read a bounded, recipient-scoped wake context packet for one directed Act or owned Lane. ' +
-  'It contains IDs, state, delivery intent, and named explicit reads only; it never loads message or memory bodies.';
+  'Read your wake context packet for one directed Act or owned Lane: the waking thread, what else ' +
+  'is open, your lane and your memory (ADR 430). Fetch more only for what fetch lists.';
 
-function render(context: WakeContextPacket): string {
+const ago = (ms: number): string =>
+  ms < 60_000
+    ? `${Math.round(ms / 1000)}s`
+    : ms < 3_600_000
+      ? `${Math.round(ms / 60_000)}m`
+      : `${Math.round(ms / 3_600_000)}h`;
+
+export function render(context: WakeContextPacket): string {
   const target = context.wake.act_id ?? context.wake.lane_id;
-  const followUps = context.fetch.map((fetch) => {
-    if (fetch === 'seat_memory') return 'team_memory_read';
-    if (fetch === 'inbox_thread') return 'team_inbox_check';
-    if (fetch === 'lane_detail') return 'lane_board';
-    return 'git artifact on the declared branch';
-  });
-  return [
+  const lines = [
     `wake context: ${context.wake.kind} ${target}`,
     `next action: ${context.objective.action} · delivery: ${context.delivery.requirement}/${context.delivery.intended}`,
-    `explicit reads: ${followUps.join(', ')}`,
-  ].join('\n');
+  ];
+  // ADR 430: the v2 block — attributed bodies the seat would otherwise spend 2–4 reads on.
+  const c = context.context;
+  if (c) {
+    if (c.thread) {
+      const omitted = c.thread.omitted ? `, ${c.thread.omitted} older omitted` : '';
+      lines.push(`thread (${c.thread.acts.length} shown${omitted}):`);
+      for (const a of c.thread.acts)
+        lines.push(`  ${a.from} · ${a.act} · ${a.id}: ${a.body}${a.truncated ? ' …' : ''}`);
+    }
+    if (c.lane) {
+      lines.push(`lane: ${c.lane.detail}${c.lane.truncated ? ' …' : ''}`);
+      if (c.lane.last_status_update) {
+        const u = c.lane.last_status_update;
+        lines.push(`your last word on it: ${u.body}${u.truncated ? ' …' : ''}`);
+      }
+    }
+    for (const o of c.open)
+      lines.push(
+        `open: ${o.kind} ${o.id}${o.from ? ` from ${o.from}` : ''} — ${o.title} (${ago(o.age_ms)})`,
+      );
+    if (c.memory)
+      lines.push(
+        `memory:\n${c.memory.body}${c.memory.truncated ? '\n…(truncated — team_memory_read for the rest)' : ''}`,
+      );
+  }
+  if (context.fetch.length > 0) {
+    const followUps = context.fetch.map((fetch) => {
+      if (fetch === 'seat_memory') return 'team_memory_read';
+      if (fetch === 'inbox_thread') return 'team_inbox_check';
+      if (fetch === 'lane_detail') return 'lane_board';
+      if (fetch === 'open_items') return 'team_inbox_check (open items did not fit)';
+      return 'git artifact on the declared branch';
+    });
+    lines.push(`explicit reads: ${followUps.join(', ')}`);
+  }
+  return lines.join('\n');
 }
 
 export function registerWakeContext(server: McpServer, client: MusterdClient): void {

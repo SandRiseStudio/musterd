@@ -165,9 +165,14 @@ single-Seed and list results. Promotion is the only operation that creates a Lan
 ### Portable wake context (ADR 209)
 
 `WakeContextRequestSchema` is a strict `{ act_id? , lane_id? }` body that requires exactly one
-canonical target. `WakeContextPacketSchema` is the strict, body-free orientation index: wake kind
-and IDs; an action enum; bounded lane/thread metadata; ADR 093's `MemoryEnvelope` (never its body);
-explicit fetch categories; and typed continuity requirement plus intended delivery. The additive
+canonical target. `WakeContextPacketSchema` is the strict orientation packet: wake kind
+and IDs; an action enum; bounded lane/thread metadata; ADR 093's `MemoryEnvelope`; explicit fetch
+categories; and typed continuity requirement plus intended delivery. Since v2 (ADR 430) it also
+carries a `context` block — the waking thread's last acts as `WakeContextBody` (attributed:
+`from`/`act`/`ts`, cut at 600 chars), an `open` ledger of `WakeContextOpenItem` (titles only), the
+lane's detail with the recipient's own last `status_update`, and the memory body — under a `budget`
+of `WAKE_CONTEXT_BUDGET.limit_bytes` (12,288), and `fetch` names only what did not fit (`open_items`
+joined the enum). `version` is `1 | 2`; a v2 packet must carry both blocks, a v1 neither. The additive
 `WakeContextResponseSchema` wraps it as `{ context }` for the later authenticated
 `POST /teams/:slug/wake-context` surface.
 

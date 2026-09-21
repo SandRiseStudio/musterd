@@ -54,6 +54,10 @@ The rule that keeps bodies out of the packet was drawn wider than its reason. Th
 - `SPEC.md` Appendix A gains the unreleased contract (A.13); `02-protocol.md` and `03-server.md` update in the implementation increment that ships the code (ADR 209 §5's rule). The implementation is goal `seat-continuity` increment 4, lane `01M32FHX6JHCVNQRGRAHHMTEJN`.
 - Out of scope, by decision: identity continuity across unrelated work; any summarizer; a per-team budget knob; changes to which wakes are portable vs transcript-required; the interrupt line.
 
+- _2026-09-21 (lane 01M32FHX6J, shipped): §6's "denied-read record" is satisfied by the existing
+  `residency.context_read` row with `result: 'deny'` (added after #603); no new action name was
+  introduced. The allow row's `bytes` remains the whole packet; the v2 parts ride `bytes_by`._
+
 ## Observability & Evaluation
 
 - **Traces:** `residency.context_read` rows carry `version: 2`, `used_bytes`, per-category bytes, `thread_acts`, `omitted`, and emitted `fetch` categories; `residency.context_denied` records refused reads by caller and target kind. The host log's first tool call after a wake (the `wake_turns` row) shows whether the seat's next call after the packet was a real act or a `fetch` follow-up.

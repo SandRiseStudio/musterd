@@ -178,6 +178,7 @@ describe('version-bump discipline (ADR 085)', () => {
     25: 'cdf87bd806cb0789', // the channel rule stops forbidding the CLI it also prescribes (lane 01M2RP18EV): `session orient-stamp` has no MCP verb, so "do not drive both" was a rule every compliant seat had to break — and the identity that swaps is the one bound to the WORKING DIRECTORY (measured: whoami in agents-stanley → stanley, in agents-miley → miley, in ~ → nick read-only), not the channel
     26: 'd1af927ac631680d', // ADR 418: orient labels from this session's tool list then always stamps; labeling skills skip silently when the tools are absent
     27: '1d7d5b5f5792efc0', // orient step 2 reconciles memory against the repo via team_next before the seat repeats it (lane 01M2XAXRP3): a carried lane whose work is on main is LANDED, unsubmitted — lane_submit, not a build
+    28: '47801df432b79884', // ADR 430 (lane 01M32FHX6J): the woken-session block says the packet IS the orientation — bodies attributed and budgeted — and team_inbox_check is a fetch follow-up, not a step
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
@@ -284,9 +285,11 @@ describe('the skill teaches the surface as it is (lane 01M1VD1CQV)', () => {
 
   it('teaches team_wake_context in prose, not only in the name reference', () => {
     // It sat in SKILL_MCP_TOOLS since v17 with no body text: a woken session got a name and no
-    // playbook. The packet's defining property — no bodies, only pointers — is the load-bearing bit.
+    // playbook. Since ADR 430 the packet's defining property is that it IS the orientation — bodies
+    // attributed and budgeted — and the inbox ritual is a fetch follow-up, not a step.
     expect(body).toMatch(/## When you were woken/);
-    expect(body).toMatch(/team_wake_context[\s\S]{0,300}no message or memory bodies/i);
+    expect(body).toMatch(/team_wake_context[\s\S]{0,400}The packet is the orientation/);
+    expect(body).not.toMatch(/no message or memory bodies/i);
   });
 
   it('dates the acceptors-came-back measurement instead of asserting it timelessly', () => {

@@ -319,9 +319,83 @@ export const WAKE_CONTEXT_FETCHES = [
   'lane_detail',
   'seat_memory',
   'git_artifact',
+  'open_items', // ADR 430: the v2 ledger did not fit the budget
 ] as const;
 export type WakeContextFetch = (typeof WAKE_CONTEXT_FETCHES)[number];
 export const WakeContextFetchSchema = z.enum(WAKE_CONTEXT_FETCHES);
+
+/** ADR 430 §4 — one number, shared by the daemon that fills the packet and the tests that pin it. */
+export const WAKE_CONTEXT_BUDGET = {
+  limit_bytes: 12_288,
+  memory: 3_072,
+  thread: 6_144,
+  lane: 1_536,
+  open: 2_048,
+  act_body_chars: 600,
+  lane_detail_chars: 1_200,
+  thread_acts: 8,
+  open_items: 12,
+} as const;
+
+/** An attributed act body (ADR 430 §2): the seat is never handed unattributed prose. */
+export const WakeContextBodySchema = z
+  .object({
+    id: z.string().min(1),
+    from: z.string().min(1),
+    act: z.string().min(1),
+    ts: z.number().int().nonnegative(),
+    body: z.string(),
+    truncated: z.boolean(),
+  })
+  .strict();
+export type WakeContextBody = z.infer<typeof WakeContextBodySchema>;
+
+export const WAKE_CONTEXT_OPEN_KINDS = [
+  'ask',
+  'request_help',
+  'review',
+  'handoff',
+  'lane',
+] as const;
+export const WakeContextOpenItemSchema = z
+  .object({
+    kind: z.enum(WAKE_CONTEXT_OPEN_KINDS),
+    id: z.string().min(1),
+    from: z.string().min(1).optional(),
+    title: z.string(),
+    age_ms: z.number().int().nonnegative(),
+  })
+  .strict();
+export type WakeContextOpenItem = z.infer<typeof WakeContextOpenItemSchema>;
+
+/** The v2 `context` block (ADR 430 §1): bodies attributed and budgeted, derived at read time. */
+export const WakeContextContextSchema = z
+  .object({
+    thread: z
+      .object({ acts: z.array(WakeContextBodySchema), omitted: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
+    open: z.array(WakeContextOpenItemSchema),
+    lane: z
+      .object({
+        detail: z.string(),
+        truncated: z.boolean(),
+        last_status_update: z
+          .object({ ts: z.number().int().nonnegative(), body: z.string(), truncated: z.boolean() })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+    memory: z.object({ body: z.string(), truncated: z.boolean() }).strict().optional(),
+  })
+  .strict();
+export type WakeContextContext = z.infer<typeof WakeContextContextSchema>;
+
+export const WakeContextBudgetSchema = z
+  .object({ limit_bytes: z.number().int().positive(), used_bytes: z.number().int().nonnegative() })
+  .strict();
+export type WakeContextBudget = z.infer<typeof WakeContextBudgetSchema>;
 
 /** Recipient request for the bounded context index; exactly one canonical target is required. */
 export const WakeContextRequestSchema = z
@@ -338,10 +412,10 @@ export const WakeContextRequestSchema = z
   });
 export type WakeContextRequest = z.infer<typeof WakeContextRequestSchema>;
 
-/** The server-derived, body-free context index (ADR 209). */
+/** The server-derived context index (ADR 209); v2 (ADR 430) adds attributed, budgeted bodies. */
 export const WakeContextPacketSchema = z
   .object({
-    version: z.literal(1),
+    version: z.union([z.literal(1), z.literal(2)]),
     wake: z
       .object({
         kind: WakeContextKindSchema,
@@ -373,6 +447,8 @@ export const WakeContextPacketSchema = z
         memory: MemoryEnvelopeSchema.optional(),
       })
       .strict(),
+    context: WakeContextContextSchema.optional(),
+    budget: WakeContextBudgetSchema.optional(),
     fetch: z.array(WakeContextFetchSchema),
     delivery: z
       .object({ requirement: ContinuityRequirementSchema, intended: WakeDeliverySchema })
@@ -394,6 +470,16 @@ export const WakeContextPacketSchema = z
         message: 'lane_id required on work_order',
         path: ['wake', 'lane_id'],
       });
+    }
+    if (value.version === 2 && (value.context === undefined || value.budget === undefined)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'v2 requires context and budget',
+        path: ['version'],
+      });
+    }
+    if (value.version === 1 && (value.context !== undefined || value.budget !== undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'v1 carries no context block', path: ['version'] });
     }
   });
 export type WakeContextPacket = z.infer<typeof WakeContextPacketSchema>;

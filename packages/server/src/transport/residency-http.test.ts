@@ -840,6 +840,25 @@ describe('POST /wake-context — residency.context_read audit (ADR 209 follow-up
     expect(send.status).toBe(201);
   }
 
+  it('records the v2 shape on the allow row and never a body (ADR 430)', async () => {
+    await claimAda();
+    await directedToAda('wc9');
+    const res = await postAsAda('/teams/dawn/wake-context', { act_id: 'wc9' });
+    expect(res.status).toBe(200);
+    expect(res.json.context.version).toBe(2);
+    const rows = audits('residency.context_read');
+    expect(rows).toHaveLength(1);
+    const detail = JSON.parse(rows[0]!.detail as string);
+    expect(detail).toMatchObject({ version: 2, thread_acts: 1, omitted: 0 });
+    expect(detail.used_bytes).toBeGreaterThan(0);
+    expect(detail.bytes_by).toEqual(
+      expect.objectContaining({ memory: expect.any(Number), thread: expect.any(Number) }),
+    );
+    // The body reached the recipient in the packet — and never the ledger.
+    expect(res.json.context.context.thread.acts[0].body).toBe('orient from the packet');
+    expect(JSON.stringify(detail)).not.toContain('orient from the packet');
+  });
+
   it('allow path records kind, version, bytes, fetch categories/count, and delivery', async () => {
     await claimAda();
     await directedToAda();
@@ -855,9 +874,9 @@ describe('POST /wake-context — residency.context_read audit (ADR 209 follow-up
     const detail = JSON.parse(rows[0]!.detail as string);
     expect(detail).toMatchObject({
       kind: 'reply',
-      version: 1,
-      fetch: ['inbox_thread', 'seat_memory'],
-      fetch_count: 2,
+      version: 2,
+      fetch: [], // v2: everything fit (ADR 430)
+      fetch_count: 0,
       delivery: { requirement: 'portable', intended: 'fresh' },
     });
     expect(detail.bytes).toBeGreaterThan(0);
