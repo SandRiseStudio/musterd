@@ -470,6 +470,45 @@ body rather than only in the footer: a script in a repo cannot receive an idea a
 laptop shut, and the checker sees a seed that RECORDED two explorers without being able to stop the
 second from starting.
 
+## 7. The skills left the monorepo (2026-09-21, dolly, lane `01M3300DV4`)
+
+**`SandRiseStudio/musterd-skills` exists and carries all seventeen**, at `skills/<name>/`, with a
+root README, MIT LICENSE, and every script executable. Verified from a *clean clone* rather than
+the directory it was built in: `controls.py`, `claims.py`, `watches.py` and `landed.sh` all run
+from a fresh checkout.
+
+**It is PRIVATE, and that is a decision, not an oversight.** §5 requires product-communications to
+review every README *before* publish, and that has not happened. Creating it private lets the work
+land and the review happen against real files; flipping to public is one command and is nick's
+call. Private→public is easy, public→indexed→private is not.
+
+**What ships:** the seventeen authored 2026-09-21 (B1–B6, S1, S3–S9). **What does not:**
+`product-communications` and `security`, which are pre-existing internal ROLE CHARTERS rather than
+skills-that-travel — and the former carries `PROVENANCE.md` + `LICENSES/` for adapted third-party
+material. Both stay here.
+
+### §2's open item is STILL OPEN, and now we know why it cannot close yet
+
+S1 named it: *whether the third-party `skills` CLI writes to the per-harness paths* — a claim about
+someone else's tool, gated on a real install.
+
+Measured 2026-09-21: the `skills` package exists on npm at **v1.7.0** ("The open agent skills
+ecosystem"), and it is **not installed on this machine**. But the verification cannot be done at all
+while the repo is private — `npx skills add SandRiseStudio/musterd-skills` needs a repo the CLI can
+read. **So the install line in §2 remains unverified, and no README asserts it.** The root README
+deliberately says "copy the directory into wherever your harness reads skills from", which is true
+of every harness, instead of naming an install command we have not run.
+
+Sequence, for whoever closes this: make the repo public → install the CLI → run the add → list what
+each harness actually loaded → then §2's install line may be written. Not before.
+
+### The doorway held
+
+Every one of the seventeen `SKILL.md` files carries the *from the musterd team* footer naming what
+a file cannot do — checked mechanically, not by reading. That was §1's whole bet: a skill installed
+is a person who has met the practice, and the last sentence tells them where the practice has a
+roster.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
