@@ -77,6 +77,14 @@ fix five contract holes.
   its seat. Lane `01M32V416B` (discharged acts re-leased on window reopen) is the adjacent fix; the
   two must agree on what "discharged" and "answered" mean.
 - The trigger date is set by clause 1's landing, recorded here as a dated note when it lands.
+- **2026-09-21 (same day, after the run):** [ADR 434](434-a-discharged-act-never-re-wakes-its-seat.md)
+  reached the daemon at `c8ab98bc`, after the arm D/E wakes ran on `e95b52d`. It already decides
+  that a recipient's `message` reply in the act's thread discharges for that recipient, and that a
+  `residency.woke` row spends the act — held live at 15:01 (gptbot, one lease through thirteen
+  polls). Clause 5's "not re-leased at the next window" is therefore satisfied by ADR 434, which
+  this ADR adopts rather than overrides; lane `01M330A04F` narrows to the wake-line wording (a reply
+  OUTSIDE the thread — ghost's arm-E shape — discharges nothing, and no seat is told so) and to
+  whether the ledger carries a distinct answered-vs-discharged label.
 
 ## Observability & Evaluation
 
