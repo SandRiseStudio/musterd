@@ -322,6 +322,28 @@ body: the freeze file is written by the same person on the same machine and defe
 determined author; publish the hash somewhere you do not control. 16 refusals and 6 must-NOT-fire
 cases exercised, all passing first run.
 
+*B4 shipped 2026-09-21 (dolly, lane `01M32JZ2AB`) — the last bundle:* `docs-that-catch-drift`,
+keeping sloane's honest name (docs CAN drift; a checker only narrows where). Ships the four
+anti-patterns, one-fact-one-home, docs-and-code-agree-at-the-end-of-a-commit, the four
+instruments with the rule each taught, mentions-are-not-uses, and `tree-check.py` — the
+checker-not-generator instrument, **deliberately with no `--fix`**, because a generated
+description reads as documentation and says nothing, which is worse than an empty section: an
+empty section invites a reader and a filled one stops them.
+
+**The bug it shipped with is this row's own subject, and it is the best finding of the arc.** The
+first version **refused its own SKILL.md**: the `## File tree` heading inside the fenced *example*
+is a MENTION, not a use, and the checker read it as a real tree. That is the exact trap the skill's
+own "mentions are not uses" section warns about, committed inside the file writing the warning —
+and had it shipped, the first thing any adopter would learn is to stop putting examples in their
+docs, which is the "a gate that fails when you document it" failure stated precisely. Fixed by
+masking fenced regions before scanning for headings, with length-aware nesting so a longer fence may
+contain shorter ones. **The cheap general test is now written into the skill: run a text gate against
+its own documentation** — any gate whose docs must quote what it matches has this bug until proven
+otherwise, and its own page is the shortest path to proving it.
+
+Eleven falsifier rows exercised, including the abstentions: an odd fence count and a run that found
+no blocks both exit 2 with "nothing was checked — that is not a pass", never a cheerful zero.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
