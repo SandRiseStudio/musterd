@@ -6,6 +6,22 @@ One enforced git loop (ADR 106): branch from fresh origin/main → PR → `gh pr
 
 Branch `feat/`|`fix/`|`docs/` from fresh `origin/main`; commits are throwaway (squash-merge). Fast local smoke only — CI is the authority. `gh pr create` → `gh pr merge --squash --auto --delete-branch`, walk away. Sync a stale branch by `git rebase origin/main` + `git push --force-with-lease`; never `merge main`, never bare `--force`. Required checks on main: `gates` + `Cursor Bugbot`; linear history; squash-only.
 
+## Waiting for "merged" never sees a red CI (2026-09-21, nick's observation, lane 01M32Z1PD9; falsify: arm the state-only waiter below on a PR whose `gates` is red — it must exit within one poll; if it runs to its timeout, the trap holds) <!-- claim: defect -->
+
+After `gh pr merge --auto`, a seat arms a background waiter (or a Monitor) on `gh pr view --json state` and waits for it to leave `OPEN`. **A failed required check never changes the state.** The PR stays `OPEN`, auto-merge stays armed, the waiter runs to its timeout in silence, and the seat sits. PR #1630: the `static` leaf failed on two `import/order` errors at 21:31; izzo's waiter said nothing and the failure was learned at 21:45 because nick asked "landed?". nick had seen the same shape on other seats.
+
+The waiter has to exit on **either** terminal state and say which:
+
+```sh
+until s=$(gh pr view $N --json state,mergeCommit -q '"\(.state) \(.mergeCommit.oid // "")"') \
+      && { [ "${s%% *}" != "OPEN" ] || gh pr checks $N | grep -qE '^gates\s+fail'; }; do sleep 45; done
+echo "PR$N $s"; gh pr checks $N | grep -E '^gates|fail'
+```
+
+`gates` is the required check and fails when any leaf fails, so it is the one name to watch; the second line prints the leaf that actually went red. A push after the fix restarts the run — re-arm the waiter, it is not re-armed for you.
+
+Related trap, same PR: the fast local gates were `typecheck && format:check`, and neither runs `eslint` — CI's `static` leaf does. A lint-only failure is therefore invisible before the push and surfaces only in the leaf the state-waiter does not watch. `pnpm lint` is now in the fast gates (AGENTS.md step 3); it costs ~25 s.
+
 ## Declare the lane in the squash body, in the first five lines
 
 Open the PR body (which becomes the squash body) with `Lane \`01M2XXXXXX\`.` — the short id, on its own line, near the top — or put `(lane 01M2XXXXXX)` in the title. This is what `team_next` reads back to tell a seat its carried lane already landed ([memory outlives the merge](memory-outlives-the-merge.md)). A mention mid-sentence ("declining lane 01M2…") or deep in the body is deliberately not counted, so a PR that never declares its lane (#1474 did not) is invisible to that check once its branch is cleared (2026-09-19).
