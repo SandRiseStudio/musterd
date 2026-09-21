@@ -106,3 +106,10 @@ packages/web/src/content/generated/
 # every browser verification. They accumulated to 102 files / 5.4 MB in this worktree, and 16 of the
 # .yml were swept into unrelated PRs (#960, #996) by `git add -A` because nothing ignored them.
 .playwright-mcp/
+
+# Squig companion session beside a canvas file. Holds the editor token for the
+# one local process. The file lock holds a pid and a token too. The .squig.json
+# itself is the shared drawing and is committed.
+*.squig.json.companion.json
+*.squig.json.companion.lock
+*.squig.json.lock
