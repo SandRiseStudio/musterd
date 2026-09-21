@@ -133,7 +133,12 @@ import {
 } from '../store/audit.js';
 import { applyCursorAdvance, getCursor } from '../store/cursors.js';
 import { deferralFold } from '../store/deferralFold.js';
-import { actDelivery, crossedBySeen, handoffNamedLaneOutOfPlay } from '../store/delivery.js';
+import {
+  actDelivery,
+  crossedBySeen,
+  handoffNamedLaneOutOfPlay,
+  openDirectedLedger,
+} from '../store/delivery.js';
 import { latestFootprint } from '../store/footprint.js';
 import { listGoals } from '../store/goals.js';
 import {
@@ -2974,10 +2979,20 @@ export async function handleHttp(
         // grant, but a LIVE session still holds it in its adapter — name that so the operator
         // knows the new grant/policy only govern from the seat's next wake/claim.
         const seatLive = hasLivePresence(ctx.db, target.id, ctx.config.presenceTimeoutMs);
+        // ADR 434 §c: a fresh enrollment stamps the wake horizon (the `residency.enrolled` row
+        // above, with no `previous_host`). Say what it leaves behind — the obligations this seat
+        // is still owed and will now NOT be woken for — so the operator can re-send what matters
+        // instead of discovering the silence. Read once, at enrollment; never on the poll.
+        const predating = previous
+          ? undefined
+          : openDirectedLedger(ctx.db, team.id).filter((d) =>
+              d.recipients.some((r) => r.seat === target.name && r.state !== 'answered'),
+            ).length;
         return sendJson(res, 201, {
           residency: toResidency(row, team.slug, target.name),
           grant: mint.token,
           ...(seatLive ? { seat_live: true } : {}),
+          ...(predating !== undefined ? { predating_backlog: predating } : {}),
         });
       }
 

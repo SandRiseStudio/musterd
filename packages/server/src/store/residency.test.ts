@@ -546,6 +546,113 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
   });
 });
 
+describe('ADR 434: a discharged act never re-wakes its seat', () => {
+  it("(a) a steer the seat answered in-thread by a plain message is not leased — ryder's shape", () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, null, 'message', 'root', 1_000);
+    msg(db, team, nick, ada, 'steer', 's1', 1_001, { thread: 'root' });
+    msg(db, team, ada, null, 'message', 'her-reply', 1_002, { thread: 'root' });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it("(a) an urgent act the seat answered by `message` in_reply_to is not leased — gptbot's shape", () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'steer', 's1', 1_000, { meta: { urgent: true, urgent_reason: 'r' } });
+    msg(db, team, ada, nick, 'message', 'standing-down', 1_001, { meta: { in_reply_to: 's1' } });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('(b) an act that already WOKE the seat is never leased again for the same act', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    // The session ran (a `woke` row), replied nothing the predicate can see, and the window reopened.
+    wakeOutcomeRow(db, team, 'Ada', 'h1', 'residency.woke', Date.now() - 2 * 3_600_000);
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+    // No terminal row either: this is a spent act, not an exhausted one.
+    expect(
+      listAudit(db, team.id).filter((r) => r.action === 'residency.wake_exhausted'),
+    ).toHaveLength(0);
+  });
+
+  it('(b) …unless a NEWER act from someone else reopened its thread', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    const woke = Date.now() - 2 * 3_600_000;
+    wakeOutcomeRow(db, team, 'Ada', 'h1', 'residency.woke', woke);
+    // nick nudges in the handoff's thread after the wake — the act is live again.
+    msg(db, team, nick, ada, 'message', 'nudge', woke + 1, { thread: 'h1' });
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.map((o) => o.act_id)).toEqual(['h1']);
+  });
+
+  it("(b) the seat's OWN later turn in the thread does not reopen it", () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    const woke = Date.now() - 2 * 3_600_000;
+    wakeOutcomeRow(db, team, 'Ada', 'h1', 'residency.woke', woke);
+    msg(db, team, ada, null, 'status_update', 'mine', woke + 1, { thread: 'h1' });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('(b) a wake that FAILED is still retried up to the attempt cap — only a completed wake spends the act', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    wakeOutcomeRow(db, team, 'Ada', 'h1', 'residency.wake_failed', Date.now() - 2 * 3_600_000);
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
+  });
+
+  it("(c) a fresh enrollment stamps a wake horizon: acts that predate it do not wake the seat — gptbot's July backlog", () => {
+    const { db, team, nick, ada } = seed();
+    msg(db, team, nick, ada, 'handoff', 'old', 1_000);
+    // `msg` stamps receipt with the wall clock; the backlog was RECEIVED before the enrollment.
+    db.prepare("UPDATE messages SET created_at = 1000 WHERE id = 'old'").run();
+    enroll(db, team, ada);
+    appendAudit(db, team.id, {
+      actor: 'nick',
+      action: 'residency.enrolled',
+      target: 'Ada',
+      result: 'allow',
+      detail: { harness: 'claude-code', host: HOST, authorized_by: 'nick' },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+    // An act after the horizon wakes as ever.
+    msg(db, team, nick, ada, 'handoff', 'new', Date.now() + 1);
+    expect(
+      claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS).map((o) => o.act_id),
+    ).toEqual(['new']);
+  });
+
+  it('(c) a RE-enrollment (policy tweak, host swap) does not move the horizon', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    appendAudit(db, team.id, {
+      actor: 'nick',
+      action: 'residency.enrolled',
+      target: 'Ada',
+      result: 'allow',
+      detail: { harness: 'claude-code', host: HOST, authorized_by: 'nick' },
+    });
+    db.prepare("UPDATE audit SET ts = ? WHERE action = 'residency.enrolled'").run(500);
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    appendAudit(db, team.id, {
+      actor: 'nick',
+      action: 'residency.enrolled',
+      target: 'Ada',
+      result: 'allow',
+      detail: { harness: 'claude-code', host: HOST, authorized_by: 'nick', previous_host: HOST },
+    });
+    expect(
+      claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS).map((o) => o.act_id),
+    ).toEqual(['h1']);
+  });
+});
+
 describe('claimWakeLeases — a deferred act is not a wake reason (ADR 211 §4)', () => {
   it('does not wake a seat for an act it deferred', () => {
     const { db, team, nick, ada } = seed();

@@ -722,6 +722,85 @@ function isExhausted(db: Database, teamId: string, actId: string): boolean {
 }
 
 /**
+ * When this act last completed a wake of this seat — the newest `residency.woke` row naming it —
+ * or null if it never has (ADR 434 §b). A `wake_failed` is deliberately not counted: a spawn that
+ * never ran did not spend the act, and the attempt cap still governs those.
+ */
+function lastWokeForAct(
+  db: Database,
+  teamId: string,
+  seatName: string,
+  actId: string,
+): number | null {
+  const row = db
+    .prepare<[string, string, string], { ts: number }>(
+      `SELECT MAX(ts) AS ts FROM audit
+        WHERE team_id = ? AND action = 'residency.woke' AND target = ?
+          AND json_extract(detail, '$.act') = ? ${MINTED_HERE}`,
+    )
+    .get(teamId, seatName, actId);
+  return row?.ts ?? null;
+}
+
+/**
+ * Has anyone OTHER than the seat added to the act's thread — or named it by `in_reply_to` — since
+ * `sinceTs`? That is what makes a spent act live again (ADR 434 §b): the sender nudging, a peer
+ * adding to the exchange. The seat's own later turn is not a reason to wake the seat.
+ */
+function threadReopenedSince(
+  db: Database,
+  teamId: string,
+  memberId: string,
+  actId: string,
+  sinceTs: number,
+): boolean {
+  const row = db
+    .prepare<[string, string, string, number], { one: number }>(
+      `SELECT 1 AS one FROM messages x
+         JOIN messages a ON a.id = ?
+        WHERE x.team_id = ? AND x.from_member != ? AND x.created_at > ?
+          AND (x.thread_id = COALESCE(a.thread_id, a.id)
+               OR json_extract(x.meta, '$.in_reply_to') = a.id)
+        LIMIT 1`,
+    )
+    .get(actId, teamId, memberId, sinceTs);
+  return row != null;
+}
+
+/**
+ * The seat's wake horizon (ADR 434 §c): the newest FRESH enrollment — a `residency.enrolled` audit
+ * row with no `previous_host`, i.e. a first enrollment or one after a revoke. An act received
+ * before it never wakes the seat. A re-enrollment (policy tweak, host swap) carries `previous_host`
+ * and does not move it, so tuning a live seat cannot silently retire what it was already owed.
+ *
+ * Why it exists: enrolling gptbot on 2026-09-21 12:47, dormant since a 2026-09-05 revoke, put its
+ * July–September obligations on the batched lane oldest-first and the daemon drained them one paid
+ * wake per window, ahead of anything current. An enrollment says "from now"; the enroll response
+ * reports what it left behind so the operator can re-send what still matters.
+ */
+export function wakeHorizon(db: Database, teamId: string, seatName: string): number | null {
+  const row = db
+    .prepare<[string, string], { ts: number }>(
+      `SELECT MAX(ts) AS ts FROM audit
+        WHERE team_id = ? AND action = 'residency.enrolled' AND target = ?
+          AND json_extract(detail, '$.previous_host') IS NULL`,
+    )
+    .get(teamId, seatName);
+  return row?.ts ?? null;
+}
+
+/** Receipt time of one act, for the horizon test; null for an unknown id. */
+function actReceivedAt(db: Database, teamId: string, actId: string): number | null {
+  const row = db
+    .prepare<
+      [string, string],
+      { created_at: number }
+    >('SELECT created_at FROM messages WHERE team_id = ? AND id = ?')
+    .get(teamId, actId);
+  return row?.created_at ?? null;
+}
+
+/**
  * The daemon-composed spawn line (ADR 088 §4 injection bar): structured fields only — act enum,
  * delimited sender/seat names, the act's id, one instruction to read the inbox through the
  * governed tools. The triggering act's **body never appears here** (nor anywhere in a lease
@@ -1347,9 +1426,23 @@ export function claimWakeLeases(
       if (reviewLoopOn && policy.flow === 'auto' && cooled) {
         candidates.unshift(...dueReviewWorkOrders(db, teamId, teamSlug, member));
       }
+      // ADR 434 §c, read once per seat per poll and only when something is due.
+      const horizon = candidates.length > 0 ? wakeHorizon(db, teamId, member.name) : null;
       for (const candidate of candidates) {
         const exhKey = wakeExhaustionKey(candidate.act_id, candidate.lane_id);
         const edge = loopEdgeOf(candidate);
+        // ADR 434, inbox wakes only (an edge-bearing work order is a lane fact, not an act):
+        //  §c — an act received before the seat's fresh enrollment is not this enrollment's to
+        //       wake for; §b — an act that already completed a wake is spent, unless someone else
+        //       has since added to its thread. Both silent, like the still-true skip: a spent act
+        //       is the resting state of an answered inbox, not an event.
+        if (edge === null && candidate.act_id) {
+          const received = actReceivedAt(db, teamId, candidate.act_id);
+          if (horizon !== null && received !== null && received < horizon) continue;
+          const woke = lastWokeForAct(db, teamId, member.name, candidate.act_id);
+          if (woke !== null && !threadReopenedSince(db, teamId, member.id, candidate.act_id, woke))
+            continue;
+        }
         /**
          * ADR 306 §1. An edge-bearing work order is bounded by the ADR 262 (lane, edge) rules
          * below and by nothing else. The per-act cap does NOT apply to it, for two reasons the

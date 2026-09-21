@@ -305,3 +305,34 @@ describe('listInterruptCandidates', () => {
     expect(rowsToEnvelopes(db, team.slug, rows).map((e) => e.id)).not.toContain('turn-early');
   });
 });
+
+describe("ADR 434: a steer answered IN ITS THREAD is discharged — ryder's 13:21 reply", () => {
+  it("a plain message from the addressee in the steer's thread, with no in_reply_to, answers it", () => {
+    const { db, team, nick, ada } = seed();
+    // stanley opened a thread, then steered ryder inside it; she replied in the thread at 13:21:44
+    // and was leased for the same steer at 13:37:25 (lease 01M32V0618C2A3R81Z093V6HWC).
+    say(db, team, nick, null, 'message', 'root');
+    say(db, team, nick, ada, 'steer', 'steer-t', { thread: 'root' });
+    expect(viaCandidates(db, team, ada, true)).toContain('steer-t');
+    // Her reply is her OWN send, which the inbox omits by construction — so the candidate read
+    // fetches it by thread key (the same reason the clause 7(iv) fetch above exists).
+    say(db, team, ada, null, 'message', 'her-reply', { thread: 'root' });
+    expect(viaCandidates(db, team, ada, true)).not.toContain('steer-t');
+  });
+
+  it("a reply threaded on the steer's own id answers a steer that opened its thread", () => {
+    const { db, team, nick, ada } = seed();
+    say(db, team, nick, ada, 'steer', 'steer-root');
+    say(db, team, ada, null, 'status_update', 'r', { thread: 'steer-root' });
+    expect(viaCandidates(db, team, ada, true)).not.toContain('steer-root');
+  });
+
+  it("a thread turn OLDER than the steer, or a third party's turn, answers nothing", () => {
+    const { db, team, nick, ada, bob } = seed();
+    say(db, team, nick, null, 'message', 'root');
+    say(db, team, ada, null, 'message', 'before', { thread: 'root' });
+    say(db, team, nick, ada, 'steer', 'steer-t', { thread: 'root' });
+    say(db, team, bob, null, 'message', 'bobs', { thread: 'root' });
+    expect(viaCandidates(db, team, ada, true)).toContain('steer-t');
+  });
+});

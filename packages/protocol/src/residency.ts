@@ -181,6 +181,11 @@ export const EnrollResidencyResponseSchema = z.object({
   /** True when the seat had a live session at enroll time — that session occupies via the grant
    *  this enroll just superseded, and the new grant/policy only govern from its next wake/claim. */
   seat_live: z.boolean().optional(),
+  /** ADR 434 §c: on a FRESH enrollment (first, or after a revoke) the daemon stamps a wake horizon
+   *  at the enrollment — acts received before it never wake the seat. This is how many directed
+   *  obligations the seat was still owed at that moment and so will NOT be woken for; the operator
+   *  re-sends what still matters. Absent on a re-enrollment, which does not move the horizon. */
+  predating_backlog: z.number().int().nonnegative().optional(),
 });
 export type EnrollResidencyResponse = z.infer<typeof EnrollResidencyResponseSchema>;
 

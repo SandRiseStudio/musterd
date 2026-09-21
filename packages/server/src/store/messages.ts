@@ -9,6 +9,7 @@ import {
   type Envelope,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { undischargedSql } from './discharge.js';
 import { ulid } from 'ulid';
 import type { MessageRow, MessageVisibility } from './rows.js';
 
@@ -140,16 +141,7 @@ export function countOpenLoops(db: Database): number {
     .prepare<[], { n: number }>(
       `SELECT COUNT(*) AS n FROM messages m
         WHERE m.act IN ('request_help','handoff')
-          AND NOT EXISTS (
-            SELECT 1 FROM messages r
-             WHERE r.team_id = m.team_id
-               AND r.act IN ('accept','decline')
-               AND json_extract(r.meta, '$.in_reply_to') = m.id)
-          AND NOT EXISTS (
-            SELECT 1 FROM messages v
-             WHERE v.team_id = m.team_id
-               AND v.act = 'resolve'
-               AND v.thread_id = COALESCE(m.thread_id, m.id))`,
+          ${undischargedSql('m', 'm.to_member')}`,
     )
     .get();
   return row?.n ?? 0;
@@ -166,16 +158,7 @@ export function countOpenLoopsByTeam(db: Database): { team: string; count: numbe
       `SELECT t.slug AS team, COUNT(*) AS count FROM messages m
          JOIN teams t ON t.id = m.team_id
         WHERE m.act IN ('request_help','handoff')
-          AND NOT EXISTS (
-            SELECT 1 FROM messages r
-             WHERE r.team_id = m.team_id
-               AND r.act IN ('accept','decline')
-               AND json_extract(r.meta, '$.in_reply_to') = m.id)
-          AND NOT EXISTS (
-            SELECT 1 FROM messages v
-             WHERE v.team_id = m.team_id
-               AND v.act = 'resolve'
-               AND v.thread_id = COALESCE(m.thread_id, m.id))
+          ${undischargedSql('m', 'm.to_member')}
         GROUP BY t.slug`,
     )
     .all();
@@ -342,10 +325,13 @@ export function listInbox(
     // bounded agent read: three readers, two of them agreeing and the newest one not. It is also
     // what makes a service seat's own discharge expressible — see ADR 432, where guardian resolves
     // the thread of an incident whose condition has cleared, being barred from `accept` by ADR 232.
-    // The outer table stays UNALIASED so `where` — built above and shared with every other read
-    // here — drops in unchanged; the correlated subquery names it `messages.id` explicitly, because
-    // an unqualified `id` inside the EXISTS would resolve to the inner alias and silently match
-    // every row against itself.
+    // The discharge shapes themselves are named ONCE, in `discharge.ts` (ADR 434): this read, the
+    // open-loops gauge, the open directed ledger and the per-recipient ledger used to each spell
+    // their own and disagreed on the recipient's in-thread reply — which is how a seat answers a
+    // threaded steer, and how ryder was woken twice for one. The outer table stays UNALIASED so
+    // `where` — built above and shared with every other read here — drops in unchanged; the
+    // correlated subqueries name it `messages.id` explicitly, because an unqualified `id` inside
+    // an EXISTS would resolve to the inner alias and silently match every row against itself.
     const pinnedAny = OBLIGATION_ACTS_ANY.map(() => '?').join(',');
     const pinnedDirected = OBLIGATION_ACTS_DIRECTED.map(() => '?').join(',');
     const pinned = db
@@ -355,18 +341,7 @@ export function listInbox(
              act IN (${pinnedAny})
              OR (to_kind = 'member' AND act IN (${pinnedDirected}))
            )
-           AND NOT EXISTS (
-             SELECT 1 FROM messages r
-              WHERE r.team_id = messages.team_id
-                AND json_extract(r.meta, '$.in_reply_to') = messages.id
-                AND (r.act IN ('accept','decline') OR r.from_member = ?)
-           )
-           AND NOT EXISTS (
-             SELECT 1 FROM messages v
-              WHERE v.team_id = messages.team_id
-                AND v.act = 'resolve'
-                AND v.thread_id = COALESCE(messages.thread_id, messages.id)
-           )
+           ${undischargedSql('messages', '?')}
          ORDER BY created_at ASC, id ASC
          LIMIT ?`,
       )
@@ -531,13 +506,27 @@ export function pendingInterrupts(
   // IS the answer, whatever act it rides on. Only `me`'s own replies count here; an obligation is
   // still discharged only by an accept/decline (any sender), as before.
   const answeredByMe = new Set<string>();
+  // ADR 434 shape 4: my newest turn per thread. A steer inside a thread is answered by my next turn
+  // IN that thread, `in_reply_to` or not — that is how ryder answered stanley's on 2026-09-21 and
+  // was woken for it again sixteen minutes later. Keyed the way `resolve` closes a thread:
+  // `m.thread ?? m.id`, so a steer that opened its own thread is answered by a turn threaded on it.
+  const myLatestOnThread = new Map<string, { ts: number; id: string }>();
   for (const m of messages) {
     if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
+    if (m.from === me && m.thread) {
+      const cur = myLatestOnThread.get(m.thread);
+      if (!cur || m.ts > cur.ts || (m.ts === cur.ts && m.id > cur.id))
+        myLatestOnThread.set(m.thread, { ts: m.ts, id: m.id });
+    }
     const ref = (m.meta as { in_reply_to?: unknown } | null | undefined)?.['in_reply_to'];
     if (typeof ref !== 'string') continue;
     if (m.act === 'accept' || m.act === 'decline') discharged.add(ref);
     if (m.from === me) answeredByMe.add(ref);
   }
+  const answeredInThreadByMe = (m: Envelope): boolean => {
+    const mine = myLatestOnThread.get(m.thread ?? m.id);
+    return mine !== undefined && (mine.ts > m.ts || (mine.ts === m.ts && mine.id > m.id));
+  };
   const isUrgent = (m: Envelope) =>
     (m.meta as { urgent?: unknown } | null | undefined)?.['urgent'] === true;
   // ADR 225: a routed acceptance is obligation-class. Keyed on the daemon-set `lane_review` marker,
@@ -665,7 +654,8 @@ export function pendingInterrupts(
         // interrupts nor counts (a ts tie is broken by id, so no two steers survive together).
         // A winner this seat already replied to is discharged (clause 7(iv)) — and because the
         // winner is chosen over the whole set first, the superseded steers under it do not rise.
-        (m.act !== 'steer' || (m.id === winningSteerId && !answeredByMe.has(m.id))),
+        (m.act !== 'steer' ||
+          (m.id === winningSteerId && !answeredByMe.has(m.id) && !answeredInThreadByMe(m))),
     )
     .sort((a, b) => b.ts - a.ts);
 }

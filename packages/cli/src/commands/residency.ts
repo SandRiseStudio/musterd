@@ -393,6 +393,16 @@ async function onCommand(parsed: Parsed): Promise<number> {
       ) + '\n',
     );
   }
+  // ADR 434 §c: a fresh enrollment says "from now". Name what it will not wake for, once, here —
+  // the alternative was gptbot draining twenty July acts one paid wake at a time (2026-09-21).
+  if (res.predating_backlog !== undefined && res.predating_backlog > 0) {
+    process.stdout.write(
+      theme.warn(
+        `  ! ${res.predating_backlog} act(s) owed to "${seat}" predate this enrollment and will not wake it — ` +
+          're-send (steer / handoff) what still matters, or answer them',
+      ) + '\n',
+    );
+  }
   if (grantSaved) {
     process.stdout.write(
       theme.meta('  standing grant saved to .musterd/binding.json (revoked by `residency off`)') +
