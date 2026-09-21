@@ -41,15 +41,18 @@ describe('site nav', () => {
  */
 describe('tap targets in the shared chrome', () => {
   const read = (p: string) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8');
-  const ruleBody = (css: string, selector: string) => {
+  const ruleBody = (css: string, selector: string): string => {
     const m = css.match(new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`));
-    if (!m) throw new Error(`no rule for ${selector}`);
+    // Both the match and its capture group are asserted rather than assumed: a selector that
+    // stopped existing must fail as "no rule for X", not as a confusing NaN three lines later.
+    if (!m?.[1]) throw new Error(`no rule for ${selector}`);
     return m[1];
   };
-  const minHeight = (css: string, selector: string) => {
-    const m = ruleBody(css, selector).match(/min-height:\s*([\d.]+)px/);
-    return m ? Number(m[1]) : 0;
+  const px = (body: string, prop: string): number => {
+    const m = body.match(new RegExp(`${prop}:\\s*([\\d.]+)px`));
+    return m?.[1] ? Number(m[1]) : 0;
   };
+  const minHeight = (css: string, selector: string) => px(ruleBody(css, selector), 'min-height');
 
   it('every shared-chrome link declares at least the 24px AA floor', () => {
     const site = read('./site.css');
@@ -61,7 +64,7 @@ describe('tap targets in the shared chrome', () => {
 
   it('the nav band still adds up to the 50px it has always been', () => {
     const site = read('./site.css');
-    const pad = Number(ruleBody(site, '.sitenav__inner').match(/padding-block:\s*([\d.]+)px/)?.[1]);
+    const pad = px(ruleBody(site, '.sitenav__inner'), 'padding-block');
     expect(pad * 2 + minHeight(site, '.sitenav__links a')).toBe(50);
   });
 
