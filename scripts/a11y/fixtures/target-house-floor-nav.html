@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>target control — the house floor, on markup that CONFORMS</title>
+<!--
+  MUST FAIL, and must fail as HOUSE FLOOR rather than "below AA". This is the arm that keeps the
+  gate honest about which standard it is applying.
+
+  These are the real header's measurements from the 2026-09-21 audit — 33x22, 42x22, 45x22 — in a
+  <nav>, spaced the way the real nav spaces them. Measured directly (lane 01M32HG5GJ): links of
+  this size and spacing CONFORM to WCAG 2.5.8, because nothing sits within 12px of their centres,
+  so the spacing exception applies. The audit called them a 2.5.8 defect and the audit was wrong
+  about the spec.
+
+  The team's 24px line for the shared chrome is a HOUSE decision (lane 01M32GF49Z), and it is worth
+  keeping: a 21px link on a phone is missed twice before it is hit. So the gate enforces it and
+  labels it, and this file is what proves the label survives.
+
+  If this file ever fails as "below AA 2.5.8", the gate has started reporting a house preference as
+  a standards violation — which would be a false accessibility claim made in our own CI.
+-->
+<style>
+  body { margin: 0; font: 15px/1 system-ui, sans-serif; }
+  nav { display: flex; align-items: center; gap: 20px; padding: 12px 16px; }
+  nav a { display: inline-flex; align-items: center; min-height: 22px; text-decoration: none; }
+</style>
+<nav aria-label="Site">
+  <a href="/docs">Docs</a>
+  <a href="/watch">Watch</a>
+  <a href="https://github.com/SandRiseStudio/musterd">GitHub</a>
+</nav>

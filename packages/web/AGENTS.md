@@ -78,6 +78,15 @@ against the markdown the moment either changed.
   phase found eleven more, ten on the goal grid. A green gate is still not full coverage: read the
   per-route "N unmeasurable" count it prints, and remember it can only measure states the fixture
   team actually seeds.
+- **Tap targets are a gate now too** — `pnpm a11y:targets:check` (CI, same leaf as contrast) sweeps
+  every route at **390×844** and fails on a WCAG 2.2 AA 2.5.8 failure, an overlapping pair, or a
+  shared-chrome target under the house 24px floor. Added 2026-09-21 after 21–22px nav and footer
+  targets shipped on every route with the 23-sweep contrast gate green: contrast is colour at any
+  width, target size is **layout at one width**, so that gate was structurally blind to it. Two
+  things worth knowing before you read a red: a `HOUSE FLOOR` row **conforms** to 2.5.8 and is the
+  stricter line this team set — never report it outside the repo as an accessibility defect — and
+  the inline-in-a-sentence exemption needs `display: inline`, so an `inline-block` CTA is judged on
+  its geometry however much prose surrounds it. [docs/a11y/target-size.md](../../docs/a11y/target-size.md).
 - **The goal grid has a measured ink set — use it, don't add a ninth brown.** `--gg-ink-quiet`,
   `--gg-ink-accent` and `--gg-ink-success` (defined on `.gg-stage`) each clear 4.9+ against every
   paper that file paints. They replaced eight one-off hexes, of which ten usages measured below AA.

@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>target control — overlapping pair</title>
+<!--
+  MUST FAIL, and MUST fail for overlap rather than for size: both buttons here are 44x44, well
+  over the 24px floor, and they sit on top of each other.
+
+  This is the arm a size-only gate goes green on, and it is not hypothetical — during the
+  01M32GF49Z fix a first cut grew padding to satisfy the size clause until the boxes collided,
+  trading a small-target violation for an overlap one. Only measuring caught it.
+-->
+<style>
+  body { margin: 0; font: 14px/1 system-ui, sans-serif; }
+  .stack { position: relative; height: 120px; }
+  .stack button { position: absolute; width: 44px; height: 44px; }
+  .one { top: 10px; left: 10px; }
+  .two { top: 40px; left: 40px; }
+</style>
+<div class="stack">
+  <button class="one">1</button>
+  <button class="two">2</button>
+</div>

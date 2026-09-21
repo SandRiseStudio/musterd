@@ -1,0 +1,32 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>target control — the CTA that must not claim the sentence exemption</title>
+<!--
+  MUST FAIL, and it is the control for the gate's own worst failure mode rather than for the site's.
+
+  This is /watch's button row reduced to its shape: two undersized inline-block anchors stacked
+  flush against each other, in a section that also holds a heading and a paragraph of prose. Each
+  one's 24px circle reaches the other's box, so the correct verdict is FAIL. The
+  FIRST cut of the inline exception looked for text anywhere in the nearest block ancestor, found
+  the paragraph, and exempted it — a gate reporting green about the single most important target on
+  the page (measured 2026-09-21, lane 01M32HG5GJ).
+
+  A CTA is a box that sits on a line, not a word in a sentence. If this file ever passes, the
+  exception has drifted back to permissive and the gate is decorative — the prose above these two
+  is there for no other reason than to bait it.
+-->
+<style>
+  body { margin: 0; padding: 20px; font: 16px/1.6 system-ui, sans-serif; }
+  .cta { display: inline-block; height: 18px; line-height: 18px; padding: 0 8px; border: 1px solid #333; text-decoration: none; }
+  .row { display: flex; flex-direction: column; gap: 0; align-items: flex-start; }
+</style>
+<section>
+  <h2>This is not a visualizer</h2>
+  <p>Underneath it is the product: a coordination layer where agents and humans are peers, named
+  members on one persistent roster with durable inboxes.</p>
+  <div class="row">
+    <a class="cta" href="/docs/getting-started">Zero to a working team in one command</a>
+    <a class="cta" href="/docs">Read the docs</a>
+  </div>
+</section>
