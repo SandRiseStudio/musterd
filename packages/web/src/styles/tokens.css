@@ -3,19 +3,25 @@
  *
  * Derives from docs/design/brand.md (mustard accent on zinc neutrals, Inter + JetBrains
  * Mono) and DELIBERATELY EXPANDS it for the immersive web surface. See DESIGN.md for the
- * office visual system and docs/decisions/036-web-surface-aesthetic.md.
+ * office visual system and docs/decisions/037-web-surface-aesthetic.md.
  *
  * THEMES. The office system targets TWO themes — a warm daylight office (the default)
  * and a dusk office (dark). Both are defined below as SEMANTIC tokens (--floor, --wall,
  * --ink, --sky, …) so a theme swap is a token swap. Components/canvas should read the
  * semantic tokens, never raw hex.
  *
- * ACTIVE DEFAULT: light (PR 3b). The document sets data-theme="light" on <html> (see __root.tsx),
- * which selects the :root[data-theme="light"] block below. The office scene reads these tokens per
- * host (office-scene/index.ts), so the landing hero now paints the daylight office. The bare :root
- * values remain the dusk palette — reachable by setting data-theme to anything but "light" (a future
- * toggle) and still scoped onto the /live stage via `.lc` (Live.css) until that surface is
- * light-moded in PR 4.
+ * LIGHT IS THE PUBLIC SITE, AND THAT IS A DECISION — docs/decisions/431-light-only-public-site.md.
+ * The document sets data-theme="light" on <html> (see __root.tsx), which selects the
+ * :root[data-theme="light"] block below, and the office scene reads these tokens per host
+ * (office-scene/index.ts), so the landing hero paints the daylight office.
+ *
+ * The bare :root values remain the dusk palette, reachable by setting data-theme to anything but
+ * "light", and they are NOT dead: `.lc` (Live.css) scopes them onto the /live stage. What they are
+ * not is a toggle waiting to be wired. ADR 431 measured them — 2 AA failures on `/`, zero on
+ * /watch and /docs — and still says light-only, because the blocker is the hero's daylight
+ * PHOTOGRAPH rather than the palette. Read that ADR's "What would reopen this" before adding a
+ * prefers-color-scheme path; a token swap alone gives a dark page around a bright daylight still,
+ * which is the composition ADR 428 removed from that very section.
  */
 
 :root {

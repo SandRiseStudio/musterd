@@ -50,6 +50,11 @@ export const Route = createRootRoute({
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
+    /* Light is PINNED, deliberately — ADR 431. Not a default waiting for a
+       prefers-color-scheme path: the hero's office still is a photograph of a daylight room, so a
+       dark page around it is the two-rooms-in-one-viewport composition ADR 428 removed from that
+       section. The dusk tokens are healthy (measured: 2 AA rows on `/`, zero elsewhere) and stay
+       live on /live via `.lc`. ADR 431 names the three things that would reopen this. */
     <html lang="en" data-theme="light">
       <head>
         <HeadContent />
