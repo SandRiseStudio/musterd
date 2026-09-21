@@ -27,6 +27,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { GATED_CLAIMS } from './lib/forbidden-claims.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(here, '..');
@@ -58,8 +59,6 @@ const SKIP = /(?:\.test\.[tj]sx?|\.png|\.jpg|\.svg|\.woff2?|\.ico)$/;
  * four against served HTML (miley's lane `01M2XD2RPG`, after musterd.io served four wrong strings
  * for most of 2026-09-19 while this gate reported green on the repo).
  */
-import { GATED_CLAIMS } from './lib/forbidden-claims.ts';
-
 type Ban = (typeof GATED_CLAIMS)[number];
 
 const BANS: readonly Ban[] = GATED_CLAIMS;
