@@ -364,6 +364,30 @@ lists S3 as a strengthener there, and S3 now ships standalone. It does NOT need 
 cross-family skill should link it rather than restate it, per one-fact-one-home. 16 refusals and 5
 must-NOT-fire cases exercised.
 
+*S4 shipped 2026-09-21 (dolly, lane `01M32K8NEA`):* `seat-workspace-identity`, keeping sloane's
+rename (the skill NAME uses workspace; the git literals `--worktree` / `extensions.worktreeConfig`
+are flags and stay). Ships the setup, the squash trailer, and `identity.py`, which reports WHICH
+config file supplies the value — a `[local]` or `[global]` scope in a linked work tree is the
+finding.
+
+**The row's trap is right about the outcome and wrong about the mechanism, and the difference names
+the line to look at.** Measured on git 2.51: `git config --worktree` does NOT fail silently when
+`extensions.worktreeConfig` is off — it refuses loudly, with a message naming the extension. The
+silent damage is the FALLBACK: a provisioning script doing `git config --worktree … || git config
+…` converts that refusal into a `--local` write, which is shared across every work tree.
+Demonstrated end to end in a two-work-tree scratch repo — work tree `b` never touched its config
+and reports `seat-a`. The general shape is in the skill: **a loud failure converted into a quiet
+success by an `||` is worse than the failure**, because a fallback that satisfies the caller has
+thrown the reason away. Nothing in the row or ADR 109 needs correcting; the outcome claim holds,
+and S4 states the measured mechanism beside it.
+
+**A branch would not fire, and it was not the code.** "No identity anywhere" never triggered
+because a real machine almost always has a global `user.name`; proving it reachable took
+`GIT_CONFIG_GLOBAL=/dev/null`. Written up as the more useful finding: on a developer machine "no
+identity" is nearly unreachable, and the real condition is a GLOBAL identity quietly supplying one
+name for every agent — which looks configured. The checker also refuses to claim a pass it has not
+earned in the MAIN work tree, where a shared write and a scoped one are the same file.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
