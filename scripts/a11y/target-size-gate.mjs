@@ -46,6 +46,14 @@ const arg = (name, fallback) => {
 
 const DIR = arg('dir', join(HERE, '../../packages/web/dist/client'));
 const VIEWPORT = arg('viewport', '390x844');
+/* Same two flags, same meaning, as contrast-gate: each is a NARROWING of one run's coverage and
+   says so rather than passing quietly. `--static-only` is also "no CLI build". */
+const STATIC_ONLY = process.argv.includes('--static-only');
+const CONNECTED_ONLY = process.argv.includes('--connected-only');
+if (STATIC_ONLY && CONNECTED_ONLY) {
+  console.error('target-size-gate — --static-only and --connected-only together measure nothing.');
+  process.exit(1);
+}
 
 /**
  * The routes, and why this list is not the contrast gate's.
@@ -82,7 +90,7 @@ if (!existsSync(DIR)) {
    would refuse it anyway (a 404 renders one link, not zero, so it can slip past the zero-target
    check) — but it would refuse it as "DID NOT MEASURE" without saying the route is simply absent,
    which is the difference between a puzzle and a fix. See dist-routes.mjs. */
-const absent = missingRoutesNotice(DIR, ROUTES, 'target-size-gate');
+const absent = missingRoutesNotice(DIR, CONNECTED_ONLY ? [] : ROUTES, 'target-size-gate');
 if (absent) {
   console.error(absent);
   process.exit(1);
@@ -106,6 +114,22 @@ const server = createServer((req, res) => {
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const BOUND = server.address().port;
 
+/**
+ * A currently-free port, for the one consumer that cannot take "port 0" itself: the fixture daemon
+ * is spawned by a shell script that passes an explicit `--port` through. Bind-then-release has a
+ * TOCTOU window, but the loser of that race fails loudly at daemon start — the exact failure this
+ * demotes from "every concurrent run" to "a genuine collision".
+ */
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+
 const sweep = (url) =>
   new Promise((resolve) => {
     const child = spawn(process.execPath, [join(HERE, 'target-size-sweep.mjs'), url], {
@@ -116,12 +140,28 @@ const sweep = (url) =>
     child.on('close', (code) => resolve({ code, out }));
   });
 
-console.log(`target-size-gate — ${ROUTES.length} routes at ${VIEWPORT} over ${DIR}\n`);
+console.log(
+  CONNECTED_ONLY
+    ? `target-size-gate — connected phase only, at ${VIEWPORT}\n`
+    : `target-size-gate — ${ROUTES.length} routes at ${VIEWPORT} over ${DIR}\n`,
+);
 
 const failed = [];
 const unmeasured = [];
-for (const route of ROUTES) {
-  const { code, out } = await sweep(`http://127.0.0.1:${BOUND}${route}`);
+
+/**
+ * Report one sweep.
+ *
+ * @param floor the minimum number of targets this surface must have measured for its pass to mean
+ *   anything. A CONNECTED page that measures a handful never finished connecting — and its
+ *   sign-in screen renders 3 targets, which is not zero, so the sweep's own zero-target refusal
+ *   cannot see it. It would pass, silently, exactly like a page with nothing wrong. Prerendered
+ *   routes legitimately measure few, so the floor is opt-in per route rather than global — the
+ *   same shape, and the same reason, as contrast-gate's text-node floor.
+ */
+let measured = 0;
+const report = ({ code, out }, label, floor = 0) => {
+  measured += 1;
   const line =
     /targets: (\d+) measured, (\d+) below AA 2\.5\.8, (\d+) below the house floor, (\d+) overlapping/.exec(
       out,
@@ -135,28 +175,127 @@ for (const route of ROUTES) {
      that dresses its own failure as a verdict about the subject sends a careful reader to debug a
      defect on a route nobody looked at. Same contract, and same hard-won reason, as contrast-gate. */
   if (code === 2) {
-    failed.push(route);
-    unmeasured.push(route);
-    console.log(`  ! ${route} — DID NOT MEASURE (harness failure, not a target-size result).`);
-    continue;
+    failed.push(label);
+    unmeasured.push(label);
+    console.log(`  ! ${label} — DID NOT MEASURE (harness failure, not a target-size result).`);
+    return;
+  }
+  if (code === 0 && floor > 0 && Number(line?.[1] ?? 0) < floor) {
+    failed.push(label);
+    console.log(
+      `  ✗ ${label} — only ${line?.[1] ?? 0} targets measured, expected ≥${floor}.` +
+        ' The page almost certainly never connected; a clean sweep of a sign-in screen is not a pass.',
+    );
+    return;
   }
   if (code === 0) {
-    console.log(`  ✓ ${route} — ${line?.[1] ?? '?'} targets${tail}`);
-    continue;
+    console.log(`  ✓ ${label} — ${line?.[1] ?? '?'} targets${tail}`);
+    return;
   }
-  failed.push(route);
+  failed.push(label);
   console.log(
-    `  ✗ ${route} — ${line?.[2] ?? '?'} below AA 2.5.8, ${line?.[3] ?? '?'} below the house floor, ` +
+    `  ✗ ${label} — ${line?.[2] ?? '?'} below AA 2.5.8, ${line?.[3] ?? '?'} below the house floor, ` +
       `${line?.[4] ?? '?'} overlapping pair(s)${tail}`,
   );
   for (const l of out.split('\n')) if (/^\s+✗ /.test(l)) console.log(`   ${l.trim()}`);
+};
+
+for (const route of CONNECTED_ONLY ? [] : ROUTES) {
+  report(await sweep(`http://127.0.0.1:${BOUND}${route}`), route);
 }
 
 server.close();
-console.log(
-  '\n  ! /board and /live were measured at their SIGN-IN screen only — a connected phase, like the' +
-    ' contrast gate has, is not wired yet.',
-);
+if (CONNECTED_ONLY) {
+  console.log('  ! --connected-only: the prerendered routes went unmeasured in this run');
+}
+
+/* ── phase 2: the CONNECTED surfaces ───────────────────────────────────────────────────────────
+ *
+ * A static server reaches /board and /live only before they connect — THREE targets each, two
+ * buttons and a link, and none of the controls the product is actually made of. So the gate stands
+ * up a throwaway daemon over a synthetic team and measures the real thing.
+ *
+ * It earned its place on its first run. Measured 2026-09-21 at 390x844 (lane 01M32WGSG6), against
+ * surfaces no geometry check had ever touched:
+ *   • /live's whole topbar button row at 19x30 — `width: 30px` in the source, shrunk by a flex
+ *     parent that ran out of room at phone width. A test reading CSS source sees a correct
+ *     declaration; only a browser sees the 19.
+ *   • /board's `.lc-insight__more` at 26x16 with another target 0.0px from its centre — undersized
+ *     AND crowded, a genuine 2.5.8 failure that neither clause forgave.
+ *   • /board's view switcher at 20px tall.
+ * All three are fixed in the same change, because a gate cannot land red.
+ *
+ * `--static-only` skips this phase (no CLI build, or you want the fast pass) and says so rather
+ * than passing quietly.
+ *
+ * WHAT IS STILL NOT MEASURED, stated rather than implied: `?asks-open` and `?plates-open` change
+ * nothing at 390px — the sweep returns an identical 7 targets with and without them — so those
+ * surfaces do not mount at phone width and are NOT covered here. The contrast gate sweeps them at
+ * desktop width, where they do. A phone-width reader of this gate should not believe otherwise.
+ */
+if (!STATIC_ONLY) {
+  /* Per-run fixture env, unless the caller pinned their own. Without this two concurrent runs race
+     to the same daemon port, DB and team name, and the loser exits 1 in the same shape as a real
+     red — the defect contrast-gate hit and fixed one layer down. The same env goes to `up` and
+     `down`, so teardown tears down THIS run's stack and nobody else's. */
+  const fixtureEnv = {
+    ...process.env,
+    A11Y_FIXTURE_ROOT:
+      process.env['A11Y_FIXTURE_ROOT'] ??
+      join(process.env['TMPDIR'] ?? '/tmp', `musterd-targets-${process.pid}`),
+    A11Y_FIXTURE_PORT: process.env['A11Y_FIXTURE_PORT'] ?? String(await freePort()),
+    A11Y_FIXTURE_TEAM: process.env['A11Y_FIXTURE_TEAM'] ?? `paper-t${process.pid}`,
+  };
+  const sh = (args) =>
+    new Promise((resolve) => {
+      const c = spawn('bash', [join(HERE, 'fixture-team.sh'), ...args], {
+        stdio: 'pipe',
+        env: fixtureEnv,
+      });
+      let out = '';
+      c.stdout.on('data', (d) => (out += d));
+      c.stderr.on('data', (d) => (out += d));
+      c.on('close', (code) => resolve({ code, out }));
+    });
+
+  console.log('\n  … standing up a fixture team for the connected surfaces');
+  const up = await sh(['up']);
+  if (up.code !== 0) {
+    console.log(
+      up.out
+        .trim()
+        .split('\n')
+        .map((l) => `    ${l}`)
+        .join('\n'),
+    );
+    console.log(
+      '\ntarget-size-gate FAILED — the fixture daemon did not come up, so the connected surfaces' +
+        ' went unmeasured. That is a gate failure, not a skip: passing here would report coverage' +
+        ' the run did not have. Needs `pnpm build` (CLI + web). `--static-only` skips this phase.',
+    );
+    process.exit(1);
+  }
+  const base = /(http:\/\/127\.0\.0\.1:\d+)\/board/.exec(up.out)?.[1];
+  const team = /team=([\w-]+)/.exec(up.out)?.[1] ?? 'paper';
+  try {
+    /* Floors, measured rather than guessed (2026-09-21): a connected /board renders 17 targets and
+       a connected /live 7, against THREE apiece on their sign-in screens. 10 and 5 sit comfortably
+       between, so they separate "connected" from "never got there" without being brittle as the
+       fixture's content changes. */
+    report(await sweep(`${base}/board?team=${team}`), '/board (connected)', 10);
+    /* The scene is PINNED, for the same reason contrast-gate pins it: an unpinned verdict is a
+       function of the wall clock and of what the room happened to be doing. Geometry is less
+       light-sensitive than colour, but it is not motion-insensitive — a walker mid-stride moves a
+       target's box, and a verdict that depends on which frame the sampler caught is a flake
+       waiting to cost someone a merge. One light, not the bracket: `?light=` changes paint, not
+       layout, so the second value would re-measure identical boxes. */
+    report(await sweep(`${base}/live?team=${team}&light=12&still`), '/live (connected)', 5);
+  } finally {
+    await sh(['down']);
+  }
+} else {
+  console.log('\n  ! --static-only: /board and /live went unmeasured past their sign-in screen');
+}
 
 if (failed.length) {
   console.log(
@@ -179,7 +318,11 @@ if (failed.length) {
   );
   process.exit(1);
 }
+/* The count is of SWEEPS taken, not of routes listed — a run narrowed by a flag must not report
+   the coverage of a full one. */
 console.log(
-  `\ntarget-size-gate — ${ROUTES.length} route(s) at ${VIEWPORT}, 0 below AA 2.5.8 and 0 below the` +
-    ' house floor.',
+  `\ntarget-size-gate — ${measured} sweep(s) at ${VIEWPORT}, 0 below AA 2.5.8 and 0 below the` +
+    ' house floor' +
+    (STATIC_ONLY ? ' (prerendered phase only)' : CONNECTED_ONLY ? ' (connected phase only)' : '') +
+    '.',
 );

@@ -152,7 +152,20 @@ const settled = await (async () => {
   let last = null;
   while (Date.now() < deadline) {
     const sig = await evalIn(GEOM_SIG);
-    if (last !== null && sig === last && sig.startsWith('complete')) return true;
+    /* ZERO TARGETS IS NOT SETTLED, however stable it looks.
+     *
+     * An app shell that has loaded its HTML but not yet mounted has `readyState: complete` and no
+     * targets at all — a signature that is identical on two consecutive polls, so the loop below
+     * declared it settled, measured nothing, and the run then refused the route as "DID NOT
+     * MEASURE". Caught on CI 2026-09-21 (lane 01M32WGSG6): connected /board measured 17 targets in
+     * ~40s while connected /live, swept 1.1s later on the same runner, measured 0 — it had not
+     * mounted yet, and the emptiness was what made it look stable.
+     *
+     * Locally /live settles fast enough that this never fired, which is exactly why it had to be
+     * a slower machine that found it. Keep polling to the cap; a page that has genuinely nothing
+     * is still refused below, just after waiting for it rather than on the first quiet frame. */
+    const count = Number(sig.split('|')[1] ?? 0);
+    if (count > 0 && last !== null && sig === last && sig.startsWith('complete')) return true;
     last = sig;
     await new Promise((r) => setTimeout(r, SETTLE_STEP));
   }

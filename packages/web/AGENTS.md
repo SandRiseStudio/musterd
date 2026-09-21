@@ -86,7 +86,11 @@ against the markdown the moment either changed.
   things worth knowing before you read a red: a `HOUSE FLOOR` row **conforms** to 2.5.8 and is the
   stricter line this team set — never report it outside the repo as an accessibility defect — and
   the inline-in-a-sentence exemption needs `display: inline`, so an `inline-block` CTA is judged on
-  its geometry however much prose surrounds it. [docs/a11y/target-size.md](../../docs/a11y/target-size.md).
+  its geometry however much prose surrounds it. It sweeps `/board` and `/live` **connected** too,
+  against the same fixture team the contrast gate uses — the first run found `/live`'s whole topbar
+  button row laid out at **19×30 against a `width: 30px` a flex parent was shrinking**, which is
+  the defect class a test reading CSS source structurally cannot see.
+  [docs/a11y/target-size.md](../../docs/a11y/target-size.md).
 - **The goal grid has a measured ink set — use it, don't add a ninth brown.** `--gg-ink-quiet`,
   `--gg-ink-accent` and `--gg-ink-success` (defined on `.gg-stage`) each clear 4.9+ against every
   paper that file paints. They replaced eight one-off hexes, of which ten usages measured below AA.
