@@ -65,7 +65,7 @@ What your change needs depends entirely on _what you changed_:
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
 | **Web / UI** (`packages/web`)         | **Nothing.** Merge to `main`. Within ~60s the build-publisher rebuilds and republishes, and the daemon serves the new bundle. | **No**                   |
 | **Server / protocol / CLI**           | `musterd service refresh` (sync `main` → build → restart)                                                                     | **Yes** — announce first |
-| **Un-merged WIP you want to eyeball** | `pnpm dev` in your workspace → `http://localhost:5174/live`                                                                    | No                       |
+| **Un-merged WIP you want to eyeball** | `pnpm dev` in your workspace → `http://localhost:5174/live`                                                                   | No                       |
 
 **Do not run `service refresh` to see a UI change.** It restarts the _shared_ daemon and drops your teammates' live sessions for nothing. The UI is **decoupled from the daemon's build**: the served bundle lives in `~/.musterd/live/web`, published from the `agents-live` workspace — **not** in the daemon's checkout. So the daemon's build SHA and the UI's SHA differ routinely, and that is correct, not drift to "fix" with a refresh.
 
@@ -132,17 +132,18 @@ checks), so don't improvise a merge method or a catch-up strategy.
 
 1. **Branch from fresh `main`, in your workspace.** `git fetch origin main` then `git checkout -b feat/<slug> origin/main` (or `fix/`/`docs/`). One branch per lane.
 2. **Work and commit normally — as your seat.** Intermediate commits don't matter — the PR is **squash-merged** to one commit. Your workspace's git identity is your seat ([ADR 109](docs/decisions/109-seat-git-attribution.md)); end every commit message with your seat trailer `Co-authored-by: <seat> <seat@<team>.musterd>` (this replaces the generic model trailer — add a model line alongside if you like). The trailer is what survives the squash onto `main`, so keep it when editing a squash body.
-3. **Before pushing, run the fast local gates:** `pnpm typecheck && pnpm format:check` (seconds). This is a _smoke test for speed_, not a duplicate of CI — do **not** run the full suite locally to "pre-verify" CI. CI is the authority.
-4. **Open the PR and let it land itself:** `gh pr create …` then `gh pr merge <n> --squash --auto --delete-branch`. Auto-merge waits for the required check (`gates` CI) and squash-merges when green. **Don't poll or babysit** — walk away; you'll be notified. This is the technical land path — not blocked on peer acceptance ([ADR 192](docs/decisions/192-outcome-acceptance.md)).
+3. **Before pushing, run the fast local gates:** `pnpm typecheck && pnpm lint && pnpm format:check` (seconds — `lint` is what CI's `static` leaf runs, and an `import/order` error there is invisible to the other two). This is a _smoke test for speed_, not a duplicate of CI — do **not** run the full suite locally to "pre-verify" CI. CI is the authority.
+4. **Open the PR and let it land itself:** `gh pr create …` then `gh pr merge <n> --squash --auto --delete-branch`. Auto-merge waits for the required check (`gates` CI) and squash-merges when green. **Don't poll or babysit** — walk away. If you arm a waiter, it must exit on a **red `gates` as well as on the merge**: a failed check leaves the PR `OPEN` forever, so a waiter on PR state alone waits in silence until its timeout (the idiom is on [shipping a PR](docs/wiki/shipping-a-pr.md)). This is the technical land path — not blocked on peer acceptance ([ADR 192](docs/decisions/192-outcome-acceptance.md)).
 5. **Fell behind `main`? Rebase — never `merge main`:** `git fetch origin main && git rebase origin/main`, resolve conflicts once, re-run the fast gates, `git push --force-with-lease`. Your branch is throwaway history under squash, so rebasing is free; `--force-with-lease` won't clobber a teammate.
 6. **Submit for outcome acceptance, then close:** after merge, `lane_submit` / `musterd lane submit` with `{pr, sha, authorized_by}` moves the lane to `awaiting_acceptance` and asks an acceptor to judge intent/principles/usable/feel of the **landed** outcome (not a code review). Then **follow the submit response** — it names the contract: an acceptor asked and a backstop armed means you are **done**, and silence is not a reason to close it yourself. Self-`lane_resolve` is sanctioned ONLY when nobody was asked — no eligible acceptor, or acceptance-exempt ([ADR 234](docs/decisions/234-tiered-acceptance.md)) — and is recorded **unconfirmed**. Then **clear the _local_ branch:** `git fetch origin main --prune && git switch --detach origin/main && git branch -D <branch>`. Auto-delete only removes the **remote** branch; the local one lingers. You can't `git checkout main` (a sibling workspace owns it) and `git branch -d` refuses a squash-merged branch — so **detach to fresh `origin/main`** (which is also step 1's start state) and force-delete. Between lanes your workspace rests detached at `origin/main`, not on a stale branch. `lane resolve` prints this line for you.
 
 **Hard rules:** never merge with a merge-commit or rebase-merge (disabled anyway); never `git push --force` (use `--force-with-lease`); never merge past a red `gates` run. Auto-delete clears the **remote** branch; you still clear the **local** one (step 6) — `git branch -d` won't (squash-merge isn't an ancestor), so use `-D` once the PR is merged. The `gates` check runs `build → typecheck → test → coverage → format:check → change-adr:check`. The `review` workflow ([ADR 180](docs/decisions/180-review-after-bugbot.md)) posts advisory findings on PRs touching `packages/protocol/src` or `packages/server/src`; read them, but they are not a gate and never block a merge.
 
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
+
 ## Your musterd team
 
-**revive** Team. Member identity is Workspace-local: trust MCP instructions/occupancy or `musterd whoami`. If unwired, repair or ask; never claim from this file. musterd is your coordination layer: your teammates — other agents *and* humans — are
+**revive** Team. Member identity is Workspace-local: trust MCP instructions/occupancy or `musterd whoami`. If unwired, repair or ask; never claim from this file. musterd is your coordination layer: your teammates — other agents _and_ humans — are
 reachable through it, and humans on the team are peers, not approvers.
 
 **Your channel.** If this session has the `team_*` tools (the musterd MCP server), they are your
@@ -156,13 +157,13 @@ The loop — `team_*` tool form / `musterd` CLI form:
 - **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox` — on start, when
   you finish a unit of work, and after being heads-down. Directed acts wait there for a reply.
 - **Report status as you work.** `team_send {act:'status_update'}` / `musterd send --act
-  status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
-- **Claim a lane *before* you build — reading the board is not enough.** `lane_claim` / `musterd lane
-  claim` the ONE (`lane_open` if new); **never build in a lane a teammate owns.** Hand off
+status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
+- **Claim a lane _before_ you build — reading the board is not enough.** `lane_claim` / `musterd lane
+claim` the ONE (`lane_open` if new); **never build in a lane a teammate owns.** Hand off
   with `team_send {act:'handoff'}`; after merge `lane_submit`, then **do what its reply says** (ADR 235).
 - **Ask a human before you act big or stall.** For a costly / irreversible / out-of-scope action, or
   when only a human can unblock you: `team_send {act:'ask'}` / `musterd send --act ask` (`meta.species`
-  + `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
+  - `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
 
 Invoke the tools/commands for real and use what they return — never write down an imagined inbox or
 reply. Keep messages short: use the acts, do not narrate in free text. **The daemon refreshes itself
@@ -172,6 +173,7 @@ reply. Keep messages short: use the acts, do not narrate in free text. **The dae
 polling, daemon refresh, or recovering from an error — read the **musterd skill**
 (`.claude/skills/musterd/SKILL.md`, `.cursor/rules/musterd.mdc`, or `.musterd/skill/SKILL.md`) or run
 `musterd help` for the full command reference.
+
 <!-- musterd:end -->
 
 ## Your role's skill (outside the managed block — survives a `musterd init` refresh)
