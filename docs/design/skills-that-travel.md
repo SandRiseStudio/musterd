@@ -449,6 +449,27 @@ accusation with a percentage on it. And **a clean run refuses to say the team is
 five named shapes did not appear in N acts, and that the window is yours to justify. Eight falsifier
 rows exercised.
 
+*S8 shipped 2026-09-21 (dolly, lane `01M32K9W6Z`) — the last single, and the §6 catalogue is
+complete bar S2:* `capture-rough-explore-once`. Ships the two-things-only capture rule, the four
+deliberate cuts with their reasons, one-explorer / one-question / submitter-only-answers, the single
+exhaustive brief and its two terminal ends, plus `seed.py`.
+
+**The determinism is the mechanism, not a style choice.** Same body, same title, every time, with no
+model in the loop — which is what makes the absence of judgement *checkable* rather than promised.
+`seed.py check` refuses a hand-written title by showing got-vs-want, because **a title somebody
+chose is the first interpretation and it is the one that sticks**: it is what everyone reads on the
+board afterwards, usually without opening the body.
+
+The duplicate-detection cut gets its own paragraph in the skill, since it is the one that feels most
+obviously useful: an automatic "similar to #412" is a claim that this idea is that idea, made by
+something that read eighty characters — right, and someone would have noticed in a moment; wrong,
+and it has pre-closed the idea under a label that now looks considered.
+
+Fourteen refusals and five must-NOT-fire cases exercised. Both doorway limits are stated in the
+body rather than only in the footer: a script in a repo cannot receive an idea at midnight with the
+laptop shut, and the checker sees a seed that RECORDED two explorers without being able to stop the
+second from starting.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
