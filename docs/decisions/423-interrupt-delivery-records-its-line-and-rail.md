@@ -107,6 +107,15 @@ Two fields are missing from a row that has everything else.
 - The doorbell contract's clause-1 table can cite a delivery row per rail, for every harness, back
   to 2026-07-06 for everything but the rail field itself. Rows written before this change carry no
   `rail`; absence there means "not recorded", not "no rail".
+- **2026-09-21 — absence is written as `null`, not omitted** (lane 01M32G1MAVT9KCYJB40ZK0N2TJ). As
+  first landed, a caller that declared no rail (no hook running, or a value `HarnessIdSchema`
+  rejected) produced a `detail` with no `rail` key at all — indistinguishable from the 253 pre-423
+  rows above, which is exactly the distinction the bullet above relies on. Corrected on izzo's
+  challenge: the handler now always emits the key, `null` when there is nothing to record. So a
+  missing `rail` key means "this daemon predates the field", and `rail: null` means "recorded, and
+  the caller declared none" — decision 2's "absent also means absent" is now provable per row rather
+  than only true of the pre-423 baseline. Falsifier: any `interrupt.raised` row written after this
+  change whose `detail` has no `rail` key.
 - `interrupt.raised` still dedupes per (recipient, act), so **repeat rings of the same act are
   invisible** — the row answers "was it delivered", never "how many times did it ring". Unchanged by
   this ADR and recorded here so the next reader does not mistake one row for one ring.
@@ -121,11 +130,12 @@ Two fields are missing from a row that has everything else.
 
 ## Observability & Evaluation
 
-- **Traces:** `interrupt.raised` gains `line` and (when declared) `rail` in its existing `detail`.
-  No new span, no new table, no wire change to the response.
+- **Traces:** `interrupt.raised` gains `line` and `rail` in its existing `detail` — `rail` always
+  present, `null` when the caller declared none (see the 2026-09-21 consequence). No new span, no
+  new table, no wire change to the response.
 - **Eval:** the falsifier is a query, which is the point — for a window in which a harness is known
-  to have been hooked, every `interrupt.raised` row for its seats carries a `rail` and a non-empty
-  `line`. Fixed means a doorbell eval for that harness reads the row instead of racing its own
+  to have been hooked, every `interrupt.raised` row for its seats carries a non-null `rail` and a
+  non-empty `line`. Fixed means a doorbell eval for that harness reads the row instead of racing its own
   PostToolUse hook for the act. Baseline: 253 rows, 0 with a rail, 0 with a line.
 - **Experiment:** none. The open question this cannot answer — whether the harness actually
   *surfaced* the line it was handed — needs the harness's own transcript, and no daemon-side record
