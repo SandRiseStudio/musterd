@@ -4375,7 +4375,7 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(detail.rail).toBe('claude-code');
   });
 
-  it('ADR 423: an unparseable rail is recorded as absent, never echoed into the audit log', async () => {
+  it('ADR 423: an unparseable rail is recorded as explicitly null, never echoed into the audit log', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
@@ -4395,11 +4395,37 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(raised.json.raised).toBe(true);
 
     const audit = auditRows('dawn').filter((r) => r.action === 'interrupt.raised');
-    const detail = JSON.parse(audit[0]!.detail as string) as { line?: string; rail?: string };
-    expect(detail.rail).toBeUndefined();
+    const detail = JSON.parse(audit[0]!.detail as string) as {
+      line?: string;
+      rail?: string | null;
+    };
+    // Absence is written, not omitted: the key is present and null, so a reader can tell this
+    // caller declared no usable rail from a pre-423 row that never carried the field at all.
+    expect(detail.rail).toBeNull();
+    expect('rail' in detail).toBe(true);
     expect(audit[0]!.detail).not.toContain('script');
     // The delivery itself is unaffected — a bad rail label must never cost the seat its bell.
     expect(detail.line).toBe(raised.json.line);
+  });
+
+  it('ADR 423: a probe run outside a hook records rail: null — the key is written, so "declared none" is not a pre-423 row', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+
+    await post('/teams/dawn/messages', { envelope: urgentEnv('nick', 'Bob', 'u-norail') }, nickTok);
+
+    // No `?rail=` at all: the CLI omits it when the probe was not run from a hook.
+    const raised = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(raised.json.raised).toBe(true);
+
+    const audit = auditRows('dawn').filter((r) => r.action === 'interrupt.raised');
+    const detail = JSON.parse(audit[0]!.detail as string) as { rail?: string | null };
+    expect('rail' in detail).toBe(true);
+    expect(detail.rail).toBeNull();
   });
 
   it('interrupt line (lane 01M2P69FHZ): names the act id and a by-id read, so the follow-up is one call at any inbox size', async () => {

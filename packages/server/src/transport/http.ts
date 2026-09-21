@@ -5735,9 +5735,14 @@ export async function handleHttp(
         // harness. Parsed through the protocol schema at the boundary (AGENTS.md rule 4): this is
         // caller-supplied text landing in a durable log, so an unparseable value is recorded as
         // ABSENT rather than echoed — and never costs the seat its bell.
+        //
+        // Absence is written as `null`, never omitted: an omitted field cannot separate a row from a
+        // pre-423 daemon that recorded no rail at all from a post-423 row whose caller genuinely
+        // declared none (no hook, or a value HarnessIdSchema rejected). `null` says recorded, and
+        // there was none; a missing key says this daemon predates the field.
         const railRaw = url.searchParams.get('rail');
         const railParsed = railRaw === null ? null : HarnessIdSchema.safeParse(railRaw);
-        const rail = railParsed?.success === true ? railParsed.data : undefined;
+        const rail = railParsed?.success === true ? railParsed.data : null;
         // Audit the delivery once per (recipient, act) — who grabbed the mic, when, at whom (§Obs).
         if (!hasInterruptRaised(ctx.db, team.id, member.name, latest.id)) {
           appendAudit(ctx.db, team.id, {
@@ -5751,7 +5756,7 @@ export async function handleHttp(
               tier: raiseClass(latest, huddleTopic),
               count: pending.length,
               line,
-              ...(rail === undefined ? {} : { rail }),
+              rail,
             },
           });
         }
