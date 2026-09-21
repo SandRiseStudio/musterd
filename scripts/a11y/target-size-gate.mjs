@@ -36,6 +36,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { missingRoutesNotice } from './dist-routes.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const arg = (name, fallback) => {
@@ -74,6 +75,16 @@ const MIME = {
 
 if (!existsSync(DIR)) {
   console.error(`target-size-gate — ${DIR} does not exist. Run \`pnpm build\` first.`);
+  process.exit(1);
+}
+
+/* Before a browser is started: a route that is not in this dist would be swept as a 404. This gate
+   would refuse it anyway (a 404 renders one link, not zero, so it can slip past the zero-target
+   check) — but it would refuse it as "DID NOT MEASURE" without saying the route is simply absent,
+   which is the difference between a puzzle and a fix. See dist-routes.mjs. */
+const absent = missingRoutesNotice(DIR, ROUTES, 'target-size-gate');
+if (absent) {
+  console.error(absent);
   process.exit(1);
 }
 

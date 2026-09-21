@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "node --disable-warning=ExperimentalWarning scripts/gen-site-content.ts && vite build",
+    "build": "node --disable-warning=ExperimentalWarning scripts/gen-site-content.ts && vite build && node --disable-warning=ExperimentalWarning scripts/check-prerendered-routes.ts",
     "preview": "vite preview",
     "typecheck": "node --disable-warning=ExperimentalWarning scripts/gen-site-content.ts && tsc --noEmit",
     "stage:site": "node scripts/stage-site.mjs",

@@ -42,11 +42,12 @@
  *     can paint, but a surface nobody seeds is a surface nobody measures.
  */
 import { spawn } from 'node:child_process';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SHARED_BLOCKER_GATES, sharedBlockerNotice } from '../lib/shared-blocker-notice.mjs';
+import { missingRoutesNotice } from './dist-routes.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const arg = (name, fallback) => {
@@ -84,12 +85,39 @@ const PORT = EXPLICIT_PORT ? Number(EXPLICIT_PORT) : 0;
  * surface (ADR 222 limits those to board/live today) and the fixture team leaves a request
  * pending — `/approvals` below reaches its sign-in screen only. See docs/a11y/contrast.md.
  */
+/**
+ * `/blog/<slug>` for the newest post, or nothing at all.
+ *
+ * The blog's post template has its own prose rules, so it is worth measuring — but only when there
+ * is a post to measure it on. With none, the section renders an index and no post pages, and
+ * listing a slug anyway is how this gate came to be sweeping a 404 and calling it clean.
+ * Filenames are `YYYY-MM-DD-<slug>.md` (site-files.ts), so the newest sorts last by name.
+ */
+const newestBlogPost = () => {
+  let files;
+  try {
+    files = readdirSync(join(HERE, '../../packages/web/content/blog'));
+  } catch {
+    return []; /* no directory at all — the normal state of a blog with no posts */
+  }
+  const slugs = files
+    .filter((f) => f.endsWith('.md'))
+    .sort()
+    .map((f) => /^\d{4}-\d{2}-\d{2}-(.+)\.md$/.exec(f)?.[1])
+    .filter(Boolean);
+  const newest = slugs[slugs.length - 1];
+  return newest ? [`/blog/${newest}`] : [];
+};
+
 const ROUTES = arg('routes', '')
   ? arg('routes', '').split(',')
   : [
       '/',
       // The ADR 302 public routes — one representative per template (Prose.css carries the rest).
-      '/roadmap',
+      // NO /roadmap: it stopped being a route on 2026-07-28 and sat in this list until 2026-09-21,
+      // sweeping the static server's 404 page and reporting `✓ /roadmap — 1 measured` every run
+      // (lane 01M32QTVN). The preflight below is what makes that shape impossible rather than
+      // merely fixed.
       '/docs',
       '/docs/getting-started',
       // /docs/spec is NOT a redundant second prose page: it is the only route with tables, so the
@@ -99,7 +127,14 @@ const ROUTES = arg('routes', '')
       // listed route renders.
       '/docs/spec',
       '/blog',
-      '/blog/launch',
+      /* The newest POST, derived — never a hardcoded slug. `/blog/launch` sat here until
+         2026-09-21 with no post behind it (the blog has none today, and `content/blog` does not
+         even exist — git does not track an empty directory), so this gate swept the static
+         server's 404 for it on every run and reported a ✓, exactly as it did for `/roadmap`.
+         Found by the dist preflight added in the same change, which is the point of a preflight.
+         Deriving it also means a gate that keeps measuring the post template the day a post is
+         published, without anyone remembering to edit this list. */
+      ...newestBlogPost(),
       // /watch has its own stylesheet (WatchPage.css), not Prose.css, so no other listed route
       // paints its colours — the eyebrow on the accent ink, the definition list on the hairline
       // rule, the player's state line. "One representative per template" is exactly why it must be
@@ -113,6 +148,14 @@ const ROUTES = arg('routes', '')
       '/audit',
       '/broadcast',
     ];
+
+/* Before a browser is started: a route that is not in this dist would be swept as a 404 and pass.
+   See dist-routes.mjs — this is a refusal, not a warning, because the failure it prevents is a ✓. */
+const absent = missingRoutesNotice(DIR, CONNECTED_ONLY ? [] : ROUTES, 'contrast-gate');
+if (absent) {
+  console.error(absent);
+  process.exit(1);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',

@@ -1,9 +1,12 @@
 # Roadmap
 
-> **The item list below is generated** from `content/roadmap.data.ts` — the single source of truth,
-> and the same module musterd.io's `/roadmap` page renders at build time. **Edit that file, then run
-> `pnpm roadmap:gen`.** Do not hand-edit between the generated markers; it will be overwritten. The
-> intro and footer here are hand-authored and live outside the markers.
+> **The item list below is generated** from `content/roadmap.data.ts` — the single source of truth.
+> **Edit that file, then run `pnpm roadmap:gen`.** Do not hand-edit between the generated markers;
+> it will be overwritten. The intro and footer here are hand-authored and live outside the markers.
+>
+> This file is the roadmap. There is no `/roadmap` page — that line said there was until
+> 2026-09-21, and the page has not existed since 2026-07-28, when the roadmap was dropped from the
+> web UI. `musterd.io/roadmap` 404s, correctly.
 
 musterd's core is deliberately small: a protocol (`SPEC.md`), a local team server, a human CLI, and a universal MCP adapter — shipped as the `@musterd/*` packages on npm. The schema and wire format already **reserve** the fields the items below need, so each lands as a backward-compatible addition — versioned by an ADR and a SPEC minor, never a break for existing clients. The current protocol version lives in `SPEC.md`.
 

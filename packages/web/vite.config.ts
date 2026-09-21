@@ -63,8 +63,10 @@ function buildStamp(id: string): Plugin {
   };
 }
 
-// The roadmap page is content, not an app: we prerender `/` to static HTML so the
+// The public pages are content, not an app: we prerender them to static HTML so the
 // build output can be served by any static host (and, later, by @musterd/server).
+// (This said "The roadmap page is content" until 2026-09-21 — a leftover from when the landing
+// page's centrepiece was the roadmap map, dropped from the web UI 2026-07-28.)
 // TanStack Start stays underneath so the future stateful dashboard adds routes without a
 // framework change. This Start version doesn't inject a React plugin, so we add @vitejs/plugin-react
 // ourselves (required for the dev-mode React Refresh runtime).
@@ -111,8 +113,16 @@ export default defineConfig(({ command }) => {
       // crawl's own localhost server into a failed build. Under machine load (a live stream encode,
       // 2026-07-24) that killed `service refresh` mid-flight — and a transient build failure also
       // strands the auto-refresher, whose debounce skips the failed tip until the NEXT commit lands.
-      // Three retries a second apart absorb a busy machine; a page that fails four times is a real
-      // bug and still fails the build (failOnError stays default-true).
+      // Three retries a second apart absorb a busy machine.
+      //
+      // THE REST OF THAT COMMENT USED TO SAY "a page that fails four times is a real bug and still
+      // fails the build (failOnError stays default-true)", AND IT WAS FALSE. Measured 2026-09-21 on
+      // 16b7d63d: `pnpm -r build` exited 0 with FIVE routes absent from dist/client (/approvals,
+      // /audit, /board, /roadmap, /character-sheet), and a clean serial build exited 0 with
+      // /roadmap absent. The count tracks machine load; the swallowing is deterministic. So the
+      // guarantee is enforced HERE instead, after the build, by scripts/check-prerendered-routes.ts
+      // — which asserts against the route tree rather than this page list, because four of those
+      // five were crawlLinks-discovered and a page list would not have missed them loudly.
       prerender: { enabled: true, crawlLinks: true, retryCount: 3, retryDelay: 1000 },
       // The ADR 302 public set's static roots; the slug pages (/docs/<slug>, /blog/<slug>) are
       // discovered by crawlLinks from exactly the index pages' <a> lists. /blog is a root only
@@ -120,7 +130,12 @@ export default defineConfig(({ command }) => {
       // than serving an empty index that the nav and sitemap have already stopped pointing at.
       pages: [
         { path: '/' },
-        { path: '/roadmap' },
+        // NO /roadmap. It was listed here until 2026-09-21 and has not been a route since
+        // 2026-07-28, when the roadmap was dropped from the web UI (src/content/site.ts). Every
+        // build since crawled it, errored, retried three times and dropped it — noise that looked
+        // like a flake — while musterd.io/roadmap 404s, correctly. AGENTS.md and ROADMAP.md
+        // claimed this page rendered content/roadmap.data.ts at build time; corrected in the same
+        // commit. ROADMAP.md is the artifact; there is no page.
         { path: '/docs' },
         ...(blogEntries().length > 0 ? [{ path: '/blog' }] : []),
       ],
