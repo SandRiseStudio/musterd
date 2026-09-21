@@ -1,0 +1,5 @@
+{"id": 1, "observed_model": "opus-5", "attested": true}
+{"id": 2, "observed_model": "grok-4.6", "attested": true}
+{"id": 3, "observed_model": "unknown", "attested": "unknown"}
+{"id": 4, "observed_model": "gpt-5.6", "attested": false}
+{"id": 5, "observed_model": "opus-5"}
