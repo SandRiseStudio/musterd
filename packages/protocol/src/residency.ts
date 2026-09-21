@@ -350,7 +350,13 @@ export const WakeContextBodySchema = z
   .strict();
 export type WakeContextBody = z.infer<typeof WakeContextBodySchema>;
 
-export const WAKE_CONTEXT_OPEN_KINDS = ['ask', 'request_help', 'review', 'handoff', 'lane'] as const;
+export const WAKE_CONTEXT_OPEN_KINDS = [
+  'ask',
+  'request_help',
+  'review',
+  'handoff',
+  'lane',
+] as const;
 export const WakeContextOpenItemSchema = z
   .object({
     kind: z.enum(WAKE_CONTEXT_OPEN_KINDS),
@@ -466,7 +472,11 @@ export const WakeContextPacketSchema = z
       });
     }
     if (value.version === 2 && (value.context === undefined || value.budget === undefined)) {
-      ctx.addIssue({ code: 'custom', message: 'v2 requires context and budget', path: ['version'] });
+      ctx.addIssue({
+        code: 'custom',
+        message: 'v2 requires context and budget',
+        path: ['version'],
+      });
     }
     if (value.version === 1 && (value.context !== undefined || value.budget !== undefined)) {
       ctx.addIssue({ code: 'custom', message: 'v1 carries no context block', path: ['version'] });

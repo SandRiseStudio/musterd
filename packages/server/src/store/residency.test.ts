@@ -282,6 +282,11 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
     // left the woken model to guess one — measured 2026-09-16, a native wake's first call was
     // `team_wake_context {act_id: "latest"}` → `forbidden wake context target`.
     expect(order.composed_line).toContain('team_wake_context {act_id: "u1"}');
+    // ADR 430 §7: the packet is the orientation; the inbox ritual is no longer prescribed.
+    expect(order.composed_line).toMatch(
+      /Read `team_wake_context \{act_id: "u1"\}` — it carries the thread, what else is open, and your memory\. Fetch more only for what it lists under `fetch`\. Then act\./,
+    );
+    expect(order.composed_line).not.toContain('read it via team_inbox_check');
     expect(order.expires_at).toBeGreaterThan(Date.now());
 
     // The lease decision is audited (actor null — a machine decision).

@@ -743,13 +743,16 @@ function composeWakeLine(
   sender: string,
   actId?: string,
 ): string {
-  const orient =
+  // ADR 430 §7: the packet IS the orientation. Still ids only — sender, act, act id — no body
+  // text (ADR 088 §4).
+  const read =
     actId !== undefined
-      ? `Orient via team_wake_context {act_id: "${actId}"}`
-      : 'Orient via team_wake_context';
+      ? `Read \`team_wake_context {act_id: "${actId}"}\``
+      : 'Read `team_wake_context`';
   return (
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": a ${act} from "${sender}" is ` +
-    `waiting. ${orient}, read it via team_inbox_check (or 'musterd inbox'), and respond.`
+    `waiting. ${read} — it carries the thread, what else is open, and your memory. ` +
+    `Fetch more only for what it lists under \`fetch\`. Then act.`
   );
 }
 

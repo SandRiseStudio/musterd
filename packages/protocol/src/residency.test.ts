@@ -278,7 +278,9 @@ describe('WakeContextPacket v2 (ADR 430)', () => {
       version: 2,
       context: {
         thread: {
-          acts: [{ id: 'a0', from: 'nick', act: 'message', ts: 1, body: 'hello', truncated: false }],
+          acts: [
+            { id: 'a0', from: 'nick', act: 'message', ts: 1, body: 'hello', truncated: false },
+          ],
           omitted: 3,
         },
         open: [{ kind: 'ask', id: 'q1', from: 'izzo', title: 'review #12', age_ms: 5_000 }],
@@ -304,7 +306,10 @@ describe('WakeContextPacket v2 (ADR 430)', () => {
       budget: { limit_bytes: 12_288, used_bytes: 1 },
       context: {
         open: [],
-        thread: { acts: [{ id: 'a0', act: 'message', ts: 1, body: 'x', truncated: false }], omitted: 0 },
+        thread: {
+          acts: [{ id: 'a0', act: 'message', ts: 1, body: 'x', truncated: false }],
+          omitted: 0,
+        },
       },
     };
     expect(WakeContextPacketSchema.safeParse(bad).success).toBe(false);

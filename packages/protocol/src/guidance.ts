@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 27;
+export const GUIDANCE_CONTENT_VERSION = 28;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -266,14 +266,15 @@ export function renderSkillBody(opts: { team: string }): string {
     '`away` holds notifications, `dnd` still passes directed + urgent. `musterd notify` runs a background',
     'nudge that raises an OS notification when a directed act lands while you are away (the human-side loop).',
     '',
-    '## When you were woken (ADR 209)',
+    '## When you were woken (ADR 209 / 430)',
     '',
     'A session the wake actuator started did not choose its own task: something addressed to this seat',
     'is why it is running. **Find out what before you do anything else.** `team_wake_context` returns a',
-    'bounded packet for the one act or lane you were woken for — ids, state, the delivery intent, and',
-    'the named reads worth making. It deliberately carries **no message or memory bodies**: it tells you',
-    'what you were woken *for* and which call fetches the substance, so read the packet, then make the',
-    'reads it names (`team_inbox_check`, `team_memory_read`, `lane_board` — or the branch it points at).',
+    'bounded packet for the one act or lane you were woken for — and it carries the thread you were woken',
+    'for (attributed, the last few acts), everything else open against you, your lane and your own memory,',
+    'under a 12 KiB budget. **The packet is the orientation.** Fetch more only for what it lists under',
+    '`fetch` (`team_inbox_check`, `team_memory_read`, `lane_board`, or the branch it points at). A packet',
+    'that says `version: 1` is an older daemon: then make those reads as before.',
     '',
     '- **Do the thing you were woken for.** A wake naming an act or a lane is work routed to this seat;',
     '  it is not a prompt to survey the board or pick something more interesting.',

@@ -20,8 +20,8 @@ describe('SURFACES (ADR 352)', () => {
   });
 });
 
-describe('FEATURE_EPOCH (governed model authorization, ADR 411)', () => {
-  it('is 21 — an old checkout cannot issue governed launch handoffs', () => {
-    expect(FEATURE_EPOCH).toBe(21);
+describe('FEATURE_EPOCH (wake-context packet v2, ADR 430)', () => {
+  it('is 22 — an old checkout cannot rewrite the woken-session guidance back to the fetch ritual', () => {
+    expect(FEATURE_EPOCH).toBe(22);
   });
 });

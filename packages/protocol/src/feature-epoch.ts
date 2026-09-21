@@ -99,5 +99,8 @@
 // exact command set and dropping that delivery seam during hook refresh.
 // Epoch 21 — ADR 411: governed model authorization protocol and server substrate. Older clients keep
 // the unmanaged/off behavior; they cannot issue or redeem governed launch handoffs.
-export const FEATURE_EPOCH = 21 as const;
+// Epoch 22 — ADR 430: the wake-context packet carries attributed, budgeted bodies and the guidance
+// says the packet IS the orientation. An older checkout must not rewrite the woken-session block
+// back to the fetch ritual during guidance refresh.
+export const FEATURE_EPOCH = 22 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;
