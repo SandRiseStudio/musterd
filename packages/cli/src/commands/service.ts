@@ -2324,8 +2324,35 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
           }
         },
         sendAsk: async (body) => {
+          if (controlProbe) return null;
+          if (!auth) return null; // unprovisioned — OS notify already fired; degrade silently (ADR 232)
+          // The id is minted here, so it is also the THREAD a later discharge closes (ADR 432):
+          // this ask is a root, and a root's thread is its own id. Returned rather than re-read,
+          // because the send's reply is not guaranteed to carry it and a discharge that cannot name
+          // its thread is no discharge at all.
+          const id = ulid();
+          await auth.http.send(
+            auth.team,
+            makeEnvelope({
+              id,
+              team: auth.team,
+              from: GUARDIAN_SEAT,
+              to: { kind: 'team' },
+              act: 'ask',
+              body,
+              meta: { species: 'consult', tier: 'standard' },
+            }),
+          );
+          return id;
+        },
+        // ADR 432: the discharge guardian is actually allowed to send. `accept` is a peer verb and
+        // ADR 232 bars a service seat from those; `resolve` is thread-terminal (ADR 025) and is not
+        // one, so it is how a monitor closes its own raise when the condition it reported clears.
+        // Unprovisioned or probing: no send, and `actOn` keeps the memo so the next live tick
+        // retries rather than forgetting a raise the team never heard closed.
+        sendResolve: async (thread, body) => {
           if (controlProbe) return;
-          if (!auth) return; // unprovisioned — OS notify already fired; degrade silently (ADR 232)
+          if (!auth) throw new Error('unprovisioned — cannot resolve');
           await auth.http.send(
             auth.team,
             makeEnvelope({
@@ -2333,9 +2360,9 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
               team: auth.team,
               from: GUARDIAN_SEAT,
               to: { kind: 'team' },
-              act: 'ask',
+              act: 'resolve',
               body,
-              meta: { species: 'consult', tier: 'standard' },
+              thread,
             }),
           );
         },

@@ -33,6 +33,7 @@ function seed() {
       from?: { id: string; name: string };
       meta?: Record<string, unknown>;
       id?: string;
+      thread?: string;
     } = {},
   ) => {
     const from = opts.from ?? { id: nick.id, name: 'nick' };
@@ -59,7 +60,7 @@ function seed() {
         to: toAda ? { kind: 'member', name: 'Ada' } : { kind: 'team' },
         act,
         body: 'x',
-        thread: null,
+        thread: opts.thread ?? null,
         meta: { ...(required[act] ?? {}), ...(opts.meta ?? {}) },
         ts: 1_000 + seq,
       }),
@@ -210,5 +211,47 @@ describe('isObligationAct — the one list both readers are built from', () => {
       expect(isObligationAct(act, true)).toBe(false);
       expect(isObligationAct(act, false)).toBe(false);
     }
+  });
+});
+
+describe('ADR 432: a resolve on the thread discharges the obligation', () => {
+  it('drops an obligation whose thread carries a resolve — the gap ADR 429 shipped with', () => {
+    // `countOpenLoops` has honoured thread-resolve since ADR 090 and the CLI's `openActionNeeded`
+    // always has; ADR 429's pinned fold did not. So a resolved obligation was excluded from the
+    // open-loops gauge and from the human's banner while STILL being pinned into every bounded
+    // agent read — three readers, two agreeing and the newest one not.
+    const { db, ada, send } = seed();
+    const help = send('request_help', { to: 'team', id: 'the-help' });
+    send('resolve', { to: 'team', thread: 'the-help' });
+    for (let i = 0; i < 20; i++) send('message');
+    expect(bounded(db, ada)).not.toContain(help);
+  });
+
+  it('is how a SERVICE seat discharges its own raise — guardian cannot accept (ADR 232)', () => {
+    // The shape ADR 432 relies on: guardian raises an `ask`, the condition clears, and guardian
+    // closes the thread itself. Nothing accepts, because nothing may.
+    const { db, ada, bo, send } = seed();
+    const incident = send('ask', {
+      to: 'team',
+      id: 'daemon-down',
+      from: { id: bo.id, name: 'Bo' },
+    });
+    for (let i = 0; i < 20; i++) send('message');
+    expect(bounded(db, ada)).toContain(incident);
+
+    const { db: db2, ada: ada2, bo: bo2, send: send2 } = seed();
+    const inc2 = send2('ask', { to: 'team', id: 'daemon-down', from: { id: bo2.id, name: 'Bo' } });
+    send2('resolve', { to: 'team', thread: 'daemon-down', from: { id: bo2.id, name: 'Bo' } });
+    for (let i = 0; i < 20; i++) send2('message');
+    expect(bounded(db2, ada2)).not.toContain(inc2);
+  });
+
+  it('keeps an obligation whose thread carries a resolve for a DIFFERENT thread', () => {
+    const { db, ada, send } = seed();
+    const help = send('request_help', { to: 'team', id: 'still-open' });
+    send('request_help', { to: 'team', id: 'other' });
+    send('resolve', { to: 'team', thread: 'other' });
+    for (let i = 0; i < 20; i++) send('message');
+    expect(bounded(db, ada)).toContain(help);
   });
 });

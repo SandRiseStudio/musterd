@@ -334,6 +334,14 @@ export function listInbox(
     // by an `accept`/`decline` from ANY seat (ADR 254: an eligible set is discharged by whoever
     // answers first) or replied to by this member at all. The app-level half (a closed lane, an act
     // already shown) stays where it is, and the response's id lists are unchanged.
+    //
+    // A `resolve` on the thread closes it too (ADR 025), and ADR 429 shipped without that clause —
+    // a gap found while building ADR 432. `countOpenLoops` above has honoured thread-resolve since
+    // ADR 090 and the CLI's `openActionNeeded` always has, so a resolved obligation was excluded
+    // from the open-loops gauge and from the human's banner while STILL being pinned into every
+    // bounded agent read: three readers, two of them agreeing and the newest one not. It is also
+    // what makes a service seat's own discharge expressible — see ADR 432, where guardian resolves
+    // the thread of an incident whose condition has cleared, being barred from `accept` by ADR 232.
     // The outer table stays UNALIASED so `where` — built above and shared with every other read
     // here — drops in unchanged; the correlated subquery names it `messages.id` explicitly, because
     // an unqualified `id` inside the EXISTS would resolve to the inner alias and silently match
@@ -352,6 +360,12 @@ export function listInbox(
               WHERE r.team_id = messages.team_id
                 AND json_extract(r.meta, '$.in_reply_to') = messages.id
                 AND (r.act IN ('accept','decline') OR r.from_member = ?)
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM messages v
+              WHERE v.team_id = messages.team_id
+                AND v.act = 'resolve'
+                AND v.thread_id = COALESCE(messages.thread_id, messages.id)
            )
          ORDER BY created_at ASC, id ASC
          LIMIT ?`,

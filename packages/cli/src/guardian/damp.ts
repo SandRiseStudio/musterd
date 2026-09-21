@@ -71,6 +71,17 @@ export interface RaiseMemo {
   lastSeenAt: number;
   /** Identical raises withheld since `raisedAt`. Rides the next re-raise so the series is visible. */
   suppressed: number;
+  /**
+   * The act id of the raise that reached the team — what a later discharge closes (ADR 432).
+   *
+   * Guardian cannot `accept` its own ask (ADR 232 bars a service seat from the peer verbs), so the
+   * discharge it CAN express is a `resolve` on the ask's thread (ADR 025), and a resolve must name
+   * the thread it closes. Without the id there is nothing to name. Absent from stamps written
+   * before this existed and from a raise whose send did not report an id — treated as "no thread to
+   * close", which degrades to the pre-432 behaviour (the ask stays owed) rather than to a wrong
+   * close.
+   */
+  actId?: string | null;
 }
 
 export interface GuardianStamp {
@@ -137,6 +148,25 @@ export function saveStamp(path: string, s: GuardianStamp): void {
   writeFileSync(path, JSON.stringify(s, null, 1));
 }
 
+/**
+ * Forget the open raise for a class whose condition has cleared (ADR 432).
+ *
+ * The inverse of {@link recordRaise}, and the half that never existed. Guardian is a `service` seat
+ * and ADR 232 bars it from the peer verbs, so it can raise an obligation and can never accept one —
+ * not even its own. The only actor that knows the condition cleared is the one actor the protocol
+ * forbids from saying so, which is why 55 `daemon_down`/`daemon_wedged` asks sat unanswered on the
+ * hub daemon on 2026-09-21, 30 of them from August.
+ *
+ * Dropping the memo also un-damps the class: a recurrence after a recovery is NEWS, not a repeat,
+ * and must not be withheld against a reason nobody is still owed.
+ */
+export function clearRaise(s: GuardianStamp, cls: GuardianClass): GuardianStamp {
+  if (s.lastRaise[cls] === undefined) return s;
+  const lastRaise = { ...s.lastRaise };
+  delete lastRaise[cls];
+  return { ...s, lastRaise };
+}
+
 export function shouldAttempt(s: GuardianStamp, cls: GuardianClass, now: number): boolean {
   const last = s.lastAttemptAt[cls];
   return last === undefined || now - last >= ATTEMPT_WINDOW_MS;
@@ -175,10 +205,16 @@ export function recordRaise(
   cls: GuardianClass,
   reason: string,
   now: number,
+  /** The act id the raise landed as, when the send reported one (ADR 432) — the thread a later
+   *  discharge closes. Optional so every existing caller and older stamp still type and read. */
+  actId?: string | null,
 ): GuardianStamp {
   return {
     ...s,
-    lastRaise: { ...s.lastRaise, [cls]: { reason, raisedAt: now, lastSeenAt: now, suppressed: 0 } },
+    lastRaise: {
+      ...s.lastRaise,
+      [cls]: { reason, raisedAt: now, lastSeenAt: now, suppressed: 0, actId: actId ?? null },
+    },
   };
 }
 
