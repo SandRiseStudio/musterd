@@ -209,6 +209,19 @@ because they aged `revisit_by` while leaving `opened` at today so the schema rul
 A1 was never reached. Written into the skill as its own section — when a rule does not fire, the
 fixture is the likelier culprit, and from the outside the two are indistinguishable.
 
+*B1 increment 4 shipped 2026-09-21 (dolly, same lane) — B1 complete:* `claims-ledger`, ADR 294 as
+a standalone instrument. `claims.py` validates the entry schema and ships `--cut`, which prints
+**counts and never a percentage**, with the denominator caveat attached to every run — decision 4's
+"no bare rates, ever" made structural rather than cultural. Fifteen refusals and five
+must-NOT-fire cases exercised; every row fired first time, and the skill says why rather than
+claiming improvement (this schema has one cross-field ordering rule, where increment 3's had a rule
+that shadowed the one under test). **One correction to the row as written:** §6.1 B1 cites
+`scripts/check-claims.ts` as a source, and that script is the ADR 320 naming-claim gate — it has
+nothing to do with the ledger and belongs to **B4**'s row, which already names it correctly ("a
+claims gate that strips mentions before matching"). The ledger has 27 entries and had **no**
+validator, so `claims.py` is new work rather than a port; B1's cost line was estimated on the
+assumption that one existed.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
