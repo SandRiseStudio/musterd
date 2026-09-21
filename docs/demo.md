@@ -296,13 +296,26 @@ musterd report
 
 **SEE** Steering latency, who waited on whom, what went unanswered.
 
-**SAY** "The number we sell is this one. In a controlled run, two teams of the same agents built
-the same feature to the same 100% correctness. Uncoordinated, 72% of the code they produced was
-wasted. On musterd, under 2% — about 38 times less (`docs/wiki/cookoff.md`; design in ADR 122/123).
-The honest denominator: a single strong agent alone beat both on cost and wall-clock, and the
-coordinated team burned about eight times the solo agent's tokens. We do not sell against solo.
-We sell against the thing you are already running — several agents at once — because the moment
-you have a second agent, this is the tax you are paying."
+**SAY** "We ran this as a controlled experiment: two teams of the same agents, the same feature,
+the same 100% correctness at the end, and we measured how much of the code each one threw away.
+The coordinated team threw away dramatically less. I am not going to quote you the multiplier,
+because that measurement is from July and the build under it is about a thousand commits old — the
+re-run is pending and the number goes back in the pitch when it lands, not before. Ask me after
+and I will show you the table with its date on it (`docs/wiki/cookoff.md`; design in ADR 122/123).
+The honest denominator I will give you now: a single strong agent alone beat both on cost and
+wall-clock, and the coordinated team burned about eight times the solo agent's tokens. We do not
+sell against solo. We sell against the thing you are already running — several agents at once —
+because the moment you have a second agent, this is the tax you are paying."
+
+<!-- THE MULTIPLIER IS GATED, AND SAYING IT IN A ROOM IS THE ONE USE THAT CANNOT BE CORRECTED.
+     `security-position.md` §6.5: the 38x refresh (lane 01M1VDRC6BAG) "gates any use of that
+     number in outbound copy… The figure returns when the re-run lands, not before." §3.11 reads
+     more permissively — date + denominator + cost side — and the two clauses disagree; nick chose
+     the stricter reading on 2026-09-21, which is the one the CFP abstract already shipped under.
+     The cost side stays, because it is not the gated figure and it is the half a hostile room
+     tests. Restoring the multiplier is a one-line edit once the re-run lands — do not restore it
+     before. -->
+
 
 ### 5:30 — What would prove us wrong
 
@@ -374,10 +387,20 @@ sandbox and your host still do that."
 **SEE** The board: two owners, two scopes. If a scope overlaps, the warning fires — read it aloud.
 
 **SAY** "The moment you run a second agent on one repo, the waste starts. On our own team, before
-this, about 37% of the code produced was thrown away — two agents writing the same diff, or one
-undoing the other. Research puts about 79% of multi-agent failures at coordination, not
-capability. The fix is not a smarter model. It is one owner per unit of work, declared before the
-first keystroke."
+lanes, about 37% of the code produced was thrown away — two agents writing the same diff, or one
+undoing the other. That is our own 2026 dogfood, not a survey. The paper everyone cites here is
+MAST, and it puts most multi-agent failures at coordination rather than capability — it is a
+taxonomy over other people's systems, not a measurement of us, and it says nothing about safety.
+The fix is not a smarter model. It is one owner per unit of work, declared before the first
+keystroke."
+
+<!-- The MAST sentence is scoped, and stays scoped. The bare "about 79%" was cut here on
+     2026-09-21 to match what #1577 landed in `docs/launch-post.md` — a taxonomy over other
+     teams' systems is not a measurement of musterd and is not a safety number, which is
+     `docs/brand/leave-behinds/security-position.md` §3 item 12 verbatim. A spoken script is the
+     easiest surface in the world to lose that qualifier on, and the hardest to correct
+     afterwards: nobody can amend a sentence you said to a room. -->
+
 
 ### 0:45 — A question reaches the human (45 s — the centerpiece)
 
@@ -402,10 +425,12 @@ model family when one is on the roster. Then, in the terminal:
 musterd report
 ```
 
-**SAY** "The agent that built it says merged; a different model says this is what we wanted, and
-the record holds what each harness reported — not what the model says about itself. The number: same
-feature, same agents, twice. Uncoordinated, 72% of the code was wasted. On musterd, under 2%. A
-single agent alone is still cheaper — we sell against the second agent, not the first."
+**SAY** "The agent that built it says merged; a different model family says this is what we
+wanted, and the record holds what each harness reported — not what the model says about itself.
+That is two claims, not one. We ran the same feature twice, coordinated and not, and measured the
+code each one threw away — the waste numbers are from July and the re-run is pending, so I will
+show you the table rather than quote you a multiplier. A single agent alone is still cheaper: we
+sell against the second agent, not the first."
 
 ### 1:50 — The ask (10 s)
 
@@ -457,8 +482,10 @@ The §4 table applies. For this cut specifically:
 - **The clock is short and it proceeds before you answer.** "It proceeded and logged the risk" —
   show the outcome on the rail. That is the design.
 - **The laptop dies.** Switch to the stream on a phone; the room sees the same office.
-- **You are at 1:45 and not at the receipt.** Skip `musterd report`; say the 72% → under 2% line
-  and the ask. The centerpiece was the demo.
+- **You are at 1:45 and not at the receipt.** Skip `musterd report`; say the two-claims line — the
+  builder says merged, a different model family says this is what we wanted — and then the ask.
+  Not a waste figure: the running-late path is exactly where a gated number gets said by reflex,
+  so there is no shortcut here that quotes one. The centerpiece was the demo.
 
 ---
 
