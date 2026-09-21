@@ -246,6 +246,33 @@ measurement was taken through `| tail -6`, which returned 0 for every case — B
 that discards the upstream exit code, committed while measuring a skill about instruments that
 lie.
 
+*B3 shipped 2026-09-21 (dolly, lane `01M32JYHEV`) — the last ★ row:* `decision-records`, absorbing
+§3 skill 9 per §6.3, so that row must not also be built. Ships the five lifecycle rules (take a
+number against everything in flight; publish it before writing; `## Decision` frozen on accept with
+dated append-only amendments; name what would tell you it was wrong, or a reasoned `n/a`; a
+promise names its disposition and silence is the one shape refused), the deviation protocol, and
+`adr.py next` / `adr.py check`.
+
+Three things worth carrying. **The rename lesson is sharper than the repo tells it.** Measured on
+git 2.51: rename detection is ON by default, so a plain diff does report the rename — the delete+add
+shape appears under `diff.renames=false`, `--no-renames`, or an older git. So the honest rule is not
+"git reports a rename as delete plus add" but **rename detection is a configurable default, so a
+rule relying on it works on your machine and comes off silently in a repo that turned it off**. The
+script passes `-M` explicitly and was verified to still refuse under `diff.renames=false`. The
+wiki's framing is not wrong about the incident, only about the mechanism; nothing needs correcting
+there, but B3's body states the measured version.
+
+**Two real defects, both found by running it.** `next` matched the `NNN-slug` shape against every
+file in an open PR, and a dated name has that shape — on this repo it answered **2027** instead of
+433. The first fix (scope to the records directory) **passed only by coincidence**, because
+`docs/decisions/` happens to hold no dated files; putting one there brought 2027 straight back. Both
+guards are needed. Written into the skill as the worked example of *a fix verified only against the
+case that produced the bug is a fix verified against one sample*.
+
+**Cross-checked against the reference implementation:** `adr.py next` and `pnpm adr:next` both
+answer 433 on this repo with its real open PRs. Thirteen falsifier rows exercised against scratch
+git repositories.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
