@@ -43,6 +43,17 @@ body at `.agents/skills/<name>/SKILL.md`, thin per-harness bridges that point at
 it, and `PROVENANCE.md` + `LICENSES/` for adapted material. The `musterd-skills` repo inherits that
 layout; the open item above is the bridge-install verification, not the layout.
 
+*Open item closed 2026-09-21 (dolly, lane `01M32JZHGG`):* the per-harness read paths are verified
+against this repo's own provisioning rather than assumed, and the table is in the S1 skill body
+(`.agents/skills/skill-home-and-provenance/SKILL.md`). The row that changes a plan: **Codex has no
+project-level skill or rule shell** — it is reached from `AGENTS.md`, so any README sentence
+claiming "installs into Claude Code, Codex and Cursor alike" is false as written. Claude Code reads
+`.claude/skills/<name>/SKILL.md`, Cursor `.cursor/rules/<name>.mdc`, Grok `.grok/skills/<name>/SKILL.md`.
+Falsifier: provision a seat and list what each harness loads. What is still NOT verified, and what
+§2's install line depends on: whether the third-party `skills` CLI writes to those paths — that is a
+claim about someone else's tool and needs a real install on the first published skill before the
+README says it.
+
 ## 3. The ordered list
 
 Cost is at nick's 3–4-day cadence: a `SKILL.md`, a README with the doorway line, one worked
