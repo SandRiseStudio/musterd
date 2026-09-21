@@ -344,6 +344,26 @@ otherwise, and its own page is the shortest path to proving it.
 Eleven falsifier rows exercised, including the abstentions: an odd fence count and a run that found
 no blocks both exit 2 with "nothing was checked — that is not a pass", never a cheerful zero.
 
+*S3 shipped 2026-09-21 (dolly, lane `01M32K8ARZ`) — the first single of this batch:* ADR 338 as a
+standalone skill. Ships the classification rule (a finding is REQUIRED only if the spec would have
+demanded it before anyone opened the diff — discovery adds information, not obligation), the four
+categories, the note floor (routes to the board **under the finder's name**; a note with nowhere to
+go is a finding buried politely), the author's symmetric duty, and `finding.py`.
+
+**The bug it shipped with is its own anti-costume rule, from inside.** The example file contained a
+REQUIRED with `probe: "none — reasoned about, not reproduced"` and **passed** — a presence check
+sees a non-empty string, and the string says the evidence does not exist. An assertion satisfied by
+its own negative case (B1 item 6), inside the validator whose one job is refusing that move, on the
+file shipped to demonstrate the rule. Evidence fields now reject negation contents (`none`, `n/a`,
+`tbd`, `—`) and too-short values, **with the two reasons reported separately** because a message
+that misattributes its own reason teaches the wrong repair. The general form is written into the
+skill: *if a field is your evidence, check what it says, not that it is there.*
+
+**Sequencing note for whoever takes §3 skill 2 (`cross-family-review`, lane `01M2PAMQX5`):** §6.3
+lists S3 as a strengthener there, and S3 now ships standalone. It does NOT need folding in — the
+cross-family skill should link it rather than restate it, per one-fact-one-home. 16 refusals and 5
+must-NOT-fire cases exercised.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
