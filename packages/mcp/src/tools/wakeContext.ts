@@ -5,9 +5,8 @@ import type { MusterdClient } from '../client.js';
 import { errorResult, notReadyMessage, textResult } from './format.js';
 
 const DESCRIPTION =
-  'Read your wake context packet for one directed Act or owned Lane: the thread you were woken for, ' +
-  'what else is open against you, your lane, and your memory — attributed and budgeted (ADR 430). ' +
-  'Fetch more only for what it lists under fetch.';
+  'Read your wake context packet for one directed Act or owned Lane: the waking thread, what else ' +
+  'is open, your lane and your memory (ADR 430). Fetch more only for what fetch lists.';
 
 const ago = (ms: number): string =>
   ms < 60_000
