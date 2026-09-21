@@ -9,8 +9,8 @@ import {
   type Envelope,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { undischargedSql } from './discharge.js';
 import { ulid } from 'ulid';
+import { undischargedSql } from './discharge.js';
 import type { MessageRow, MessageVisibility } from './rows.js';
 
 /**
