@@ -222,6 +222,30 @@ claims gate that strips mentions before matching"). The ledger has 27 entries an
 validator, so `claims.py` is new work rather than a port; B1's cost line was estimated on the
 assumption that one existed.
 
+*B2 shipped 2026-09-21 (dolly, lane `01M32JY65H`):* `hooks-that-reach-the-model`. The row's
+central distinction is the skill's opening: **a hook that RAN and a hook whose output the model SAW
+are different facts**, and harnesses answer the first loudly and the second not at all. Ships the
+per-harness reachability table with a falsifier per row, the six house-style rules (fail open; `cd`
+first; a versioned marker so an installer can find and replace its own lines; both JSON dialects in
+one emit; self-gate; keep it short), the two measured traps the row names (the git **common-dir**
+resolution that makes a `git worktree`'s hook file silently unread; neighbouring events disagreeing
+inside one harness), and `canary.py`.
+
+Three things worth carrying. **The table is framed as a worked example, not as current truth** —
+these are other seats' dated measurements on specific harness versions, restated, and the canary is
+how a reader gets their own; claiming the table as live fact would be exactly the shape B1 item 10
+catches. **The canary refuses on positive evidence only**, the S6/`landed.sh` rule now applied to a
+third gate: a sentinel under an unrecognised key is `CANNOT TELL`, never `DID NOT REACH`. **That
+was a real defect the first version shipped with** — unrecognised key, unstructured plain text and
+genuine absence all returned the accusing verdict, three causes on one reading (B1 item 3, inside
+the instrument). Found by running the check against a fixture with a made-up key and noticing the
+verdict was more confident than the evidence. All eight verdicts exercised after the fix.
+
+A second self-inflicted instance, recorded because it is the funnier one: the first exit-code
+measurement was taken through `| tail -6`, which returned 0 for every case — B1 item 2, the pipe
+that discards the upstream exit code, committed while measuring a skill about instruments that
+lie.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
