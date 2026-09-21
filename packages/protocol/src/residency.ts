@@ -554,6 +554,9 @@ export const WakeReportBodySchema = z.object({
   exact_match: WakeExactMatchResultSchema.optional(),
   /** Local transcript size examined by the host; no path or content crosses the boundary. */
   transcript_bytes: HostMeasuredCount.optional(),
+  /** The bytes of that transcript a resume would replay — its user + assistant records — when the
+   *  host weighed it (ADR 427: only a file over the bound is weighed). Absent ⇒ not weighed. */
+  resume_weight_bytes: HostMeasuredCount.optional(),
   /** Local capture age examined by the host; no session identifier crosses the boundary. */
   transcript_age_ms: HostMeasuredCount.optional(),
   /** True ⇒ the host skipped this wake because a live local session already holds the workspace

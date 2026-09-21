@@ -1,4 +1,4 @@
-import { openSync, readSync, statSync, closeSync } from 'node:fs';
+import { openSync, readSync, readFileSync, statSync, closeSync } from 'node:fs';
 
 /**
  * The single place that knows a harness transcript's on-disk shape.
@@ -72,4 +72,45 @@ export function readModelFromTranscript(path: string): string | undefined {
     return model.slice(0, MAX_MODEL_LEN);
   }
   return undefined;
+}
+
+/**
+ * The bytes of a transcript that a `--resume` actually replays: its `user` and `assistant` records.
+ *
+ * Everything else in the file — `attachment` lines (the harness's snapshot of its own system
+ * prompt, tool-schema and MCP-instruction deltas, skill listings), hook records, cost and queue
+ * bookkeeping — is written to the transcript but never re-read into the model's context on resume.
+ * Measured 2026-09-21 (ADR 427): 45% of a wake life's file is those lines, so a 284 KiB file is a
+ * 47k-token conversation. The ADR 131 §5 hygiene bound is a *cost* crossover on what a resume
+ * re-ingests, which is this number, not `stat().size`.
+ *
+ * Returns `undefined` when the file cannot be read or parsed at all — the caller falls back to the
+ * file size, which is the conservative direction (it refuses a resume, never grants one on a guess).
+ * A single unparseable line (a truncated tail mid-write) is skipped, not fatal, exactly as in
+ * {@link readModelFromTranscript}. `isMeta` records are counted as conversation: they ride the
+ * message array on resume even though the harness synthesised them.
+ */
+export function resumeWeightBytes(path: string): number | undefined {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return undefined;
+  }
+  let bytes = 0;
+  let parsedAny = false;
+  for (const line of raw.split('\n')) {
+    if (line === '') continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (typeof parsed !== 'object' || parsed === null) continue;
+    parsedAny = true;
+    const type = (parsed as Record<string, unknown>)['type'];
+    if (type === 'user' || type === 'assistant') bytes += Buffer.byteLength(line, 'utf8');
+  }
+  return parsedAny || raw === '' ? bytes : undefined;
 }

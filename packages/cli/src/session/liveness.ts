@@ -49,6 +49,9 @@ export interface EnumeratedJudgement {
   state: LocalSessionState;
   /** The newest transcript's session id — not whatever wrote the slot. */
   id?: string;
+  /** Its on-disk path, so the resume ladder can weigh the conversation (ADR 427) and not only
+   *  read the file size the scan already paid for. */
+  path?: string;
   mtime?: number;
   bytes?: number;
   /** How many sessions the harness actually has here. The slot can only ever describe one. */
@@ -94,7 +97,13 @@ function enumeratedLiveness(
   if (files === undefined) return undefined;
   const newest = files[0];
   if (!newest) return { state: 'none', count: 0 };
-  const base = { id: newest.id, mtime: newest.mtime, bytes: newest.bytes, count: files.length };
+  const base = {
+    id: newest.id,
+    path: newest.path,
+    mtime: newest.mtime,
+    bytes: newest.bytes,
+    count: files.length,
+  };
   // Liveness is ANY session still being written, not merely the newest — a workspace with a live
   // session and a newer dead one is exactly the case the slot gets wrong.
   if (files.some((f) => now - f.mtime < LOCAL_SESSION_LIVE_MS)) return { state: 'live', ...base };

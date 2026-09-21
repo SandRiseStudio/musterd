@@ -170,6 +170,20 @@ describe('portable wake context (ADR 209)', () => {
     expect(parsed.cost_usd).toBe(1.3093);
   });
 
+  it('carries resume_weight_bytes beside transcript_bytes, and only when sent (ADR 427)', () => {
+    const weighed = WakeReportBodySchema.parse({
+      lease_id: 'L1',
+      occupied: true,
+      transcript_bytes: 290_304,
+      resume_weight_bytes: 96_256,
+    });
+    expect(weighed.resume_weight_bytes).toBe(96_256);
+    expect(
+      WakeReportBodySchema.parse({ lease_id: 'L1', occupied: true, transcript_bytes: 4_096 })
+        .resume_weight_bytes,
+    ).toBeUndefined();
+  });
+
   it('rounds a fractional transcript_bytes rather than dropping the report', () => {
     expect(
       WakeReportBodySchema.parse({ lease_id: 'L1', occupied: true, transcript_bytes: 262_144.5 })

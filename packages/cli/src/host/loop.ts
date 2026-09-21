@@ -443,6 +443,9 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
               ...(actuation.outcome.transcript_bytes !== undefined
                 ? { transcript_bytes: actuation.outcome.transcript_bytes }
                 : {}),
+              ...(actuation.outcome.resume_weight_bytes !== undefined
+                ? { resume_weight_bytes: actuation.outcome.resume_weight_bytes }
+                : {}),
               ...(actuation.outcome.transcript_age_ms !== undefined
                 ? { transcript_age_ms: actuation.outcome.transcript_age_ms }
                 : {}),

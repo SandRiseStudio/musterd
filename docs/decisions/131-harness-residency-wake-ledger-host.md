@@ -165,6 +165,11 @@ carries a hygiene clause: the host prefers resume for continuity but rolls over 
 session when the transcript is bloated or stale — the cost bound and the compaction escape hatch
 are the same clause. Fork-on-wake is a deferred per-seat knob.
 
+_2026-09-21 ([ADR 427](427-resume-bound-gates-on-message-bytes.md), lane 01M32FGSXK): the bound is
+judged on the transcript's `user`+`assistant` record bytes — what a resume replays — not on
+`stat().size`; a Claude Code transcript is 45% attachment metadata the model never re-reads, so a
+284 KiB file was a 47k-token conversation the ladder refused. The 256 KiB number is unchanged._
+
 **The local-session guard** (amended 2026-07-13, from the first measured wake; owner-endorsed):
 **roster-offline ≠ workspace-idle.** The daemon leases on the presence it can see — and a daemon
 bounce once dropped a seat's WebSocket so the roster honestly read `offline · wakeable` while a
