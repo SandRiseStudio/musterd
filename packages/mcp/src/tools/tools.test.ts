@@ -782,7 +782,9 @@ describe('team_inbox_check handler', () => {
         team: 'dawn',
         from: 'nick',
         to: { kind: 'team' },
-        act: 'status_update',
+        // A plain @team message: the one broadcast shape the tail still owes in full (ADR 433 folds
+        // a `status_update` to a line, which is a different path from the digest under test here).
+        act: 'message',
         body: `body of ${id}`,
         ts,
       });
@@ -799,7 +801,7 @@ describe('team_inbox_check handler', () => {
     expect(text(r)).toContain('ℹ 70 older unread digested below and marked read');
     expect(text(r)).not.toContain('older unread not shown');
     expect(text(r)).toContain('— 70 older unread, now read (oldest first) —');
-    expect(text(r)).toContain('· nick [status_update] → @team: body of n0 (id=n0)');
+    expect(text(r)).toContain('· nick [message] → @team: body of n0 (id=n0)');
     expect(text(r)).not.toContain('Nothing was marked read');
     // Everything was rendered in one form or the other, so the cursor goes to the newest.
     expect(markRead).toHaveBeenCalledWith('n119');
