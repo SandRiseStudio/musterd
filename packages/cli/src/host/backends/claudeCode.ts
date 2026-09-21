@@ -698,9 +698,17 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       // `exact_match` rides EVERY outcome this wake can produce, and is deliberately outside the
       // `deliveryTracked` gate: it is the axis ADR 210's Eval splits eligible wakes on, so an
       // eligible wake that ended fresh has to say WHY. Absent ⇒ the wake was never eligible.
-      // ADR 427: the conversation weight the hygiene rung judged, when it read one. Set once the
-      // rung has run; `deliveryMetadata` is only ever called after that.
-      let judgedWeight: number | undefined;
+      // Absent is legacy: mixed daemon/host versions retain the existing resume ladder. An explicit
+      // portable/fresh order bypasses every transcript read decision and spawns fresh immediately.
+      const wantsResume = spec.order.intended_delivery !== 'fresh';
+      // The resume decision itself (increment 4) — taken here so the ADR 427 conversation weight it
+      // judged can ride `deliveryMetadata` on every outcome; the branch on it is below.
+      const rung = exactEligible
+        ? exact
+        : wantsResume
+          ? resumeLadder(deps, liveness, bound)
+          : { skip: null as string | null };
+      const judgedWeight = 'weight' in rung ? rung.weight : undefined;
       const deliveryMetadata = () => ({
         ...('result' in exact ? { exact_match: exact.result } : {}),
         ...(!deliveryTracked
@@ -722,18 +730,9 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
                 : {}),
             }),
       });
-      // Absent is legacy: mixed daemon/host versions retain the existing resume ladder. An explicit
-      // portable/fresh order bypasses every transcript read decision and spawns fresh immediately.
-      const wantsResume = spec.order.intended_delivery !== 'fresh';
       let resumeAttempted = false;
 
       // ── The resume upgrade (increment 4) ──────────────────────────────────────────────────
-      const rung = exactEligible
-        ? exact
-        : wantsResume
-          ? resumeLadder(deps, liveness, bound)
-          : { skip: null as string | null };
-      judgedWeight = 'weight' in rung ? rung.weight : undefined;
       if (exactEligible && 'skip' in rung) {
         if (rung.skip)
           ctx.log(`exact-match resume skipped for ${seat}: ${rung.skip} — fresh spawn`);
