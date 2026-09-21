@@ -102,3 +102,19 @@ Two limits on this datum, stated so nobody over-reads it. It is **one seat**, no
 ~~Open as of 2026-09-19 morning.~~ DECIDED 2026-09-19 by nick: both. The label half is [ADR 424](../decisions/424-resumable-label-honest.md) — the daemon withdraws the roster's `resumable_at` once a `residency.woke` row newer than the capture says `session: fresh`, and the next capture or a resumed wake re-arms it; no renderer or protocol field changes. The life-size half is lane 01M2XD2WCE, unowned. Falsify the label fix: `musterd status` on an enrolled seat whose last woke row is `fresh` must not print `resumable`.
 
 Either the roster stops saying `resumable` while the effective policy cannot honour it (the host already reports `transcript_bytes` on every wake report, so the daemon can know), or a lane goes after the life size — attachments and musterd's own tool-result volume — which is the only path that makes resume real again. Both are ADR-gated: the first changes a label ADR 131 defines, the second changes what the harness injects. Related: [wake leases](wake-leases.md), [which acts wake a seat](which-acts-wake-a-seat.md).
+
+## ADR 429 changed what `team_inbox_check` CONTAINS, not what it weighs (2026-09-21, lane 01M32FH5YQ; falsify: a post-e841a2d7 wake life whose `team_inbox_check` tool result is under 10 KiB on a seat with any unread backlog) <!-- claim: other -->
+
+The measurement lane 01M32FH5YQ owed, and it does not support the lane's premise. [ADR 429](../decisions/429-inbox-pinning-is-an-obligation-rule-not-a-salience-one.md) landed at `b653e182` and reached the daemon at `e841a2d7` (11:59 local). One wake of ryder at 12:21 by a `steer`, `session=resumed provenance=wake`, `exit=0 cost=$1.7079 wall=93.6s` (lease `01M32PMQSDK8Y15KD8NJBV0HWF`). Her three most recent lives sit in one transcript, so the before/after is the same seat on the same file:
+
+| life | when | `team_inbox_check` | elided | digest rows | full rows |
+| --- | --- | --- | --- | --- | --- |
+| 1 | pre-fix | 22.9 KiB | 0 | 21 | 29 |
+| 2 | pre-fix 11:20 | 23.7 KiB | 0 | 31 | 46 |
+| 3 | **post-fix 12:21** | **23.7 KiB** | 0 | 22 | 43 |
+
+**Unchanged.** The claim above — that `team_inbox_check` is 26 KiB because it re-returns an ancient directed backlog, so fixing that recovers the bytes — is half right. ADR 429 does cut what the daemon SELECTs and sends: measured the same day on this daemon's own database, the pinned set per bounded read went stanley 367 rows/318.0 KB → 50/30.0, ghost 183/159.6 → 50/21.0, grokbot 116/93.3 → 50/21.2, dolly 17/11.2 → 4/2.7, miley 3/2.1 → 0. But the RENDERED reply is budget-filling: `RESULT_BUDGET` is 30,000 chars and `planInboxCheck` spends it — waiting acts first, then newest, then digest lines take whatever is left. Budget freed by un-pinning an answered `accept` is immediately consumed by another digest line. **A size win requires lowering the budget or changing how it is split, neither of which ADR 429 touches.**
+
+What did change is what the bytes BUY. Those 22 digest lines walk the read cursor: ryder's moved to 12:21:05 and her backlog cleared, where the same budget previously went partly on re-showing acts that were already answered. Value per byte improved; byte count did not.
+
+**Caveats, both load-bearing** (2026-09-21; falsify: a wake-life measurement of stanley, ghost or grokbot, or any second seat woken for this change). (1) ryder is the seat ADR 429 helps least — 58 unread, 2 pinned before and 1 after. The 320 KB → 30 KB cases are stanley, ghost and grokbot, and none of the three is wakeable, so the change's best case remains unmeasured in a wake life. (2) Only one seat was woken, not two: dolly and miley were both live at the time and a live seat cannot be wake-measured. So lane 01M32FH5YQ's acceptance (c) — "a wake that has read nothing new gets an inbox result under 2 KiB" — is **not met**, and (d) is satisfied for one seat only. <!-- claim: other -->
