@@ -256,3 +256,50 @@ describe('planInboxCheck — a seat behind by more than `limit` still drains (la
     expect(plan.digested.map((e) => e.id)).toContain('ask-old');
   });
 });
+
+/**
+ * ADR 429 — this view's pin rule and the server's pinned `SELECT` are built from one list.
+ *
+ * `isPinnedNeed` is not exported, so it is exercised through the plan, which is the surface that
+ * matters anyway: a pinned row survives a limit it would otherwise fall outside. If these two sides
+ * ever disagree the client re-pins what the server just dropped — the row is not in the fetch, so it
+ * simply vanishes from the view while both sides believe the other is carrying it.
+ */
+describe('ADR 429: the plan pins obligations, not answers', () => {
+  const at = (id: string, act: Envelope['act'], to: Envelope['to']): Envelope =>
+    ({ id, from: 'nick', act, body: 'x', ts: Number(id.slice(1)), to }) as Envelope;
+  const me = { kind: 'member', name: 'Ada' } as const;
+
+  it('keeps an obligation that falls outside the limit', () => {
+    for (const act of ['request_help', 'ask', 'handoff', 'steer', 'challenge', 'defer'] as const) {
+      const owed = at('m001', act, act === 'request_help' || act === 'ask' ? { kind: 'team' } : me);
+      const rest = Array.from({ length: 10 }, (_, i) =>
+        at(`m1${String(i + 10)}`, 'message', { kind: 'team' }),
+      );
+      const plan = planInboxCheck([owed, ...rest], 3);
+      expect(
+        plan.shown.map((e) => e.id),
+        act,
+      ).toContain('m001');
+    }
+  });
+
+  it('lets an answer or a report fall outside the limit like any other row', () => {
+    for (const act of ['accept', 'decline', 'wait', 'status_update', 'insight'] as const) {
+      const notOwed = at('m001', act, me);
+      const rest = Array.from({ length: 10 }, (_, i) =>
+        at(`m1${String(i + 10)}`, 'message', { kind: 'team' }),
+      );
+      const plan = planInboxCheck([notOwed, ...rest], 3);
+      // Not pinned — but the digest still walks it, so it is SEEN rather than lost.
+      expect(
+        plan.shown.map((e) => e.id),
+        act,
+      ).not.toContain('m001');
+      expect(
+        plan.digested.map((e) => e.id),
+        act,
+      ).toContain('m001');
+    }
+  });
+});

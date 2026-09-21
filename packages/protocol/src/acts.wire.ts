@@ -49,6 +49,40 @@ export const ACTS = [
 ] as const;
 export type Act = (typeof ACTS)[number];
 
+/**
+ * The acts that ASK SOMETHING OF THE RECIPIENT — the obligation class (ADR 429).
+ *
+ * `OBLIGATION_ACTS_ANY` are owed by whoever can answer them and so count whatever they are
+ * addressed to: `request_help` is a call the team may answer (ADR 024), and `ask` is a decision
+ * waiting on a human whether or not it named one (ADR 147). `OBLIGATION_ACTS_DIRECTED` are owed only
+ * by the member they name: work passed over (`handoff`), and the ADR 103 steering trio.
+ *
+ * WHAT THIS IS FOR, and what it is NOT. A bounded inbox page may drop an ordinary row — it is still
+ * unread, and the digest walk will render it — but it may not drop an act that is WAITING on the
+ * reader, so these are pinned into the page (`listInbox`, `isPinnedNeed`). That is a retention rule,
+ * and it is why the set is deliberately narrower than the CLI banner's `isActionNeeded`: salience
+ * asks "show this above the fold now" and costs a row of screen when it is wrong, while retention
+ * asks "carry this on EVERY future read until it is answered" and costs that weight on every wake.
+ *
+ * So an answer is not an obligation. `accept` and `decline` DISCHARGE one, `wait` says a human is
+ * deciding, `status_update` reports, `insight` remembers, `resolve` is terminal (ADR 025) and
+ * `message` is chat. Before ADR 429 the server's SQL pinned every directed act that was not
+ * `message`/`resolve`, which made 129 `accept`s and 41 `status_update`s permanent freight in one
+ * seat's every inbox read.
+ *
+ * One list, two readers: the server's pinned `SELECT` and the MCP's `isPinnedNeed` are both built
+ * from it, so the wire and the rendered view cannot disagree about what is owed.
+ */
+export const OBLIGATION_ACTS_ANY = ['request_help', 'ask'] as const;
+export const OBLIGATION_ACTS_DIRECTED = ['handoff', 'steer', 'challenge', 'defer'] as const;
+
+/** Does this act ask something of `to`? Pure act-shape: says nothing about whether it is still owed
+ *  (that is discharge — answered / lane closed / already shown) or about who is reading. */
+export function isObligationAct(act: Act, directed: boolean): boolean {
+  if ((OBLIGATION_ACTS_ANY as readonly string[]).includes(act)) return true;
+  return directed && (OBLIGATION_ACTS_DIRECTED as readonly string[]).includes(act);
+}
+
 /** Surfaces a Member can be present on. v0.1 implements cli/claude-code/codex; the rest are
  *  reserved. `musterd` (ADR 131 §7) is the native harness — the agent loop hosted in `musterd host`.
  *  `opencode` (ADR 321) and `grok` (ADR 352) are first-class CLI harnesses — enumeration, wake, and

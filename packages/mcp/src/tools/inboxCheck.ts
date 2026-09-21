@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import { envelopePosition, type Envelope } from '@musterd/protocol';
+import { envelopePosition, isObligationAct, type Envelope } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { linkReceived } from '../otel.js';
@@ -166,13 +166,17 @@ function rowCost(env: Envelope): number {
 }
 
 /**
- * Waiting acts the newest-N slice must not bury. Matches the CLI banner's `isActionNeeded`, minus
- * directed `message` — those stay newest-N so a mailbox of DMs does not explode the bound.
+ * Waiting acts the newest-N slice must not bury — the OBLIGATION class (ADR 429), read off the one
+ * list in `@musterd/protocol` that the server's pinned `SELECT` is also built from.
+ *
+ * It used to be spelled here as "directed and not `message`/`resolve`", which pinned every `accept`,
+ * `decline` and directed `status_update` a seat had not read — answers and reports, owed to nobody,
+ * and 182 KB of one seat's 327 KB pinned set when it was measured. The wire and this view must agree
+ * about what is owed or the client re-pins what the server just dropped, so neither side spells the
+ * set itself.
  */
 function isPinnedNeed(env: Envelope): boolean {
-  if (env.act === 'resolve') return false;
-  if (env.act === 'request_help' || env.act === 'ask') return true;
-  return env.to?.kind === 'member' && env.act !== 'message';
+  return isObligationAct(env.act, env.to?.kind === 'member');
 }
 
 export function planInboxCheck(
