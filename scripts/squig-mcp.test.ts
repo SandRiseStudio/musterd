@@ -61,11 +61,11 @@ describe('squig companion launcher', () => {
         '/home/me',
         '/usr/bin/node',
         22,
-        (path) => path === local || path === '/usr/bin/node',
+        (path: string) => path === local || path === '/usr/bin/node',
       ),
     ).toBe('/usr/bin/node');
     expect(
-      resolveNodeBinary(undefined, '/home/me', '/usr/bin/node', 20, (path) => path === brew),
+      resolveNodeBinary(undefined, '/home/me', '/usr/bin/node', 20, (path: string) => path === brew),
     ).toBe(brew);
     expect(
       resolveNodeBinary(
@@ -73,7 +73,7 @@ describe('squig companion launcher', () => {
         '/home/me',
         '/usr/bin/node',
         22,
-        (path) => path === '/custom/node',
+        (path: string) => path === '/custom/node',
       ),
     ).toBe('/custom/node');
     expect(resolveNodeBinary('/missing', '/home/me', '/usr/bin/node', 24, () => false)).toBeNull();
@@ -83,7 +83,7 @@ describe('squig companion launcher', () => {
         '/home/me',
         '/usr/bin/node',
         24,
-        (path) => path === '/usr/bin/node',
+        (path: string) => path === '/usr/bin/node',
       ),
     ).toBe('/usr/bin/node');
   });
