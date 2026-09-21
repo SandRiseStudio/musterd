@@ -22,9 +22,12 @@ export {
   ACTS,
   LIFECYCLES,
   MEMBER_KINDS,
+  OBLIGATION_ACTS_ANY,
+  OBLIGATION_ACTS_DIRECTED,
   PRESENCE_STATUSES,
   PROVENANCES,
   SURFACES,
+  isObligationAct,
   normalizeActivity,
 } from './acts.wire.js';
 export type {

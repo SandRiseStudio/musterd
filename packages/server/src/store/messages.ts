@@ -2,6 +2,8 @@ import { hostname } from 'node:os';
 import {
   DeferUntilSchema,
   eligibleOf,
+  OBLIGATION_ACTS_ANY,
+  OBLIGATION_ACTS_DIRECTED,
   PROTOCOL_VERSION,
   type DeferUntil,
   type Envelope,
@@ -212,6 +214,12 @@ export interface InboxOpts {
    */
   headLimit?: number;
   /**
+   * How many pinned obligations one bounded page may carry (ADR 429). Ignored without `limit` —
+   * pinning is what keeps a waiting act out of a bounded page's blind spot, and an unbounded read
+   * has none. Defaults to {@link PINNED_DEFAULT_LIMIT}.
+   */
+  pinnedLimit?: number;
+  /**
    * Read these specific rows back, cursor and bounds ignored (lane 01M2JZYTAH).
    *
    * `team_inbox_check` clips a long body so one act cannot spend a whole reply's byte budget, and a
@@ -223,6 +231,20 @@ export interface InboxOpts {
    */
   ids?: readonly string[];
 }
+
+/**
+ * How many pinned obligations a bounded page carries (ADR 429).
+ *
+ * Generous on purpose. The number that actually decides what a seat SEES is the MCP's
+ * `RESULT_BUDGET` — a byte budget, spent waiting-acts-first — and this is the wire bound beneath
+ * it, so it wants to sit comfortably above anything a client will render and still be a ceiling.
+ * 50 is ~4x the rows a 30k-char budget fits at this team's median body (592 chars) and caps the
+ * pinned contribution at tens of KB instead of the measured 327.
+ *
+ * It is a ROW cap on the largest single contributor to a bounded reply, not a promise about reply
+ * size; a caller that needs fewer names `pinnedLimit`.
+ */
+export const PINNED_DEFAULT_LIMIT = 50;
 
 /**
  * A member's inbox: messages in their team addressed to them or to team/broadcast,
@@ -287,14 +309,60 @@ export function listInbox(
     // (request_help / ask / directed non-message) into the page. Directed `message` stays newest-N
     // so a mailbox of DMs does not explode the bound.
     if (!opts.unreadOnly) return newest;
+    // The pinned set is the OBLIGATION class (ADR 429), bounded, and oldest-first.
+    //
+    // Obligation, not salience. This predicate used to read `to_kind = 'member' AND act NOT IN
+    // ('message','resolve')` and its comment claimed to match the CLI banner's `isActionNeeded`. It
+    // matched that predicate's SHAPE test and dropped the narrowing that makes it correct — the
+    // banner counts through `openActionNeeded`, which also excludes a resolved thread and an act
+    // this seat has already answered. The salience half was left doing a RETENTION job, and the two
+    // tolerate error differently: a false positive in salience costs a row of screen, while a false
+    // positive here is carried on every future read for as long as the act stays unread. Measured
+    // 2026-09-21 on the laptop daemon: one seat's pinned set was 370 rows / 327 KB, of which 129
+    // `accept`, 41 directed `status_update` and 13 `decline` — answers and reports, owed to nobody.
+    //
+    // Bounded, because `limit` was never true. It binds `newest` above; this SELECT carried no
+    // LIMIT of its own, so `team_inbox_check {limit: 8}` on that seat returned 370 rows. Oldest
+    // first: the obligation that has waited longest is the one a bounded page must not drop. What
+    // the bound cuts is counted into `unread_remaining` by the caller like any other uncarried row,
+    // so ADR 287 holds — the cursor still may not pass what was not rendered.
+    //
+    // Discharge is folded HERE rather than after marshalling. The handler computes `answered` /
+    // `discharged` and ships them beside the rows so the client can un-pin, which is right for the
+    // rendered view and too late for the wire: the row is already loaded and already sent. The
+    // cheap half of that fold is expressible in SQL and is the bulk of it — an obligation answered
+    // by an `accept`/`decline` from ANY seat (ADR 254: an eligible set is discharged by whoever
+    // answers first) or replied to by this member at all. The app-level half (a closed lane, an act
+    // already shown) stays where it is, and the response's id lists are unchanged.
+    // The outer table stays UNALIASED so `where` — built above and shared with every other read
+    // here — drops in unchanged; the correlated subquery names it `messages.id` explicitly, because
+    // an unqualified `id` inside the EXISTS would resolve to the inner alias and silently match
+    // every row against itself.
+    const pinnedAny = OBLIGATION_ACTS_ANY.map(() => '?').join(',');
+    const pinnedDirected = OBLIGATION_ACTS_DIRECTED.map(() => '?').join(',');
     const pinned = db
       .prepare<unknown[], MessageRow>(
-        `SELECT * FROM messages ${where} AND (
-           act IN ('request_help', 'ask')
-           OR (to_kind = 'member' AND act NOT IN ('message', 'resolve'))
-         ) ORDER BY created_at ASC, id ASC`,
+        `SELECT * FROM messages ${where}
+           AND (
+             act IN (${pinnedAny})
+             OR (to_kind = 'member' AND act IN (${pinnedDirected}))
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM messages r
+              WHERE r.team_id = messages.team_id
+                AND json_extract(r.meta, '$.in_reply_to') = messages.id
+                AND (r.act IN ('accept','decline') OR r.from_member = ?)
+           )
+         ORDER BY created_at ASC, id ASC
+         LIMIT ?`,
       )
-      .all(...params);
+      .all(
+        ...params,
+        ...OBLIGATION_ACTS_ANY,
+        ...OBLIGATION_ACTS_DIRECTED,
+        member.id,
+        opts.pinnedLimit ?? PINNED_DEFAULT_LIMIT,
+      );
     if (pinned.length === 0) return newest;
     const byId = new Map<string, MessageRow>();
     for (const row of newest) byId.set(row.id, row);
