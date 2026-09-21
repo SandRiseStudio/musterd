@@ -4,7 +4,7 @@
 
 **Seed:** `01M0ZXBSKGMADATTQJ13PWZ6SA` — “Paved roads - aperture (tailscale)”
 
-**Status:** approved exploration design; Increment 1 is implemented as `musterd integration doctor` under [ADR 385](../../decisions/385-optional-tailscale-aperture-doctor.md); Increment 2a and 2b are implemented as the reviewed Aperture and Tailscale generators under [ADR 400](../../decisions/400-aperture-policy-generator.md) and [ADR 402](../../decisions/402-tailscale-transport-generator.md); Increment 3 is partially implemented as the protocol/server authorization substrate under [ADR 411](../../decisions/411-governed-model-authorization-substrate.md); Increment 4 is not implemented. The complete governed-launch acceptance in §13 remains open, and any later work requires its own ADRs and plans.
+**Status:** approved exploration design; Increment 1 is implemented as `musterd integration doctor` under [ADR 385](../../decisions/385-optional-tailscale-aperture-doctor.md); Increment 2a and 2b are implemented as the reviewed Aperture and Tailscale generators under [ADR 400](../../decisions/400-aperture-policy-generator.md) and [ADR 402](../../decisions/402-tailscale-transport-generator.md); Increment 3 is partially implemented as the protocol/server authorization substrate under [ADR 411](../../decisions/411-governed-model-authorization-substrate.md) plus the non-spawning CLI handoff adapter under [ADR 425](../../decisions/425-governed-launcher-adapter-handoff.md); Increment 4 is not implemented. The complete governed-launch acceptance in §13 remains open, and any later work requires its own ADRs and plans.
 
 **Security boundary:** product architecture only; no active scanning, production access, or
 infrastructure mutation was performed
@@ -326,15 +326,19 @@ Figma terminal contract; this spec defines behavior, not an unreviewed terminal 
   privilege. Neither generator discovers runtime nodes, changes daemon settings, calls an external
   service, or applies configuration; the operator reviews and applies both artifacts.
 
-### Increment 3 — governed model launcher (partial: authorization substrate implemented)
+### Increment 3 — governed model launcher (partial: authorization substrate and local handoff implemented)
 
 - **Implemented in the substrate slice (ADR 411):** server-owned secret-free model policy; durable
   Member-to-machine-node checks; human-issued one-shot `msla_` launch handoffs; matching Presence
   consumption and revocation; bounded Lane/Act authorization; stable structured refusals; and
   metadata-only audit correlation. Enforcement remains `off` by default.
-- **Not implemented:** persistent runtime bridge/device management; governed Claude Code or Codex
-  launchers; live Tailscale/Aperture configuration or application; provider routing and native
-  Aperture quota execution; and transactional activation from `off` to `required`.
+- **Implemented in the local handoff slice (ADR 425):** typed CLI methods for the existing governed
+  policy/launch routes and a pure Claude Code/Codex process-plan builder with exact model arguments,
+  harness Surface markers, endpoint validation, and direct-provider-credential stripping. It does
+  not spawn either harness or consume the launch handoff.
+- **Not implemented:** persistent runtime bridge/device management; live Tailscale/Aperture
+  configuration or application; provider routing and native Aperture quota execution; and
+  transactional activation from `off` to `required`.
 - The original Increment 3 acceptance therefore remains open: a live governed launch has not yet been
   proven end to end through a supported Surface, Tailscale workload, Aperture request, provider, and
   cost record.

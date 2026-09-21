@@ -40,9 +40,10 @@ src/
   process.ts          // injected synchronous process runner: missing binary → code 127, shared by read-only inspectors
   errors.ts           // CliError(code) -> message + exit code
   exit.ts             // exitAfterFlush: exit only once stdout+stderr have drained — a piped render was cut at 64 KB by a bare process.exit()
-  integrations/       // optional external integration inspectors and generated-policy support (ADR 385/400)
+  integrations/       // optional external integration inspectors, generated-policy, and governed handoff support (ADR 385/400/425)
     aperture.ts        // HuJSON config parsing + secret-safe Aperture retention/provider/grant/quota/identity posture checks
     governed-models.ts // committed roster + provider-neutral policy resolver and deterministic Aperture artifact renderer
+    governed-launch.ts // pure Claude Code/Codex governed process-plan builder; validates the one-shot handoff and strips direct provider credentials (ADR 425)
     governed-transport.ts // committed transport manifest loader + deterministic Tailscale tag/ACL and workload mapping renderer (ADR 402)
     report.ts          // stable report composition + exact terminal rendering for independent optional postures
     tailscale.ts       // typed Tailscale status/Serve parsing + bounded Host-gate upgrade probe; no mutation commands
@@ -342,6 +343,13 @@ daemon change, or runtime binding. It rejects missing, stale, duplicate, wildcar
 Musterd-credential-prefixed governed-model or transport data before writing (ADR 405). A current
 artifact reports
 `Tailscale transport policy is current`.
+
+The governed launcher handoff is a pure CLI boundary (ADR 425), not a public launch command. Its
+typed client methods parse the existing governed policy and one-shot launch routes, while
+`integrations/governed-launch.ts` turns a validated mint into an ephemeral Claude Code or Codex
+process plan. It allow-lists inherited runtime values, sets the harness-specific Aperture endpoint
+and `MUSTERD_LAUNCH_SURFACE`, and excludes direct provider credentials. It does not spawn a process,
+consume a launch, bind Tailscale/Aperture, or activate `required` enforcement.
 
 ### `musterd team create <slug> [--display <name>] [--as <yourname>] [--role <role>]`
 
