@@ -429,6 +429,26 @@ parameter expansion**, so a whole flag string went through as one argument. Not 
 pipe; a third member of that family, and again a fixture lying rather than code. Re-run with a
 proper argument array, all six fire correctly.
 
+*S9 shipped 2026-09-21 (dolly, lane `01M32KA4KY`):* `mast-checklist`. Ships the five shapes worth
+screening for, finding 002's self-audit as the worked example (84% `status_update`, ~3% closed-loop,
+`resolve` zero times in three days, 85% broadcast — **reporting is not coordinating, and the
+difference is invisible from inside**), and `audit.py` with configurable field names so it reads a
+stranger's log rather than ours.
+
+**Both papers verified from their abstracts before citing** (2026-09-21), after B6's Co-Gym finding
+made that the house rule: MAST is 14 failure modes in three categories — *system design issues,
+inter-agent misalignment, task verification* — from 150 traces across 7 frameworks at κ = 0.88, plus
+MAST-Data's 1,600+ annotated traces; Co-Gym's 86 / 74 / 66 win rates are abstract-confirmed. Deeper
+numbers we quote internally (the notification ablation, the per-class error rates) are marked in the
+skill as our reading of the paper bodies, NOT reproduced as citations. The skill's five shapes are
+explicitly OURS and not the taxonomies restated.
+
+Two design properties worth reusing. **Every screen carries its innocent reading** — "INNOCENT
+READING: … WORTH READING IF: …" — because a screen that reports only the guilty reading is an
+accusation with a percentage on it. And **a clean run refuses to say the team is healthy**: it says
+five named shapes did not appear in N acts, and that the window is yours to justify. Eight falsifier
+rows exercised.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
