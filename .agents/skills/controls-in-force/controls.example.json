@@ -1,0 +1,30 @@
+[
+  {
+    "id": "test-timeout-parity",
+    "kind": "timeout",
+    "claim": "Every test config in the repo runs at the same measured timeout, so a slow test fails the same way under a single-package run and a whole-repo run.",
+    "where": "vitest.shared.ts (TEST_TIMEOUT_MS), imported by the root config and all five package configs",
+    "exercise": "Edit any package's test config to drop the shared import and set its own timeout; tests/config-parity.test.ts must fail. Independently: add a test that sleeps 6s and run it under a package config -- at the 5s default it fails, at the shared ceiling it passes.",
+    "motivated_by": "2026-08-19: the root config's 30s ceiling reached zero of five packages, because a package-local config inherits nothing. Presented for a week as known flaky-test noise; cost two people most of a day each. Baseline 2/20 full runs failed, all by timeout; with the fix 0/20.",
+    "counterfactual": "Yes, and it is the rare case where that was measured rather than argued: the parity test fails on the exact pre-fix configuration, and the 6s probe reproduces the original symptom under a package config.",
+    "last_exercised": "2026-08-19",
+    "ever_tripped": true,
+    "last_tripped": "2026-08-19",
+    "stale_after_days": 90,
+    "refs": ["PR #918", "tests/config-parity.test.ts"]
+  },
+  {
+    "id": "infra-touch-warning",
+    "kind": "guard",
+    "claim": "A command that would restart shared infrastructure warns anyone who does not hold the platform role before it runs.",
+    "where": "src/commands/guard.ts; the signal is an audit row with action 'infra.warned'",
+    "exercise": "Fire the control, not the action it guards -- it is a read with no side effect of its own, and the destructive verb is what follows it. Call the guard directly from a non-holder identity and read back the warning text and the audit row. Note which branch you fired: a platform-role holder gets the silence branch by design and cannot produce the warning at all.",
+    "motivated_by": "2026-08-05: a restart of shared infrastructure during working hours dropped four live sessions, from a session that had no idea the command was shared.",
+    "counterfactual": "Yes -- the warning fires for exactly the identity that caused the incident. What it would NOT have caught is the holder doing the same thing deliberately, which is by design rather than a gap.",
+    "never_exercised": "Registered from the code and the incident report; nobody has fired it deliberately from a non-holder identity since it shipped.",
+    "never_exercised_since": "2026-09-21",
+    "ever_tripped": false,
+    "stale_after_days": 45,
+    "refs": ["PR #689", "docs/incidents/2026-08-05-shared-restart.md"]
+  }
+]
