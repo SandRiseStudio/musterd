@@ -30,6 +30,9 @@
  *
  * And one passing arm, which is the one that keeps the gate installed:
  *
+ *   require-absent       — a CONFORMING page swept with a `--require` selector it does not have.
+ *                          Must refuse, not count: a target count from the wrong surface is not
+ *                          coverage of the right one. Aimed at the gate.
  *   conforming           — size, spacing and inline conformance in one page. A gate that reds
  *                          conforming markup gets switched off, so "it fails the bad ones" is only
  *                          half the claim being made here.
@@ -58,9 +61,11 @@ const serve = () => {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 };
 
-const sweep = (url) =>
+const sweep = (url, extra = []) =>
   new Promise((resolve) => {
-    const p = spawn(process.execPath, [SWEEP, url], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(process.execPath, [SWEEP, url, ...extra], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let out = '';
     p.stdout.on('data', (c) => (out += c));
     p.stderr.on('data', (c) => (out += c));
@@ -121,6 +126,22 @@ const ARMS = [
     why: 'newlines and indentation around a link are not a sentence',
   },
   {
+    /* THE SURFACE CHECK, on a page that is otherwise perfectly healthy. `--require` exists because
+       a target COUNT is not coverage: connected /board renders the goal grid only while the
+       fixture has an unshipped goal, so the grid could stop mounting while the gate's floor went
+       on passing on the columns view (sloane's read, lane 01M32ZTPR7). The arm asserts the gate
+       refuses rather than counts — and uses a CONFORMING page on purpose, so a pass here could
+       only come from the requirement being ignored. */
+    file: 'target-conforming.html',
+    /* Two arms share this fixture, so they cannot be named by it. */
+    label: 'require-absent',
+    args: ['--require', '.not-a-surface-this-page-has'],
+    want: 2,
+    expect: /rendered nothing matching/,
+    forbid: /targets: \d+ measured/,
+    why: 'a required surface that is absent must refuse, not report a count from the wrong page',
+  },
+  {
     file: 'target-conforming.html',
     want: 0,
     expect: /inline in a sentence/,
@@ -134,11 +155,12 @@ console.log(`target-size-falsifier — ${ARMS.length} arms against ${base}\n`);
 
 let failed = 0;
 for (const arm of ARMS) {
-  const { out, code } = await sweep(`${base}/${arm.file}`);
+  const { out, code } = await sweep(`${base}/${arm.file}`, arm.args ?? []);
   const ok = code === arm.want && arm.expect.test(out) && !(arm.forbid?.test(out) ?? false);
   if (!ok) failed++;
   console.log(
-    `  ${ok ? '✓' : '✗'} ${arm.file.replace(/^target-|\.html$/g, '')} — exit ${code} (want ${arm.want}), ${arm.why}`,
+    `  ${ok ? '✓' : '✗'} ${arm.label ?? arm.file.replace(/^target-|\.html$/g, '')} — exit ${code}` +
+      ` (want ${arm.want}), ${arm.why}`,
   );
   if (!ok)
     console.log(

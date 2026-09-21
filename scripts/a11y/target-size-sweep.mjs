@@ -65,6 +65,21 @@ const flag = (name) => {
 };
 const QUIET = args.includes('--quiet');
 const JSON_OUT = flag('json');
+/**
+ * A selector the page MUST render for this sweep to mean anything.
+ *
+ * A target COUNT is not coverage. Connected /board renders the goal grid only while the fixture
+ * has an unshipped goal — `resolveBoardView` falls to `columns` otherwise — and the columns view
+ * renders plenty of targets, so the gate's floor passes either way and the grid quietly stops
+ * being measured (sloane, 2026-09-21, lane 01M32ZTPR7). That is the /roadmap shape again: an
+ * instrument reporting a green verdict about a surface it had stopped visiting.
+ *
+ * Deliberately a CHECK, not a switch. Forcing the view with a url parameter would add a product
+ * surface to serve a gate, and would make the sweep pass by construction rather than by
+ * observation — the failure ryder named in guardian's green unit test, where the comparison was
+ * exercised and the operand never existed.
+ */
+const REQUIRE = flag('require');
 
 /* 390×844 is the iPhone 12/13/14 logical viewport and the width the 2026-09-21 audit read the site
    at. It is a DELIBERATE default rather than a desktop one: target size is the criterion that only
@@ -259,6 +274,21 @@ const MEASURE = /* js */ `(() => {
   return { rows, viewport: { w: innerWidth, h: innerHeight } };
 })()`;
 
+/* Before anything is judged: is this even the surface we think it is? Exit 2, because a sweep of
+   the wrong page has taken no verdict about the right one. */
+if (REQUIRE) {
+  const found = await evalIn(`document.querySelectorAll(${JSON.stringify(REQUIRE)}).length`);
+  if (!found) {
+    console.error(
+      `target-size-sweep — ${url} rendered nothing matching \`${REQUIRE}\`, which this sweep was` +
+        ' told to require. Nothing was measured and no target-size verdict was taken: a target' +
+        ' COUNT from the wrong surface is not coverage of the right one. Either the page changed,' +
+        ' or the fixture stopped producing the state that renders it.',
+    );
+    await exit(2);
+  }
+}
+
 const { rows, viewport } = await evalIn(MEASURE);
 const targets = rows.filter((r) => !r.skipped);
 const skipped = rows.filter((r) => r.skipped);
@@ -294,7 +324,10 @@ if (targets.length === 0 && !args.includes('--allow-empty')) {
 
 const log = QUIET ? () => {} : (...a) => console.log(...a);
 const counts = judged.reduce((m, j) => ({ ...m, [j.verdict]: (m[j.verdict] ?? 0) + 1 }), {});
-log(`target-size-sweep — ${url} at ${viewport.w}×${viewport.h}`);
+log(
+  `target-size-sweep — ${url} at ${viewport.w}×${viewport.h}` +
+    (REQUIRE ? ` (required \`${REQUIRE}\` — present)` : ''),
+);
 log(
   `targets: ${targets.length} measured, ${failures.length} below AA 2.5.8, ` +
     `${houseFailures.length} below the house floor, ${overlapping.length} overlapping pair(s)` +

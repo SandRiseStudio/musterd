@@ -130,9 +130,11 @@ const freePort = () =>
     });
   });
 
-const sweep = (url) =>
+const sweep = (url, require) =>
   new Promise((resolve) => {
-    const child = spawn(process.execPath, [join(HERE, 'target-size-sweep.mjs'), url], {
+    const argv = [join(HERE, 'target-size-sweep.mjs'), url];
+    if (require) argv.push('--require', require);
+    const child = spawn(process.execPath, argv, {
       stdio: ['ignore', 'pipe', 'inherit'],
     });
     let out = '';
@@ -282,14 +284,26 @@ if (!STATIC_ONLY) {
        a connected /live 7, against THREE apiece on their sign-in screens. 10 and 5 sit comfortably
        between, so they separate "connected" from "never got there" without being brittle as the
        fixture's content changes. */
-    report(await sweep(`${base}/board?team=${team}`), '/board (connected)', 10);
+    /* `.gg-stage` is the GOAL GRID's root, and requiring it is the difference between measuring
+       that surface and counting targets on whatever /board happened to render. The view is a pure
+       function of the fixture's content — `resolveBoardView` returns `columns` when no goal is
+       unshipped, and the fixture clears that by exactly one — so without this the grid could stop
+       mounting and the floor of 10 would still pass on the columns view (sloane's read of lane
+       01M32WGSG6; the grid is where the contrast gate found ten of its eleven failures). */
+    report(await sweep(`${base}/board?team=${team}`, '.gg-stage'), '/board (connected)', 10);
     /* The scene is PINNED, for the same reason contrast-gate pins it: an unpinned verdict is a
        function of the wall clock and of what the room happened to be doing. Geometry is less
        light-sensitive than colour, but it is not motion-insensitive — a walker mid-stride moves a
        target's box, and a verdict that depends on which frame the sampler caught is a flake
        waiting to cost someone a merge. One light, not the bracket: `?light=` changes paint, not
        layout, so the second value would re-measure identical boxes. */
-    report(await sweep(`${base}/live?team=${team}&light=12&still`), '/live (connected)', 5);
+    /* `.lc__topbar` is the chrome that carries /live's small controls — the row that was laid out
+       at 19x30 against a `width: 30px`. If it stops mounting, this sweep has nothing to say. */
+    report(
+      await sweep(`${base}/live?team=${team}&light=12&still`, '.lc__topbar'),
+      '/live (connected)',
+      5,
+    );
   } finally {
     await sh(['down']);
   }

@@ -125,6 +125,24 @@ guessed, against 17 and 7 connected versus 3 apiece at the sign-in screen. The s
 zero-target refusal cannot catch this: a sign-in screen renders **three** targets, which is not
 zero, so a page that never connected would otherwise pass exactly like a clean one.
 
+**A count is not coverage, so each connected sweep names the surface it is there for.**
+`/board` requires `.gg-stage` (the goal grid) and `/live` requires `.lc__topbar`; a sweep whose
+required selector matches nothing **refuses** with exit 2 instead of reporting a target count.
+
+That is not belt-and-braces. `/board` renders the goal grid only while the fixture has an unshipped
+goal — `resolveBoardView` returns `columns` otherwise, and the fixture clears that threshold by
+*exactly one* — and the columns view renders plenty of targets, so the floor of 10 would pass
+happily while the grid stopped being measured (sloane, 2026-09-21, lane 01M32ZTPR7). The goal grid
+is where the contrast gate found **ten of its eleven** failures, so losing it silently is the
+expensive version of this mistake. It is also the `/roadmap` shape from earlier the same day: an
+instrument reporting a green verdict about a surface it had stopped visiting.
+
+**Why a check and not `?view=grid`.** Forcing the view would add a URL surface to a product page
+purely to serve a gate, and would make the sweep pass *by construction* rather than by observation
+— the same "exercise the comparison, never the operand" failure that let guardian ship a green unit
+test for a file nothing writes (ADR 435). Verifying makes a fixture change loud on the next run;
+forcing would hide it forever.
+
 **The scene is pinned** (`?light=12&still`) for the reason the contrast gate pins it: a verdict
 that changes with the wall clock or with what the room happened to be doing cannot gate merges.
 Geometry is less light-sensitive than colour but not motion-insensitive — a walker mid-stride
@@ -139,6 +157,7 @@ pnpm a11y:targets:check --connected-only     # the fixture-daemon phase alone
 pnpm a11y:targets http://127.0.0.1:4849/     # one page
 pnpm a11y:targets <url> --viewport 320x568   # a narrower phone
 pnpm a11y:targets <url> --json out.json      # every judged row, for digging
+pnpm a11y:targets <url> --require .gg-stage  # refuse unless that surface is on the page
 ```
 
 Needs `pnpm build` first and nothing else — the gate serves the built client itself.
@@ -153,7 +172,7 @@ sweep defaulting to 1440 would be green by construction.
 node scripts/a11y/target-size-falsifier.mjs
 ```
 
-Six arms over fixtures whose verdict is known in advance. `contrast.md` set the precedent and the
+Seven arms over fixtures whose verdict is known in advance. `contrast.md` set the precedent and the
 wiki's rule 3 states it: **a check that passes either way is a ritual.** The gate is green on
 `main` — that is either because the site conforms or because the gate cannot see, and only a
 control that fails tells them apart.
@@ -162,6 +181,7 @@ control that fails tells them apart.
 | ------------------------- | ------ | -------------------------------------------------------- |
 | `undersized-crowded`      | fail 1 | the plain size clause, outside the chrome                |
 | `whitespace-is-not-prose` | fail 1 | newlines around a link reading as a sentence             |
+| `require-absent`          | fail 2 | counting targets on a page that is not the surface       |
 | `overlapping-pair`        | fail 1 | two 44×44 buttons overlapping — a size-only gate passes  |
 | `inline-block-cta`        | fail 1 | the exemption drifting back to permissive                |
 | `house-floor-nav`         | fail 1 | conforming markup must fail HOUSE, never "below AA"      |
