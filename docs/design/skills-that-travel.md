@@ -388,6 +388,26 @@ identity" is nearly unreachable, and the real condition is a GLOBAL identity qui
 name for every agent — which looks configured. The checker also refuses to claim a pass it has not
 earned in the MAIN work tree, where a shared write and a scoped one are the same file.
 
+*S5 shipped 2026-09-21 (dolly, lane `01M32K90FW`):* `two-consumers`. Ships both halves — the two
+clauses asked together (*what wrote this row, and who else reads it?*), the documented-discard rule
+with its grep (**find helpers whose docs explain a discard, then count their callers; the ratio is
+the risk**), the citation smell one rung worse, and ADR 173's four parts on three-valued reads.
+Plus `threestate.py`, which prints **absent first** because it is the finding rather than a
+footnote, then refuses to print a rate — naming both causes it cannot separate and pointing the
+repair at the WRITE rather than the read.
+
+Two refusals in it are worth reusing elsewhere: **a partial read is not a result** (one malformed
+line exits 2 rather than reporting over the rows that parsed — counting most of a file and printing
+a number is how a truncated export becomes a finding), and **an empty file is not a zero**. Even on
+a complete population it will not hand over a bare rate: it names the denominator as the DECIDED
+rows, which is B5's rule reaching a second instrument.
+
+The lane's own suggestion was taken — ADR 423's rail (lane `01M32G1M`, landed the same day) is the
+worked example, one day old and in our own repo: an omitted field already meant *this writer
+predates the field*, so writing omission for a declared absence collapsed two causes onto one
+reading. **Absent and declared-absent are different facts and need different encodings.** Nine
+falsifier cases exercised.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
