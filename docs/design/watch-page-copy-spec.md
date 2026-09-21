@@ -199,10 +199,13 @@ the whole line links to the repository.
 - `robots.txt`: no change (everything public is allowed).
 - Structured data (`graph` on `pageHead`), truthful and minimal:
   - `WebPage` — name = H1, description = meta description, `isPartOf` the site.
-  - `BroadcastEvent` — `name: "musterd, built live"`, `isLiveBroadcast: true`,
-    `videoFormat: "HD"`, `publishedOn: { "@type": "BroadcastService", name: "Twitch",
+  - `BroadcastEvent` — `name: "musterd, built live"`, `videoFormat: "HD"`,
+    `publishedOn: { "@type": "BroadcastService", name: "Twitch",
     url: "https://twitch.tv/sandrise_ai" }`. **No `startDate`/`endDate`** — we keep no schedule
-    and must not invent one; omit the fields rather than fake them.
+    and must not invent one; omit the fields rather than fake them. **No `isLiveBroadcast`**
+    (removed 2026-09-21, lane 01M32GFMZ8) — this graph is prerendered, so it cannot be upgraded
+    by `twitchLiveness.ts` the way §4.1's eyebrow is, and a hardcoded `true` asserted to crawlers
+    what the page refuses to assert to humans. Absent means unknown, which is true at prerender.
   - No `VideoObject`. It requires `uploadDate` and a thumbnail of a specific video; a live channel
     is not one.
 

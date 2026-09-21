@@ -278,9 +278,17 @@ export const TWITCH_CHANNEL_URL = 'https://twitch.tv/sandrise_ai';
  * The live broadcast, as an entity.
  *
  * Deliberately missing `startDate` and `endDate`, and that omission is the honest part: the team
- * works in sessions and keeps no schedule, so any date here would be invented. Google treats a
- * `BroadcastEvent` without them as an ongoing live channel, which is exactly what this is — and a
- * fabricated schedule is a structured-data violation, not a shortcut to a richer result.
+ * works in sessions and keeps no schedule, so any date here would be invented. A fabricated
+ * schedule is a structured-data violation, not a shortcut to a richer result.
+ *
+ * Deliberately missing `isLiveBroadcast` for the same reason, and that one is load-bearing: this
+ * graph is PRERENDERED, so unlike every other liveness claim on /watch it cannot be upgraded by
+ * `twitchLiveness.ts` in any way a crawler will see. `watchCopy.ts` sets the standard the whole
+ * page meets — assert liveness only once the player has told us which is true — and a hardcoded
+ * `true` here told machines what we refuse to tell humans, on a channel that is dark most hours.
+ * Omitted means unknown, which is the truth at prerender time; the property is not required of a
+ * `BroadcastEvent`, and Google's LIVE badge needs a `startDate` we honestly cannot give, so the
+ * `true` bought nothing it did not overclaim. Do not add it back without wiring it to a real read.
  *
  * No `VideoObject` beside it for the same reason: that type wants an `uploadDate` and a thumbnail
  * of one specific video, and a live channel is not a video.
@@ -289,7 +297,6 @@ export function broadcastEventNode(): JsonLdNode {
   return {
     '@type': 'BroadcastEvent',
     name: 'musterd, built live',
-    isLiveBroadcast: true,
     videoFormat: 'HD',
     publishedOn: {
       '@type': 'BroadcastService',
