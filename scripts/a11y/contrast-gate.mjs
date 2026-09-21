@@ -47,6 +47,7 @@ import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SHARED_BLOCKER_GATES, sharedBlockerNotice } from '../lib/shared-blocker-notice.mjs';
+import { missingRoutesNotice } from './dist-routes.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const arg = (name, fallback) => {
@@ -89,7 +90,10 @@ const ROUTES = arg('routes', '')
   : [
       '/',
       // The ADR 302 public routes — one representative per template (Prose.css carries the rest).
-      '/roadmap',
+      // NO /roadmap: it stopped being a route on 2026-07-28 and sat in this list until 2026-09-21,
+      // sweeping the static server's 404 page and reporting `✓ /roadmap — 1 measured` every run
+      // (lane 01M32QTVN). The preflight below is what makes that shape impossible rather than
+      // merely fixed.
       '/docs',
       '/docs/getting-started',
       // /docs/spec is NOT a redundant second prose page: it is the only route with tables, so the
@@ -113,6 +117,14 @@ const ROUTES = arg('routes', '')
       '/audit',
       '/broadcast',
     ];
+
+/* Before a browser is started: a route that is not in this dist would be swept as a 404 and pass.
+   See dist-routes.mjs — this is a refusal, not a warning, because the failure it prevents is a ✓. */
+const absent = missingRoutesNotice(DIR, CONNECTED_ONLY ? [] : ROUTES, 'contrast-gate');
+if (absent) {
+  console.error(absent);
+  process.exit(1);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
