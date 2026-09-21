@@ -3,6 +3,10 @@
 **`pnpm a11y:check` is the gate** (CI, after Build). `pnpm a11y:contrast <url>` is the instrument you
 reach for when the gate fails, or when you are measuring a surface the gate cannot reach.
 
+Colour only. **Tap target size has its own gate** — [target-size.md](target-size.md) — because it is
+a property of layout at one viewport rather than of colour at any of them, and this gate was
+structurally blind to it while 21–22px targets shipped on every route.
+
 ## The gate
 
 `pnpm a11y:check` runs [`scripts/a11y/contrast-gate.mjs`](../../scripts/a11y/contrast-gate.mjs) in

@@ -98,6 +98,25 @@ jobs:
         env:
           CHROME_BIN: /usr/bin/google-chrome
 
+      # Target size (WCAG 2.2 AA 2.5.8) at PHONE WIDTH — the other thing the contrast sweep is
+      # structurally blind to. Contrast is a property of colour at any width; target size is a
+      # property of layout at one width, which is how 21-22px nav and footer targets shipped on
+      # every route with the 23-sweep contrast gate green (2026-09-21, lane 01M32GF49Z). Rides in
+      # this leaf rather than its own: ~15s over 7 routes, against the same dist and the same
+      # Chrome this job already has.
+      - name: A11y tap targets (390x844)
+        run: pnpm a11y:targets:check
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+
+      # The gate about the gate. Five fixtures with verdicts known in advance, three of which MUST
+      # fail — a check that passes either way is a ritual, and a green gate on main is otherwise
+      # indistinguishable from a gate that cannot see. ~10s.
+      - name: A11y tap-target falsifier (controls)
+        run: node scripts/a11y/target-size-falsifier.mjs
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+
   a11y-connected:
     name: a11y-connected
     runs-on: ubuntu-latest

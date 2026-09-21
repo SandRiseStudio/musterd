@@ -1,0 +1,22 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>target control — undersized and crowded</title>
+<!--
+  MUST FAIL, on the SPEC clause. A row of 20px-tall links packed 2px apart: each is under 24x24 and
+  its 24px circle reaches its neighbour, so 2.5.8 is genuinely violated.
+
+  Deliberately NOT inside a <nav>. The house floor (target-size-rules.mjs) fires on anything
+  undersized in the shared chrome and would decide this file before the spec clause ever ran,
+  leaving the spec half of the gate untested behind a house preference. Keeping the two arms on
+  separate markup is what stops one tier quietly standing in for the other —
+  target-house-floor-nav.html is the house arm.
+-->
+<style>
+  body { margin: 0; font: 14px/1 system-ui, sans-serif; }
+  .row { display: flex; gap: 2px; padding: 8px; }
+  .row a { display: block; height: 20px; width: 20px; line-height: 20px; text-align: center; background: #eee; }
+</style>
+<div class="row">
+  <a href="#a">a</a><a href="#b">b</a><a href="#c">c</a><a href="#d">d</a>
+</div>
