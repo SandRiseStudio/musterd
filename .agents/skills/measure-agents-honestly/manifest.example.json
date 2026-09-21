@@ -1,0 +1,18 @@
+{
+  "question": "Does claiming work before starting reduce duplicated effort when three agents share one repo?",
+  "predicate_set": "v1",
+  "declared_on": "2026-09-21",
+  "model": "claude-opus-5",
+  "harness": "claude-code 2.1.276",
+  "kickoff_sha": "263f6246",
+  "arms": [
+    "A  — one agent, alone (the cost control)",
+    "C3 — three agents, no coordination (the honest comparison)",
+    "D  — three agents, claim-before-you-build enforced"
+  ],
+  "denominator": "wasted lines divided by total lines authored inside the run window, per arm — never divided by agent count, and never compared against arm A",
+  "headline": "wasted-work % in D versus C3",
+  "guardrail": "correctness must not fall: every arm's tickets accepted at the same rate, or the headline does not count",
+  "stop_rule": "all tickets reported done, or 90 minutes wall-clock, whichever comes first",
+  "notes": "Arm A is here to price the coordination, not to be beaten. See the denominator section of SKILL.md."
+}

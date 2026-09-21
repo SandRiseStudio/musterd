@@ -296,6 +296,32 @@ confirm the ablation or invalidate-date it; recorded here rather than left as a 
 by anyone who cites it next. **Follows-up:** deferred — the next seat that needs the ablation as
 load-bearing evidence reads the body (2026-09-21).
 
+*B5 shipped 2026-09-21 (dolly, lane `01M32K7QXT`) — absorbs §3 skill 13, so that row must not also
+be built.* Five habits (pre-register the manifest and freeze it; reconstruct wasted work from git
+alone with the two exclusions that cost most — a surviving reimplementation is not waste, self-rework
+never is; diagnose rather than rank; the denominator; the zero-spend retro first, with the
+necessity rule written down in advance) plus `manifest.py check|freeze|verify`.
+
+**The denominator line ships verbatim, and it is the one that costs us our best number.** Solo:
+0% waste, full acceptance, ~24k output tokens; coordinated N ≈7.7× that and slower at this scale —
+so the comparison is coordinated-N against *uncoordinated*-N, never against solo, and anyone quoting
+a multiplier against a solo baseline is answering a question nobody asked. That unflattering number
+is published; the flattering one is not.
+
+**The 38× is deliberately absent from the skill**, matching `cfp-abstract.md`'s own gate rather than
+re-deciding it: the flagship is ~994 commits old (lane `01M1VDRC6B` is the re-run), and the skill
+says why a gated number is gated instead of quietly omitting it. The posture it teaches is that the
+reader's number should be their own — a multiplier from someone else's repo on someone else's build
+is decoration.
+
+`manifest.py` makes "a frozen ruler must not bend" checkable: `freeze` records a canonical hash and
+refuses a manifest failing `check`, `verify` separates **never frozen** from **changed**, and the
+hash is over canonical JSON so reordering or reindenting the file does not trip it — a check that
+fails when you tidy a file teaches people to stop tidying it. Its honest limit is stated in the
+body: the freeze file is written by the same person on the same machine and defeats drift, not a
+determined author; publish the hash somewhere you do not control. 16 refusals and 6 must-NOT-fire
+cases exercised, all passing first run.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
