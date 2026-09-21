@@ -126,9 +126,11 @@ export const FORBIDDEN_CLAIMS: readonly ForbiddenClaim[] = [
   {
     id: 11,
     tier: 'review',
-    claim: 'The 38x without its date, its denominator and its cost side.',
-    why: "July 2026 flagship, D vs uncoordinated-N and never vs solo; D burns ~7.7x solo's tokens. Gated by §6.5 until the re-run lands (lane 01M1VDRC6B, held).",
-    instead: 'the sell is D-vs-uncoordinated-N, never D-vs-solo. Date every number or drop it.',
+    claim:
+      'The 38x in any form while lane 01M1VDRC6B is open, INCLUDING its components: not the multiplier, not "72% wasted / under 2%", not the ratio restated in prose. No caveat set unlocks it.',
+    why: "The prohibition is in `claim` because `claim` is the rule (ADR 437). It used to read 'without its date, its denominator and its cost side' here while §6.5 said the figure was gated outright — two answers, and the permissive one was the one a writer read. That wording also never reached the component form, which is how three of the four uses in docs/demo.md survived on 2026-09-21 (#1639). Underneath: July 2026 flagship, D vs uncoordinated-N and never vs solo, D burns ~7.7x solo's tokens, build ~994 commits old.",
+    instead:
+      "say it qualitatively, or show the dated table. The figure returns by an edit to THIS item when the re-run lands, with the new run's date, denominator and cost side attached — the sell is D-vs-uncoordinated-N, never D-vs-solo.",
   },
   {
     id: 12,

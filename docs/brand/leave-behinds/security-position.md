@@ -185,12 +185,18 @@ clean mutation run, not confidence. Edit the numbered items below and the module
    down" — never "human in the loop." *(ghost; wanderer did not raise it and it is correct.)*
 10. Cross-family review as "reviewed by a different model family" without the daemon qualifier —
     nothing attests the reviewer's model differed outside the daemon record.
-11. The 38× without its date, its denominator and its cost side: July 2026 flagship, D vs
-    uncoordinated-N and never vs solo, and D burns ~7.7× solo's tokens. It is also ~994 commits
-    old. Date every number or drop it. *(ghost. Verified 2026-09-18 against
+11. **The 38×, in any form, while the refresh lane `01M1VDRC6BAG` is open — including its
+    components.** Not the multiplier, not "72 % wasted / under 2 %", not the ratio restated in
+    prose. No caveat set unlocks it; the figure returns when the re-run lands, not before, and it
+    returns by an edit to this item (ADR 437). Naming the components is the load-bearing part: the
+    wording this item carried until 2026-09-21 forbade the number "without its date, its
+    denominator and its cost side", which never reached the component form, and three of the four
+    uses found in `docs/demo.md` that day were in exactly that form, written by an author who
+    believed they were complying (#1639). *(ghost. Verified 2026-09-18 against
     `docs/wiki/cookoff.md`, which states it in one line: 1.9 % vs 72.2 % wasted work at the same
-    100 % correctness, solo A the honest denominator. The refresh is an open lane,
-    `01M1VDRC6BAG`.)*
+    100 % correctness, solo A the honest denominator — July 2026 flagship, D vs uncoordinated-N and
+    never vs solo, D burning ~7.7× solo's tokens, on a build ~994 commits old. Those are the
+    caveats the figure returns WITH, not a licence to use it now.)*
 12. MAST's 79% as a safety number, or as a measurement of musterd. It is a failure taxonomy over
     other teams' systems. *(wanderer; already enforced on the site, ADR 320 "what this is not".)*
 13. Credential custody as solved. Nx Console is the counterexample, and big-body owns the section
@@ -331,12 +337,20 @@ the source at 2am. One cost section is honest; two is talking them out. Removed.
    revoke fast — for README and docs. Scoped as explicitly *not* part of these reads. No lane.
 4. **kimi's read never arrived.** Two is enough to reconcile; if kimi answers later, this document
    gets a dated amendment rather than a rewrite.
-5. **The 38× refresh** (`01M1VDRC6BAG`) gates any use of that number in outbound copy.
-   **Honoured 2026-09-18 by dropping the figure, not by amending this line.** The first draft of
-   the platform-team page used it with all four caveats, which wanderer caught on the second-seat
-   read: the caveats were correct and complete, and the page still violated a gate I had written
-   myself two commits earlier. Amending the gate to fit the copy was the available move and it is
-   the wrong one — a bar that bends to an argument is not a bar. Both leave-behinds now say the
-   honest thing without the number: one agent alone still wins on cost and on wall-clock, and if
-   the reader's bottleneck is the bill rather than the collisions, that is an argument against us.
-   The figure returns when the re-run lands, not before.
+5. **The 38× refresh** (`01M1VDRC6BAG`) is what is *owed*. **The rule is §3 item 11 and the module,
+   not this line** — see [ADR 437](../../decisions/437-one-gate-one-place.md). Until 2026-09-21
+   this bullet stated the gate itself while §3.11 stated a weaker, conditional version of it, and a
+   writer who read either one was reading the governing document correctly. That split produced
+   four uses of the figure in `docs/demo.md` (#1639). A live gate belongs in the list of claims; §6
+   is where you look for what is outstanding, not for what you may say.
+
+   The reasoning stays here because it is the evidence the pair was broken. **Honoured 2026-09-18
+   by dropping the figure, not by amending this line.** The first draft of the platform-team page
+   used it with all four caveats, which wanderer caught on the second-seat read: the caveats were
+   correct and complete, and the page still violated a gate I had written myself two commits
+   earlier. I read that at the time as my own lapse. It was not — it was §3-compliant copy failing
+   §6, which is the contradiction, written down inside the clause that caused it. Amending the gate
+   to fit the copy was the available move and it is the wrong one: a bar that bends to an argument
+   is not a bar. Both leave-behinds say the honest thing without the number — one agent alone still
+   wins on cost and on wall-clock, and if the reader's bottleneck is the bill rather than the
+   collisions, that is an argument against us.
