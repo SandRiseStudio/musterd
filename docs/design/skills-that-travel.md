@@ -169,6 +169,19 @@ ships `landed.sh` — ADR 300's verification as a daemon-free script, all five t
 against real repositories including `not_ancestor` in a scratch repo. Per §6.3, S6 absorbs §3
 skill 8; that row should not also be built.
 
+*B1 increment 1 shipped 2026-09-21 (dolly, lane `01M32JXEK8`):* the **idea** half of B1 —
+`.agents/skills/dated-and-falsifiable/SKILL.md`. The three scripted instruments
+(controls-in-force, pre-registered-watch, claims-ledger) remain unbuilt and are increments 2–4 of
+the same lane, matching the row's own `4d idea + 3 × 3d` shape. Two dated notes on the row as
+written. **It is twelve shapes, not ten:** the eleven sourced wiki pages yield twelve distinct
+failure modes once *the instrument discharges the act* (a destructive read) and *recorded, not
+routed* (a distribution failure) are kept separate from the aliasing family, and collapsing any of
+them would have merged causes the pages exist to tell apart. **The catalogue's own anecdotes are
+deliberately undated** — they illustrate a shape for a stranger who cannot run our falsifiers, and
+the skill says so rather than hoping the reader does not notice; the two that *are* checkable
+anywhere (the zsh glob abort, the pipeline exit code) were re-run on 2026-09-21 under zsh 5.9
+before publishing.
+
 ### 6.3 Strengtheners for §3 (fold into those rows when each ships)
 
 | §3 skill | Add |
