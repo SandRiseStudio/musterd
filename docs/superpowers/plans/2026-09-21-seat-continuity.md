@@ -37,9 +37,9 @@ construction.
 
 | # | lane | state on 2026-09-21 | depends on | what "done" is |
 | - | ---- | ------------------- | ---------- | -------------- |
-| 1 | `01M32FGSXKZZDTQAPBACZFMPS0` | claimed by stanley, PR #1594 | — | ADR 427 accepted; the three rungs judge `user`+`assistant` bytes; `resume_weight_bytes` on the wake report; **a real enrolled-seat wake logs `session=resumed`** for the first time since 2026-09-14, cost inside the 07-29 fresh range. |
-| 2 | `01M32FH5YQD4EVTG6ARSS0S0SG` | open, unowned | — | `team_inbox_check` honours `limit` and stops re-surfacing acts the seat already received; a wake that has read nothing new gets under 2 KiB back; both seats re-measured. |
-| 3 | `01M32FHKKQXKH9W96XF3G4CT3J` | open, unowned, **brainstorm with nick first** | — | A design spec for the continuity packet — what any harness receives on a cold spawn so it has what a resume would have given it — and the protocol ADR for `WakeContextPacket` v2. |
+| 1 | `01M32FGSXKZZDTQAPBACZFMPS0` | landed #1594 (e155dc0); ryder resumed 2026-09-21; awaiting acceptance | — | ADR 427 accepted; the three rungs judge `user`+`assistant` bytes; `resume_weight_bytes` on the wake report; **a real enrolled-seat wake logs `session=resumed`** for the first time since 2026-09-14, cost inside the 07-29 fresh range. |
+| 2 | `01M32FH5YQD4EVTG6ARSS0S0SG` | claimed by izzo 2026-09-21 | — | `team_inbox_check` honours `limit` and stops re-surfacing acts the seat already received; a wake that has read nothing new gets under 2 KiB back; both seats re-measured. |
+| 3 | `01M32FHKKQXKH9W96XF3G4CT3J` | claimed by stanley 2026-09-21; spec approved (#1600), ADR 430 (#1601) | — | A design spec for the continuity packet — what any harness receives on a cold spawn so it has what a resume would have given it — and the protocol ADR for `WakeContextPacket` v2. |
 | 4 | `01M32FHX6JHCVNQRGRAHHMTEJN` | open, blocked on 3 | 3 | The packet served on every wake kind; a Codex seat and a Claude Code seat each woken cold and picking up a lane mid-flight; the three-arm comparison (resume / fresh+packet / Codex fresh+packet) run and recorded. |
 | 5 | `01M32FJ8T49EGFJV659DNBEMKK` | open, blocked on 3, **design conversation with nick** | 3 | `docs/design/musterd-harness.md` + one decision ADR: build a musterd-owned harness, don't, or a dated trigger; if build, its goal and lanes opened before this lane closes. |
 
@@ -77,6 +77,8 @@ under the same goal.
 - [ ] Protocol ADR for `WakeContextPacket` v2.
 
 ### Increment 4 — implement the packet on spawn
+
+Plan: `docs/superpowers/plans/2026-09-21-continuity-packet-v2.md` (written 2026-09-21 from the approved spec; eight tasks, TDD, ending in the three-arm measurement).
 
 - [ ] Serve v2 on every wake kind; the spawn line and primer point a fresh seat at it before its
       first inbox read.
