@@ -11,12 +11,14 @@ import {
   SITE_TITLE,
   absoluteUrl,
   breadcrumbNode,
+  broadcastEventNode,
   itemListNode,
   organizationNode,
   pageHead,
   pageMeta,
   pageTitle,
   softwareApplicationNode,
+  TWITCH_CHANNEL_URL,
   webSiteNode,
 } from './siteMeta';
 
@@ -222,6 +224,18 @@ describe('structured data nodes', () => {
           url: 'https://musterd.io/docs/concepts',
         },
       ],
+    });
+  });
+
+  it('the broadcast node names the channel without claiming it is live right now', () => {
+    const node = broadcastEventNode();
+    // Prerendered, so no client upgrade a crawler will ever see: an `isLiveBroadcast` here would
+    // be the one liveness claim on /watch that cannot react. Absent means unknown, which is true.
+    expect(node).not.toHaveProperty('isLiveBroadcast');
+    expect(node.publishedOn).toEqual({
+      '@type': 'BroadcastService',
+      name: 'Twitch',
+      url: TWITCH_CHANNEL_URL,
     });
   });
 
