@@ -226,6 +226,7 @@ import {
 } from '../store/nodes.js';
 import { deriveNext, deriveNextSummary } from '../store/orientation.js';
 import {
+  currentBuild,
   attach,
   clearOrphanPresence,
   clearMemberPresence,
@@ -989,6 +990,26 @@ function attestedModelSourceHeader(req: IncomingMessage): string | undefined {
  * any prior attestation). Unlike model there is NO agent-key gate: build attests the *binary* the
  * caller runs, which a human's CLI genuinely has — a stale human CLI is exactly in scope.
  */
+/**
+ * Which adapter a wake actually ran, for the wake ledger (lane 01M330CCQE, 2026-09-21). A woken
+ * session's MCP server attests its dist's build ref on connect (ADR 135) and it lands on the
+ * presence row; stamping it — with the daemon's own build beside it — onto `residency.woke` and
+ * `residency.wake_cost` makes "was that wake on stale tools?" a ledger query instead of a `ps`
+ * over live processes. The premise that wakes run a seat workspace's own dist was measured wrong
+ * that day (they run the shared daemon checkout's), and only a stamp on the row settles it per
+ * wake rather than per argument. Both keys are omitted, never null, when unknown.
+ */
+function adapterBuildStamp(
+  ctx: Ctx,
+  memberId: string,
+): { adapter_build?: string; daemon_build?: string } {
+  const adapter = currentBuild(ctx.db, memberId);
+  return {
+    ...(adapter ? { adapter_build: adapter } : {}),
+    ...(ctx.config.buildRef ? { daemon_build: ctx.config.buildRef } : {}),
+  };
+}
+
 function attestedBuildHeader(req: IncomingMessage): string | undefined {
   const raw = req.headers['x-musterd-build'];
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -3154,6 +3175,7 @@ export async function handleHttp(
                 ...(body.harness_cost_usd !== undefined
                   ? { harness_cost_usd: body.harness_cost_usd }
                   : {}),
+                ...adapterBuildStamp(ctx, settled.member_id),
                 ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
                 ...(body.exact_match ? { exact_match: body.exact_match } : {}),
                 ...(body.transcript_bytes !== undefined
@@ -3207,6 +3229,7 @@ export async function handleHttp(
             ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
             ...(lease.edge ? { edge: lease.edge } : {}),
             ...(enrollment?.grant_id ? { grant_id: enrollment.grant_id } : {}),
+            ...adapterBuildStamp(ctx, lease.member_id),
             ...(body.session ? { session: body.session } : {}),
             ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
             // ADR 210: WHY an eligible wake resumed or did not. `delivery_outcome` says what

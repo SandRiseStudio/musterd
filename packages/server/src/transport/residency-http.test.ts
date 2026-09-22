@@ -603,6 +603,49 @@ describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
     });
   });
 
+  // Lane 01M330CCQE: "was that wake on stale tools?" was answered from `ps` over live processes,
+  // and the first answer was wrong. The adapter's own attestation (ADR 135) already sits on the
+  // presence row; the wake ledger now carries it, so the question is a query.
+  it('stamps the adapter build the woken session attested onto residency.woke and wake_cost', async () => {
+    const leaseId = await freshLease('ab1');
+    await claimAda();
+    // The woken adapter attests its dist on an ordinary authenticated touch (sticky on the row).
+    const touched = await fetch(base + '/teams/dawn/inbox', {
+      headers: { ...authHeaders(adaAuth), 'x-musterd-build': 'feedface' },
+    });
+    expect(touched.status).toBe(200);
+    const primary = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, session: 'fresh' },
+      agentKey,
+    );
+    expect(primary.status).toBe(200);
+    expect(JSON.parse(audits('residency.woke')[0]!.detail as string)).toMatchObject({
+      adapter_build: 'feedface',
+    });
+    const supplement = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, cost_usd: 0.2 },
+      agentKey,
+    );
+    expect(supplement.status).toBe(200);
+    expect(JSON.parse(audits('residency.wake_cost')[0]!.detail as string)).toMatchObject({
+      adapter_build: 'feedface',
+    });
+  });
+
+  it('records no adapter_build when the seat never attested one — absent is unknown, not stale', async () => {
+    const leaseId = await freshLease('ab2');
+    await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, session: 'fresh' },
+      agentKey,
+    );
+    expect(JSON.parse(audits('residency.woke')[0]!.detail as string)).not.toHaveProperty(
+      'adapter_build',
+    );
+  });
+
   it('a report with no exact_match records none — absent means never considered', async () => {
     const leaseId = await freshLease('em2');
     await post(
