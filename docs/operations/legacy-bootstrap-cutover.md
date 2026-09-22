@@ -17,8 +17,14 @@ seat-scoped successor, and atomically replaces only `agent_key` in the 0600 bind
 publication fails, the legacy key remains in the binding. Rerun the same command: the daemon revokes
 and replaces only an unused migration successor; it never revokes one that has authenticated.
 
-Launch or reclaim the seat once with the new credential. Minting or writing it is not readiness;
-successful scoped authentication is.
+Adopt the new credential once with the exact command printed by migration (ADR 439):
+
+```bash
+musterd claim <seat> --bootstrap
+```
+
+Minting or writing it is not readiness; successful scoped authentication is. Ordinary same-seat
+claims continue to use the narrower agent-seat credential.
 
 ## 2. Migrate each residency host
 

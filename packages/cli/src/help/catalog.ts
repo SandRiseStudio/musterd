@@ -174,7 +174,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'a folder without a valid selection exits 6 and names `musterd harness configure` as the fix. ' +
       '`--migrate-bootstrap` replaces this Workspace’s legacy Team key with a seat-scoped credential; ' +
       'it requires the existing seat credential, preserves active Presence, and is safe to retry after ' +
-      'a local write failure.',
+      'a local write failure. Run the exact adoption command it prints to satisfy cutover readiness.',
     examples: ['musterd wire', 'musterd wire --autojoin', 'musterd wire --migrate-bootstrap'],
   },
   {
@@ -802,7 +802,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'claim',
     signature:
-      '[<name>] [--team <slug>] [--key <mskey_|mscr_>] [--grant <msgr_>] [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--detach] [--force]',
+      '[<name>] [--team <slug>] [--key <mskey_|mscr_>] [--grant <msgr_>] [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--bootstrap] [--detach] [--force]',
     summary: 'get onto the team from this folder — occupy or adopt a seat (MCP: team_join)',
     group: 'team',
     primary: true,
@@ -814,10 +814,13 @@ export const CATALOG: readonly CommandEntry[] = [
       '`claim <name> --team <slug> --key <mskey_|mscr_>` (a key this machine has held before is found in ' +
       'the vault). `--detach` claims one-shot over HTTP and exits with the seat still present (no session ' +
       'held) — for fixtures and ' +
-      'scripts that want the room to stay occupied. The MCP spelling is `team_join`.',
+      'scripts that want the room to stay occupied. `claim <bound-seat> --bootstrap` explicitly uses ' +
+      'the binding’s scoped bootstrap credential once for migration readiness (ADR 439); ordinary ' +
+      'same-seat reconnects keep using the narrower seat credential. The MCP spelling is `team_join`.',
     examples: [
       'musterd claim',
       'musterd claim scout',
+      'musterd claim scout --bootstrap',
       'musterd claim --role reviewer',
       'musterd claim nick --team acme --key mscr_…',
     ],

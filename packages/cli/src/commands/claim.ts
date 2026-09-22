@@ -90,9 +90,27 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
   const grant = flagStr(flags, 'grant') ?? process.env['MUSTERD_GRANT'] ?? binding?.grant;
   const target = resolveTarget(parsed, binding);
   const boundSeat = binding ? bindingSeat(binding) : undefined;
+  const bootstrapAdoption = flags['bootstrap'] === true;
+  if (
+    bootstrapAdoption &&
+    (!parsed.positionals[0] ||
+      'role' in target ||
+      boundSeat === undefined ||
+      target.seat !== boundSeat)
+  ) {
+    const command = boundSeat
+      ? `musterd claim ${boundSeat} --bootstrap`
+      : 'musterd claim <seat> --bootstrap';
+    throw new CliError(
+      `--bootstrap requires the explicit seat name from this Workspace binding: ${command}`,
+      2,
+    );
+  }
   const reoccupyingBoundSeat =
     'seat' in target && boundSeat !== undefined && target.seat === boundSeat;
-  const claimKey = (reoccupyingBoundSeat ? binding?.seat_credential : undefined) ?? agentKey;
+  const claimKey = bootstrapAdoption
+    ? binding?.agent_key
+    : ((reoccupyingBoundSeat ? binding?.seat_credential : undefined) ?? agentKey);
   if (!claimKey) {
     throw new CliError(
       'no agent authority — bootstrap claiming needs a team agent key; reconnecting needs this ' +

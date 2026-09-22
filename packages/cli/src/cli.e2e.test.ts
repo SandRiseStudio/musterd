@@ -185,21 +185,14 @@ describe('CLI end-to-end (ADR 350 legacy bootstrap cutover)', () => {
       });
       expect(reseatPolicy.status).toBe(200);
       for (const workspace of [adaDir, graceDir]) {
+        cwdSpy.mockReturnValue(workspace);
         const binding = JSON.parse(
           readFileSync(join(workspace, '.musterd', 'binding.json'), 'utf8'),
         );
-        const claimed = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/claim`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            key: binding.agent_key,
-            target: { seat: binding.claim.name },
-            surface: 'cli',
-          }),
-        });
-        expect(claimed.status).toBe(200);
+        expect((await run(claimCommand, [binding.claim.name, '--bootstrap'])).code).toBe(0);
       }
 
+      cwdSpy.mockReturnValue(cwdDir);
       const cutover = await run(teamCommand, ['bootstrap', 'cutover', '--yes', '--json']);
       expect(JSON.parse(cutover.out)).toMatchObject({ ok: true, already_cut_over: false });
 
