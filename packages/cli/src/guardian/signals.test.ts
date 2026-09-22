@@ -149,12 +149,33 @@ describe('collectSignals', () => {
     '2026-09-21 14:09:18 web build failed; keeping the previously published bundle. Build output:';
   const PUBLISHED = '2026-09-21 14:15:25 published 5df33745 \u2192 /Users/nick/.musterd/live/web';
 
-  it('publisher freshFailure = the last completed outcome was a failure', async () => {
+  it('the publisher signal IS the last completed outcome, carried as all three states', async () => {
     const fresh = await collectSignals(deps({ readTail: async () => [FAILED] }));
-    expect(fresh.publisherLog.freshFailure).toBe(true);
+    expect(fresh.publisherLog.outcome).toBe('failed');
 
     const recovered = await collectSignals(deps({ readTail: async () => [FAILED, PUBLISHED] }));
-    expect(recovered.publisherLog.freshFailure).toBe(false);
+    expect(recovered.publisherLog.outcome).toBe('published');
+  });
+
+  // The decline this lane came back for: a log the collector cannot read an outcome from used to
+  // arrive downstream as `freshFailure: false` — byte-identical to a healthy publisher. The whole
+  // fix is that this line says `unknown` and keeps saying it all the way to the discharge.
+  it('a log with no outcome line reaches the classifier as unknown, NOT as health', async () => {
+    const trimmed = await collectSignals(
+      deps({
+        readTail: async () => ['[vite] building for production...', 'dist/index.html 1.2 kB'],
+      }),
+    );
+    expect(trimmed.publisherLog.outcome).toBe('unknown');
+
+    const unreadable = await collectSignals(
+      deps({
+        readTail: async () => {
+          throw new Error('ENOENT: build.log');
+        },
+      }),
+    );
+    expect(unreadable.publisherLog.outcome).toBe('unknown');
   });
 
   // The regression this lane exists for: five clean publishes after one failure, and guardian still
@@ -166,7 +187,7 @@ describe('collectSignals', () => {
       PUBLISHED,
     ];
     const s = await collectSignals(deps({ readTail: async () => lines }));
-    expect(s.publisherLog.freshFailure).toBe(false);
+    expect(s.publisherLog.outcome).toBe('published');
   });
 });
 

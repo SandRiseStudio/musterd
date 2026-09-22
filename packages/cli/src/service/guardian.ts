@@ -10,6 +10,7 @@
 import { CliError, isConnRefused } from '../errors.js';
 import {
   classify,
+  indeterminate,
   DEFAULT_TIERS,
   type GuardianClass,
   type GuardianTier,
@@ -46,7 +47,11 @@ export interface GuardianTickDeps {
    * being something to act on is what kept a week-old raise open until an unrelated class happened
    * to fire beside it.
    */
-  discharge: (firing: ReadonlySet<GuardianClass>, stamp: GuardianStamp) => Promise<GuardianStamp>;
+  discharge: (
+    firing: ReadonlySet<GuardianClass>,
+    withheld: ReadonlySet<GuardianClass>,
+    stamp: GuardianStamp,
+  ) => Promise<GuardianStamp>;
   /** The daily in-band heartbeat act (best-effort; unprovisioned seat = silent no-op). */
   heartbeat: () => Promise<void>;
   log: (line: string) => void;
@@ -187,9 +192,18 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
   // Skipped entirely under a handover, where `classified` is empty because the daemon is restarting
   // on purpose (ADR 274). That emptiness means "we know nothing this tick", and ADR 173's rule
   // applies to a guardian reading its own signals too: absent is unknown, never healthy.
+  //
+  // And the per-class version of that same rule rides beside it: `indeterminate` names the classes
+  // whose evidence this tick could not read (ADR 435's `unknown`). They are absent from `classified`
+  // for a reason that is not health, so they are withheld from the discharge rather than counted as
+  // recovery — otherwise a trimmed build.log closes a real publisher_failed raise.
   if (!handoverDeferred) {
     try {
-      stamp = await d.discharge(new Set(classified.map((i) => i.class)), stamp);
+      stamp = await d.discharge(
+        new Set(classified.map((i) => i.class)),
+        new Set(indeterminate(signals)),
+        stamp,
+      );
     } catch (e) {
       d.log(`discharge failed (${String(e)}) — raises stay open; next tick retries`);
     }

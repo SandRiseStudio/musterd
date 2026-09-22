@@ -12,6 +12,13 @@ import { describeSample, type StackSample } from './sample.js';
 
 export type { GuardianClass, GuardianTier };
 
+/**
+ * The publisher's last completed outcome (ADR 435). `unknown` means the log did not say — a build
+ * still in flight, a log trimmed past its last outcome line, a publisher that has never run — and
+ * it is NOT `published`: ADR 173's rule, absent is unknown, never zero.
+ */
+export type PublisherOutcome = 'published' | 'failed' | 'unknown';
+
 export interface Incident {
   class: GuardianClass;
   /**
@@ -47,7 +54,12 @@ export interface GuardianSignals {
   /** A current autorefresh restart. Only suppresses a confirmed unavailable health result. */
   handover?: { startedAt: number; targetBuild: string } | null;
   launchd: { lastExit: number; runs: number };
-  publisherLog: { freshFailure: boolean };
+  /**
+   * What the publisher last finished doing, as a THREE-state answer (ADR 435). `unknown` is its own
+   * state and must stay one all the way to the discharge: folding it into "not failed" is how an
+   * unreadable log came to read as health — see {@link indeterminate}.
+   */
+  publisherLog: { outcome: PublisherOutcome };
   errLinesSinceBoot: number;
   httpErrorRateSinceBoot: number;
   reaperStormSinceBoot: boolean;
@@ -224,9 +236,34 @@ export function classify(s: GuardianSignals): Incident[] {
     if (!s.health.dbPathExpected) alert.push({ class: 'wrong_db' });
   }
 
-  if (s.publisherLog.freshFailure) auto.push({ class: 'publisher_failed' });
+  if (s.publisherLog.outcome === 'failed') auto.push({ class: 'publisher_failed' });
   if (s.httpErrorRateSinceBoot >= ERROR_RATE_FLOOR) alert.push({ class: 'error_rate' });
   if (s.reaperStormSinceBoot) alert.push({ class: 'presence_churn' });
 
   return [...auto, ...alert];
+}
+
+/**
+ * The classes this tick could not OBSERVE — not firing, and not observed healthy either.
+ *
+ * `classify` answers one question ("what is wrong right now"), and a class it omits is normally a
+ * class just observed healthy: that absence is what ADR 432's discharge reads as recovery. But
+ * absence has two causes, and only one of them is health. When the publisher's log carries no
+ * outcome line at all, `classify` omits `publisher_failed` because there is nothing to raise —
+ * which, since ADR 438 made the discharge run on EVERY tick, silently closed a genuine open raise
+ * on the strength of a tick that observed nothing. ADR 435's Decision says in writing that
+ * `unknown` "does not raise, and does not clear an existing raise either"; the landed code kept
+ * only the first half, because the signal folded `unknown` into `false` before anything downstream
+ * could tell the two apart.
+ *
+ * REACHABLE, not theoretical: autorefresh trims logs over a cap (observed 2026-09-21 16:51 on
+ * daemon.log). A trimmed `build.log` whose last outcome line is gone reads `unknown` while the
+ * publisher is genuinely broken — the exact "one real outage going quiet" direction clear.test.ts
+ * names as the safety case.
+ *
+ * This is the per-class version of the handover rule the tick already applies wholesale (ADR 274:
+ * a daemon restarting on purpose classifies nothing, and that emptiness is not health).
+ */
+export function indeterminate(s: GuardianSignals): GuardianClass[] {
+  return s.publisherLog.outcome === 'unknown' ? ['publisher_failed'] : [];
 }

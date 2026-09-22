@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CliError } from '../errors.js';
+import { dischargeCleared } from '../guardian/act.js';
 import { DEFAULT_TIERS } from '../guardian/classify.js';
-import { emptyStamp, loadStamp, saveStamp } from '../guardian/damp.js';
+import { emptyStamp, loadStamp, raiseReason, recordRaise, saveStamp } from '../guardian/damp.js';
+import { collectSignals } from '../guardian/signals.js';
 import {
   classifyPolicyError,
   guardianStatusLine,
@@ -27,7 +29,7 @@ function tickDeps(over: Partial<GuardianTickDeps> = {}): {
       now: NOW,
       health: { ok: true, bootedAt: NOW - 60_000, schemaOk: true, dbPathExpected: true },
       launchd: { lastExit: 0, runs: 1 },
-      publisherLog: { freshFailure: false },
+      publisherLog: { outcome: 'published' },
       errLinesSinceBoot: 0,
       httpErrorRateSinceBoot: 0,
       reaperStormSinceBoot: false,
@@ -39,8 +41,9 @@ function tickDeps(over: Partial<GuardianTickDeps> = {}): {
       lines.push(`acted:${incidents.map((i) => i.class).join(',') || 'none'}`);
       return { stamp, acted: [] };
     },
-    discharge: async (firing, stamp) => {
+    discharge: async (firing, withheld, stamp) => {
       lines.push(`discharged:${[...firing].join(',') || 'none'}`);
+      lines.push(`withheld:${[...withheld].join(',') || 'none'}`);
       return stamp;
     },
     heartbeat: async () => {
@@ -69,7 +72,7 @@ describe('guardianTick', () => {
         now: NOW,
         health: { ok: true, bootedAt: NOW - 60_000, schemaOk: true, dbPathExpected: true },
         launchd: { lastExit: 0, runs: 1 },
-        publisherLog: { freshFailure: true },
+        publisherLog: { outcome: 'failed' },
         errLinesSinceBoot: 0,
         httpErrorRateSinceBoot: 0,
         reaperStormSinceBoot: false,
@@ -86,7 +89,7 @@ describe('guardianTick', () => {
         now: NOW,
         health: null,
         launchd: { lastExit: 1, runs: 2 },
-        publisherLog: { freshFailure: false },
+        publisherLog: { outcome: 'published' },
         errLinesSinceBoot: 0,
         httpErrorRateSinceBoot: 0,
         reaperStormSinceBoot: false,
@@ -203,7 +206,7 @@ describe('guardianTick', () => {
         health: null,
         handover: { startedAt: NOW - 1_000, targetBuild: 'nextsha' },
         launchd: { lastExit: 1, runs: 2 },
-        publisherLog: { freshFailure: false },
+        publisherLog: { outcome: 'published' },
         errLinesSinceBoot: 0,
         httpErrorRateSinceBoot: 0,
         reaperStormSinceBoot: false,
@@ -233,7 +236,7 @@ describe('guardianTick', () => {
         confirmError: 'The operation was aborted due to timeout',
       },
       launchd: { lastExit: 0, runs: 15 },
-      publisherLog: { freshFailure: false },
+      publisherLog: { outcome: 'published' },
       errLinesSinceBoot: 0,
       httpErrorRateSinceBoot: 0,
       reaperStormSinceBoot: false,
@@ -498,7 +501,7 @@ describe('ADR 438: discharge is reachable on a healthy tick', () => {
         now: NOW,
         health: { ok: true, bootedAt: NOW - 60_000, schemaOk: true, dbPathExpected: true },
         launchd: { lastExit: 0, runs: 1 },
-        publisherLog: { freshFailure: true },
+        publisherLog: { outcome: 'failed' },
         errLinesSinceBoot: 0,
         httpErrorRateSinceBoot: 0,
         reaperStormSinceBoot: false,
@@ -523,7 +526,7 @@ describe('ADR 438: discharge is reachable on a healthy tick', () => {
         health: null,
         handover: { reason: 'refresh', startedAt: NOW - 1_000 },
         launchd: { lastExit: 0, runs: 1 },
-        publisherLog: { freshFailure: false },
+        publisherLog: { outcome: 'published' },
         errLinesSinceBoot: 0,
         httpErrorRateSinceBoot: 0,
         reaperStormSinceBoot: false,
@@ -544,5 +547,84 @@ describe('ADR 438: discharge is reachable on a healthy tick', () => {
     expect(await guardianTick(d)).toBe(0);
     expect(loadStamp(d.stampPath).lastTickAt).toBe(NOW);
     expect(lines.some((l) => l.startsWith('discharge failed'))).toBe(true);
+  });
+});
+
+/**
+ * ADR 435's other half, tested the way the first half should have been: THROUGH THE PATH.
+ *
+ * The landed 435 shipped with a green suite that drove `lastPublisherOutcome` directly and asserted
+ * it returns `unknown`. It does. What nothing exercised was `unknown` PROPAGATING —
+ * collectSignals → classify → the discharge — and there it was folded into `freshFailure: false`
+ * two lines after it was computed, so the class went missing from the tick's classification and the
+ * discharge read that absence as recovery. Once ADR 438 put the discharge on every tick, a
+ * `build.log` trimmed past its last outcome line would close a real `publisher_failed` raise within
+ * one tick, in silence.
+ *
+ * So these wire the REAL collector, the REAL classifier and the REAL `dischargeCleared` together,
+ * with only the log text and the stamp as fixtures. The mechanism has unit tests of its own; this
+ * is the wiring, which is where both defects in this arc actually lived.
+ */
+describe('ADR 435 propagation: an unreadable publisher log does not close its raise', () => {
+  const PUBLISHED = '2026-09-21 14:15:25 published 5df33745 → /Users/nick/.musterd/live/web';
+
+  /** A build.log whose outcome lines have scrolled out — what autorefresh's log trim leaves. */
+  const TRIMMED = ['[vite] building for production...', 'dist/assets/index-a1b2c3.js  412.02 kB'];
+
+  async function tickOver(tail: string[]) {
+    const audits: Array<{ action: string; detail: Record<string, unknown> }> = [];
+    const { d, lines } = tickDeps({
+      collect: () =>
+        collectSignals({
+          now: () => NOW,
+          fetchHealth: async () => ({ ok: true, db: '/db', schema: 39, booted_at: NOW - 60_000 }),
+          confirmHealth: async () => ({ ok: true, db: '/db', schema: 39, booted_at: NOW - 60_000 }),
+          launchctlPrint: async () => 'state = running\n\truns = 1\n\tlast exit code = 0\n',
+          readSince: async () => [],
+          expected: { dbPath: '/db', schema: 39 },
+          daemonErrLogPath: '/tmp/err.log',
+          publisherBuildLogPath: '/tmp/build.log',
+          readTail: async () => tail,
+          lastRefreshAt: async () => null,
+        }),
+      // The real discharge, bound to fixtures — not the stub the tests above use.
+      discharge: (firing, withheld, stamp) =>
+        dischargeCleared(firing, withheld, {
+          stamp,
+          audit: async (action, detail) => {
+            audits.push({ action, detail });
+          },
+          sendResolve: async () => {},
+          log: (l) => lines.push(l),
+        }),
+    });
+    // An open raise from a genuine failure, exactly as the last tick would have left it on disk.
+    saveStamp(
+      d.stampPath,
+      recordRaise(
+        emptyStamp(),
+        'publisher_failed',
+        raiseReason('publisher_failed', 'web build failed'),
+        NOW - 600_000,
+        'act-publisher',
+      ),
+    );
+    await guardianTick(d);
+    return { stamp: loadStamp(d.stampPath), audits, lines };
+  }
+
+  it('holds the raise open when the log says nothing — the trimmed-log outage that would go quiet', async () => {
+    const { stamp, audits, lines } = await tickOver(TRIMMED);
+    expect(audits.filter((a) => a.action === 'guardian.cleared')).toHaveLength(0);
+    expect(stamp.lastRaise['publisher_failed']).toBeDefined();
+    expect(lines.some((l) => l.startsWith('guardian.discharge_withheld'))).toBe(true);
+  });
+
+  it('and still clears it the moment the publisher says `published` — the test is not vacuous', async () => {
+    const { stamp, audits } = await tickOver([...TRIMMED, PUBLISHED]);
+    const cleared = audits.filter((a) => a.action === 'guardian.cleared');
+    expect(cleared).toHaveLength(1);
+    expect(cleared[0]!.detail['class']).toBe('publisher_failed');
+    expect(stamp.lastRaise['publisher_failed']).toBeUndefined();
   });
 });
