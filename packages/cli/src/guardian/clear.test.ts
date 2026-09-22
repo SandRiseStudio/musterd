@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { actOn, type ActDeps } from './act.js';
-import { DEFAULT_TIERS } from './classify.js';
+import { dischargeCleared, type DischargeDeps } from './act.js';
+import type { GuardianClass } from './classify.js';
 import { emptyStamp, raiseReason, recordRaise, type GuardianStamp } from './damp.js';
 
 const NOW = 9_000_000;
@@ -28,19 +28,11 @@ interface Audit {
   detail: Record<string, unknown>;
 }
 
-function deps(stamp: GuardianStamp, over: Partial<ActDeps> = {}) {
+function deps(stamp: GuardianStamp, over: Partial<DischargeDeps> = {}) {
   const audits: Audit[] = [];
-  const asks: string[] = [];
   const resolves: Array<{ thread: string; body: string }> = [];
-  const d: ActDeps = {
-    now: () => NOW,
+  const d: DischargeDeps = {
     stamp,
-    tiers: DEFAULT_TIERS,
-    runService: async () => ({ ok: true }),
-    osNotify: () => {},
-    sendAsk: async (b) => {
-      asks.push(b);
-    },
     audit: async (action, detail) => {
       audits.push({ action, detail });
     },
@@ -50,8 +42,11 @@ function deps(stamp: GuardianStamp, over: Partial<ActDeps> = {}) {
     log: () => {},
     ...over,
   };
-  return { d, audits, asks, resolves };
+  return { d, audits, resolves };
 }
+
+/** The classes firing this tick — what the caller owes `dischargeCleared`. */
+const firing = (...cls: GuardianClass[]): ReadonlySet<GuardianClass> => new Set(cls);
 
 /** A stamp carrying an open, already-raised alert for `daemon_down` — the shape on disk today. */
 function withOpenRaise(
@@ -64,7 +59,7 @@ function withOpenRaise(
 describe('ADR 432: a cleared condition discharges its own raise', () => {
   it('a healthy tick clears a class that had an open raise, and says so in the ledger', async () => {
     const { d, audits } = deps(withOpenRaise());
-    const { stamp } = await actOn([], d);
+    const stamp = await dischargeCleared(firing(), d);
 
     const cleared = audits.filter((a) => a.action === 'guardian.cleared');
     expect(cleared).toHaveLength(1);
@@ -76,7 +71,7 @@ describe('ADR 432: a cleared condition discharges its own raise', () => {
 
   it('DOES NOT clear a class whose incident is still present — the one direction this must not err', async () => {
     const { d, audits } = deps(withOpenRaise());
-    const { stamp } = await actOn([{ class: 'daemon_down', evidence: 'still down' }], d);
+    const stamp = await dischargeCleared(firing('daemon_down'), d);
 
     expect(audits.filter((a) => a.action === 'guardian.cleared')).toHaveLength(0);
     expect(stamp.lastRaise['daemon_down']).toBeDefined();
@@ -91,7 +86,7 @@ describe('ADR 432: a cleared condition discharges its own raise', () => {
       NOW - 600_000,
     );
     const { d, audits } = deps(s);
-    const { stamp } = await actOn([{ class: 'daemon_wedged', evidence: 'still wedged' }], d);
+    const stamp = await dischargeCleared(firing('daemon_wedged'), d);
 
     const cleared = audits.filter((a) => a.action === 'guardian.cleared');
     expect(cleared).toHaveLength(1);
@@ -102,7 +97,7 @@ describe('ADR 432: a cleared condition discharges its own raise', () => {
 
   it('says nothing when there was no open raise — a quiet guardian stays quiet', async () => {
     const { d, audits } = deps(emptyStamp());
-    await actOn([], d);
+    await dischargeCleared(firing(), d);
     expect(audits.filter((a) => a.action === 'guardian.cleared')).toHaveLength(0);
   });
 
@@ -110,13 +105,13 @@ describe('ADR 432: a cleared condition discharges its own raise', () => {
     // ADR 232 bars a service seat from the peer verbs, so `accept` is not available to guardian.
     // `resolve` is thread-terminal (ADR 025) and is not a peer verb — it is the discharge guardian
     // can actually express, and the one the server's pinned fold now honours.
-    const { d, asks, resolves } = deps(withOpenRaise());
-    await actOn([], d);
+    const { d, resolves } = deps(withOpenRaise());
+    await dischargeCleared(firing(), d);
     expect(resolves).toEqual([
       { thread: 'act-daemon_down', body: 'guardian: daemon_down — cleared; this raise is closed' },
     ]);
-    // No new ask. A recovery must not bill anyone's attention the way the incident did.
-    expect(asks).toHaveLength(0);
+    // No new ask, structurally: `DischargeDeps` has no `sendAsk` to reach for. A recovery must
+    // not bill anyone's attention the way the incident did, and now it cannot.
   });
 
   it('keeps the memo when the resolve fails to send — an un-sent discharge is not a discharge', async () => {
@@ -127,7 +122,7 @@ describe('ADR 432: a cleared condition discharges its own raise', () => {
         throw new Error('daemon unreachable — it may BE the incident');
       },
     });
-    const { stamp } = await actOn([], d);
+    const stamp = await dischargeCleared(firing(), d);
     expect(resolves).toHaveLength(0);
     expect(stamp.lastRaise['daemon_down']).toBeDefined();
   });
@@ -136,14 +131,14 @@ describe('ADR 432: a cleared condition discharges its own raise', () => {
     // A raise from before ADR 432, or one whose send reported no id. There is nothing to resolve,
     // so the ask stays owed on the server — but the local memo must not wedge the damper shut.
     const { d, resolves } = deps(withOpenRaise('daemon_down', null));
-    const { stamp } = await actOn([], d);
+    const stamp = await dischargeCleared(firing(), d);
     expect(resolves).toHaveLength(0);
     expect(stamp.lastRaise['daemon_down']).toBeUndefined();
   });
 
   it('carries the raise it is discharging, so the ledger row can be matched to the ask', async () => {
     const { d, audits } = deps(withOpenRaise());
-    await actOn([], d);
+    await dischargeCleared(firing(), d);
     const cleared = audits.find((a) => a.action === 'guardian.cleared')!;
     expect(cleared.detail['raised_at']).toBe(NOW - 600_000);
   });

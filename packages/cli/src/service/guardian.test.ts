@@ -39,6 +39,10 @@ function tickDeps(over: Partial<GuardianTickDeps> = {}): {
       lines.push(`acted:${incidents.map((i) => i.class).join(',') || 'none'}`);
       return { stamp, acted: [] };
     },
+    discharge: async (firing, stamp) => {
+      lines.push(`discharged:${[...firing].join(',') || 'none'}`);
+      return stamp;
+    },
     heartbeat: async () => {
       lines.push('heartbeat');
     },
@@ -466,5 +470,79 @@ describe('classifyPolicyError (cannot-separate-two-causes: name the cause or say
     const out = classifyPolicyError(new Error('x'.repeat(5_000)), NOW);
     expect(out.detail.length).toBeLessThanOrEqual(201);
     expect(out.detail.endsWith('…')).toBe(true);
+  });
+});
+
+/**
+ * ADR 438 — the discharge must run on a tick with NOTHING firing.
+ *
+ * These are at the TICK level on purpose. `dischargeCleared`'s own unit tests passed throughout the
+ * bug: they call it directly, and the defect was that nothing called it. A test that exercises a
+ * function production never reaches proves the mechanism and says nothing about the wiring — the
+ * same shape as the `publisher.ok` fixture in ADR 435. The assertion that matters is which ticks
+ * reach the discharge, so that is what is asserted.
+ */
+describe('ADR 438: discharge is reachable on a healthy tick', () => {
+  it('runs on a tick with no incidents — the tick that IS the observation', async () => {
+    const { d, lines } = tickDeps();
+    await guardianTick(d);
+    // The regression in one line: before this, `act` was the only path to the discharge and `act`
+    // is not called here, so a raise could sit open through any number of healthy ticks.
+    expect(lines.some((l) => l.startsWith('acted:'))).toBe(false);
+    expect(lines).toContain('discharged:none');
+  });
+
+  it('runs on an incident tick too, AFTER act, carrying the firing classes', async () => {
+    const { d, lines } = tickDeps({
+      collect: async () => ({
+        now: NOW,
+        health: { ok: true, bootedAt: NOW - 60_000, schemaOk: true, dbPathExpected: true },
+        launchd: { lastExit: 0, runs: 1 },
+        publisherLog: { freshFailure: true },
+        errLinesSinceBoot: 0,
+        httpErrorRateSinceBoot: 0,
+        reaperStormSinceBoot: false,
+        lastRefreshAt: null,
+      }),
+    });
+    await guardianTick(d);
+    // Order is load-bearing: a class this tick RAISED must be in `firing`, or the same tick that
+    // made a raise would discharge it.
+    expect(lines.indexOf('acted:publisher_failed')).toBeLessThan(
+      lines.indexOf('discharged:publisher_failed'),
+    );
+  });
+
+  it('does NOT discharge under a handover — an empty classification there means unknown', async () => {
+    // ADR 274: the daemon is restarting on purpose, so `classified` is empty for a reason that is
+    // not health. Discharging on it would close every open raise on the strength of a tick that
+    // deliberately observed nothing (ADR 173: absent is unknown, never zero).
+    const { d, lines } = tickDeps({
+      collect: async () => ({
+        now: NOW,
+        health: null,
+        handover: { reason: 'refresh', startedAt: NOW - 1_000 },
+        launchd: { lastExit: 0, runs: 1 },
+        publisherLog: { freshFailure: false },
+        errLinesSinceBoot: 0,
+        httpErrorRateSinceBoot: 0,
+        reaperStormSinceBoot: false,
+        lastRefreshAt: null,
+      }),
+    });
+    await guardianTick(d);
+    expect(lines).toContain('guardian.handover_deferred');
+    expect(lines.some((l) => l.startsWith('discharged:'))).toBe(false);
+  });
+
+  it('a failing discharge does not fail the tick — raises stay open and next tick retries', async () => {
+    const { d, lines } = tickDeps({
+      discharge: async () => {
+        throw new Error('daemon unreachable — it may BE the incident');
+      },
+    });
+    expect(await guardianTick(d)).toBe(0);
+    expect(loadStamp(d.stampPath).lastTickAt).toBe(NOW);
+    expect(lines.some((l) => l.startsWith('discharge failed'))).toBe(true);
   });
 });
