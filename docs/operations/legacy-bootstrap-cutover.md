@@ -28,6 +28,27 @@ musterd claim <seat> --bootstrap
 Minting or writing it is not readiness; successful scoped authentication is. Ordinary same-seat
 claims continue to use the narrower agent-seat credential.
 
+### Restore Presence before leaving the session — required, not troubleshooting
+
+The bootstrap claim mints a lease that ends with the command, so the seat's session Presence is dead
+the moment it returns. The roster still shows the seat joined and nothing on the board looks wrong,
+but directed acts can no longer interrupt that session — a wake-driven seat that finishes here and
+goes quiet is unreachable (observed 2026-09-22 on `ryder`). In the same session, immediately after
+the claim:
+
+```
+team_leave
+team_join
+musterd inbox --interrupt-check
+```
+
+Silence from `--interrupt-check` is healthy; any output means the seat is still deaf.
+
+Neither obvious repair works. `musterd reclaim <seat>` refuses with "this operation requires an admin
+seat" — the successor is deliberately non-admin, which is the point of the cutover — and `team_join`
+on its own short-circuits on "Already joined", because its idempotent path treats a dead lease as
+already-joined and reports success while re-minting nothing. Only leave-then-join restores Presence.
+
 ## 2. Migrate each residency host
 
 For every host label shown by the cutover preview, an administrator runs:
