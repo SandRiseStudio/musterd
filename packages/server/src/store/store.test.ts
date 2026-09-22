@@ -86,10 +86,12 @@ describe('teams + members', () => {
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
     const { seat_credential } = mintAgentSeatCredential(db, ada.row.id);
     const legacyKey = legacyBootstrap(db, team.id);
+    const now = 1_790_096_938_029;
 
     const migrated = migrateLegacyBootstrapCredential(db, {
       legacyKey,
       seatCredential: seat_credential,
+      now,
     });
 
     expect(migrated.credential).toMatchObject({
@@ -99,6 +101,7 @@ describe('teams + members', () => {
       migration_target_member_id: ada.row.id,
       first_used_at: null,
     });
+    expect(migrated.credential.expires_at).toBe(now + 90 * 24 * 60 * 60 * 1000);
     expect(migrated.agent_key).toMatch(/^mskey_/);
     expect(migrated.replaced_credential_id).toBeNull();
   });
@@ -108,16 +111,20 @@ describe('teams + members', () => {
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
     const { seat_credential } = mintAgentSeatCredential(db, ada.row.id);
     const legacyKey = legacyBootstrap(db, team.id);
+    const now = Date.now();
 
     const first = migrateLegacyBootstrapCredential(db, {
       legacyKey,
       seatCredential: seat_credential,
+      now,
     });
     const second = migrateLegacyBootstrapCredential(db, {
       legacyKey,
       seatCredential: seat_credential,
+      now: now + 1_000,
     });
     expect(second.replaced_credential_id).toBe(first.credential.id);
+    expect(second.credential.expires_at).toBe(now + 1_000 + 90 * 24 * 60 * 60 * 1000);
     expect(findBootstrapCredential(db, team.id, first.agent_key)).toBeNull();
 
     recordBootstrapCredentialUse(db, second.credential.id, 1234);

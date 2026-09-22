@@ -16,6 +16,7 @@ import { hashToken, newSecret } from './members.js';
 import { resolveAccountStatus, type MemberRow, type TeamRow } from './rows.js';
 
 const SLUG_RE = /^[a-z0-9-]{1,32}$/;
+export const MIGRATED_BOOTSTRAP_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
 export type BootstrapCredentialUse = 'claim_seat' | 'claim_role' | 'host' | 'legacy';
 
@@ -402,7 +403,7 @@ export function migrateLegacyBootstrapCredential(
       target: member.name,
       label: 'legacy-migration',
       state: 'active',
-      expires_at: null,
+      expires_at: now + MIGRATED_BOOTSTRAP_TTL_MS,
       created_by: member.name,
       created_at: now,
       rotated_at: null,
