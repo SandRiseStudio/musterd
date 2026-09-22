@@ -44,16 +44,27 @@ musterd inbox --interrupt-check
 
 Silence from `--interrupt-check` is healthy; any output means the seat is still deaf.
 
-Neither obvious repair works. `musterd reclaim <seat>` refuses with "this operation requires an admin
-seat" — the successor is deliberately non-admin, which is the point of the cutover — and `team_join`
-on its own short-circuits on "Already joined", because its idempotent path treats a dead lease as
-already-joined and reports success while re-minting nothing. Only leave-then-join restores Presence.
+`musterd reclaim <seat>` is not the repair: it refuses with "this operation requires an admin seat" —
+the successor is deliberately non-admin, which is the point of the cutover.
 
-`team_leave` may answer "Not joined — nothing to leave" on a seat that is genuinely deaf (observed
-2026-09-22 on `dolly`). That is not a sign the seat is fine; run `team_join` anyway and let
-`--interrupt-check` be the verdict. Deafness is also not confined to this step — a seat that
-migrated earlier in the day went deaf mid-session with no bootstrap command nearby — so run the
-check at task boundaries, not only here.
+`team_join` on its own has been seen to short-circuit on "Already joined", treating a dead lease as
+already-joined and re-minting nothing (2026-09-22, ryder). It does **not** always do that: on a
+genuinely deaf seat, `team_join` alone re-minted Presence and silenced `--interrupt-check` on both
+attempts, with no `team_leave` first (2026-09-22, dolly, 2 of 2; falsify: deafen a seat with
+`musterd inbox --wait 420` and call `team_join` alone — a reply that re-mints nothing, leaving
+`--interrupt-check` loud, restores the stronger claim). Run the pair above as written, but let
+`--interrupt-check` be the verdict rather than either command's wording.
+
+`team_leave` may likewise answer "Not joined — nothing to leave" on a seat that is genuinely deaf
+(observed 2026-09-22 on `dolly`). That is not a sign the seat is fine; continue to `team_join`.
+
+Deafness is not confined to this step, and the widest cause is not the cutover at all: **`musterd
+inbox --wait` ends the seat's own lease**, so the seat is deaf after every long wait (2026-09-22,
+dolly, 2 of 2; ruled out plain idle with a seven-minute no-musterd control that left the seat live).
+Anyone mid-cutover who waits on a blocking ask that way becomes unreachable exactly while waiting
+for the answer. Poll `team_inbox_check` at task boundaries instead, run `--interrupt-check` at those
+boundaries too, and re-join after any `--wait`. Background:
+[authorised-but-unowned](../wiki/authorised-but-unowned.md).
 
 ## 2. Migrate each residency host
 
