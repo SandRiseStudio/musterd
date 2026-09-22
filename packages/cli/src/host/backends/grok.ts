@@ -2,7 +2,9 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { findBinding, saveBinding } from '../../config.js';
 import { resolveGrokBin } from '../../grokBin.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
-import type { ActuatorBackend, WakeActuation } from '../backend.js';
+import type { WakeUsage } from '@musterd/protocol';
+import type { ActuatorBackend, WakeActuation, WakeCompletion } from '../backend.js';
+import { readGrokWakeUsage } from './grokUsage.js';
 import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
 
 const KILL_GRACE_MS = 10_000;
@@ -65,6 +67,8 @@ export interface GrokDeps {
   killGraceMs?: number;
   resumeVerifyWindowMs?: number;
   ensurePinned?: (opts: { node: string; binJs: string }) => string | undefined;
+  /** ADR 436 clause 2: the usage Grok wrote for this wake, read at settle; injectable for tests. */
+  readUsage?: (workspace: string, startedAt: number) => WakeUsage | undefined;
 }
 
 function recordFreshSession(workspace: string, id: string, startedAt: number): void {
@@ -117,7 +121,7 @@ export function grokBackend(deps: GrokDeps = {}): ActuatorBackend {
         occupied: boolean;
         deferred?: boolean;
         reason: string;
-        settled: Promise<undefined>;
+        settled: Promise<WakeCompletion | undefined>;
       }> => {
         const startedAt = Date.now();
         let child: ChildProcess;
@@ -140,15 +144,28 @@ export function grokBackend(deps: GrokDeps = {}): ActuatorBackend {
           timeoutMs,
         );
         watchdog.unref();
-        const settled = new Promise<undefined>((resolve) => {
-          child.once('exit', () => {
-            clearTimeout(watchdog);
-            resolve(undefined);
-          });
-          child.once('error', () => {
-            clearTimeout(watchdog);
-            resolve(undefined);
-          });
+        // ADR 436 clause 1: every wake settles and prices. Until 2026-09-21 this resolved
+        // `undefined`, so a Grok wake wrote no settle line and no `residency.wake_cost` row — two
+        // grokbot wakes that day left zero cost rows while Grok itself had written a usage.json.
+        const exited = new Promise<number | null>((resolve) => {
+          child.once('exit', (code) => resolve(code));
+          child.once('error', () => resolve(null));
+        });
+        const settled: Promise<WakeCompletion | undefined> = exited.then((code) => {
+          clearTimeout(watchdog);
+          const duration_ms = Date.now() - startedAt;
+          ctx.log(
+            `run for ${spec.order.seat} (${label}) settled: exit=${code ?? 'error'} ` +
+              `wall=${(duration_ms / 1000).toFixed(1)}s`,
+          );
+          const usage = (deps.readUsage ?? readGrokWakeUsage)(spec.workspace, startedAt);
+          // Grok prints `costUsdTicks`, a price in a unit the host cannot verify — so the row
+          // carries the tokens and says so, and never a converted dollar figure (ADR 364).
+          return {
+            duration_ms,
+            ...(usage ? { usage } : {}),
+            unpriced_reason: 'harness_price_unverified',
+          };
         });
         const verified = await ctx.verifyOccupied(
           spec.order.seat,

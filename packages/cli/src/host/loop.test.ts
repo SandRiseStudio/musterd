@@ -120,7 +120,8 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(specs).toHaveLength(1);
     expect(specs[0]!.workspace).toBe('/ws/scout');
     expect(specs[0]!.order.lease_id).toBe('L1');
-    expect(calls.reports).toEqual([{ lease_id: 'L1', occupied: true, session: 'fresh' }]);
+    // The primary at verification; ADR 436 clause 1 adds a host-stamped supplement at settle.
+    expect(calls.reports[0]).toEqual({ lease_id: 'L1', occupied: true, session: 'fresh' });
     expect(result.orders).toBe(1);
     await Promise.all(result.settled);
   });
@@ -260,7 +261,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(servers).toEqual(['http://127.0.0.1:4849']); // the canonical spelling is what gets dialled
     expect(specs).toHaveLength(1);
     expect(specs[0]!.workspace).toBe('/ws/sloane');
-    expect(calls.reports).toEqual([{ lease_id: 'L7', occupied: true, session: 'fresh' }]);
+    expect(calls.reports[0]).toEqual({ lease_id: 'L7', occupied: true, session: 'fresh' });
   });
 
   it('an order for a harness with no backend is reported failed with the harness named', async () => {
@@ -843,6 +844,31 @@ describe('the supplementary wake-cost report (inc 5)', () => {
     );
     await Promise.all(result.settled);
     expect(calls.reports).toHaveLength(2); // the two primaries, zero supplements
+  });
+
+  it('an OCCUPIED wake whose backend settles with nothing gets a host-stamped duration row (ADR 436 clause 1)', async () => {
+    const { client, calls } = fakeClient([order()]);
+    const backend: ActuatorBackend = {
+      harness: 'grok',
+      wake: async () => ({
+        outcome: { occupied: true, session: 'fresh' },
+        settled: Promise.resolve(undefined),
+      }),
+    };
+    const result = await pollHostOnce(
+      deps({
+        backends: new Map([['grok', backend]]),
+        loadRegistry: () => ({ entries: [entryOf({ harness: 'grok' })] }),
+        clientFor: () => client,
+      }),
+    );
+    await Promise.all(result.settled);
+    expect(calls.reports).toHaveLength(2);
+    const supplement = calls.reports[1]!;
+    expect(supplement.lease_id).toBe('L1');
+    expect(supplement.duration_ms).toBeTypeOf('number');
+    expect(supplement.unpriced_reason).toBe('harness_prints_no_price');
+    expect(supplement.cost_usd).toBeUndefined();
   });
 });
 
