@@ -1,11 +1,11 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+import type { WakeUsage } from '@musterd/protocol';
 import { findBinding, saveBinding } from '../../config.js';
 import { resolveGrokBin } from '../../grokBin.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
-import type { WakeUsage } from '@musterd/protocol';
 import type { ActuatorBackend, WakeActuation, WakeCompletion } from '../backend.js';
-import { readGrokWakeUsage } from './grokUsage.js';
 import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
+import { readGrokWakeUsage } from './grokUsage.js';
 
 const KILL_GRACE_MS = 10_000;
 const RESUME_VERIFY_WINDOW_MS = 30_000;
