@@ -13,9 +13,11 @@ musterd wire --migrate-bootstrap
 ```
 
 The command proves the seat with its existing `msac_` credential, receives one shown-once
-seat-scoped successor, and atomically replaces only `agent_key` in the 0600 binding. If local
-publication fails, the legacy key remains in the binding. Rerun the same command: the daemon revokes
-and replaces only an unused migration successor; it never revokes one that has authenticated.
+seat-scoped successor with a server-selected 90-day expiry, and atomically replaces only `agent_key`
+in the 0600 binding. The response and admin inventory expose the redacted expiry timestamp, never
+the plaintext or hash. If local publication fails, the legacy key remains in the binding. Rerun the
+same command: the daemon revokes and replaces only an unused migration successor, measuring a fresh
+90-day window from that retry; it never revokes one that has authenticated.
 
 Adopt the new credential once with the exact command printed by migration (ADR 439):
 
