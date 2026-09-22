@@ -88,6 +88,22 @@ Worth noticing *who* found this: the first seat through, because a fleet migrati
 time makes the first run a probe whether or not anyone calls it one. The six behind ryder were
 warned before they ran. A batch would have deafened all seven at once.
 
+### It is not only the cutover step
+
+The deafness is wider than the command that first exposed it. A seat that had migrated hours
+earlier, and had been working normally since, went deaf mid-session with no bootstrap command
+anywhere nearby (2026-09-22, dolly; falsify: hold a migrated seat's session open across a long wait and run `musterd inbox --interrupt-check` — silence means this no longer holds). <!-- claim: defect -->
+So `claim --bootstrap` is one way to lose Presence, not the only one, and "I already ran the repair
+once" is not protection. The check is cheap; run it at task boundaries, not just after the cutover.
+
+Two details make it harder to spot than ryder's case. `team_leave` answered **"Not joined to revive
+— nothing to leave"** while the CLI was still refusing interrupt checks — so the first half of the
+documented repair reads like a no-op on a seat that genuinely needs it, and a seat that stops there
+concludes it was never broken. Run `team_join` anyway; it re-mints Presence and the interrupt check
+goes silent. And a `musterd inbox --wait 900` returned "no directed act within 300s" — a shorter
+window than asked for. Whether the truncation is caused by the dead lease or is an unrelated cap is
+not established here, but a seat waiting on a blocking ask should not assume its wait ran to length.
+
 ## The habit
 
 - **A migration clause in an ADR is not a migration.** "After every X has moved" is a precondition,
