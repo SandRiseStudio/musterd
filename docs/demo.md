@@ -359,6 +359,30 @@ backup if the laptop dies.
 Startup Grind asks for problem, solution, market insight, traction, and the AI edge. The beats
 below carry each, in that order, without naming them.
 
+**It has to FIT, and the way to know is to count the words.** A 2-minute slot is ~300 spoken words
+at 150 wpm, and this script's `SAY` lines are the only thing that spends the clock. Measured
+2026-09-21, counting spoken words only — bracketed notes to the speaker are not speech:
+
+| beat | budget | spoken | ~at 150 wpm |
+| --- | --- | --- | --- |
+| 0:00 roster | 20 s | 76 | ~30 s |
+| 0:20 second agent | 25 s | 62 | ~24 s |
+| 0:45 the ask (centerpiece) | 45 s | 98 | ~39 s |
+| 1:30 two claims | 20 s | 64 | ~25 s |
+| 1:50 the ask | 10 s | 29 | ~11 s |
+| **total** | **120 s** | **329** | **~131 s** |
+
+**0:00 is the one that overruns** — ten seconds long, and it is the beat that sets up everything
+after it, so it is the speaker's call whether to trim it or to take the ten seconds out of the
+centerpiece's slack (0:45 runs six seconds under). Before this measurement the script ran ~160 s
+and nobody had counted; two of those beats were lengthened on 2026-09-21 by a claims repair that
+added qualification to spoken copy (see the notes at 0:20 and 1:30).
+
+**Falsify it rather than trust it:** read the script aloud with a timer at a real demo pace. 150
+wpm is a presentation constant, and a demo with pauses and a laptop to look at is slower — so if
+this table says 131 s, the room is unlikely to be kinder. If a live read comes in under 120 s, the
+constant is wrong and this table should be replaced by the stopwatch.
+
 **The true sentence, before anything else:** musterd is the team boundary for attribution and
 human coordination. It is not a sandbox, a policy engine, or a host containment layer. Every claim
 in this script is scoped to acts the daemon accepted — the roster — and none of it promises
@@ -386,20 +410,26 @@ sandbox and your host still do that."
 
 **SEE** The board: two owners, two scopes. If a scope overlaps, the warning fires — read it aloud.
 
-**SAY** "The moment you run a second agent on one repo, the waste starts. On our own team, before
-lanes, about 37% of the code produced was thrown away — two agents writing the same diff, or one
-undoing the other. That is our own 2026 dogfood, not a survey. The paper everyone cites here is
-MAST, and it puts most multi-agent failures at coordination rather than capability — it is a
-taxonomy over other people's systems, not a measurement of us, and it says nothing about safety.
-The fix is not a smarter model. It is one owner per unit of work, declared before the first
-keystroke."
+**SAY** "The moment you run a second agent on one repo, the waste starts. On our own team, in 2026,
+before lanes — about 37% of the code produced was thrown away. Two agents writing the same diff, or
+one undoing the other. The fix is not a smarter model. It is one owner per unit of work, declared
+before the first keystroke."
 
-<!-- The MAST sentence is scoped, and stays scoped. The bare "about 79%" was cut here on
-     2026-09-21 to match what #1577 landed in `docs/launch-post.md` — a taxonomy over other
-     teams' systems is not a measurement of musterd and is not a safety number, which is
-     `docs/brand/leave-behinds/security-position.md` §3 item 12 verbatim. A spoken script is the
-     easiest surface in the world to lose that qualifier on, and the hardest to correct
-     afterwards: nobody can amend a sentence you said to a room. -->
+<!-- ~53 words, ~21 s. MAST IS NOT IN THIS BEAT, and that is the decision, not an omission.
+     The bare "about 79%" was cut on 2026-09-21 to match #1577; the first repair replaced it with
+     the scoped form — "a taxonomy over other people's systems, not a measurement of us, and it
+     says nothing about safety" — which is correct, and is three qualifying clauses nobody says
+     out loud with a two-minute clock running. That repair took this beat from 55 to 107 words.
+
+     THE RULE: in spoken copy under a hard clock, a claim that needs that much scoping gets CUT,
+     not caveated. A qualifier dropped on stage cannot be corrected afterwards, and the speaker
+     most likely to drop it is one who is running long. Same move nick ruled for the 38x
+     (`security-position.md` §6.5: drop rather than caveat) — applied to the other number that was
+     in this beat.
+
+     The 37% is ours, dated, and the stronger sentence anyway. MAST keeps its scoped form in
+     `docs/launch-post.md`, where a reader can re-read the qualifier. It is in no spoken beat of
+     this document — §5's six-minute pitch never carried it either. -->
 
 
 ### 0:45 — A question reaches the human (45 s — the centerpiece)
@@ -425,12 +455,17 @@ model family when one is on the roster. Then, in the terminal:
 musterd report
 ```
 
-**SAY** "The agent that built it says merged; a different model family says this is what we
-wanted, and the record holds what each harness reported — not what the model says about itself.
-That is two claims, not one. We ran the same feature twice, coordinated and not, and measured the
-code each one threw away — the waste numbers are from July and the re-run is pending, so I will
-show you the table rather than quote you a multiplier. A single agent alone is still cheaper: we
-sell against the second agent, not the first."
+**SAY** "The agent that built it says merged. A different model family says this is what we
+wanted. That is two claims, not one. We measured the waste both ways — those numbers are from
+July, the re-run is pending, so ask me after and I'll show you the table. One agent alone is still
+cheaper: we sell against the second agent, not the first."
+
+<!-- ~58 words, ~23 s, against a 20 s budget — the closest this beat gets while keeping the cost
+     side, which is the half a hostile room tests. The 2026-09-21 repair ran it to 97 words by
+     explaining the gate out loud; a room does not need our reasoning, only the offer of the
+     table. The multiplier stays out until lane 01M1VDRC6BAG lands (`security-position.md` §3
+     item 11, ADR 437) — restoring it is an edit there, not here. -->
+
 
 ### 1:50 — The ask (10 s)
 
