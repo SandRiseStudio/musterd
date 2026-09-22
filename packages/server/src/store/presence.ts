@@ -728,6 +728,22 @@ export function currentAttestedModel(
  * be defaulted to `binding`: "we do not know which tier" is a different fact from "it was a
  * declaration", and guessing collapses exactly the distinction this carries.
  */
+/**
+ * The adapter build this seat most recently attested (ADR 135's `x-musterd-build`, sticky on the
+ * presence row) — the dist a woken session actually runs, read for the wake ledger (lane
+ * 01M330CCQE). Null when no presence of this seat ever carried one. Newest presence first, so a
+ * fresh wake's row wins over an older live session's.
+ */
+export function currentBuild(db: Database, memberId: string): string | null {
+  const row = db
+    .prepare<
+      [string],
+      { build: string | null }
+    >('SELECT build FROM presence WHERE member_id = ? AND build IS NOT NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1')
+    .get(memberId);
+  return row?.build ?? null;
+}
+
 export function currentAttestation(
   db: Database,
   memberId: string,

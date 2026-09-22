@@ -100,6 +100,12 @@ Captured from one real run each on this machine, not from docs (codex ships none
 
 `claimWakeLeases` MUTATES — it claims a lease, so a second call on the same db is suppressed by the live lease and cooldown, and a before/after test on one db passes before any fix exists. Use a fresh seed per assertion.
 
+## Which adapter a wake runs — the shared checkout, not the seat's workspace (2026-09-21, lane 01M330CCQE; falsify: `ps -eo args | grep mcp/dist/index.js` on the Mac and `grep -A2 'mcp_servers.musterd' ~/agents-gptbot/.codex/config.toml` — a seat whose musterd server path is under its own `~/agents-<seat>/` falsifies "shared" for that seat) <!-- claim: other -->
+
+Every seat's musterd MCP server — Claude Code seats via `~/.claude.json`, gptbot's Codex via `.codex/config.toml` — launches `/Users/nick/agents/packages/mcp/dist/index.js`: the daemon's own checkout, which autorefresh rebuilds on every bounce. Measured 2026-09-21 15:35: 7 of 8 live MCP processes ran that path; the one exception was wanderer's cursor workspace on its own dist. So a wake is never stale by more than the autorefresh settle window, whatever `~/agents-<seat>/packages/mcp/dist/build.json` says — those per-workspace dists exist for dogfooding a branch and govern nothing at the wake edge. izzo claimed the opposite that afternoon from the workspace build ages (grokbot Aug 26 … ghost Sep 19), rebuilt gptbot's workspace on that basis, and was wrong; the ADR 135 skew warning a LIVE session prints is a stale *process*, cured by `/mcp` reload, not a stale disk.
+
+So the question is answered by the ledger from now on: `residency.woke` and `residency.wake_cost` carry `adapter_build` (the ref the woken session's adapter attested on connect, ADR 135, read off its presence row) beside `daemon_build`. `sqlite3 ~/.musterd/musterd.db "select target, json_extract(detail,'$.adapter_build'), json_extract(detail,'$.daemon_build') from audit where action='residency.woke' order by ts desc limit 10"` — a wake whose two refs differ by more than one autorefresh is the finding; a row with no `adapter_build` is a session that never attested (older adapter), not a stale one.
+
 ## Related
 
 `claimWakeLeases` already reasons per-act (`isExhausted` keyed on act_id) — an act-scoped gate mirrors `liveLease` keyed on `act_id` instead of `member_id`. A live seat is never woken (`hasLivePresence` guard), so "wake only if none live" is free.
