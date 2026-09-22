@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { dischargeCleared, type DischargeDeps } from './act.js';
-import { emptyStamp, raiseReason, recordRaise, type GuardianStamp } from './damp.js';
 import type { GuardianClass } from './classify.js';
+import { emptyStamp, raiseReason, recordRaise, type GuardianStamp } from './damp.js';
 
 const NOW = 9_000_000;
 
