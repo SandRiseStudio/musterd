@@ -424,8 +424,22 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
       // exit, long after the primary report settled the lease at verification — so the settled
       // completion posts a second report and the daemon records `residency.wake_cost`. Skipped
       // when the primary already carried the summary (fast-fail merge) — one record per lease.
+      const actuatedAt = Date.now();
       settled.push(
-        actuation.settled.then(async (completion) => {
+        actuation.settled.then(async (settledWith) => {
+          // ADR 436 clause 1: an occupied wake whose backend settles with nothing still gets a
+          // row — host-stamped duration from actuation to settle, priced as "prints no price".
+          // Until 2026-09-21 a backend could make a wake vanish from the ledger this way (grok).
+          let completion = settledWith;
+          if (!completion && actuation.outcome.occupied) {
+            completion = {
+              duration_ms: Date.now() - actuatedAt,
+              unpriced_reason: 'harness_prints_no_price',
+            };
+            deps.log(
+              `! ${order.seat}'s backend settled without a completion — host-stamped duration only`,
+            );
+          }
           if (!completion) return;
           if (completion.cost_usd === undefined && completion.duration_ms === undefined) return;
           if (
