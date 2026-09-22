@@ -444,7 +444,7 @@ The seat's private **cross-session continuity note** (ADR 093) over `PUT`/`GET`/
 
 The explicit CLI read for ADR 209's recipient-scoped portable wake index. It sends exactly one canonical target to `POST /teams/:slug/wake-context` and renders only wake kind/ID, objective, intended delivery, and the named explicit fetch categories. `--json` returns the same bounded packet. It never reads an Act, thread, memory, or artifact body as a side effect.
 
-### `musterd claim <name> | --role <role> [--for <code>] [--surface <s>] [--key mskey_…] [--grant msgr_…] [--force] [--timeout <s>]`
+### `musterd claim <name> | --role <role> [--for <code>] [--surface <s>] [--key mskey_…] [--grant msgr_…] [--bootstrap] [--force] [--timeout <s>]`
 
 The **L2 universal floor** of claim-on-first-use (ADR 032) — needs only the daemon, works in any harness. Resolves team+server from the binding/env/global config, then presents the **team agent key** (`mskey_`, from `--key`/`MUSTERD_AGENT_KEY`/the binding) and asks to occupy a seat over the v0.3 claim handshake (ADR 075/077) — **no per-seat token is minted**. `<name>` claims a named seat; `--role <role>` claims the next open `<role>-<n>` pool handle (resolved server-side); no target falls back to the folder policy. The outcome:
 
@@ -453,6 +453,11 @@ The **L2 universal floor** of claim-on-first-use (ADR 032) — needs only the da
 - **refused** — a no-dead-end hint (ADR 055).
 
 **Clobber guard (ADR 066):** claiming a _different_ seat into a folder already bound to a **live** member refuses (pointing at `musterd agent`/a separate worktree); `--force` repoints anyway. **Pending markers (ADR 033):** unclaimed adapter sessions leave `.musterd/pending/*.json` markers (scoped to this workspace); claim lists them and requires `--for <code>` when several wait, clearing the chosen one and dropping a 0600 `<code>.resolved.json` sidecar so a running session goes online **without a relaunch** (ADR 034, `--json` reports `live: true`). Output: `✓ <name> — occupied on <team>`.
+
+**Migrated bootstrap adoption (ADR 439):** `musterd claim <bound-seat> --bootstrap` is the explicit
+one-shot path that presents the binding's scoped `agent_key` and records ADR 350 cutover readiness.
+It requires the explicit matching seat and refuses an implicit, role, or different-seat target before
+opening a claim. Without the flag, same-seat reconnects continue to prefer the narrower `msac_`.
 
 ### `musterd wire [--autojoin] [--key mskey_…] [--server <url>] [--json]`
 

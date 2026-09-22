@@ -213,6 +213,25 @@ async function decide(
 }
 
 describe('musterd claim (v0.3 handshake, ADR 075)', () => {
+  it.each([
+    { argv: ['--bootstrap'], label: 'an implicit seat target' },
+    { argv: ['--role', 'reviewer', '--bootstrap'], label: 'a role target' },
+    { argv: ['Grace', '--bootstrap'], label: 'a different seat' },
+  ])('refuses bootstrap adoption with $label before claiming', async ({ argv }) => {
+    saveBinding(cwd, {
+      version: 2,
+      server: serverUrl,
+      team: 'dawn',
+      claim: { mode: 'seat', name: 'Ada' },
+      agent_key: 'mskey_scoped',
+      seat_credential: 'msac_ada',
+    });
+
+    await expect(run(argv)).rejects.toThrow(
+      '--bootstrap requires the explicit seat name from this Workspace binding: musterd claim Ada --bootstrap',
+    );
+  });
+
   it('claims a named seat with a grant → occupies + binds the folder (agent_key, no token)', async () => {
     await declareSeat('Ada');
     const g = await grant('Ada');
