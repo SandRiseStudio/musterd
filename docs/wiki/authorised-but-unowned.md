@@ -100,9 +100,31 @@ Two details make it harder to spot than ryder's case. `team_leave` answered **"N
 — nothing to leave"** while the CLI was still refusing interrupt checks — so the first half of the
 documented repair reads like a no-op on a seat that genuinely needs it, and a seat that stops there
 concludes it was never broken. Run `team_join` anyway; it re-mints Presence and the interrupt check
-goes silent. And a `musterd inbox --wait 900` returned "no directed act within 300s" — a shorter
+goes silent. ~~And a `musterd inbox --wait 900` returned "no directed act within 300s" — a shorter
 window than asked for. Whether the truncation is caused by the dead lease or is an unrelated cap is
-not established here, but a seat waiting on a blocking ask should not assume its wait ran to length.
+not established here, but a seat waiting on a blocking ask should not assume its wait ran to length.~~
+**CAUSE ESTABLISHED 2026-09-22** — the truncation and the deafness are the same event; see below.
+
+### The wait is what kills it
+
+`musterd inbox --wait` ends the seat's own session lease, so after a long wait the seat is deaf every time, and the window it reports is 300s regardless of what was asked for (2026-09-22, dolly, 2 of 2; falsify: `team_join`, confirm `--interrupt-check` is silent, run `musterd inbox --wait 420`, then run `--interrupt-check` again — silence means this no longer holds). <!-- claim: defect -->
+
+Asked for 600 it said 300; asked for 420 it said 300 and had not exited eight minutes later.
+
+The obvious rival explanation — that the lease just expires on an idle session and the wait merely
+spans it — was tested rather than argued away. With Presence confirmed live, seven minutes of
+`python3 -c 'time.sleep(420)'` and no musterd call at all left `--interrupt-check` silent, while a
+`--wait` of the same length deafened the seat on both runs. Idle is not what does it. That control is
+the point: the two causes produce an identical symptom, and only the one that holds the rail idle
+*without* waiting can tell them apart — a [cannot-separate-two-causes](cannot-separate-two-causes.md)
+instance that happens to be separable.
+
+This is the part worth carrying off this page, because it is not about the migration at all: **the
+command a seat is told to hold with is the command that makes it unreachable.** A blocking ask
+answers "HOLDS, 15m"; a seat that holds the documented way destroys its own ability to receive the
+answer, and nothing in the transcript says so — the wait returns a plausible "no directed act"
+either way. Hold with `team_inbox_check` at task boundaries instead, and treat any `--wait` as a
+command that requires a `team_join` after it.
 
 ## The habit
 
