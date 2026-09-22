@@ -49,6 +49,12 @@ seat" — the successor is deliberately non-admin, which is the point of the cut
 on its own short-circuits on "Already joined", because its idempotent path treats a dead lease as
 already-joined and reports success while re-minting nothing. Only leave-then-join restores Presence.
 
+`team_leave` may answer "Not joined — nothing to leave" on a seat that is genuinely deaf (observed
+2026-09-22 on `dolly`). That is not a sign the seat is fine; run `team_join` anyway and let
+`--interrupt-check` be the verdict. Deafness is also not confined to this step — a seat that
+migrated earlier in the day went deaf mid-session with no bootstrap command nearby — so run the
+check at task boundaries, not only here.
+
 ## 2. Migrate each residency host
 
 For every host label shown by the cutover preview, an administrator runs:
