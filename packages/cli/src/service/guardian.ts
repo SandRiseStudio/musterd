@@ -40,6 +40,13 @@ export interface GuardianTickDeps {
     stamp: GuardianStamp,
     tiers: Record<GuardianClass, GuardianTier>,
   ) => Promise<{ stamp: GuardianStamp }>;
+  /**
+   * ADR 432's discharge, with the real senders bound. Called on EVERY tick, healthy or not — the
+   * healthy tick IS the observation that discharges a raise (ADR 438), so gating this on there
+   * being something to act on is what kept a week-old raise open until an unrelated class happened
+   * to fire beside it.
+   */
+  discharge: (firing: ReadonlySet<GuardianClass>, stamp: GuardianStamp) => Promise<GuardianStamp>;
   /** The daily in-band heartbeat act (best-effort; unprovisioned seat = silent no-op). */
   heartbeat: () => Promise<void>;
   log: (line: string) => void;
@@ -163,6 +170,28 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
       stamp = (await d.act(incidents, stamp, tiers)).stamp;
     } catch (e) {
       d.log(`act failed (${String(e)}) — will re-classify next tick`);
+    }
+  }
+
+  // ADR 438: discharge runs on EVERY tick, outside the branch above. It used to live inside
+  // `actOn`, which is reached only when something is firing — so the tick that observes health,
+  // the one that IS the discharge, was the one tick that could not record it.
+  //
+  // AFTER `act`, deliberately: a class this tick raised must be in `firing`, or a raise would be
+  // discharged by the same tick that made it.
+  //
+  // `classified`, not `incidents`: a DEFERRED sighting (ADR 274's unconfirmed outage) is filtered
+  // out of `incidents` and is not evidence of health — discharging on it would close a raise on
+  // the strength of an observation the classifier itself declined to trust.
+  //
+  // Skipped entirely under a handover, where `classified` is empty because the daemon is restarting
+  // on purpose (ADR 274). That emptiness means "we know nothing this tick", and ADR 173's rule
+  // applies to a guardian reading its own signals too: absent is unknown, never healthy.
+  if (!handoverDeferred) {
+    try {
+      stamp = await d.discharge(new Set(classified.map((i) => i.class)), stamp);
+    } catch (e) {
+      d.log(`discharge failed (${String(e)}) — raises stay open; next tick retries`);
     }
   }
 

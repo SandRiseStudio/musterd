@@ -15,7 +15,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { configPath, loadConfig, serverProvenance } from '../config.js';
 import { CliError } from '../errors.js';
-import { actOn } from '../guardian/act.js';
+import { actOn, dischargeCleared } from '../guardian/act.js';
 import { resolveGuardianTiers, DEFAULT_TIERS } from '../guardian/classify.js';
 import { runSampleTool } from '../guardian/sample.js';
 import { collectSignals, type HealthPayload } from '../guardian/signals.js';
@@ -2285,6 +2285,34 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
         });
 
   const auth = serviceSeatAuth();
+  // ADR 432: the discharge guardian is actually allowed to send. `accept` is a peer verb and ADR
+  // 232 bars a service seat from those; `resolve` is thread-terminal (ADR 025) and is not one, so
+  // it is how a monitor closes its own raise when the condition it reported clears. Unprovisioned
+  // or probing: no send, and the caller keeps the memo so the next live tick retries rather than
+  // forgetting a raise the team never heard closed. Shared by `act` and `discharge` (ADR 438) —
+  // one binding, so the two paths cannot drift into sending different things.
+  const sendResolve = async (thread: string, body: string): Promise<void> => {
+    if (controlProbe) return;
+    if (!auth) throw new Error('unprovisioned — cannot resolve');
+    await auth.http.send(
+      auth.team,
+      makeEnvelope({
+        id: ulid(),
+        team: auth.team,
+        from: GUARDIAN_SEAT,
+        to: { kind: 'team' },
+        act: 'resolve',
+        body,
+        thread,
+      }),
+    );
+  };
+  // No client-writable audit endpoint exists; the guardian's ledger is its own log plus the
+  // attributed acts. One structured line per action, greppable.
+  const guardianAudit = async (action: string, detail: Record<string, unknown>): Promise<void> => {
+    log(`${action} ${JSON.stringify(detail)}`);
+  };
+
   return guardianTick({
     now: () => Date.now(),
     stampPath: join(gHome, 'stamp.json'),
@@ -2352,36 +2380,15 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
           );
           return id;
         },
-        // ADR 432: the discharge guardian is actually allowed to send. `accept` is a peer verb and
-        // ADR 232 bars a service seat from those; `resolve` is thread-terminal (ADR 025) and is not
-        // one, so it is how a monitor closes its own raise when the condition it reported clears.
-        // Unprovisioned or probing: no send, and `actOn` keeps the memo so the next live tick
-        // retries rather than forgetting a raise the team never heard closed.
-        sendResolve: async (thread, body) => {
-          if (controlProbe) return;
-          if (!auth) throw new Error('unprovisioned — cannot resolve');
-          await auth.http.send(
-            auth.team,
-            makeEnvelope({
-              id: ulid(),
-              team: auth.team,
-              from: GUARDIAN_SEAT,
-              to: { kind: 'team' },
-              act: 'resolve',
-              body,
-              thread,
-            }),
-          );
-        },
-        audit: async (action, detail) => {
-          // No client-writable audit endpoint exists; the guardian's ledger is its own log plus
-          // the attributed acts above. One structured line per action, greppable.
-          log(`${action} ${JSON.stringify(detail)}`);
-        },
+        sendResolve,
+        audit: guardianAudit,
         log,
       });
       return report;
     },
+    // ADR 438: the same discharge, bound the same way, reachable on a tick with nothing firing.
+    discharge: (firing, stamp) =>
+      dischargeCleared(firing, { stamp, sendResolve, audit: guardianAudit, log }),
     heartbeat: async () => {
       if (controlProbe || !auth) return;
       await auth.http.send(
