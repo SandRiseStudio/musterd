@@ -222,17 +222,36 @@ export interface DischargeDeps {
  * and so is never absent, so a real open incident cannot go quiet; it is the damper, not this, that
  * keeps a persisting outage from repeating itself.
  *
+ * `withheld` is the other half of that direction, and the reason absence alone is not enough: a
+ * class whose evidence this tick could not READ is absent from `firing` for a reason that is not
+ * health (ADR 435 `unknown`, computed by `indeterminate`). It is neither cleared nor raised — the
+ * raise simply stays open until a tick can actually see the condition, which is what the ADR means
+ * by "does not clear an existing raise either".
+ *
  * It sends no act beyond the `resolve` that closes the thread. Announcing recovery would answer
  * inbox volume with more inbox, which is the problem this lives inside.
  */
 export async function dischargeCleared(
   firing: ReadonlySet<GuardianClass>,
+  withheld: ReadonlySet<GuardianClass>,
   d: DischargeDeps,
 ): Promise<GuardianStamp> {
   let stamp = d.stamp;
   const open = Object.keys(stamp.lastRaise) as GuardianClass[];
   for (const cls of open) {
     if (firing.has(cls)) continue;
+    if (withheld.has(cls)) {
+      // Said out loud, because the alternative is silence that looks exactly like health — the
+      // failure mode this whole clause exists to end. Only ever logged for a class that HAS an
+      // open raise, so a quiet guardian stays quiet.
+      d.log(
+        `guardian.discharge_withheld ${JSON.stringify({
+          class: cls,
+          reason: 'this tick could not observe the condition — unknown is not recovery (ADR 435)',
+        })}`,
+      );
+      continue;
+    }
     const memo = stamp.lastRaise[cls];
     // The ledger row first: it is local and cannot fail the tick. The `resolve` is the part that
     // reaches the team, and it is best-effort for the same reason every other send here is — the

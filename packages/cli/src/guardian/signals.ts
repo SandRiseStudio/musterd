@@ -7,7 +7,7 @@
  * `now` — under-reporting is safe (a missed incident on a skewed daemon), a stale line is not
  * (the 8-day-old-log ghost paged a human for an incident that ended a week ago).
  */
-import type { GuardianSignals } from './classify.js';
+import type { GuardianSignals, PublisherOutcome } from './classify.js';
 import { parseSample } from './sample.js';
 
 export interface HealthPayload {
@@ -117,7 +117,7 @@ const PUBLISHER_OUTCOME =
  * `building <sha>` line and no outcome yet, and deliberately does not change the verdict: mid-build
  * is not evidence either way, and treating it as failure would raise once per retry.
  */
-export function lastPublisherOutcome(lines: readonly string[]): 'published' | 'failed' | 'unknown' {
+export function lastPublisherOutcome(lines: readonly string[]): PublisherOutcome {
   for (let i = lines.length - 1; i >= 0; i--) {
     const m = PUBLISHER_OUTCOME.exec(lines[i] ?? '');
     if (m === null) continue;
@@ -270,11 +270,12 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
 
   const errLines = await d.readSince(d.daemonErrLogPath, bootedAt).catch(() => []);
 
-  // The publisher's state is its LAST OUTCOME, read from its own vocabulary (ADR 435).
-  const freshFailure =
-    lastPublisherOutcome(
-      await d.readTail(d.publisherBuildLogPath, PUBLISHER_TAIL_LINES).catch(() => []),
-    ) === 'failed';
+  // The publisher's state is its LAST OUTCOME, read from its own vocabulary (ADR 435) and carried
+  // as the three-state answer it is. An unreadable log is `unknown` here and stays `unknown` to
+  // the discharge — collapsing it to a boolean at this line is what made silence read as health.
+  const publisherOutcome = lastPublisherOutcome(
+    await d.readTail(d.publisherBuildLogPath, PUBLISHER_TAIL_LINES).catch(() => []),
+  );
 
   const httpErrorRateSinceBoot = errLines.filter(
     (l) => /"status":5\d\d/.test(l) || /musterd\.errors/.test(l),
@@ -290,7 +291,7 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
     ...(stack !== undefined ? { stack } : {}),
     ...(d.loadAverage !== undefined ? { load: d.loadAverage() } : {}),
     launchd,
-    publisherLog: { freshFailure },
+    publisherLog: { outcome: publisherOutcome },
     errLinesSinceBoot: errLines.length,
     httpErrorRateSinceBoot,
     reaperStormSinceBoot: errLines.filter((l) => /presence\.reaped/.test(l)).length >= 10,

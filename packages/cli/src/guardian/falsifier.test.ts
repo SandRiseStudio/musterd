@@ -47,7 +47,7 @@ function persisted(ticksAgo: number, stack: StackSample | undefined) {
     },
     handover: null,
     launchd: { lastExit: 0, runs: 15 },
-    publisherLog: { freshFailure: false },
+    publisherLog: { outcome: 'published' as const },
     errLinesSinceBoot: 0,
     httpErrorRateSinceBoot: 0,
     reaperStormSinceBoot: false,

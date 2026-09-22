@@ -3,6 +3,7 @@ import {
   classify,
   DEFAULT_TIERS,
   ERROR_RATE_FLOOR,
+  indeterminate,
   resolveGuardianTiers,
   type GuardianSignals,
 } from './classify.js';
@@ -11,7 +12,7 @@ const healthy: GuardianSignals = {
   now: 1_000_000,
   health: { ok: true, bootedAt: 900_000, schemaOk: true, dbPathExpected: true },
   launchd: { lastExit: 0, runs: 1 },
-  publisherLog: { freshFailure: false },
+  publisherLog: { outcome: 'published' },
   errLinesSinceBoot: 0,
   httpErrorRateSinceBoot: 0,
   reaperStormSinceBoot: false,
@@ -24,7 +25,7 @@ describe('classify (guardian spec §4)', () => {
   });
 
   it('publisher failure with a healthy daemon is publisher_failed', () => {
-    const out = classify({ ...healthy, publisherLog: { freshFailure: true } });
+    const out = classify({ ...healthy, publisherLog: { outcome: 'failed' } });
     expect(out).toEqual([{ class: 'publisher_failed' }]);
   });
 
@@ -77,10 +78,35 @@ describe('classify (guardian spec §4)', () => {
   it('auto classes order before alert classes when both fire', () => {
     const out = classify({
       ...healthy,
-      publisherLog: { freshFailure: true },
+      publisherLog: { outcome: 'failed' },
       reaperStormSinceBoot: true,
     });
     expect(out.map((i) => i.class)).toEqual(['publisher_failed', 'presence_churn']);
+  });
+});
+
+/**
+ * ADR 435 — `unknown` does not raise, AND does not clear an existing raise.
+ *
+ * The landed change implemented only the first half: the signal folded `unknown` into
+ * `freshFailure: false`, so by the time anything downstream could tell "the publisher is fine" from
+ * "we could not read the publisher" the distinction was already gone. These pin BOTH halves at the
+ * classifier, and the tick-level propagation test in service/guardian.test.ts pins the path.
+ */
+describe('ADR 435: an unreadable publisher log is neither failure nor health', () => {
+  it('unknown raises nothing — a publisher mid-build is not an incident', () => {
+    expect(classify({ ...healthy, publisherLog: { outcome: 'unknown' } })).toEqual([]);
+  });
+
+  it('unknown is INDETERMINATE, so the discharge is told not to read its absence as recovery', () => {
+    expect(indeterminate({ ...healthy, publisherLog: { outcome: 'unknown' } })).toEqual([
+      'publisher_failed',
+    ]);
+  });
+
+  it('an outcome the publisher actually stated is never indeterminate — either state clears it', () => {
+    expect(indeterminate(healthy)).toEqual([]);
+    expect(indeterminate({ ...healthy, publisherLog: { outcome: 'failed' } })).toEqual([]);
   });
 });
 

@@ -110,6 +110,50 @@ Three supporting changes:
   predicate went. A dep with no reader is the same rot as a reader with no writer, one direction
   reversed.
 
+## Amendment — 2026-09-22: `unknown` is carried, not collapsed
+
+The Decision above says `unknown` "does not raise, and does not clear an existing raise either."
+**The landed code implemented only the first half**, and big-body's review of this lane caught it:
+
+```ts
+const freshFailure = lastPublisherOutcome(await d.readTail(…)) === 'failed';
+```
+
+Two lines after the three-state answer was computed it became a boolean, and `unknown` and
+`published` arrived downstream as the same bytes. `classify` then omitted `publisher_failed`,
+ADR 432's discharge read that absence as recovery, and `clearRaise` closed an open raise about a
+publisher nobody had observed. The ADR asserted a property the code did not have.
+
+**ADR 438 made it live.** Before 438 the discharge ran only on a tick where something else was
+firing, so this was mostly latent; 438 put the discharge on every tick, so an `unknown` reading now
+closes a real raise within one two-minute tick. Both are in the running daemon.
+
+It is reachable, not theoretical: autorefresh trims logs over a cap (observed 2026-09-21 16:51 on
+`daemon.log`). A `build.log` trimmed past its last outcome line reads `unknown` while the publisher
+is genuinely broken — the "one real outage going quiet" direction `clear.test.ts` names as the
+safety case, and strictly worse than the 55 stale asks ADR 432 exists to end.
+
+The repair keeps `unknown` a third state the whole way:
+
+- `GuardianSignals.publisherLog` carries `outcome: 'published' | 'failed' | 'unknown'`. The boolean
+  is gone, so there is no longer a place where the distinction *can* be dropped.
+- `indeterminate(signals)` — a sibling of `classify` — names the classes this tick could not
+  observe. It is the per-class version of the handover rule the tick already applied wholesale
+  (ADR 274: a daemon restarting on purpose classifies nothing, and that emptiness is not health).
+- `dischargeCleared(firing, withheld, deps)` takes that set and skips those classes: neither
+  raised nor cleared, the raise simply stays open until a tick can see the condition. It logs
+  `guardian.discharge_withheld` when it does, because silent withholding is indistinguishable from
+  health — the failure mode this clause exists to end.
+
+**The missing test was the propagation one.** The suite that shipped the defect drove
+`lastPublisherOutcome` directly and asserted it returns `unknown`; it does. Nothing exercised
+`unknown` travelling collectSignals → classify → discharge. That is the same defect as the
+`publisher.ok` fixture this ADR was written about and as ADR 438's `actOn([], d)` — a green test
+blind to its own wiring, three times in one arc. `service/guardian.test.ts` now wires the real
+collector, real classifier and real `dischargeCleared` together over a trimmed log fixture, and it
+was verified by running it against the old semantics: 2 fail / 67 pass, the failure being the raise
+getting cleared.
+
 ## Consequences
 
 - `publisher_failed` now has a recovered edge, so ADR 432's `clearRaise` reaches it: the first
@@ -137,6 +181,11 @@ tick of the first clean publish after a failure, followed by a `guardian.cleared
 class, the raise it closes and the suppressed count. If `incidents: publisher_failed` is still
 logged after a line matching `published` is the newest outcome in `build.log`, this decision is
 wrong.
+
+The amendment's falsifier is the same log, read for the opposite mistake: a `guardian.cleared` row
+for `publisher_failed` on a tick whose `build.log` tail holds **no** outcome line at all means
+`unknown` is still being read as recovery, and the amendment is wrong. The line that should appear
+there instead is `guardian.discharge_withheld {"class":"publisher_failed",…}`.
 
 **Eval.** n/a — mechanical. The decision is a parser over a fixed vocabulary, not a judgement, so
 there is nothing to score against a dataset. Its correctness is pinned by unit tests over real log

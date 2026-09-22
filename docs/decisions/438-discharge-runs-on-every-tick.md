@@ -105,6 +105,19 @@ that fails its tick while recovering is worse than one that is quiet about a rec
   real outage going quiet — and it remains the test that matters most in `clear.test.ts`.
 - The existing 432 tests move to `dischargeCleared` and no longer call `actOn` with an empty list,
   a shape production cannot produce.
+- **Confirmed live on the hub, 2026-09-21 17:39:50** — the falsifier this ADR asked for, from the
+  running daemon rather than the suite. `guardian.log` holds
+  `guardian.cleared {"class":"publisher_failed","raised_at":1790025181552,"suppressed":19,"act":"01M32X1ABMERVXADTJ1V260KTD"}`
+  on a tick with **no `incidents:` line above it** — the healthy tick doing the discharging, which
+  is the exact tick that could not record it before. Guardian's `resolve` act 01M338W0KH landed on
+  that ask's thread. A raise open long enough to be suppressed 19 times closed on the first healthy
+  tick after this shipped.
+- **The safety direction had a second hole, found by review and closed in ADR 435's amendment.**
+  Running the discharge every tick also means running it on every tick that could not *observe* a
+  class: ADR 435's `unknown` publisher reading was folded into "not failed", so a `build.log`
+  trimmed past its last outcome line made this discharge close a real raise within one tick. The
+  fix carries `unknown` as a third state and withholds those classes from the discharge. This ADR
+  is what made that latent defect live, and the two should be read together.
 
 ## Observability & Evaluation
 

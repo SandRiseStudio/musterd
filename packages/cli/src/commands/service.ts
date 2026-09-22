@@ -2250,7 +2250,7 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
           dbPathExpected: true,
         },
         launchd: { lastExit: 0, runs: 1 },
-        publisherLog: { freshFailure: true },
+        publisherLog: { outcome: 'failed' as const },
         errLinesSinceBoot: 0,
         httpErrorRateSinceBoot: 0,
         reaperStormSinceBoot: false,
@@ -2387,8 +2387,8 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
       return report;
     },
     // ADR 438: the same discharge, bound the same way, reachable on a tick with nothing firing.
-    discharge: (firing, stamp) =>
-      dischargeCleared(firing, { stamp, sendResolve, audit: guardianAudit, log }),
+    discharge: (firing, withheld, stamp) =>
+      dischargeCleared(firing, withheld, { stamp, sendResolve, audit: guardianAudit, log }),
     heartbeat: async () => {
       if (controlProbe || !auth) return;
       await auth.http.send(
