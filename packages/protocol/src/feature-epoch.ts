@@ -106,5 +106,8 @@
 // 167's `delivery_hint` + nudge-relay skill. A daemon behind this epoch refuses a `session-denied`
 // body (the client's report is fire-and-forget, so the refusal itself still stands locally); a seat
 // behind it may still hold the relay skill, and the roster's `behind` hint is the cue to refresh.
-export const FEATURE_EPOCH = 23 as const;
+// Epoch 24 — ADR 443 (the doorbell): `PolicySchema.doorbell`, per-human doorbell prefs, and the
+// host's ring poll for the `os` sink. A daemon behind this epoch drops a `doorbell` policy key and
+// has no `/doorbell` routes; a host behind it raises no banner.
+export const FEATURE_EPOCH = 24 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

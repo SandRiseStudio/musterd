@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DoorbellPolicySchema } from './doorbell.js';
 import { EnforcementPolicySchema } from './enforcement.js';
 import { GuardianTiersSchema } from './guardian.js';
 import { IncidentPolicySchema } from './incident.js';
@@ -104,8 +105,14 @@ export const PolicySchema = z.object({
    * `ask` raised — the loud reach beside the guaranteed reach (message row + admin push, ADR 147 §3).
    * Unset (the default) = no outbound call ever. The URL is a secret: policy reads are admin-only,
    * `team export` never serializes policy, and the CLI display masks it to its host.
+   *
+   * Since ADR 443 this is read through as `doorbell.slack_url` (with `slack` in the doorbell
+   * defaults) when that is unset — the stored blob is never rewritten.
    */
   ask_slack_webhook: z.string().url().optional(),
+  /** The doorbell's team half (ADR 443): the sink allow-list, defaults, and team Slack/webhook
+   *  URLs. `parse({})` configures no outbound URL. */
+  doorbell: DoorbellPolicySchema.default({}),
   /**
    * Seeds ingest (ADR 248) — where the daemon pulls buffered raw ideas from, and the bearer token it
    * presents. Both set = the ingest loop polls `GET <url>/seeds?after=<cursor>` and opens one lane

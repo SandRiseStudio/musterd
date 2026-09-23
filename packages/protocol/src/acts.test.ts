@@ -21,7 +21,7 @@ describe('SURFACES (ADR 352)', () => {
 });
 
 describe('FEATURE_EPOCH (the wall, ADR 442)', () => {
-  it('is 23 — a daemon behind it refuses the session-denied attestation', () => {
-    expect(FEATURE_EPOCH).toBe(23);
+  it('is at least 23 — a daemon behind it refuses the session-denied attestation', () => {
+    expect(FEATURE_EPOCH).toBeGreaterThanOrEqual(23);
   });
 });
