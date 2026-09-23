@@ -178,6 +178,7 @@ src/
     whoami.ts         // print the seat this folder resolves to: member/team/surface/source (ADR 067)
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
+    doorbell.ts       // `musterd doorbell` (ADR 443): your route, sink by sink, and where each part comes from; `<sink> on|off` (`os on` takes this machine's host label from the host registry); `team` — the admin's allow-list, defaults and team URLs via read-merge-write POST /policy. Humans only; no MCP tool; a URL prints masked to its host
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
     insight.ts        // insight save/search — team-visible findings via the insight act + FTS search (ADR 327)
     surface.ts        // musterd surface list|decline|accept (ADR 332): the vocabulary for refusing a provisioned surface. `decline` removes it AND records the tombstone (one command, one outcome); `list` names what is refusable here plus any refusal this build no longer recognises; `accept` clears one. `init --refresh-hooks` overrides every tombstone in the folder and says which it resurrected
