@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   TWITCH_SDK_SRC,
+  eyebrowFor,
   replayWhenDark,
   subscribeLiveness,
   type Liveness,
@@ -150,5 +153,49 @@ describe('replayWhenDark', () => {
     fire('offline');
     fire('play');
     expect(replayed).toBe(false);
+  });
+});
+
+/**
+ * The joint the lane (01M2XC9GNX) found untested: player events -> liveness -> the string a reader
+ * sees. Each case drives a fake player's real listeners through `subscribeLiveness` into
+ * `eyebrowFor`, so a swap that stops working goes red here. The no-event case matters most,
+ * because a dead swap and correct SSR both print the neutral eyebrow.
+ */
+describe('the /watch eyebrow follows the player', () => {
+  const EVENTS = { ONLINE: 'online', OFFLINE: 'offline' };
+  function drive(fire: string[], replaying = false): string {
+    const listeners: Record<string, () => void> = {};
+    let state: Liveness = 'unknown';
+    subscribeLiveness(
+      { addEventListener: (e: string, cb: () => void) => (listeners[e] = cb) } as never,
+      EVENTS,
+      (s) => (state = s),
+    );
+    for (const e of fire) listeners[e]!();
+    return eyebrowFor(state, replaying);
+  }
+
+  it('no event leaves the neutral SSR string', () => {
+    expect(drive([])).toBe(WATCH_COPY.eyebrow);
+  });
+  it('ONLINE reads live', () => {
+    expect(drive(['online'])).toBe(WATCH_COPY.eyebrowLive);
+  });
+  it('OFFLINE reads between sessions', () => {
+    expect(drive(['offline'])).toBe(WATCH_COPY.eyebrowDark);
+  });
+  it('the latest event wins in both directions', () => {
+    expect(drive(['offline', 'online'])).toBe(WATCH_COPY.eyebrowLive);
+    expect(drive(['online', 'offline'])).toBe(WATCH_COPY.eyebrowDark);
+  });
+  it('a dark channel playing a replay says so; live beats replay', () => {
+    expect(drive(['offline'], true)).toBe(WATCH_COPY.eyebrowReplay);
+    expect(drive(['online'], true)).toBe(WATCH_COPY.eyebrowLive);
+  });
+  it('WatchPage renders eyebrowFor from the state the subscription sets', () => {
+    const src = readFileSync(fileURLToPath(new URL('./WatchPage.tsx', import.meta.url)), 'utf8');
+    expect(src).toMatch(/watch-hero__eyebrow[^>]*>\s*\{eyebrowFor\(liveness, replaying\)\}/);
+    expect(src).toMatch(/subscribeLiveness\([^)]*\([^)]*\)\s*=>\s*\{\s*if \(!cancelled\) setLiveness\(state\)/);
   });
 });

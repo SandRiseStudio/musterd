@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { TWITCH_CHANNEL, TWITCH_COLLECTION, TWITCH_URL } from './twitchEmbed';
 import {
+  eyebrowFor,
   loadTwitchSdk,
   replayWhenDark,
   subscribeLiveness,
@@ -129,13 +130,7 @@ export function WatchPage() {
     <>
       <section className="watch-hero shell">
         <p className="watch-hero__eyebrow mono">
-          {liveness === 'live'
-            ? WATCH_COPY.eyebrowLive
-            : replaying
-              ? WATCH_COPY.eyebrowReplay
-              : liveness === 'dark'
-                ? WATCH_COPY.eyebrowDark
-                : WATCH_COPY.eyebrow}
+          {eyebrowFor(liveness, replaying)}
         </p>
         <h1 className="watch-hero__title">{WATCH_COPY.h1}</h1>
         <p className="watch-hero__lede">
