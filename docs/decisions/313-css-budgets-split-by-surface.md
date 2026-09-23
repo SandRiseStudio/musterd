@@ -83,6 +83,9 @@ The route choice was nick's, made 2026-08-24 on the numbers above (spec §10).
   cadence the single budget did (two in eight days), the split fixed nothing and this ADR should be
   revisited as having been a raise wearing structure.
 
+- 2026-09-23: `app` is split again. `Live` has its own `live` budget, and `app` keeps Board,
+  Broadcast, approvals and audit. See [ADR 441](441-live-css-gets-its-own-budget.md).
+
 ## Observability & Evaluation
 
 - **Traces:** the gate's summary line now prints all three CSS numbers per run

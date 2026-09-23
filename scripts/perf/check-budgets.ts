@@ -42,6 +42,7 @@ interface Budgets {
   initialJsGzipBytes: number;
   totalJsGzipBytes: number;
   maxChunkGzipBytes: number;
+  liveCssGzipBytes: number;
   appCssGzipBytes: number;
   siteCssGzipBytes: number;
   sharedCssGzipBytes: number;
@@ -50,7 +51,7 @@ interface Budgets {
   allowedFontFamilies: string[];
 }
 
-type CssGroup = 'app' | 'site' | 'shared';
+type CssGroup = 'live' | 'app' | 'site' | 'shared';
 
 const budgets: Budgets = JSON.parse(
   readFileSync(join(repoRoot, 'docs', 'perf', 'budgets.json'), 'utf8'),
@@ -102,8 +103,11 @@ const totalFont = fonts.reduce((s, f) => s + statSync(f).size, 0);
  * office bytes (and vice versa — it happened, 2026-08-24, 6 bytes free). Bundles are classified by
  * pre-hash basename against budgets.cssBundles; an unlisted bundle is a FAILURE, not a silent
  * bucket, for the same reason the font allowlist exists — a new stylesheet is a deliberate act.
+ * ADR 441 split `live` (Live.css, the office — the file under continuous change) off `app`, so the
+ * one stylesheet that keeps filling its ceiling cannot spend the runway of the four that do not.
  */
 const cssGroupBudget: Record<CssGroup, number> = {
+  live: budgets.liveCssGzipBytes,
   app: budgets.appCssGzipBytes,
   site: budgets.siteCssGzipBytes,
   shared: budgets.sharedCssGzipBytes,
@@ -185,7 +189,7 @@ for (const chunk of jsSizes) {
 for (const c of cssSizes) {
   if (!c.group) {
     failures.push(
-      `css bundle ${c.file} (basename \`${c.base}\`) is not classified in budgets.cssBundles — a new stylesheet must be assigned to app, site, or shared deliberately (ADR 313), not budgeted by accident`,
+      `css bundle ${c.file} (basename \`${c.base}\`) is not classified in budgets.cssBundles — a new stylesheet must be assigned to live, app, site, or shared deliberately (ADR 313), not budgeted by accident`,
     );
   }
 }
@@ -223,7 +227,7 @@ const initialSummary = worst
   ? `initial JS gzip ${kb(worst.gzip)}/${kb(budgets.initialJsGzipBytes)} (worst route ${worst.route}, ${worst.chunks.length} eager chunks)`
   : 'initial JS gzip UNMEASURED';
 console.log(
-  `perf:check — ${initialSummary} · total JS gzip ${kb(totalJs)}/${kb(budgets.totalJsGzipBytes)} (${jsSizes.length} chunks) · CSS gzip app ${kb(cssGroupTotal('app'))}/${kb(budgets.appCssGzipBytes)} · site ${kb(cssGroupTotal('site'))}/${kb(budgets.siteCssGzipBytes)} · shared ${kb(cssGroupTotal('shared'))}/${kb(budgets.sharedCssGzipBytes)} · fonts ${kb(totalFont)}/${kb(budgets.totalFontBytes)} (${fonts.length} files) · largest chunk ${kb(Math.max(...jsSizes.map((c) => c.gzip)))}/${kb(budgets.maxChunkGzipBytes)}`,
+  `perf:check — ${initialSummary} · total JS gzip ${kb(totalJs)}/${kb(budgets.totalJsGzipBytes)} (${jsSizes.length} chunks) · CSS gzip live ${kb(cssGroupTotal('live'))}/${kb(budgets.liveCssGzipBytes)} · app ${kb(cssGroupTotal('app'))}/${kb(budgets.appCssGzipBytes)} · site ${kb(cssGroupTotal('site'))}/${kb(budgets.siteCssGzipBytes)} · shared ${kb(cssGroupTotal('shared'))}/${kb(budgets.sharedCssGzipBytes)} · fonts ${kb(totalFont)}/${kb(budgets.totalFontBytes)} (${fonts.length} files) · largest chunk ${kb(Math.max(...jsSizes.map((c) => c.gzip)))}/${kb(budgets.maxChunkGzipBytes)}`,
 );
 
 if (failures.length > 0) {
