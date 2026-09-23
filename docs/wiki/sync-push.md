@@ -113,7 +113,9 @@ slice boundary leaked.
 `musterd node invite` run inside `/Users/nick/agents-*` resolved team `revive` from the workspace
 binding and ignored the scratch config's `current` (2026-08-28). Bindings win over
 `MUSTERD_CONFIG`'s current team, which is right for daily use and surprising when driving a test
-hub. Run from the scratch directory and pass `--as <name>`, since a binding-free folder has no
-active identity either. Falsify: run `musterd node invite` from a bound worktree with
+hub. ~~Run from the scratch directory and pass `--as <name>`, since a binding-free folder has no
+active identity either.~~ **Invalidated 2026-09-23 (ADR 442):** `--as` is removed. Run from a
+scratch folder that `team create --member <name>` bound (it binds the folder it runs in), so the
+folder itself is the identity. Falsify: run `musterd node invite` from a bound worktree with
 `MUSTERD_CONFIG` pointing at a config whose `current` is a different team, and read which team the
 request goes to.

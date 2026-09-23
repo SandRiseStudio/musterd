@@ -252,7 +252,7 @@ describe('notify against a live daemon', () => {
    * `team add` token no longer authenticates.
    */
   async function setup(): Promise<{ nickToken: string; lin: AgentHttpAuth }> {
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
     await capture(() => teamCommand(parseArgs(['add', 'lin', '--kind', 'agent', '--json'])));
     const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
     const nickToken = cfg.identities.dawn.key as string; // nick's credential (mscr_)

@@ -28,7 +28,7 @@ describe('audit command', () => {
 
     // `team create` mints nick as the creator-admin (ADR 071) and auto-binds this folder, so the
     // audit command resolves nick from the binding without an explicit --as.
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
     nickToken = loadConfig().identities['dawn']!.key;
     // Add an agent member to reclaim (the governed op that writes the first audit row).
     await new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' }).addMember('dawn', {

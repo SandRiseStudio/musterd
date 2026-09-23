@@ -1,6 +1,10 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { bindingSeat } from '@musterd/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import type { HostRegistryEntry } from '../host/registry.js';
-import { ensureHostKey, harnessDrift, registryDrift } from './residency.js';
+import { ensureHostKey, harnessDrift, registryDrift, seatWorkspace } from './residency.js';
 
 /**
  * The drift lines are the remediation, so their wording is the contract (ADR 131 §1). Both faults
@@ -129,5 +133,48 @@ describe('ensureHostKey (ADR 395)', () => {
     await expect(ensureHostKey(binding, 'delta-host', mint)).resolves.toBe('mskey_host_minted');
     expect(mint).toHaveBeenCalledTimes(1);
     expect(mint).toHaveBeenCalledWith('delta-host');
+  });
+});
+
+describe('seatWorkspace — which folder receives the grant (ADR 442)', () => {
+  const bind = (dir: string, seat: string) => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: 'http://127.0.0.1:1',
+        team: 'dawn',
+        claim: { mode: 'seat', name: seat },
+        seat_credential: 'msac_x0000000000000000000',
+      }),
+    );
+  };
+
+  it('--workspace names the agent seat folder, so an admin enrolls from their own Workspace', () => {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-res-ws-'));
+    const agent = join(root, 'scout');
+    bind(agent, 'scout');
+    const got = seatWorkspace({ positionals: [], flags: { workspace: agent } });
+    expect(got?.dir).toBe(agent);
+    expect(got?.binding && bindingSeat(got.binding)).toBe('scout');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('a --workspace with no binding is refused, never silently skipped', () => {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-res-ws-'));
+    expect(() => seatWorkspace({ positionals: [], flags: { workspace: root } })).toThrow(
+      /no musterd binding/,
+    );
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('without --workspace it is the current folder, as before', () => {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-res-ws-'));
+    bind(root, 'scout');
+    const spy = vi.spyOn(process, 'cwd').mockReturnValue(root);
+    expect(seatWorkspace({ positionals: [], flags: {} })?.dir).toBe(root);
+    spy.mockRestore();
+    rmSync(root, { recursive: true, force: true });
   });
 });

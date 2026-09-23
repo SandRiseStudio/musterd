@@ -53,7 +53,7 @@ describe('wake-context command (ADR 209)', () => {
   }
 
   it('returns the packet as JSON — v2 carries the body ATTRIBUTED — and rejects missing targets', async () => {
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
     await capture(() =>
       sendCommand(parseArgs(['--to', 'nick', '--act', 'message', 'wake body stays remote'])),
     );

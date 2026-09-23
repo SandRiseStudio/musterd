@@ -264,16 +264,41 @@ function mergePolicy<T extends ResidencyPolicy | ResidencyPolicyOverride>(
   return merged;
 }
 
-/** The seat this invocation is about: `--seat` wins, else the workspace binding's fixed seat. */
+/**
+ * The agent seat's folder — where the standing grant, host key and host-registry entry land.
+ * `--workspace <dir>` names it; otherwise it is the current folder, as before.
+ *
+ * Why the flag exists (ADR 442): enrollment is admin-authorized, and it used to run from the AGENT's
+ * folder with `--as <admin>`. `--as` is gone — a folder acts only as its own member — so the admin now
+ * runs `residency on --seat <agent> --workspace <agent's folder>` from their OWN Workspace. The admin's
+ * identity never enters the agent's folder; only the grant the daemon issued for that seat does.
+ */
+export function seatWorkspace(parsed: Parsed): { dir: string; binding: Binding | null } | null {
+  const named = flagStr(parsed.flags, 'workspace');
+  if (named) {
+    const binding = findBinding(named);
+    if (!binding) {
+      throw new CliError(
+        `no musterd binding at ${named} — --workspace must be the agent seat's own folder`,
+        2,
+      );
+    }
+    return { dir: findWorkspaceDir(named) ?? named, binding };
+  }
+  const dir = findWorkspaceDir();
+  return dir ? { dir, binding: findBinding() } : null;
+}
+
+/** The seat this invocation is about: `--seat` wins, else the seat folder's fixed seat. */
 function resolveSeat(parsed: Parsed): string {
   const flag = flagStr(parsed.flags, 'seat');
   if (flag) return flag;
-  const binding = findBinding();
+  const binding = seatWorkspace(parsed)?.binding ?? null;
   const bound = binding ? bindingSeat(binding) : undefined;
   if (bound) return bound;
   throw new CliError(
-    'no seat to enroll — run this in the agent seat’s workspace (musterd agent <name>), or name ' +
-      'one with --seat <agent>. (--as <admin> only says who authorizes, never what gets enrolled.)',
+    'no seat to enroll — name it with --seat <agent> --workspace <its folder>, run from an ' +
+      'admin’s own Workspace (ADR 442: the folder you run from is who authorizes).',
     2,
   );
 }
@@ -281,7 +306,8 @@ function resolveSeat(parsed: Parsed): string {
 async function onCommand(parsed: Parsed): Promise<number> {
   const { team, http } = resolve(parsed.flags);
   const seat = resolveSeat(parsed);
-  const binding = findBinding();
+  const target = seatWorkspace(parsed);
+  const binding = target?.binding ?? null;
   // Identity declares no surface since ADR 281; the captured session's harness is the evidence-backed
   // default (a claude-code hook only fires under claude-code). `--harness` stays the explicit choice.
   const harness = flagStr(parsed.flags, 'harness') ?? binding?.session?.harness;
@@ -320,7 +346,7 @@ async function onCommand(parsed: Parsed): Promise<number> {
   // own credential (the daemon never holds it) — only when this folder is actually the seat's.
   // The same condition gates the host-registry write: seat → workspace is a fact only the seat's
   // own workspace can assert (ADR 131 §2's third store).
-  const dir = findWorkspaceDir();
+  const dir = target?.dir ?? null;
   let grantSaved = false;
   let registered = false;
   let hostKeyMinted = false;
@@ -442,8 +468,9 @@ async function offCommand(parsed: Parsed): Promise<number> {
   // The server grant is revoked; drop the now-dead token from the local binding too, and take the
   // seat out of this machine's host registry — after the kill switch, `musterd host` must derive
   // *and* hold nothing for it.
-  const dir = findWorkspaceDir();
-  const binding = findBinding();
+  const target = seatWorkspace(parsed);
+  const dir = target?.dir ?? null;
+  const binding = target?.binding ?? null;
   if (
     dir &&
     binding &&

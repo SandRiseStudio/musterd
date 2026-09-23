@@ -89,7 +89,7 @@ send must not impersonate a human.
    `musterd agent steward --team <team>` (the workhorse — its worktree is where wakes run) and
    `musterd agent steward-scan --team <team>` (the sender — authenticated discovery→ask only).
 2. **Enroll the steward** from its workspace (admin authorizes):
-   `musterd residency on --as <admin> --lane batched --tool-policy seat-policy --timeout 15m --budget 2`
+   `musterd residency on --seat <steward> --workspace <its folder> --lane batched --tool-policy seat-policy --timeout 15m --budget 2` (run from an admin's own Workspace — ADR 442 removed `--as`)
    — `seat-policy` because the charter drafts PRs (the workspace's own Claude settings govern);
    the wake path still never passes a skip-permissions flag — the CI shape does **not** transfer.
 3. **Keep the actuator resident**: `musterd service install --wake`.

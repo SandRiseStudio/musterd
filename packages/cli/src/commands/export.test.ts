@@ -131,7 +131,7 @@ describe('`team export` guards the directory it tells you to commit (ADR 176)', 
     mkdirSync(home, { recursive: true });
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'ada'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'ada'])));
   });
 
   afterEach(async () => {

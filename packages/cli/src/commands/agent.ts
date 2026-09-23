@@ -11,7 +11,7 @@ import { provisionWorkspace } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 import { writeSeatFile } from '../roster.js';
-import { resolve } from './helpers.js';
+import { resolve, resolveRead } from './helpers.js';
 
 /**
  * `musterd agent <name>` — one command to add an agent AND give it an isolated, ready-to-run
@@ -57,16 +57,18 @@ export async function agentCommand(
   // writes `driver` into the seat's binding.json so the adapter reports who is steering — which makes
   // the steering human read `working`/present on the roster instead of offline. `--driver` bare uses
   // the acting identity (`--as`). Absent = no driver (unchanged, warn-never-block): presence is a
-  // convenience the operator grants, never inferred behind their back.
+  // convenience the operator grants, never inferred behind their back. Bare `--driver` names the
+  // member THIS folder resolves to (ADR 442 removed `--as`).
   let driver: string | undefined;
   const driverFlag = parsed.flags['driver'];
   if (typeof driverFlag === 'string' && driverFlag.trim()) {
     driver = driverFlag.trim();
   } else if (driverFlag === true) {
-    driver = flagStr(parsed.flags, 'as');
+    driver = resolveRead(parsed.flags).identity?.name;
     if (!driver)
       throw new CliError(
-        '`--driver` marks the human steering this seat — pass a name (`--driver <you>`) or identify yourself with `--as <you>`',
+        '`--driver` marks the human steering this seat — pass a name (`--driver <you>`), or run it ' +
+          'from your own Workspace so bare `--driver` resolves to you',
         2,
       );
   }

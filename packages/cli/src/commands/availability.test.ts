@@ -47,7 +47,7 @@ describe('availability command', () => {
   // `team create` auto-binds the cwd identity (ADR 036), so the command resolves `nick` from the
   // binding without an explicit --as.
   async function setupTeam(): Promise<void> {
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
   }
 
   it('sets away_until and the roster reflects it (off until <ts>)', async () => {

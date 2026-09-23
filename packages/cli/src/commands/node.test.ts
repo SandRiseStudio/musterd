@@ -47,7 +47,7 @@ describe('node command', () => {
 
     // The operator's CLI points at the hub for the admin verbs.
     process.env['MUSTERD_SERVER'] = hubBase;
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
   });
 
   afterEach(async () => {
@@ -78,7 +78,7 @@ describe('node command', () => {
     // Now act as the joining machine: same team, its own daemon.
     const joinerBase = `http://127.0.0.1:${(await joiner.listen()).port}`;
     process.env['MUSTERD_SERVER'] = joinerBase;
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
     // Give the joiner a local node row the way a live daemon gets one — by writing to its log.
     await capture(() =>
       sendCommand(parseArgs(['--to', '@team', '--act', 'status_update', 'hello'])),

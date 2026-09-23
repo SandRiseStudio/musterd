@@ -67,7 +67,23 @@ export function resolveClaimWorkspace(
  * caller named it with `--as`; `config` is the ambient global-config fallback — a *credential store*
  * default that may **read** but never **act** (ADR 036).
  */
-export type IdentitySource = 'env' | 'binding' | 'flag' | 'config';
+export type IdentitySource = 'env' | 'binding';
+
+/**
+ * `--as` was removed (ADR 442, superseding ADR 059's resolution): it let any process under this OS
+ * user act as any identity the machine had ever held — the 2026-09-22 incident's `musterd inbox --as
+ * nick`. Refused loudly rather than ignored, so a script that still passes it fails at once instead
+ * of silently acting as whoever this folder is bound to.
+ */
+export function rejectAs(flags: Record<string, string | boolean>): void {
+  if (flags['as'] !== undefined) {
+    throw new CliError(
+      '--as was removed (ADR 442): a folder acts only as the member it is bound to — cd into that ' +
+        "member's Workspace (`musterd whoami` says who this folder is)",
+      2,
+    );
+  }
+}
 
 export interface Resolved {
   config: Config;
@@ -142,6 +158,7 @@ export function identityClientOpts(
  * on the global config's single-slot-per-team (the 2026-06-16 dogfood failure).
  */
 function gather(flags: Record<string, string | boolean>) {
+  rejectAs(flags);
   const config = loadConfig();
   const env = process.env;
   // The STRICT read (ADR 281/282): this binding would BE the acting identity, so a legacy/invalid
@@ -177,24 +194,10 @@ function gather(flags: Record<string, string | boolean>) {
       source: 'binding',
     });
   }
-  // Active identity per team first (so a no-`--as` default resolves to it), then the rest of the
-  // vault (ADR 059) so `--as <name>` can name any previously-known identity for the team.
-  for (const [slug, identity] of Object.entries(config.identities)) {
-    sources.push({ team: slug, identity, source: 'config' });
-  }
-  for (const si of config.knownIdentities) {
-    if (config.identities[si.team]?.name === si.name) continue; // already added as the active one
-    sources.push({
-      team: si.team,
-      identity: {
-        name: si.name,
-        key: si.key,
-        surface: si.surface,
-        ...(si.sessionLease !== undefined ? { sessionLease: si.sessionLease } : {}),
-      },
-      source: 'config',
-    });
-  }
+  // ADR 442 §6: the global-config vault (ADR 059) is STORAGE — `claim`/`init` use it to rebind a
+  // folder without re-pasting a key — and never a resolution source. A folder acts as its binding (or
+  // an explicit `MUSTERD_CLAIM` env seat), or as nobody. The 2026-09-22 incident read nick's inbox
+  // from an unbound folder; `--as` was one path there and this fallback was the other.
 
   const team = flagStr(flags, 'team') ?? envId?.team ?? binding?.team ?? config.current;
   // ADR 246 resolves WHICH model to attest; ADR 301 keeps WHICH RUNG answered. One resolve, read
@@ -207,7 +210,6 @@ function gather(flags: Record<string, string | boolean>) {
     team,
     workspace: resolveClaimWorkspace(),
     workspaceKey: resolveWorkspaceKey(),
-    asName: flagStr(flags, 'as'),
     model: attestation.model,
     modelSource: attestation.source,
   };
@@ -278,30 +280,20 @@ export function attestedAttestation(
  * from silently acting as a real teammate.
  */
 export function resolve(flags: Record<string, string | boolean>): Resolved {
-  const { config, server, sources, team, workspace, workspaceKey, asName, model, modelSource } =
+  const { config, server, sources, team, workspace, workspaceKey, model, modelSource } =
     gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
-  // ADR 059: `--as <name>` resolves any vault identity for the team, not just the active one.
-  const match = sources.find((s) => s.team === team && (!asName || s.identity.name === asName));
+  const match = sources.find((s) => s.team === team);
   if (!match) {
-    const who = asName ? ` as ${asName}` : '';
     throw new CliError(
-      `no identity for team "${team}"${who} — run: musterd claim <name> --team ${team}`,
+      `no identity in this folder for team "${team}" — a folder acts only as the member it is ` +
+        `bound to (ADR 442). cd into that member's Workspace, or bind this one: musterd claim <name>`,
       4,
     );
   }
-  const explicit = match.source === 'env' || match.source === 'binding' || asName != null;
-  if (!explicit) {
-    throw new CliError(
-      `no active identity in this folder for team "${team}" — ` +
-        `run: musterd claim <name>  (bind this folder), or pass --as ${match.identity.name}`,
-      4,
-    );
-  }
-  const identitySource: IdentitySource =
-    match.source === 'config' && asName ? 'flag' : match.source;
+  const identitySource: IdentitySource = match.source;
   return {
     config,
     team,
@@ -356,22 +348,20 @@ export function resolveRead(
   opts: ResolveReadOptions = {},
 ): ResolvedRead {
   const claimSeatPerRequest = opts.claimSeatPerRequest ?? false;
-  const { config, server, sources, team, workspace, workspaceKey, asName, model, modelSource } =
+  const { config, server, sources, team, workspace, workspaceKey, model, modelSource } =
     gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
-  // ADR 059: prefer an exact `--as` match from the vault; fall back to the team's active identity.
-  const match =
-    sources.find((s) => s.team === team && (!asName || s.identity.name === asName)) ??
-    (asName ? undefined : sources.find((s) => s.team === team));
+  // Every source is env or binding (ADR 442), so a match is always explicit.
+  const match = sources.find((s) => s.team === team);
   let identity: Identity | undefined;
   let identitySource: IdentitySource | undefined;
   let explicit = false;
   if (match) {
     identity = match.identity;
-    explicit = match.source === 'env' || match.source === 'binding' || asName != null;
-    identitySource = match.source === 'config' && asName ? 'flag' : match.source;
+    explicit = true;
+    identitySource = match.source;
   }
   return {
     config,

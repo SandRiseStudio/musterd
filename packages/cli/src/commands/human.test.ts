@@ -33,7 +33,7 @@ describe('human command', () => {
     // The command never writes at cwd — but pin it inside the fixture so a stray relative path can't
     // reach the real machine, and so `findBinding`'s walk-up can't see the developer's own binding.
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'ada'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'ada'])));
   });
 
   afterEach(async () => {
@@ -247,7 +247,7 @@ describe('human command', () => {
     // required to move it: creating a team no longer claims an ESTABLISHED machine default on its
     // own (lane 01KZVKF3H0R81XEA818G2QBRZC — that silent fleet-wide write is the bug). `musterd
     // human` still asserts `current` unconditionally, which is exactly what this test covers.
-    await capture(() => teamCommand(parseArgs(['create', 'dusk', '--as', 'ada', '--switch'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dusk', '--member', 'ada', '--switch'])));
     expect(readConfig().current).toBe('dusk');
 
     const res = await run(['lin', '--team', 'dawn', '--home', home]);

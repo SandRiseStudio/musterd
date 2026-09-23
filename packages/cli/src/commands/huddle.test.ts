@@ -35,7 +35,7 @@ describe('musterd huddle', () => {
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     process.env['WHITEBOARD_PORT'] = '1'; // nothing listens: the room is skipped, never spawned
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
   });
 
   afterEach(async () => {
@@ -102,8 +102,8 @@ describe('musterd huddle', () => {
   });
 
   it('open with --to a,b carries the eligible set; --room overrides the derived URL', async () => {
-    await capture(() => teamCommand(parseArgs(['add', 'lin', '--kind', 'agent', '--as', 'nick'])));
-    await capture(() => teamCommand(parseArgs(['add', 'ada', '--kind', 'agent', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['add', 'lin', '--kind', 'agent'])));
+    await capture(() => teamCommand(parseArgs(['add', 'ada', '--kind', 'agent'])));
     const root = await open(['--to', 'lin,ada', '--room', 'http://example.test/b/x']);
     expect(root['to']).toEqual({ kind: 'team' });
     expect(root['meta']).toMatchObject({
@@ -223,9 +223,7 @@ describe('musterd huddle', () => {
 
   describe('the room as a view over the log (ADR 378)', () => {
     it('show renders the transcript, who is in it, who has yet to speak, and the budget spent', async () => {
-      await capture(() =>
-        teamCommand(parseArgs(['add', 'lin', '--kind', 'agent', '--as', 'nick'])),
-      );
+      await capture(() => teamCommand(parseArgs(['add', 'lin', '--kind', 'agent'])));
       const root = await open(['--to', 'lin']);
       const id = String(root['id']);
       await capture(() => huddleCommand(parseArgs(['say', id, 'a first turn', '--json'])));

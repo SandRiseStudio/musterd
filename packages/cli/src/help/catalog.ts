@@ -378,7 +378,7 @@ export const CATALOG: readonly CommandEntry[] = [
     primary: true,
     detail:
       'Manage the standing roster:\n' +
-      '  create <slug> [--as <you>] [--role <role>] [--display <name>] [--switch]\n' +
+      '  create <slug> [--member <you>] [--role <role>] [--display <name>] [--switch]\n' +
       '                               binds the creating folder; --switch also points every UNBOUND\n' +
       '                               folder on this machine at the new team (skip it for a probe)\n' +
       '  add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]\n' +
@@ -396,11 +396,11 @@ export const CATALOG: readonly CommandEntry[] = [
       '                               disable the legacy Team key after every held seat and enrolled host\n' +
       '                               proves scoped use; --force bypasses readiness, --yes confirmation\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +
-      '  archive <slug> [--as <admin>]  soft-archive a whole team — off status/rosters, history kept (admin)\n' +
+      '  archive <slug>  soft-archive a whole team — off status/rosters, history kept (admin; run from your Workspace)\n' +
       '  export <slug> [--to <dir>]   move the roster onto git-tracked .musterd/ files (ADR 058);\n' +
       '                               defaults into the team home when the team has one (ADR 176)',
     examples: [
-      'musterd team create acme --as nick',
+      'musterd team create acme --member nick',
       'musterd team add lin --kind human --role reviewer',
       'musterd team bootstrap mint --seat ada --expires-in 24h',
       'musterd team bootstrap cutover',
@@ -755,8 +755,9 @@ export const CATALOG: readonly CommandEntry[] = [
     group: 'waiting',
     primary: true,
     detail:
-      'Show the seat this folder resolves to right now and where it came from (env > binding > --as > ' +
-      'config). An unbound folder is a valid answer — it tells you how to claim a seat.',
+      'Show the seat this folder resolves to right now and where it came from (env > binding). A ' +
+      'folder acts only as the member it is bound to (ADR 442): an unbound folder resolves to nobody, ' +
+      'which is a valid answer — it tells you how to claim a seat.',
   },
   {
     name: 'memory',
@@ -850,7 +851,8 @@ export const CATALOG: readonly CommandEntry[] = [
       'and registers the workspace in the machine-local host registry; `off` is the kill switch ' +
       '(reverses all three); `status` cross-checks the stores, names drift, and renders the effective ' +
       'wake policy (seat overrides starred). Two different flags: --seat = WHAT gets enrolled (an ' +
-      'agent seat; defaults to this workspace’s binding), --as = WHO authorizes (an admin). Knobs ' +
+      'agent seat; defaults to this workspace’s binding), --workspace = WHERE its grant lands (the ' +
+      'seat’s own folder). Who authorizes is the folder you run from — an admin’s Workspace (ADR 442). Knobs ' +
       '(inc 5) — on `on` they override THIS seat, on `policy` they set the TEAM defaults: ' +
       '--lane both|interrupt|batched, --cooldown 15m, --hourly-cap N, --attempt-cap N, ' +
       '--tool-policy reply-only|seat-policy, --timeout 5m, --max-turns N, --budget USD, ' +
@@ -859,9 +861,9 @@ export const CATALOG: readonly CommandEntry[] = [
       '`--lane off` — "stop waking this seat" is `residency off`. The roster shows enrolled offline ' +
       'seats as `offline · wakeable`.',
     examples: [
-      'musterd residency on --as nick',
-      'musterd residency on --seat scout --as nick --lane batched --budget 2',
-      'musterd residency policy --cooldown 15m --hourly-cap 4 --as nick',
+      'musterd residency on --seat scout --workspace ~/agents-scout',
+      'musterd residency on --seat scout --workspace ~/agents-scout --lane batched --budget 2',
+      'musterd residency policy --cooldown 15m --hourly-cap 4',
       'musterd residency status',
       'musterd residency off',
     ],
