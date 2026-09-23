@@ -102,5 +102,9 @@
 // Epoch 22 — ADR 430: the wake-context packet carries attributed, budgeted bodies and the guidance
 // says the packet IS the orientation. An older checkout must not rewrite the woken-session block
 // back to the fetch ritual during guidance refresh.
-export const FEATURE_EPOCH = 22 as const;
+// Epoch 23 — ADR 442 (the wall): the `session-denied` actor attestation, and the retirement of ADR
+// 167's `delivery_hint` + nudge-relay skill. A daemon behind this epoch refuses a `session-denied`
+// body (the client's report is fire-and-forget, so the refusal itself still stands locally); a seat
+// behind it may still hold the relay skill, and the roster's `behind` hint is the cue to refresh.
+export const FEATURE_EPOCH = 23 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

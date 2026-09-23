@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { SURFACES } from './acts.wire.js';
 
 /**
  * Enforcement policy (ADR 150 — structural inducement). The declaration surface both PreToolUse gates
@@ -310,11 +311,16 @@ export function matchEnforcement(
  * ADR 167 adds a third kind, `session-message`: a seat used the harness's own session-to-session
  * messaging (`ccd_session_mgmt.send_message`) — an identityless channel the ledger otherwise never
  * sees. Same exemption, same reason: the reporter still cannot say no.
+ *
+ * ADR 442 adds `session-denied`: the gate refused a session-reaching tool (the wall). Unlike the three
+ * above it records a refusal the CLIENT already made — the deny is decided locally, before any daemon
+ * round trip, so this row is the audit of a decision, never the decision itself. Tool and harness only.
  */
 export const ACTOR_ATTESTATION_KINDS = [
   'subagent-write',
   'subagent-spawn',
   'session-message',
+  'session-denied',
 ] as const;
 export type ActorAttestationKind = (typeof ACTOR_ATTESTATION_KINDS)[number];
 
@@ -349,6 +355,9 @@ export const ActorAttestationSchema = z.object({
     .string()
     .regex(/^[0-9A-HJKMNP-TV-Z]{26}$/)
     .optional(),
+  /** `session-denied`-only (ADR 442): which harness the refused call came from, so the per-harness
+   *  reach table is readable from the audit. Optional — a hook that cannot tell leaves it out. */
+  harness: z.enum(SURFACES).optional(),
 });
 export type ActorAttestation = z.infer<typeof ActorAttestationSchema>;
 
@@ -358,6 +367,35 @@ export type ActorAttestation = z.infer<typeof ActorAttestationSchema>;
  *  `list_sessions` is a read (reads need no provenance, the ADR 163 line) and `set_session_title` is
  *  ADR 160's governed surface already. */
 export const CCD_SEND_MESSAGE_TOOL = 'mcp__ccd_session_mgmt__send_message';
+
+/* ─────────────────────────── ADR 442 — the wall ─────────────────────────── */
+
+/**
+ * Every harness tool that discovers, reads or messages ANOTHER harness session. The gate refuses these
+ * in a seat Workspace (ADR 442): a seat reaches teammates through acts, and humans through musterd's
+ * own surfaces, never through a harness session. Frozen so no caller can widen or narrow it at runtime.
+ *
+ * `SendMessage` is also a session's channel to its own in-process subagents, so the gate scopes it
+ * ({@link SUBAGENT_CHANNEL_TOOLS}); every other entry is refused outright. An unknown session-reaching
+ * tool is a gap to add here, not a pass.
+ */
+export const SESSION_REACH_TOOLS: readonly string[] = Object.freeze([
+  CCD_SEND_MESSAGE_TOOL,
+  'mcp__ccd_session_mgmt__list_sessions',
+  'mcp__ccd_session_mgmt__list_events',
+  'mcp__ccd_session_mgmt__search_session_transcripts',
+  'mcp__ccd_session_mgmt__get_session',
+  'ListAgents',
+  'SendMessage',
+]);
+
+/** The session-reach tools a seat may still use toward a subagent IT spawned (ADR 442). */
+export const SUBAGENT_CHANNEL_TOOLS = ['SendMessage'] as const;
+
+/** Does this tool reach another harness session? See {@link SESSION_REACH_TOOLS}. */
+export function isSessionReachTool(tool: string): boolean {
+  return SESSION_REACH_TOOLS.includes(tool);
+}
 
 /** sha256-16 of an arbitrary text — the shapes-only reduction ADR 167 applies to a session message's
  *  body and target session id client-side. Sibling of `gateFingerprint`, minus the class prefix: here

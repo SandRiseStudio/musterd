@@ -20,8 +20,8 @@ describe('SURFACES (ADR 352)', () => {
   });
 });
 
-describe('FEATURE_EPOCH (wake-context packet v2, ADR 430)', () => {
-  it('is 22 — an old checkout cannot rewrite the woken-session guidance back to the fetch ritual', () => {
-    expect(FEATURE_EPOCH).toBe(22);
+describe('FEATURE_EPOCH (the wall, ADR 442)', () => {
+  it('is 23 — a daemon behind it refuses the session-denied attestation', () => {
+    expect(FEATURE_EPOCH).toBe(23);
   });
 });
