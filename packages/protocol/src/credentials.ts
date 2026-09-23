@@ -184,6 +184,7 @@ export const PolicyOverrideSchema = PolicySchema.partial().extend({
   enforcement: EnforcementPolicySchema.partial().optional(),
   loops: LoopsPolicySchema.partial().optional(),
   incident: IncidentPolicySchema.partial().optional(),
+  doorbell: DoorbellPolicySchema.partial().optional(),
 });
 export type PolicyOverride = z.infer<typeof PolicyOverrideSchema>;
 
@@ -202,6 +203,7 @@ const POLICY_SUB_SCHEMAS = {
   enforcement: EnforcementPolicySchema,
   loops: LoopsPolicySchema,
   incident: IncidentPolicySchema,
+  doorbell: DoorbellPolicySchema,
 } as const;
 
 /** Strip the keys of one sub-object that equal their current schema default; undefined if none survive. */

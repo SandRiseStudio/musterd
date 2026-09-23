@@ -107,6 +107,7 @@ import { MusterdError, SessionLeaseRefused, asMusterdError } from '../errors.js'
 import { reapOrphans } from '../footprint/reap.js';
 import { log } from '../log.js';
 import { saveNodeEnrollment } from '../node/state.js';
+import { flushHeldRings } from '../notify/doorbell.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
 import {
@@ -6246,6 +6247,9 @@ export async function handleHttp(
             ? { status: body.status, until: body.until }
             : { status: body.status };
         setAvailability(ctx.db, member.id, availability);
+        // ADR 443 §4: leaving away/dnd releases the rings held for you.
+        const updated = getMemberById(ctx.db, member.id);
+        if (updated) flushHeldRings(ctx, team, updated);
         const me = summarize(ctx, team.slug, team.id, member).find((m) => m.name === member.name);
         return sendJson(res, 200, { member: me });
       }

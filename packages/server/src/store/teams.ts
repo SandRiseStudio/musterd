@@ -101,6 +101,10 @@ export function getTeamBySlug(db: Database, slug: string): TeamRow | undefined {
   return db.prepare<[string], TeamRow>('SELECT * FROM teams WHERE slug = ?').get(slug);
 }
 
+export function getTeamById(db: Database, id: string): TeamRow | undefined {
+  return db.prepare<[string], TeamRow>('SELECT * FROM teams WHERE id = ?').get(id);
+}
+
 /**
  * Every non-archived team, for the daemon's own periodic passes (ADR 229's sweep). Archived teams are
  * excluded on the same principle as `requireTeam`: a soft-archived team drops off every surface at

@@ -1,4 +1,4 @@
-import type { AskSpecies, AskTier } from '@musterd/protocol';
+import type { AskSpecies, AskTier, DoorbellRecord } from '@musterd/protocol';
 import { askContract, askTierHolds } from '@musterd/protocol';
 
 /**
@@ -45,9 +45,34 @@ export function formatAskSlackText(input: {
   return body ? `${head}\n> ${body}\n${answer}` : `${head}\n${answer}`;
 }
 
+/** The phrase for a non-ask act that rings a human (ADR 443 §2), at the human. */
+function actPhrase(from: string, act: string): string {
+  if (act === 'handoff') return `${from} handed you work`;
+  if (act === 'request_help') return `${from} needs your help`;
+  return `${from} sent you a ${act}`;
+}
+
+/**
+ * The Slack text for any doorbell record (ADR 443). An `ask` keeps ADR 149's text, body included —
+ * the one body-to-human exception. Every other act is named from the record alone: a handoff's or
+ * `request_help`'s body is not an ask's, and ADR 149's exception does not cover it.
+ */
+export function formatDoorbellSlackText(record: DoorbellRecord, askBody: string): string {
+  if (record.act === 'ask') {
+    return formatAskSlackText({
+      team: record.team,
+      from: record.from,
+      species: record.species,
+      tier: record.tier,
+      body: askBody,
+    });
+  }
+  return `[${record.team}] ${actPhrase(record.from, record.act)}\nOpen it on ${record.answer_path}`;
+}
+
 /**
  * POST the text to a Slack incoming webhook. Never throws: resolves `{ ok, status? }` for the
- * `ask.surfaced` audit row (ADR 149 — attempt + outcome, never the URL, never the body).
+ * `doorbell.surfaced` audit row (ADR 443 — attempt + outcome, never the URL, never the body).
  */
 export async function postSlackWebhook(
   url: string,
@@ -59,6 +84,8 @@ export async function postSlackWebhook(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ text }),
       signal: AbortSignal.timeout(SLACK_POST_TIMEOUT_MS),
+      // A 3xx to a private host would walk around the PUT-time public-host check (ADR 443 §5).
+      redirect: 'manual',
     });
     return { ok: res.ok, status: res.status };
   } catch {

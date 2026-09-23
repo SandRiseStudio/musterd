@@ -66,6 +66,9 @@ export interface MemberRow {
   credential_hash: string | null;
   /** Sticky why-offline (ADR 141): `disconnected` | `signed_off`. NULL ⇒ never stamped / cleared on attach. */
   last_offline_reason: string | null;
+  /** The human's own doorbell overrides (ADR 443), `DoorbellPrefs` JSON. May hold a personal URL,
+   * so it is read back only to its owner. NULL ⇒ team defaults. Optional: pre-v70 fixtures lack it. */
+  doorbell_prefs?: string | null;
   left_at: number | null;
   created_at: number;
   updated_at: number;

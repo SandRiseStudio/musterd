@@ -72,10 +72,30 @@ export function adminHumanPresent(
   );
   if (adminHumans.length === 0) return false;
   const drivers = listLiveDrivers(db, teamId, presenceTimeoutMs);
-  return adminHumans.some(
-    (m) =>
-      !isSelfSetAway(m) && (hasLivePresence(db, m.id, presenceTimeoutMs) || drivers.has(m.name)),
-  );
+  return adminHumans.some((m) => isPresent(db, m, drivers, presenceTimeoutMs));
+}
+
+/**
+ * One human composes as present — the {@link adminHumanPresent} test for a single member. The
+ * doorbell (ADR 443 §4) uses it for a ring directed at one human: their own presence, not any
+ * admin's, decides whether the off-machine sinks stay quiet at raise.
+ */
+export function humanPresent(
+  db: Database,
+  teamId: string,
+  m: MemberRow,
+  presenceTimeoutMs: number,
+): boolean {
+  return isPresent(db, m, listLiveDrivers(db, teamId, presenceTimeoutMs), presenceTimeoutMs);
+}
+
+function isPresent(
+  db: Database,
+  m: MemberRow,
+  drivers: Set<string>,
+  presenceTimeoutMs: number,
+): boolean {
+  return !isSelfSetAway(m) && (hasLivePresence(db, m.id, presenceTimeoutMs) || drivers.has(m.name));
 }
 
 /** The representative local-merge landing command the route-around probe matches against — the item-2

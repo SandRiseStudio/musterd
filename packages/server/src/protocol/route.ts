@@ -1,6 +1,4 @@
 import {
-  type AskSpecies,
-  type AskTier,
   blockedByOf,
   DeferUntilSchema,
   eligibleOf,
@@ -16,7 +14,7 @@ import { ulid } from 'ulid';
 import type { Ctx } from '../context.js';
 import { MusterdError } from '../errors.js';
 import { log } from '../log.js';
-import { formatAskSlackText, postSlackWebhook } from '../notify/slack.js';
+import { ringDoorbell } from '../notify/doorbell.js';
 import { appendAudit } from '../store/audit.js';
 import { incidentReporters, recordBlockedReport } from '../store/incidents.js';
 import { recordLaneClose } from '../store/laneClose.js';
@@ -24,11 +22,10 @@ import { deriveHandoffLane, getLane, type HandoffLaneBasis, updateLane } from '.
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import { currentAttestation } from '../store/presence.js';
-import { adminHumanPresent } from '../store/reachability.js';
 import { pickHumanReviewer, supersededAcceptanceAsks } from '../store/review.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
-import { getPolicy, getTeamBySlug } from '../store/teams.js';
+import { getTeamBySlug } from '../store/teams.js';
 import { joinerEnrollment } from '../sync/claim.js';
 import {
   recordActModel,
@@ -472,8 +469,10 @@ function routeEnvelopeInner(
   // row is the inbox reach, this push is the loud reach. (Its loud *surface* — Slack + /live — is item 3.)
   if (env.act === 'ask') {
     ctx.hub.deliverToAdmins(team.id, { type: 'deliver', envelope: firehoseEnv }, skip);
-    dispatchAskToSlack(ctx, team, sender.name, outgoingEnv);
   }
+  // The doorbell (ADR 443): ring any human this act rings, through musterd's own surfaces. Detached
+  // and never throwing — the send has already persisted and delivered.
+  ringDoorbell(ctx, team, firehoseEnv);
 
   log.info({
     msg: 'route',
@@ -1119,46 +1118,4 @@ function recordAskLifecycle(ctx: Ctx, team: TeamRow, actor: string, env: Envelop
       });
     }
   }
-}
-
-/**
- * The ask stream's Slack delivery (ADR 149) — the loud reach, fired beside the admin push. Opt-in via
- * the team-policy `ask_slack_webhook` (unset = no outbound call ever) and **detached from the send
- * path**: the POST runs fire-and-forget after persist + deliver, so a slow or dead endpoint can
- * neither delay nor fail the send. Each attempt audits `ask.surfaced` (attempt + outcome — never the
- * URL, never the body), so "did the loud reach fire, did the endpoint take it" is one audit query
- * beside `ask.raised`. Best-effort like `appendAudit` itself: any failure is a recorded fact, not an
- * error.
- *
- * Presence informs the clock, never the ceiling (ADR 155 Increment 2): when an admin human composes
- * *present* (`working`/`idle`), the raise stays quiet — the human already got the live admin push +
- * inbox row, and the loud surface waits for the agent's re-notify (an in-thread `ask`, which always
- * fires). When no admin is present (away/dnd/off_hours, or offline-but-notifiable), Slack fires at
- * raise — sitting a local timer for a demonstrably-away human wastes the window. This shifts only
- * *which surface fires when*: the tier's absolute timeout and the `held`/`stranded` terminals are
- * byte-for-byte the ADR 153 contract either way. Whether the loud surface fired at raise or on
- * re-notify is legible from the existing `ask.surfaced` timestamp beside `ask.raised` — no new trace.
- */
-function dispatchAskToSlack(ctx: Ctx, team: TeamRow, actor: string, env: Envelope): void {
-  const webhook = getPolicy(ctx.db, team.id).ask_slack_webhook;
-  if (!webhook) return;
-  const isRenotify = typeof env.thread === 'string' && env.thread.length > 0;
-  if (!isRenotify && adminHumanPresent(ctx.db, team.id, ctx.config.presenceTimeoutMs)) return;
-  const meta = env.meta ?? {};
-  const text = formatAskSlackText({
-    team: team.slug,
-    from: actor,
-    species: typeof meta['species'] === 'string' ? (meta['species'] as AskSpecies) : undefined,
-    tier: typeof meta['tier'] === 'string' ? (meta['tier'] as AskTier) : undefined,
-    body: env.body,
-  });
-  void postSlackWebhook(webhook, text).then(({ ok, status }) => {
-    appendAudit(ctx.db, team.id, {
-      actor,
-      action: 'ask.surfaced',
-      target: env.to.kind === 'member' ? env.to.name : null,
-      result: 'allow',
-      detail: { surface: 'slack', ok, ...(status !== undefined ? { status } : {}) },
-    });
-  });
 }
