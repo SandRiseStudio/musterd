@@ -1,3 +1,5 @@
+import { WATCH_COPY } from './watchCopy';
+
 /**
  * Whether the channel is live, as the page is allowed to know it.
  *
@@ -43,6 +45,19 @@ export interface TwitchGlobal {
  * still read `hlsLatencyBroadcaster: 0`, `videoResolution: '0x0'`, `fps: 0`. It reports playback,
  * not availability, so it cannot tell a dark channel from one that simply has not started.
  */
+/**
+ * The /watch eyebrow for a liveness reading. This is the joint between the player's events and the
+ * string a reader sees: `unknown` (no event yet, or the SDK blocked) must stay neutral, because
+ * a dead swap and correct SSR would otherwise print the same bytes (lane 01M2XC9GNX). Live wins
+ * over a replay, and a replay wins over plain dark, since the replay is what is on screen.
+ */
+export function eyebrowFor(liveness: Liveness, replaying: boolean): string {
+  if (liveness === 'live') return WATCH_COPY.eyebrowLive;
+  if (replaying) return WATCH_COPY.eyebrowReplay;
+  if (liveness === 'dark') return WATCH_COPY.eyebrowDark;
+  return WATCH_COPY.eyebrow;
+}
+
 export function subscribeLiveness(
   player: TwitchPlayerLike,
   events: { ONLINE: string; OFFLINE: string },
