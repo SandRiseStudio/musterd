@@ -67,7 +67,7 @@ export interface HostPollResult {
   settled: Promise<void>[];
 }
 
-const defaultReadAgentKey = (workspace: string): string | undefined => {
+export const defaultReadAgentKey = (workspace: string): string | undefined => {
   // Empty env on purpose: a `MUSTERD_BINDING` override in the host's own shell must not shadow
   // the *target workspace's* binding. Prefer host_key (ADR 395): agent_key is the claim
   // authenticator and a woken session may rewrite it.
@@ -192,7 +192,7 @@ function ownWorkspaceLabel(workspacePath: string): string | undefined {
 }
 
 /** Group registry entries by the (server, team, host-label) tuple one lease poll covers. */
-function pollGroups(
+export function pollGroups(
   entries: HostRegistryEntry[],
   hostLabel?: string,
 ): Map<string, { server: string; team: string; host: string; entries: HostRegistryEntry[] }> {

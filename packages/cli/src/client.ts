@@ -44,6 +44,8 @@ import {
   ResidencyListResponseSchema,
   SessionAttestationResponseSchema,
   WakeLeasesResponseSchema,
+  DoorbellRingsResponseSchema,
+  type DoorbellRingsResponse,
   WakeContextRequestSchema,
   WakeContextResponseSchema,
   type EnrollResidencyBody,
@@ -1170,6 +1172,29 @@ export class HttpClient {
       throw new CliError('wake-leases response did not match the protocol schema', 1);
     }
     return parsed.data;
+  }
+
+  /**
+   * The doorbell's `os` sink (ADR 443 §3) — `POST /teams/:slug/doorbell/rings`, the wake-lease
+   * poll's auth. Claims every ring queued for this host label; the daemon will not hand the same
+   * ring out twice. Parsed here so a drifted daemon cannot hand the notifier an unvetted shape.
+   */
+  async doorbellRings(slug: string, host: string): Promise<DoorbellRingsResponse> {
+    const json = await this.request('POST', `/teams/${slug}/doorbell/rings`, { host });
+    const parsed = DoorbellRingsResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('doorbell rings response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /** The host's report that a ring's banner was raised — `doorbell.surfaced {surface: 'os'}`. */
+  async doorbellSurfaced(slug: string, ringId: string, host: string, ok: boolean): Promise<void> {
+    await this.request(
+      'POST',
+      `/teams/${slug}/doorbell/rings/${encodeURIComponent(ringId)}/surfaced`,
+      { host, ok },
+    );
   }
 
   /** The host's outcome report (ADR 131 §6) — `POST /teams/:slug/residency/wake-report`. Settles

@@ -41,6 +41,33 @@ export const DoorbellRecordSchema = z
   .strict();
 export type DoorbellRecord = z.infer<typeof DoorbellRecordSchema>;
 
+/** The host's ring claim (`POST /teams/:slug/doorbell/rings`), authenticated like the wake-lease
+ *  poll: the team agent key, or a credential scoped to exactly this host label. */
+export const DoorbellRingsBodySchema = z.object({ host: z.string().min(1) }).strict();
+
+/** One ring handed to a host to raise as an OS banner: the record, and who it rings. */
+export const DoorbellHostRingSchema = z.object({
+  id: z.string(),
+  member: z.string(),
+  record: DoorbellRecordSchema,
+});
+export type DoorbellHostRing = z.infer<typeof DoorbellHostRingSchema>;
+
+export const DoorbellRingsResponseSchema = z.object({ rings: z.array(DoorbellHostRingSchema) });
+export type DoorbellRingsResponse = z.infer<typeof DoorbellRingsResponseSchema>;
+
+/** The host's report that it raised (or failed to raise) a ring's banner. */
+export const DoorbellSurfacedBodySchema = z
+  .object({ host: z.string().min(1), ok: z.boolean() })
+  .strict();
+
+/**
+ * How long a ring with no deadline (a handoff, a `request_help`) stays worth a banner. A host that
+ * was asleep for a day should not wake to a wall of stale banners: `/live` and the inbox still hold
+ * every one of them.
+ */
+export const DOORBELL_OS_MAX_AGE_MS = 60 * 60_000;
+
 /**
  * Team doorbell policy (admin-set, `PolicySchema.doorbell`). `parse({})` allows every sink,
  * defaults to the on-machine ones, and configures no outbound URL — so no outbound call ever until

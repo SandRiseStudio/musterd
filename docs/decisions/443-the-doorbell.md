@@ -75,6 +75,19 @@ The `os` sink runs on the host, not in the daemon. The daemon may be a synced pe
 machine. The host is the one process already running on the human's own machine. A ring carries a
 host label, and only the host enrolled under that label raises it.
 
+**Which label (the plan's Task 5 spike, 2026-09-23).** The host polls once per (daemon, team,
+label) group in its registry, and the labels are the ones its resident seats enrolled under (ADR
+131). A human's `os` sink stores one of those labels, and `musterd doorbell os on`, run on the
+human's machine, picks it from that machine's host registry. The ring poll uses the wake-lease
+poll's auth: the team agent key, or, after the bootstrap cutover, a credential scoped to exactly
+that label. So a host-scoped credential can claim only its own machine's rings. The host claims its
+rings in one transaction that marks them `done`. A second poll raises nothing twice, and a banner
+lost to a crash between claim and banner is not retried, like every other sink. A machine that runs
+no resident seat for the team has no host process, so it has no `os` sink. `live` and the
+off-machine sinks still reach that human. An agent holding the legacy team agent key can read the
+ring records for any label. Those records are the same structured fields the firehose already
+shows it, with no body.
+
 Each sink gets one attempt, detached from the send path, and never throws into `routeEnvelope`. A
 team URL shared by several rung humans is POSTed once per act, not once per human. Each attempt
 audits **`doorbell.surfaced {surface, ok, status?}`**: never the URL, never a body. This generalizes

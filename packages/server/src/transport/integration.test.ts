@@ -9525,6 +9525,83 @@ describe('the doorbell (ADR 443)', () => {
     const stored = await get('/teams/dawn/policy', t.nick);
     expect(stored.json.stored).toEqual(slackPolicy);
   });
+
+  // ── the `os` sink: the host claims and raises (ADR 443 §3) ──
+
+  async function osTeam() {
+    const t = await team();
+    const created = teamBootstraps.get('dawn')!;
+    await put(
+      '/teams/dawn/members/me/doorbell',
+      { sinks: { os: { on: true, host: 'mac-a' } } },
+      t.dee,
+    );
+    return { ...t, key: created.agentKey };
+  }
+  const claim = (key: string, host: string) => post('/teams/dawn/doorbell/rings', { host }, key);
+
+  it('a ring is handed to the host enrolled under its label, and to no other', async () => {
+    const t = await osTeam();
+    await send(t.ada, env('Ada', toDee, 'ask', 'os1', consult));
+    expect(rings(t.teamId)[0]!.state).toBe('queued');
+    const other = await claim(t.key, 'mac-b');
+    expect(other.json.rings).toEqual([]);
+    const mine = await claim(t.key, 'mac-a');
+    expect(mine.status).toBe(200);
+    expect(mine.json.rings).toHaveLength(1);
+    expect(mine.json.rings[0]).toMatchObject({
+      member: 'Dee',
+      record: { team: 'dawn', from: 'Ada', act: 'ask', act_id: 'os1' },
+    });
+    expect(JSON.stringify(mine.json)).not.toContain('secret plan');
+  });
+
+  it('a second claim raises nothing twice', async () => {
+    const t = await osTeam();
+    await send(t.ada, env('Ada', toDee, 'handoff', 'os2'));
+    expect((await claim(t.key, 'mac-a')).json.rings).toHaveLength(1);
+    expect((await claim(t.key, 'mac-a')).json.rings).toEqual([]);
+    expect(rings(t.teamId)[0]!.state).toBe('done');
+  });
+
+  it('a ring answered meanwhile, or too old to matter, is claimed without a banner', async () => {
+    const t = await osTeam();
+    await send(t.ada, env('Ada', toDee, 'ask', 'os3', consult));
+    await send(
+      t.dee,
+      env('Dee', { kind: 'member', name: 'Ada' }, 'accept', 'os4', { in_reply_to: 'os3' }),
+    );
+    await send(t.ada, env('Ada', toDee, 'handoff', 'os5'));
+    server.db.prepare("UPDATE doorbell_rings SET created_at = 0 WHERE act_id = 'os5'").run();
+    expect((await claim(t.key, 'mac-a')).json.rings).toEqual([]);
+    expect(rings(t.teamId).every((r) => r.state === 'done')).toBe(true);
+  });
+
+  it('the host reports a banner as doorbell.surfaced {surface: os}; another host cannot', async () => {
+    const t = await osTeam();
+    await send(t.ada, env('Ada', toDee, 'ask', 'os6', consult));
+    const [ring] = (await claim(t.key, 'mac-a')).json.rings;
+    const wrong = await post(
+      `/teams/dawn/doorbell/rings/${ring.id}/surfaced`,
+      { host: 'mac-b', ok: true },
+      t.key,
+    );
+    expect(wrong.status).toBe(404);
+    const ok = await post(
+      `/teams/dawn/doorbell/rings/${ring.id}/surfaced`,
+      { host: 'mac-a', ok: true },
+      t.key,
+    );
+    expect(ok.status).toBe(200);
+    expect(surfaced(t.teamId).map((r) => JSON.parse(r.detail!))).toEqual([
+      { surface: 'os', ok: true },
+    ]);
+  });
+
+  it('the ring poll refuses a caller without the team agent key', async () => {
+    const t = await osTeam();
+    expect((await claim(t.dee, 'mac-a')).status).toBe(401);
+  });
 });
 
 /**
