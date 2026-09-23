@@ -150,6 +150,26 @@ Replayed on the daemon's own database (`.backup`, never `cp` — a WAL snapshot 
 
 **This is a replay, not a wake.** The lane's acceptance names a real before/after on a light-inbox seat, and the fold runs in the MCP adapter, so the "after" needs a wake whose adapter carries ADR 433 — owed after merge, to be appended here dated. The number a wake will show is not 8.3 KiB: a behind seat then spends the freed budget on drain lines (that is the drain working, lane 01M2GT874Y), so the honest wake measure is `folded_ambient.length` against full rows, not bytes alone.
 
+### The owed wake numbers: in a real wake, three seats' first inbox check drops from 28–35 full rows to 7–11 (2026-09-22, lane 01M36CWVTS; falsify: run the first non-`ids` `team_inbox_check` result of any Claude Code `musterd wake` transcript whose adapter build contains `56cca24b` through `JSON.parse` — `folded_ambient` empty while the result still has status or foreign-lane rows in `messages` falsifies this) <!-- claim: other -->
+
+No wake was paid for. These were read back from wakes that had already run. Each row is the first `team_inbox_check` of a fresh Claude Code wake life (not an `ids` read), taken from the seat's transcript under `~/.claude/projects/-Users-nick-agents-<seat>/`. The "before" wakes ran adapters older than `56cca24b`. The "after" wakes stamp `adapter_build` `769ddec5` or `cf5f950d`, and both contain it. Bytes are the result text the model read.
+
+| seat  | before (pre-433 adapter)                                          | after (post-433 adapter)                                                                        |
+| ----- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| miley | 09-21 16:55Z steer wake: 18,650 B, **28 full**, 0 folded          | 09-22 17:46Z request_help wake (lease `01M353K16586`): 7,789 B, **7 full**, 43 folded, 75 drained |
+| dolly | 09-21 16:55Z steer wake: 24,904 B, **35 full**, 0 folded, 890 elided | 09-22 16:04Z lane continuation (lease `01M34XS1HB`): 11,906 B, **9 full**, 41 folded, 135 elided |
+| ryder | 09-20 21:44Z request_help wake: 23,608 B, **29 full**, 0 folded   | 09-22 15:58Z lane continuation (lease `01M34XESW9`): 11,983 B, **11 full**, 39 folded           |
+
+The two 09-21 "before" wakes are the ADR 426 measurement wakes above (leases `01M32E9Q8V`, `01M32E9Q9E`). izzo was woken by the same 09-22 request_help as miley. Its first check was 5,614 B, with 7 full rows and 43 folded.
+
+What this settles and what it does not:
+
+- **The fold works in a wake, not only in a replay.** On all three seats, 62–75% of the rows the wake reads first became one line each. After the fold, bytes are 42–51% of the before figure. That is inside the replay's 41–82% band above.
+- **Some of the freed budget goes to the drain, as predicted.** miley's result carried 75 `digested_unread` ids alongside the fold. The pre-433 miley wake carried none.
+- **The before/after pairs do not share an inbox.** Each pair is the same seat on the same harness, but a different day, a different triggering act, and a different backlog. The row counts compare like with like. The bytes compare only roughly.
+- **The rows kept in full are now acts sent to `@team` in reply to asks to other seats.** All 7 of miley's full rows were big-body's `@team` `accept`/`decline`/`wait`/`request_help`. ADR 433 does not fold these, because it folds only status updates and foreign-lane transitions. They are 2.8 KB of the 7.8. izzo got the same 7 rows.
+- **Lane 01M32FH5YQ's acceptance (c) is still not met.** It asks for an inbox result under 2 KiB on a wake that has read nothing new. No wake here reads under 5.6 KB.
+
 ## Arms D and E: the v2 packet gives Grok CLI and OpenCode a correct first act too — with one more read each than Claude Code, and neither harness lets musterd price the wake (2026-09-21, lanes 01M32XYMD7 / 01M32XYRW3 under inc 5 01M32FJ8T4; falsify: repeat the three-act thread on any enrolled Grok or OpenCode seat with a v2 daemon — a fresh+v2 wake whose first act is wrong falsifies the claim for that harness) <!-- claim: other -->
 
 Same task as arms A–C above, same day, daemon on `e95b52d`. Two seats enrolled for the run under nick's authorization (grokbot on Grok CLI, ghost on OpenCode; both at `5m · 6/h` for the run, reset to team defaults afterwards). Enrolling ghost needed [#1634](https://github.com/SandRiseStudio/musterd/pull/1634): OpenCode 1.18.31 prints `run --help` on stderr and the capability probe read stdout only, so a working CLI was refused as "does not advertise run --format json".
