@@ -42,10 +42,18 @@ working.
 | B — the `os` sink | 5 | An OS banner on the human's own machine, with no `musterd notify` running. |
 | C — `/live` notification, CLI, docs | 6, 7, 8 | A browser notification from an open `/live` tab. `musterd doorbell` to set your own sinks. |
 
-**Overlap with the wall (lane 1).** The wall edits `transport/http.ts` (the hint block),
-`protocol/nudge.ts`, `protocol/gate.ts` and `telemetry.ts`. This lane edits `protocol/route.ts`,
-`notify/`, `store/reachability.ts` and `store/audit.ts`. There is no shared file. If a rebase ever
-shows one, the wall's PR lands first and this lane rebases.
+**Overlap with the wall (lane 1)** — four shared files, all in different regions:
+
+| File | Wall sub-lane | Wall edits | This lane edits |
+| --- | --- | --- | --- |
+| `packages/protocol/src/feature-epoch.ts` | 1a (dolly) | the wall's epoch | the doorbell's epoch |
+| `packages/server/src/transport/http.ts` | 1b (stanley) | the hint block (~3935), `composeInterruptLine` (~785) | availability POST (~941), new `/members/*/doorbell` and `/doorbell/rings` routes |
+| `packages/cli/src/commands/team.ts` | 1d (dolly) | `team create --as` → `--member` (~687) | `team policy` doorbell flags (~337–483) |
+| `packages/cli/src/help/catalog.ts` | 1d (dolly) | `--as` help lines | `doorbell` and `team policy` entries |
+
+Rule: whichever PR lands second rebases, and never rewrites the other's hunk. The epoch file is the
+only real contention (two appends to one list). The wall takes its epoch first. This lane takes the
+next number at rebase time, not at plan time.
 
 ## Global constraints
 
@@ -439,7 +447,7 @@ label.
 - **Scope widening for this lane:** `packages/protocol/src/{doorbell,credentials,feature-epoch}.ts`;
   `packages/server/src/{notify/*,protocol/route.ts,store/{teams,reachability,audit}.ts,db/*,transport/http.ts}`;
   `packages/cli/src/{host/{doorbell,loop}.ts,commands/{doorbell,team}.ts,help/catalog.ts}`;
-  `packages/web/src/live/*`; `docs/decisions/{443,149,222}-*`; `SPEC.md`; `docs/architecture/*`;
+  `packages/web/src/live/{AsksStrip.tsx,doorbellNotify.ts}`; `docs/decisions/{443,149,222}-*`; `SPEC.md`; `docs/architecture/*`;
   `docs/design/daemon-doorbell-contract.md`; one new `docs/wiki/` page.
 - **Open, for dolly:** review focus 1 (team-addressed asks ring admins) and 2 (ADR 155 modulation
   kept for off-machine sinks only).
