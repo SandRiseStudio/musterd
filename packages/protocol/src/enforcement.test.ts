@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { PolicySchema } from './credentials.js';
 import {
+  ActorAttestationSchema,
   EnforcementPolicySchema,
   gateFingerprint,
   globToRegExp,
+  isSessionReachTool,
   isWriteShaped,
   matchEnforcement,
   normalizeCommand,
+  SESSION_REACH_TOOLS,
+  SUBAGENT_CHANNEL_TOOLS,
 } from './enforcement.js';
 
 describe('EnforcementPolicySchema (ADR 150) — the opt-in class table', () => {
@@ -273,5 +277,59 @@ describe('isWriteShaped (ADR 163)', () => {
   it('a Bash call with no command is not a write', () => {
     expect(isWriteShaped({ tool: 'Bash' })).toBe(false);
     expect(isWriteShaped({ tool: 'Bash', command: '   ' })).toBe(false);
+  });
+});
+
+describe('session reach (ADR 442) — the wall', () => {
+  it.each([
+    'mcp__ccd_session_mgmt__send_message',
+    'mcp__ccd_session_mgmt__list_sessions',
+    'mcp__ccd_session_mgmt__list_events',
+    'mcp__ccd_session_mgmt__search_session_transcripts',
+    'mcp__ccd_session_mgmt__get_session',
+    'ListAgents',
+    'SendMessage',
+  ])('%s reaches another session', (tool) => {
+    expect(isSessionReachTool(tool)).toBe(true);
+  });
+
+  it.each(['Read', 'Bash', 'Agent', 'mcp__ccd_session_mgmt__set_session_title', ''])(
+    '%s does not',
+    (tool) => {
+      expect(isSessionReachTool(tool)).toBe(false);
+    },
+  );
+
+  it('the tool set cannot be mutated at runtime', () => {
+    expect(Object.isFrozen(SESSION_REACH_TOOLS)).toBe(true);
+  });
+
+  it('only SendMessage is scoped (a session’s channel to its own subagents)', () => {
+    expect([...SUBAGENT_CHANNEL_TOOLS]).toEqual(['SendMessage']);
+    for (const t of SUBAGENT_CHANNEL_TOOLS) expect(isSessionReachTool(t)).toBe(true);
+  });
+
+  it('accepts a session-denied attestation carrying the tool and harness only', () => {
+    expect(
+      ActorAttestationSchema.parse({
+        kind: 'session-denied',
+        tool: 'ListAgents',
+        harness: 'claude-code',
+      }),
+    ).toEqual({ kind: 'session-denied', tool: 'ListAgents', harness: 'claude-code' });
+  });
+
+  it('harness is optional, and an unknown harness is refused', () => {
+    expect(ActorAttestationSchema.parse({ kind: 'session-denied', tool: 'ListAgents' })).toEqual({
+      kind: 'session-denied',
+      tool: 'ListAgents',
+    });
+    expect(
+      ActorAttestationSchema.safeParse({
+        kind: 'session-denied',
+        tool: 'ListAgents',
+        harness: 'vim',
+      }).success,
+    ).toBe(false);
   });
 });

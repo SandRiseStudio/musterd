@@ -1,4 +1,9 @@
 /**
+ * RETIRED (ADR 442): no daemon at feature epoch 23 or later issues this. The seat↔seat relay it drove
+ * is removed, because no host process can deliver into a harness session and a model-chosen target is
+ * what the 2026-09-22 incident exploited. The types stay so an ack from an older daemon still parses;
+ * nothing may act on a hint that arrives.
+ *
  * The delivery hint (ADR 167 increment 2) — a **daemon-computed, additive** field on the `POST
  * /messages` ack, exactly the ADR 153 `unblocker_reachable` shape: older clients ignore it, older
  * daemons omit it, and its absence is today's behavior in full (warn-never-block; the rail is an
