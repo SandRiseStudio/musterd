@@ -880,8 +880,14 @@ if (MOTION) {
   const hex = (c) =>
     '#' + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
   const ink = (h, bg, a) => {
-    const f = { r: parseInt(h.slice(1, 3), 16), g: parseInt(h.slice(3, 5), 16), b: parseInt(h.slice(5, 7), 16) };
-    return a >= 1 ? f : { r: f.r * a + bg.r * (1 - a), g: f.g * a + bg.g * (1 - a), b: f.b * a + bg.b * (1 - a) };
+    const f = {
+      r: parseInt(h.slice(1, 3), 16),
+      g: parseInt(h.slice(3, 5), 16),
+      b: parseInt(h.slice(5, 7), 16),
+    };
+    return a >= 1
+      ? f
+      : { r: f.r * a + bg.r * (1 - a), g: f.g * a + bg.g * (1 - a), b: f.b * a + bg.b * (1 - a) };
   };
   /** key → [{frame, ratio, on, alpha}] */
   const seen = new Map();
@@ -951,7 +957,16 @@ if (MOTION) {
     const worst = atPeak.reduce((a, b) => (b.ratio < a.ratio ? b : a));
     const best = atPeak.reduce((a, b) => (b.ratio > a.ratio ? b : a));
     const row = rows.get(key);
-    graded.push({ el: row.el, sample: row.sample, need: row.need, ink: row.ink, ...worst, best: best.ratio, frames: obs.length, peak });
+    graded.push({
+      el: row.el,
+      sample: row.sample,
+      need: row.need,
+      ink: row.ink,
+      ...worst,
+      best: best.ratio,
+      frames: obs.length,
+      peak,
+    });
   }
   const fails = graded.filter((g) => g.ratio < g.need).sort((a, b) => a.ratio - b.ratio);
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
@@ -966,9 +981,15 @@ if (MOTION) {
           ` (best ${g.best}${g.peak < 1 ? `, graded at peak opacity ${g.peak}` : ''})  ${g.el}  "${g.sample}"`,
       );
     if (movedFrames)
-      console.log(`\n! ${movedFrames} row-frame(s) moved under the shutter and were excluded for that frame`);
+      console.log(
+        `\n! ${movedFrames} row-frame(s) moved under the shutter and were excluded for that frame`,
+      );
   }
-  if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify({ url, frames: FRAMES, gapMs: GAP_MS, secs: +secs, graded, fails }, null, 2));
+  if (JSON_OUT)
+    writeFileSync(
+      JSON_OUT,
+      JSON.stringify({ url, frames: FRAMES, gapMs: GAP_MS, secs: +secs, graded, fails }, null, 2),
+    );
   await exit(fails.length ? 1 : 0);
 }
 
