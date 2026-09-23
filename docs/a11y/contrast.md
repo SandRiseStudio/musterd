@@ -250,6 +250,13 @@ with a `#e8e8e8` block walking beneath it on an rAF loop. Measured 2026-09-23: t
 **green 3 of 3**, and `--motion` is **red 3 of 3** at `1.23 on #e8e8e8` (best frame 17.4), while its
 steady control line passes.
 
+**The opacity falsifier** is `scripts/a11y/fixtures/opacity-pinned-055.html`: `#555555` on white
+(about 7.5:1 at full strength) pinned at `opacity: 0.55`, with the same ink at full strength as a
+control. Measured 2026-09-23: the frozen pass and `--motion` are both **red 3 of 3 at 2.57**, and the
+control passes. `--motion` says it graded the row at its peak opacity of 0.55. This is the lane's
+second falsifier. The frozen pass already folded a settled fade into the ink, so this commits the
+proof rather than a fix.
+
 **Cost, measured 2026-09-23** against the local daemon (wall clock includes Chrome start and load):
 
 | route | rows | motion loop | wall | below AA |
