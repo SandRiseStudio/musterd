@@ -42,18 +42,17 @@ working.
 | B — the `os` sink | 5 | An OS banner on the human's own machine, with no `musterd notify` running. |
 | C — `/live` notification, CLI, docs | 6, 7, 8 | A browser notification from an open `/live` tab. `musterd doorbell` to set your own sinks. |
 
-**Overlap with the wall (lane 1)** — four shared files, all in different regions:
+**Overlap with the wall (lane 1)** — three shared files, all in different regions:
 
 | File | Wall sub-lane | Wall edits | This lane edits |
 | --- | --- | --- | --- |
 | `packages/protocol/src/feature-epoch.ts` | 1a (dolly) | the wall's epoch | the doorbell's epoch |
 | `packages/server/src/transport/http.ts` | 1b (stanley) | the hint block (~3935), `composeInterruptLine` (~785) | availability POST (~941), new `/members/*/doorbell` and `/doorbell/rings` routes |
-| `packages/cli/src/commands/team.ts` | 1d (dolly) | `team create --as` → `--member` (~687) | `team policy` doorbell flags (~337–483) |
-| `packages/cli/src/help/catalog.ts` | 1d (dolly) | `--as` help lines | `doorbell` and `team policy` entries |
+| `packages/cli/src/help/catalog.ts` | 1d (dolly) | `--as` help lines (team/residency/whoami) | one new `doorbell` entry, nothing else |
 
-Rule: whichever PR lands second rebases, and never rewrites the other's hunk. The epoch file is the
-only real contention (two appends to one list). The wall takes its epoch first. This lane takes the
-next number at rebase time, not at plan time.
+`team.ts` is **not** touched: the team knobs live in `musterd doorbell team` (Task 7). Rule:
+whichever PR lands second rebases, and never rewrites the other's hunk. Epoch: the wall's #1665
+takes 23, and the doorbell takes **24**, after rebasing on it.
 
 ## Global constraints
 
@@ -198,7 +197,8 @@ describe('routing', () => {
     pure and returns names only. URL resolution is the server's job.
   - Add `doorbell: DoorbellPolicySchema.default({})` to `PolicySchema`. Keep `ask_slack_webhook`,
     and mark it in its doc comment as read-through to `doorbell.slack_url` (Task 3).
-  - Add an epoch to `feature-epoch.ts`: `Epoch <k> — ADR 443: the doorbell`.
+  - Add epoch 24 to `feature-epoch.ts`: `Epoch 24 — ADR 443: the doorbell`. (Rebase on #1665 first;
+    that PR takes 23.)
 - [ ] **Step 4:** Tests pass. Run `pnpm --filter @musterd/protocol test` in full (≥95% lines).
 - [ ] **Step 5:** Commit `protocol: the doorbell record, ring rule and routing`, `Refs ADR-443`.
 
@@ -389,11 +389,17 @@ label.
 **Files:**
 - Create: `packages/cli/src/commands/doorbell.ts` — `doorbell` (show my route),
   `doorbell <sink> on|off [--url <u>] [--tiers blocking,standard]`, `doorbell os on` (records this
-  machine's host label)
-- Modify: `packages/cli/src/commands/team.ts:337-342,405,483` — `team policy --doorbell-allow`,
-  `--doorbell-defaults`, `--doorbell-slack <url|off>` (with `--ask-slack-webhook` kept as an alias)
-- Modify: `packages/cli/src/help/catalog.ts`
-- Test: `packages/cli/src/commands/doorbell.test.ts`, `team.test.ts`
+  machine's host label), and the admin team knobs `doorbell team --allow <sinks> --defaults <sinks>
+  --slack <url|off> --webhook <url|off>` (the same read-merge-write `POST /policy` that `team
+  policy` uses, audited `policy.change`)
+- **Not modified:** `packages/cli/src/commands/team.ts`. It is wall 1d's file (dolly). `team policy
+  --ask-slack-webhook` keeps working unchanged, because Task 3 reads it through as the team's
+  `slack` URL.
+- Modify: `packages/cli/src/help/catalog.ts` — **one new `doorbell` entry only**. No existing entry is
+  touched.
+- Modify: the command registry (wherever top-level commands are registered — `grep -n "'status'"
+  packages/cli/src/cli.ts`)
+- Test: `packages/cli/src/commands/doorbell.test.ts`
 
 - [ ] **Step 1: Write the failing tests** — `doorbell` prints each sink with where its state comes
   from (team default / your override / not allowed); a URL prints masked to its host, as
@@ -446,7 +452,7 @@ label.
 
 - **Scope widening for this lane:** `packages/protocol/src/{doorbell,credentials,feature-epoch}.ts`;
   `packages/server/src/{notify/*,protocol/route.ts,store/{teams,reachability,audit}.ts,db/*,transport/http.ts}`;
-  `packages/cli/src/{host/{doorbell,loop}.ts,commands/{doorbell,team}.ts,help/catalog.ts}`;
+  `packages/cli/src/{host/{doorbell,loop}.ts,commands/doorbell.ts,help/catalog.ts,cli.ts}`;
   `packages/web/src/live/{AsksStrip.tsx,doorbellNotify.ts}`; `docs/decisions/{443,149,222}-*`; `SPEC.md`; `docs/architecture/*`;
   `docs/design/daemon-doorbell-contract.md`; one new `docs/wiki/` page.
 - **Open, for dolly:** review focus 1 (team-addressed asks ring admins) and 2 (ADR 155 modulation
