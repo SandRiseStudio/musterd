@@ -906,3 +906,18 @@ viewer feels did not.
 - Falsify: `pnpm -r build && pnpm perf:check` on this branch — total must read under 242.6 KB and
   initial under 136.2 KB. If total reads at or under 239.3 KB, the cache has been dropped from the
   graph and this raise should be reverted with it.
+
+## 2026-09-23 — `appCssGzipBytes` split: `live` 20,800 + `app` 7,600 (ADR 441)
+
+Measured after `pnpm --filter @musterd/web build` (Node zlib, as the gate does): app group **24,661 B
+of 24,700, 39 B free**. The gate printed `24.1 KB/24.1 KB`, a rounding that hid a ceiling the ~0.7 KB
+CI gzip delta had already passed.
+
+Trimming was measured first. There are no dead selectors: 109 of 632 classes have no literal source
+token, and all of them are modifiers built at runtime from a stem in use. Duplicate rule bodies
+are ~2.3 KB raw, and gzip already absorbs most of that, so a cascade-reordering merge would give
+~100–200 B.
+
+Split per ADR 441: `Live` 18,056 → `liveCssGzipBytes` 20,800 (2,744 B free); Board 2,279 +
+Broadcast 2,246 + approvals 1,863 + audit 217 = 6,605 → `appCssGzipBytes` 7,600 (995 B free).
+Measured + 15%, following ADR 313. A loosening, approved by nick.
