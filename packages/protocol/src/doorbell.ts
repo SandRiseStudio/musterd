@@ -125,6 +125,55 @@ export function resolveRoute(
   });
 }
 
+/** What anyone but the owner may see of one sink pref (ADR 443 §5): whether a personal URL exists,
+ *  never the URL. */
+export interface MaskedSinkPref {
+  on: boolean;
+  tiers?: DoorbellSinkPref['tiers'];
+  host?: string;
+  personal: boolean;
+}
+
+/** The one mask every non-self read of a human's doorbell prefs goes through (ADR 443 §5). */
+export function maskPrefs(
+  prefs: DoorbellPrefs | undefined,
+): Partial<Record<DoorbellSink, MaskedSinkPref>> {
+  const out: Partial<Record<DoorbellSink, MaskedSinkPref>> = {};
+  for (const sink of DOORBELL_SINKS) {
+    const pref = prefs?.sinks[sink];
+    if (!pref) continue;
+    out[sink] = {
+      on: pref.on,
+      ...(pref.tiers ? { tiers: pref.tiers } : {}),
+      ...(pref.host ? { host: pref.host } : {}),
+      personal: pref.url !== undefined,
+    };
+  }
+  return out;
+}
+
+/**
+ * Why a human may not save these prefs, or null (ADR 443 §4–5): a sink turned on must be in the
+ * team's allow-list; a URL rides only `slack`/`webhook` and must be `https` to a public host. The
+ * reason names the sink and never echoes a URL.
+ */
+export function doorbellPrefsProblem(
+  prefs: DoorbellPrefs,
+  allow: readonly DoorbellSink[],
+): string | null {
+  for (const sink of DOORBELL_SINKS) {
+    const pref = prefs.sinks[sink];
+    if (!pref) continue;
+    if (pref.on && sink !== 'live' && !allow.includes(sink))
+      return `the ${sink} sink is not allowed on this team`;
+    if (pref.url === undefined) continue;
+    if (!OFF_MACHINE_SINKS.has(sink)) return `the ${sink} sink takes no url`;
+    const problem = publicHttpsUrlProblem(pref.url);
+    if (problem) return `the ${sink} url ${problem}`;
+  }
+  return null;
+}
+
 /**
  * Does this availability hold a ring (ADR 443 §4)? A self-set `away` or `dnd` holds; `blocking`
  * pierces `dnd` (ADR 044) but not `away`. `off_hours` never holds — schedule enforcement is out of

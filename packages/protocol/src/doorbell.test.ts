@@ -4,7 +4,9 @@ import {
   DoorbellPolicySchema,
   DoorbellPrefsSchema,
   DoorbellRecordSchema,
+  doorbellPrefsProblem,
   holdsRing,
+  maskPrefs,
   publicHttpsUrlProblem,
   resolveRoute,
   ringTargets,
@@ -149,6 +151,55 @@ describe('sink URLs must be https to a public host', () => {
   it('172.32.x is public', () => expect(publicHttpsUrlProblem('https://172.32.0.1/')).toBeNull());
   it('the problem never echoes the URL', () =>
     expect(publicHttpsUrlProblem('https://10.0.0.5/secret-token')).not.toMatch(/secret|10\.0/));
+});
+
+describe('personal URLs stay private (ADR 443 §5)', () => {
+  const prefs = DoorbellPrefsSchema.parse({
+    sinks: {
+      webhook: { on: true, url: 'https://ntfy.sh/nick-secret-topic' },
+      os: { on: true, host: 'mac-a' },
+      slack: { on: false, tiers: ['blocking'] },
+    },
+  });
+  it('maskPrefs says a personal URL exists, never what it is', () => {
+    const masked = maskPrefs(prefs);
+    expect(masked).toEqual({
+      os: { on: true, host: 'mac-a', personal: false },
+      slack: { on: false, tiers: ['blocking'], personal: false },
+      webhook: { on: true, personal: true },
+    });
+    expect(JSON.stringify(masked)).not.toMatch(/ntfy|secret|url/);
+  });
+  it('maskPrefs of nothing is empty', () => expect(maskPrefs(undefined)).toEqual({}));
+
+  const all = ['live', 'os', 'slack', 'webhook'] as const;
+  it('accepts prefs inside the allow-list with public https URLs', () =>
+    expect(doorbellPrefsProblem(prefs, all)).toBeNull());
+  it('refuses a sink turned on outside the allow-list, naming it', () =>
+    expect(doorbellPrefsProblem(prefs, ['live', 'os'])).toBe(
+      'the webhook sink is not allowed on this team',
+    ));
+  it('a sink turned off outside the allow-list is fine', () =>
+    expect(
+      doorbellPrefsProblem(DoorbellPrefsSchema.parse({ sinks: { slack: { on: false } } }), [
+        'live',
+      ]),
+    ).toBeNull());
+  it('refuses a private URL without echoing it', () => {
+    const bad = DoorbellPrefsSchema.parse({
+      sinks: { webhook: { on: true, url: 'https://192.168.1.4/hook-secret' } },
+    });
+    const problem = doorbellPrefsProblem(bad, all)!;
+    expect(problem).toMatch(/^the webhook url must not point at a private/);
+    expect(problem).not.toMatch(/192|secret/);
+  });
+  it('refuses a URL on a sink that takes none', () =>
+    expect(
+      doorbellPrefsProblem(
+        DoorbellPrefsSchema.parse({ sinks: { os: { on: true, url: 'https://x.io' } } }),
+        all,
+      ),
+    ).toBe('the os sink takes no url'));
 });
 
 describe('FEATURE_EPOCH (the doorbell, ADR 443)', () => {

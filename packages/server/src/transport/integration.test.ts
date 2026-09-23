@@ -9376,6 +9376,95 @@ describe('the doorbell (ADR 443)', () => {
     await tick(50);
     expect(attempts).toBe(1);
   });
+
+  // ── prefs, privacy and URL checks (ADR 443 §5) ──
+
+  const put = (path: string, body: unknown, auth: Auth) => req('PUT', path, body, auth);
+  const personal = { sinks: { webhook: { on: true, url: 'https://ntfy.sh/dee-secret-topic' } } };
+
+  it('a human sets and reads back their own prefs, personal URL included', async () => {
+    const t = await team();
+    const set = await put('/teams/dawn/members/me/doorbell', personal, t.dee);
+    expect(set.status).toBe(200);
+    const got = await get('/teams/dawn/members/me/doorbell', t.dee);
+    expect(got.json.prefs.sinks.webhook.url).toBe('https://ntfy.sh/dee-secret-topic');
+    expect(got.json.route).toEqual(['live', 'os', 'webhook']);
+    expect(got.json.team_urls).toEqual({ slack: false, webhook: false });
+  });
+
+  it('an admin sees that a personal sink exists and is on, never its URL', async () => {
+    const t = await team();
+    await put('/teams/dawn/members/me/doorbell', personal, t.dee);
+    const got = await get('/teams/dawn/members/Dee/doorbell', t.nick);
+    expect(got.status).toBe(200);
+    expect(got.json.sinks).toEqual({ webhook: { on: true, personal: true } });
+    expect(JSON.stringify(got.json)).not.toMatch(/ntfy|secret|"url"/);
+  });
+
+  it('a non-admin cannot read another member’s doorbell', async () => {
+    const t = await team();
+    const got = await get('/teams/dawn/members/nick/doorbell', t.dee);
+    expect(got.status).toBe(403);
+  });
+
+  it('an agent has no doorbell', async () => {
+    const t = await team();
+    const got = await get('/teams/dawn/members/me/doorbell', t.ada);
+    expect(got.status).toBe(403);
+    expect(got.json.error.message).toMatch(/for human members/);
+  });
+
+  it('a sink outside the team allow-list is refused 422, naming the sink', async () => {
+    const t = await team();
+    await post('/teams/dawn/policy', { doorbell: { allow: ['live', 'os'] } }, t.nick);
+    const set = await put('/teams/dawn/members/me/doorbell', personal, t.dee);
+    expect(set.status).toBe(422);
+    expect(set.json.error.message).toBe('the webhook sink is not allowed on this team');
+  });
+
+  it.each([
+    'http://ntfy.sh/topic',
+    'https://localhost/x',
+    'https://127.0.0.1/x',
+    'https://[::1]/x',
+    'https://169.254.169.254/latest',
+    'https://10.1.2.3/x',
+    'https://172.20.0.1/x',
+    'https://192.168.0.9/x',
+    'https://[fd12::1]/x',
+  ])('a personal URL %s is refused 422 without echoing it', async (url) => {
+    const t = await team();
+    const set = await put(
+      '/teams/dawn/members/me/doorbell',
+      { sinks: { webhook: { on: true, url } } },
+      t.dee,
+    );
+    expect(set.status).toBe(422);
+    expect(set.json.error.message).toMatch(/^the webhook url must/);
+    expect(JSON.stringify(set.json)).not.toContain(url);
+  });
+
+  it.each([
+    { doorbell: { webhook_url: 'https://10.0.0.1/hook' } },
+    { doorbell: { slack_url: 'http://hooks.slack.com/x' } },
+    { ask_slack_webhook: 'https://192.168.1.1/x' },
+  ])('a team policy with a non-public sink URL is refused 422', async (policy) => {
+    const t = await team();
+    const set = await post('/teams/dawn/policy', policy, t.nick);
+    expect(set.status).toBe(422);
+    expect(set.json.error.message).toMatch(/^the team (slack|webhook) url must/);
+  });
+
+  it('ask_slack_webhook reads through as the team slack sink, and the stored blob is not rewritten', async () => {
+    const t = await team();
+    await post('/teams/dawn/policy', slackPolicy, t.nick);
+    const got = await get('/teams/dawn/members/me/doorbell', t.dee);
+    expect(got.json.defaults).toEqual(['live', 'os', 'slack']);
+    expect(got.json.team_urls).toEqual({ slack: true, webhook: false });
+    expect(JSON.stringify(got.json)).not.toContain('hooks.slack.test');
+    const stored = await get('/teams/dawn/policy', t.nick);
+    expect(stored.json.stored).toEqual(slackPolicy);
+  });
 });
 
 /**
