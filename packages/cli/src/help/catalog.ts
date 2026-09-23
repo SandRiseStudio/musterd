@@ -431,7 +431,7 @@ export const CATALOG: readonly CommandEntry[] = [
     detail:
       'The mirror of `musterd agent`: agents stand in workspaces, the human stands in the **team ' +
       'home** — `~/musterd/<team>` by default, holding their 0600 binding, so `musterd board`, ' +
-      '`musterd inbox --watch` and `musterd send` are simply them with no `--as` and nothing pasted. ' +
+      '`musterd inbox --watch` and `musterd send` are simply them with nothing named and nothing pasted.' +
       'Mints the credential for a new person, reuses one this machine already holds, and offers a ' +
       're-issue (`--rotate`) when it holds none. Also sets the current team, and says so. Idempotent.',
     examples: ['musterd human nick --team acme', 'musterd human lin --home ~/work/acme'],

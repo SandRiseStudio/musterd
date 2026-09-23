@@ -226,7 +226,7 @@ exact task targeting, lifecycle observation, and safe resume (ADR 216).
 }
 ```
 
-- `MUSTERD_SERVER` env overrides `server`. `--team <slug>` overrides `current`. `--as <name>` selects identity within a team.
+- `MUSTERD_SERVER` env overrides `server`. `--team <slug>` overrides `current`. There is no flag that selects an identity — `--as` was removed (ADR 442); the folder's binding (or a `MUSTERD_*` env seat) is the identity.
 - Tokens live here (chmod 600 on write). Never logged.
 - `bindings` (ADR 020) records _where_ each member is bound, so init can warn on cross-folder name reuse (`nameBoundElsewhere`). It is **tokenless** — secrets stay only in each folder's 0600 `.musterd/binding.json`, never duplicated here — and **optional/back-compatible** (older configs without it load with an empty map). `saveBinding` writes the entry; nothing reads it but the init guard.
 - **Concurrent saves (ADR 255).** `saveConfig` used to last-write-wins the whole snapshot, so two CLI processes that each loaded, mutated a different map, and saved dropped the other's identities/bindings/vault entries. It now exclusive-locks (`config.json.lock`), 3-way-merges those maps (and `server`/`current`) against the `loadConfig` snapshot vs disk, and writes tmp+rename at 0600. A Config built from scratch (`musterd reset`) has no snapshot and replaces. Callers keep passing the object `loadConfig` returned.
@@ -255,15 +255,17 @@ binding as an identity source, and `musterd claim` fills the seat in. Relatedly,
 a different member, rather than silently relabeling its key (which "succeeded" then failed every
 send with `from/team must match`).
 
-**Act vs. read — the global config is a credential store, not an act-authority (ADR 036).** The
-global config's identity is the _last_ source and is **ambient**: it may **read** but never **act**.
-To _act as_ a member (any write — `send`/`team add`/`team remove`/`reclaim`, `inbox`'s cursor
-advance, `notify`'s poll) the identity must be **explicit**: `MUSTERD_*` env, a workspace binding, or
-a named `--as <member>`. `resolve()` enforces this (the **act** path) — it refuses an ambient-only
-identity with guidance (`musterd claim <name>` or `--as`), so a bare `cd` into an unrelated folder
-can't silently act as a real teammate (the 2026-06-23 dogfood: `notify` ran as the global default
-`David`). Read/operator commands use `resolveRead()` (the **read** path) — a team is required, an
-identity is optional; `status` always prints the auth-free roster and shows its per-member "⚑ waiting
+**Identity is the Workspace binding or nothing (ADR 442, superseding ADR 036/059's resolution).**
+The global config is a credential store — `claim`/`init` use its vault to rebind a folder without
+re-pasting a key — and **never** a resolution source. An identity comes from exactly two places: a
+`MUSTERD_*` env seat or this folder's workspace binding. `--as` is removed and refused with exit 2
+(`rejectAs`), so a script still passing it fails at once instead of silently acting as the bound
+seat. To _act as_ a member (any write — `send`/`team add`/`team remove`/`reclaim`, `inbox`'s cursor
+advance, `notify`'s poll) `resolve()` (the **act** path) requires one; an unbound folder resolves
+nobody and is refused with `musterd claim <name>` guidance, so a bare `cd` into an unrelated folder
+can't act as a real teammate (the 2026-06-23 dogfood: `notify` ran as the global default `David`;
+the 2026-09-22 incident: `musterd inbox --as nick` from an unbound folder). Read/operator commands
+use `resolveRead()` (the **read** path) — a team is required, an identity is optional; `status` always prints the auth-free roster and shows its per-member "⚑ waiting
 for you" comeback summary only when an identity is explicit. To keep onboarding frictionless,
 `team create` / `claim` **auto-bind the current folder** to the new identity (init already binds it to
 the provisioned agent), so the folder you set up in is immediately active while every other unbound
@@ -285,7 +287,7 @@ promotes it to a Lane. `conclude <id> --file <path> "<conclusion>"` records the 
 Lane. `promote` is the explicit research-skipped override. Mutation success and empty-state copy are
 specified by `figma-brief-terminal.md`.
 
-**Agent-side reachability nudge (ADR 046).** After any **acting** command returns, `bin.ts` re-resolves the identity (`resolveRead`) and — only when it is **explicit** (env/binding/`--as`, never an ambient global-config read, ADR 036) — appends a one-line banner to **stderr** naming the directed acts waiting for that member: `⚑ N acts waiting for <me> — musterd inbox (since <t>)`. It is the agent-side mirror of `status`'s comeback summary, surfaced everywhere an agent already is so a heads-down agent can't sit on a `request_help` it never looked for. Built from the same `pendingActionSummary`/`openActionNeeded` predicate, so it self-clears once the inbox cursor advances or the thread is resolved. **Skipped** for commands that show the acts themselves or carry no identity (`inbox`, `nudge`, `status`, `serve`, `service`, `init`, `reset`, `role`, `uninstall`) and suppressed by `--json`/`--quiet`/`MUSTERD_NO_NUDGE=1`. Best-effort: any read failure is swallowed — the nudge never fails or delays a command beyond one inbox read, and never touches stdout (keeps `--json`/pipes clean). No wire change (rides the existing inbox cursor, like `notify`).
+**Agent-side reachability nudge (ADR 046).** After any **acting** command returns, `bin.ts` re-resolves the identity (`resolveRead`) and — only when there is one (env/binding — the only sources, ADR 442) — appends a one-line banner to **stderr** naming the directed acts waiting for that member: `⚑ N acts waiting for <me> — musterd inbox (since <t>)`. It is the agent-side mirror of `status`'s comeback summary, surfaced everywhere an agent already is so a heads-down agent can't sit on a `request_help` it never looked for. Built from the same `pendingActionSummary`/`openActionNeeded` predicate, so it self-clears once the inbox cursor advances or the thread is resolved. **Skipped** for commands that show the acts themselves or carry no identity (`inbox`, `nudge`, `status`, `serve`, `service`, `init`, `reset`, `role`, `uninstall`) and suppressed by `--json`/`--quiet`/`MUSTERD_NO_NUDGE=1`. Best-effort: any read failure is swallowed — the nudge never fails or delays a command beyond one inbox read, and never touches stdout (keeps `--json`/pipes clean). No wire change (rides the existing inbox cursor, like `notify`).
 
 ### `musterd init`
 
@@ -352,9 +354,9 @@ process plan. It allow-lists inherited runtime values, sets the harness-specific
 and `MUSTERD_LAUNCH_SURFACE`, and excludes direct provider credentials. It does not spawn a process,
 consume a launch, bind Tailscale/Aperture, or activate `required` enforcement.
 
-### `musterd team create <slug> [--display <name>] [--as <yourname>] [--role <role>]`
+### `musterd team create <slug> [--display <name>] [--member <yourname>] [--role <role>] [--switch]`
 
-`POST /teams`. Creates the team and you as its first **human** member. Saves identity+token to config, sets `current`, and **auto-binds the current folder** to you (ADR 036) so you can act there with no `--as`. Output: `cmd/team-create` frame — green `✓ team "dawn" created`, your member line, the dim _bound this folder_ note, dim add hint. Errors: slug taken → `conflict` (exit 9).
+`POST /teams`. Creates the team and you as its first **human** member (`--member`, was `--as` before ADR 442 — a name to create, not an identity to resolve). Saves identity+token to config, sets `current`, and **auto-binds the current folder** to you (ADR 036) so you can act there. Output: `cmd/team-create` frame — green `✓ team "dawn" created`, your member line, the dim _bound this folder_ note, dim add hint. Errors: slug taken → `conflict` (exit 9).
 
 ### `musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]`
 
@@ -368,7 +370,7 @@ Admin lifecycle for least-privilege harness bootstrap credentials. `mint` requir
 
 `POST /teams/:slug/members/:name/remove`. **Soft-removes** a member from the roster (ADR 019) — the sanctioned way to clear a mistaken or stale member instead of editing the daemon's DB. Sets `left_at` via the existing `leaveMember`, so the member drops off every list/auth/route path (all filter `left_at IS NULL`) while its message history + provenance survive; any live session is dropped (same mechanism as reclaim) so the seat frees immediately. Idempotent — removing an already-removed member is a clean `not_found`, never an error stack. Removal is admin-gated (ADR 071 `is_admin`). Reactivating a removed/offline member is the claim/request lane (ADR 077): re-declare or claim the seat via `musterd init`'s "activate an existing member", `musterd claim <name>`, or `musterd agent`. Output: `✓ removed <member> from <team> — off the roster; message history is kept`. Errors: unknown/already-removed member → `not_found` (exit 6).
 
-### `musterd team archive <slug> [--as <admin>]`
+### `musterd team archive <slug>` (run from an admin's Workspace)
 
 `POST /teams/:slug/archive`. The **inverse of `team create`**, which until now had none: the sanctioned way to retire a junk or finished team instead of running SQL against the daemon's DB. **Soft** — sets `archived_at` on the team row, which `requireTeam` treats as gone, so the team drops off `status`, the rosters, and every team-scoped auth path at once while its members, messages, lanes, and audit rows all survive. Admin-gated (ADR 071 `is_admin`) and audited (`team.archive`), like the other governance writes: archiving pulls the whole team off every surface, so it carries the same authority bar. The slug is always explicit — never the ambient bound team — so a mistyped bare invocation can't take down the team you are working in. The slug stays taken (history keeps it), so re-creating an archived slug is a `conflict` that names the archived state. Output: `✓ archived team "<slug>" — off every roster and status surface; history is kept (soft archive)`. Errors: unknown slug → `not_found` (exit 6); an already-archived team → `not_found` ("team is archived", since auth itself can no longer resolve it); a non-admin seat → `forbidden`.
 
@@ -426,7 +428,7 @@ Prints the directed acts waiting for **this folder's bound seat** — the read-o
 
 ### `musterd whoami`
 
-Prints the seat this folder resolves to — `<member> on <team> (<surface> · <source>)` — or, for an unbound folder, how to claim one (ADR 067). Read-only and **identity-optional** (ADR 036): an unbound folder is a valid answer, not an error, and the ambient global-config case is flagged `(read-only — claim or --as to act)` so a later "send refused" isn't a surprise. The first thing a fresh agent reaches for to confirm which seat it's acting as. `--json` → `{team, member, surface, source, explicit}`. Output: `cmd/whoami`.
+Prints the seat this folder resolves to — `<member> on <team> (<surface> · <source>)` — or, for an unbound folder, how to claim one (ADR 067). Read-only and **identity-optional** (ADR 036): an unbound folder is a valid answer, not an error — it prints `not bound … this folder acts as nobody` with the `musterd claim <name>` hint, so a later "send refused" isn't a surprise. There is no ambient global-config case any more (ADR 442). The first thing a fresh agent reaches for to confirm which seat it's acting as. `--json` → `{team, member, surface, source, explicit}`. Output: `cmd/whoami`.
 
 ### `musterd status`
 

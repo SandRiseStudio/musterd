@@ -63,9 +63,8 @@ export function resolveClaimWorkspace(
 }
 
 /**
- * Where a resolved identity came from. `env`/`binding` are workspace-explicit; `flag` means the
- * caller named it with `--as`; `config` is the ambient global-config fallback — a *credential store*
- * default that may **read** but never **act** (ADR 036).
+ * Where a resolved identity came from: an env seat or this folder's binding — the only two sources
+ * since ADR 442 removed `--as` (`flag`) and the global-config fallback (`config`).
  */
 export type IdentitySource = 'env' | 'binding';
 
@@ -90,7 +89,7 @@ export interface Resolved {
   team: string;
   identity: Identity;
   identitySource: IdentitySource;
-  /** True when the identity is workspace-explicit (env/binding) or named via `--as`. Acts require it. */
+  /** True when an identity resolved (env/binding are the only sources, ADR 442). Acts require it. */
   explicit: boolean;
   http: HttpClient;
 }
@@ -274,10 +273,9 @@ export function attestedAttestation(
 }
 
 /**
- * Resolve the team + identity for an **act** (anything that writes/acts as a member). An ambient
- * global-config identity is *not* enough — acting requires the identity to be workspace-explicit
- * (env/binding) or named with `--as` (ADR 036). This keeps a bare `cd` into an unrelated folder
- * from silently acting as a real teammate.
+ * Resolve the team + identity for an **act** (anything that writes/acts as a member). Acting
+ * requires an env seat or this folder's binding (ADR 036, narrowed by ADR 442 to those two), so a
+ * bare `cd` into an unrelated folder acts as nobody rather than as a real teammate.
  */
 export function resolve(flags: Record<string, string | boolean>): Resolved {
   const { config, server, sources, team, workspace, workspaceKey, model, modelSource } =
@@ -440,8 +438,7 @@ const NUDGE_SKIP_COMMANDS = new Set([
 
 /**
  * The agent-side reachability nudge (ADR 046): after an acting command runs, re-resolve the identity
- * and — only when it is *explicit* (an env/binding/`--as` actor, never an ambient global-config read,
- * ADR 036) — return a one-line banner naming the directed acts waiting for that member. Returns '' to
+ * and — only when there is one (env/binding, the only sources since ADR 442) — return a one-line banner naming the directed acts waiting for that member. Returns '' to
  * print nothing. Best-effort and silent on any failure: the nudge must never fail a command. Honours
  * `--json`/`--quiet`/`MUSTERD_NO_NUDGE=1` (scripts that want a clean sidecar) and skips commands that
  * either show the acts already or carry no identity ({@link NUDGE_SKIP_COMMANDS}).
