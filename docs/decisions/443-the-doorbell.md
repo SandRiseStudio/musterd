@@ -167,9 +167,18 @@ stop a same-user process from reading the ring queue or a human's prefs with a c
 
 ## Observability & Evaluation
 
-- **Did it ring?** `doorbell.surfaced` rows, one per sink attempt, beside the act's own row.
-- **Holds:** `doorbell_rings` rows in `held`. A held ring older than a day on a human who is
-  `available` is a flush bug.
-- **Falsifier:** a directed ask to a human with only `live` and `os` on produces no banner on their
-  machine within one host tick. Or a `doorbell.surfaced` row, a log line, or an error contains a URL
-  or a body.
+- Traces: one `doorbell.surfaced` audit row per off-machine sink attempt, `{surface, ok, status?}`,
+  with no URL and no body, beside the act's own row:
+  `SELECT json_extract(detail,'$.surface'), json_extract(detail,'$.ok'), COUNT(*) FROM audit WHERE
+  action = 'doorbell.surfaced' GROUP BY 1, 2;`. Holds are rows in `doorbell_rings` with
+  `state = 'held'`. A held ring older than a day on a member who is `available` is a flush bug.
+  `ask.surfaced` rows stop after this ADR ships; a new one means a path still calls the old dispatch.
+- Eval: the dataset is the doorbell integration fixtures (`the doorbell (ADR 443)` in
+  `transport/integration.test.ts`) and the protocol fixtures (`doorbell.test.ts`): what rings, holds,
+  lapses, answered-meanwhile drops, URL privacy and the public-host check. The baseline is ADR 149's
+  behavior: only an `ask` rang anything, only to one team Slack URL, and a directed handoff to a human
+  rang nothing. Each fixture asserts the new behavior against it. The ADR 149 Slack fixtures still
+  pass, moved from `away` to `off_hours`.
+- Experiment: after the `os` sink ships, a directed ask to nick with only `live` and `os` on raises
+  one banner on his machine within one host tick. If no banner appears, or any `doorbell.surfaced`
+  row, log line or error carries a URL or a body, this decision is not implemented.

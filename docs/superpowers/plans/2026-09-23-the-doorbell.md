@@ -316,6 +316,10 @@ describe('ringDoorbell (ADR 443)', () => {
 - [ ] **Step 4:** `pnpm --filter @musterd/server test` in full, keeping the ≥85% bar. The ADR 149
   Slack tests must pass unchanged. If one fails, the carry-over is wrong — fix the code, not the
   test.
+  - *As built (2026-09-23):* two of them pinned the admin `away` to force Slack at raise. Under the
+    spec a self-set `away` **holds** the ring, so they conflict with §1, not with the carry-over.
+    They now pin `off_hours` (not present, not a hold), which keeps their ADR 155 intent. ADR 443
+    records this as a deliberate change from ADR 149. The action name moved to `doorbell.surfaced`.
 - [ ] **Step 5:** Commit `server: ring the doorbell on route; hold for away/dnd, blocking pierces`.
 
 ### Task 3: Server — prefs, policy read-through, and URL privacy
