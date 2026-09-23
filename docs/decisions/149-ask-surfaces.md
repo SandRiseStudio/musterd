@@ -3,6 +3,9 @@
 - Status: accepted — 2026-07-17. Implements the third backlog item ADR 145 re-sequenced
   (`ask-surfaces`) — the surfaces ADR 145 §3.2 says ship _with_ the stream, not after it.
 - Date: 2026-07-17
+- Extended by [ADR 443](443-the-doorbell.md) (2026-09-23): Slack delivery moves behind the doorbell's
+  sink interface; `ask_slack_webhook` is read through as the team's `slack` URL, and `ask.surfaced`
+  generalizes to `doorbell.surfaced`.
 - Builds on: [ADR 147](147-human-ask-stream.md) (the ask stream this surfaces — species/tier/contract,
   the four `ask.*` audit rows, `deliverToAdmins`), [ADR 145](145-human-role-refounded.md) §3.2 (the
   decision: "a Slack message naming what needs approving/deciding, and a loud, prominent asks/approvals
