@@ -263,14 +263,25 @@ So the loop is ~8 s per route, and the four office routes would add about 75 s o
 `a11y-connected` if they ran as separate sweeps. Until someone decides that is worth it, the mode
 stays manual.
 
-**Findings from those runs, not yet triaged:**
+**Findings from those runs, triaged 2026-09-23:**
 
-- `/live?light=12`: `lc-chip__avatar lc-asks__who is-over` "D", white on `#5b8dd5`, **3.38** (best
-  frame 4.0). It is below AA in every frame, so this is not a motion finding. The frozen pass runs
-  with reduced motion and did not render this state.
-- `/office-preview?light=12`: one earlier run (with the stricter settle) graded
-  `lc-speech__text` at 4.38 on `#d7605f`, seen in only one frame. That is a character colour, so it
-  may be the moving-bubble mis-sample the frozen pass already documents. It did not repeat.
+- ~~`/live?light=12`: `lc-chip__avatar lc-asks__who is-over` "D", white on `#5b8dd5`, **3.38**~~
+  **A measurement artifact, not a page defect.** Live at 1440×900, the disc is `rgb(41,110,214)`
+  (luminance 0.164, the value `memberAvatar()` targets) and white on it is about 4.9:1, with nothing
+  over it in `elementsFromPoint`. The sampled `#5b8dd5` is that disc under a ~23% white wash, and it
+  varied from frame to frame (3.38 to 4.39, never 4.9). The cause was this mode's own shutter. A
+  `captureBeyondViewport` capture resizes the page, and without reduced motion that re-ran the
+  strip's 0.2 s `lc-fade`, so every frame caught it mid-fade over the floor. The mode now captures
+  the viewport only. On a re-run the row is clean 3 of 3, and the fixture is still red at 1.23.
+- `/office-preview?light=12`: one run graded `lc-speech__text` at 4.38 on `#d7605f`, seen in only one
+  frame. That is a character colour, so it is probably the moving-bubble mis-sample the frozen pass
+  already documents. It did not repeat, and nothing has been changed for it.
+
+**A vacuous green, closed the same day.** Settling on "loaded and painted" can fire before `/live`
+renders its rows, and one run graded **0 rows and exited 0**. Zero graded rows now exits 2 as a
+harness failure. A settle that fires early and grades only part of the page (one run graded 16 rows
+where others graded ~120) is still possible and is not yet guarded: compare the row count to the
+frozen pass before trusting a green.
 
 ## Log
 

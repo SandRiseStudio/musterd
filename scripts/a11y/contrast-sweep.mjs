@@ -911,11 +911,17 @@ if (MOTION) {
       document.head.appendChild(s);
       return true;
     })()`);
-    const tall = g1.docH > 20000;
+    /* The VIEWPORT only, never captureBeyondViewport. A beyond-viewport capture resizes the page for
+       the shot, and without reduced motion that can re-run entrance animations: the /live asks
+       strip's 0.2s lc-fade was captured mid-fade over the floor on every frame, so a disc that is
+       4.9:1 live measured 3.38-4.39 (2026-09-23). Rows below the fold fall outside the image and are
+       skipped for that frame; the office surfaces this mode is for are viewport-sized apps. */
+    const vh = await evalIn('window.innerHeight');
+    const tall = false;
     const shot = await send('Page.captureScreenshot', {
       format: 'png',
-      captureBeyondViewport: !tall,
-      ...(tall ? {} : { clip: { x: 0, y: 0, width: g1.docW, height: g1.docH, scale: 1 } }),
+      captureBeyondViewport: false,
+      clip: { x: 0, y: 0, width: g1.docW, height: Math.min(g1.docH, vh), scale: 1 },
     });
     await evalIn(`document.getElementById('__a11y_glyphs_off')?.remove()`);
     const g2 = await evalIn(RECTS_IN_PAGE);
@@ -967,6 +973,16 @@ if (MOTION) {
       frames: obs.length,
       peak,
     });
+  }
+  /* Zero rows graded is not a pass. Settling on "loaded and painted" can fire before /live renders
+     its rows, and one measured run graded nothing and exited 0 (2026-09-23): a green verdict about
+     a page nobody measured. Report it as a harness failure, the same way the settle cap does. */
+  if (!graded.length) {
+    console.error(
+      `contrast-sweep --motion — no rows were graded on ${url}; nothing was measured. This is a` +
+        ' harness failure, not a contrast result. Re-run once the page has rendered its text.',
+    );
+    await exit(2);
   }
   const fails = graded.filter((g) => g.ratio < g.need).sort((a, b) => a.ratio - b.ratio);
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
