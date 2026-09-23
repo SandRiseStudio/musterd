@@ -280,8 +280,18 @@ stays manual.
 **A vacuous green, closed the same day.** Settling on "loaded and painted" can fire before `/live`
 renders its rows, and one run graded **0 rows and exited 0**. Zero graded rows now exits 2 as a
 harness failure. A settle that fires early and grades only part of the page (one run graded 16 rows
-where others graded ~120) is still possible and is not yet guarded: compare the row count to the
-frozen pass before trusting a green.
+where others graded ~120) is ~~still possible and is not yet guarded~~ **guarded since 2026-09-23**:
+after the frames, if the page carries more than 1.25 × the walked rows + 5, the run exits 2 ("the
+page grew from N to M text rows"). `fixtures/motion-late-render.html`, which adds 20 rows after 6 s,
+graded 1 row of 21 green before the guard and exits 2 after it. A settle heuristic was tried first
+(wait until the row count stops reaching new highs for 2.5 s) and was rejected: it cannot know how
+long a fetch will take, and it still graded that fixture's 1 row.
+
+**What the guard cannot see:** a page whose data never arrives during the run. In 1 of 5 `/live`
+runs the team data did not load at all, so the sweep graded the empty screen ("0 seats", "No seats
+on this team", "Listening.", 18 rows) and nothing grew. That is not specific to `--motion`; the
+frozen pass settles on the same screen. Read the row count: ~120-135 rows on `/live` is the
+populated page, and ~18 is the empty one.
 
 ## Log
 

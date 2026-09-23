@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>late render fixture</title>
+<style> body { background: #ffffff; margin: 0; font: 16px sans-serif; color: #111; } p { margin: 4px 16px; } </style></head>
+<body>
+  <p>the first line, present at load</p>
+  <div id="later"></div>
+  <script>
+    // The /live shape: the shell renders at once, and the rows arrive seconds later (a roster fetch).
+    // 6 s is past SETTLE_MIN (4 s), so a settle that trusts "loaded and painted" grades one row.
+    setTimeout(() => {
+      const box = document.getElementById('later');
+      for (let i = 0; i < 20; i++) {
+        const p = document.createElement('p');
+        p.textContent = 'a row that arrived late, number ' + i;
+        box.appendChild(p);
+      }
+    }, 6000);
+  </script>
+</body>
+</html>

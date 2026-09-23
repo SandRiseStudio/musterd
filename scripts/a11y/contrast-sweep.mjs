@@ -974,6 +974,24 @@ if (MOTION) {
       peak,
     });
   }
+  /* A page still ARRIVING is not a pass either. Only rows the walk found are graded, and settling
+     on "loaded and painted" can fire before /live renders them: one run graded 16 rows where
+     others graded ~120 (2026-09-23), and fixtures/motion-late-render.html grades 1 row of 21. No
+     settle heuristic can know how long a fetch will take, so the check is made AFTER the frames:
+     if the page now carries clearly more text than was walked, the run measured an earlier page. */
+  {
+    const walked = rows.size;
+    const nowText = await evalIn(KEYS_IN_PAGE);
+    const nowRows = typeof nowText === 'string' ? nowText.split('\n').length - 1 : 0;
+    if (nowRows > walked * 1.25 + 5) {
+      console.error(
+        `contrast-sweep --motion — the page grew from ${walked} to ${nowRows} text rows while it` +
+          ` was being measured on ${url}, so the grade covers an earlier, partial page. This is a` +
+          ' harness failure, not a contrast result. Re-run once the page has rendered its text.',
+      );
+      await exit(2);
+    }
+  }
   /* Zero rows graded is not a pass. Settling on "loaded and painted" can fire before /live renders
      its rows, and one measured run graded nothing and exited 0 (2026-09-23): a green verdict about
      a page nobody measured. Report it as a harness failure, the same way the settle cap does. */
