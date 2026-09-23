@@ -127,6 +127,16 @@ describe('orient tier 1 owns addressed work (ADR 326 amendment 2026-08-27 UTC)',
     expect(labelAt).toBeGreaterThan(0);
     expect(stampAt).toBeGreaterThan(labelAt);
   });
+
+  it('says the plain inbox read is the orientation read and the ⚡ act needs no ids read on top (lane 01M32WXS59)', () => {
+    // ryder paid for both on a wake: the hook line named the by-id read, orientation needed the
+    // unfiltered one, and nothing said which. An `ids` read marks nothing, so both = the act twice.
+    const skill = renderOrientSkill();
+    const step1 = skill.slice(skill.indexOf('1. `team_inbox_check`'), skill.indexOf('\n2. '));
+    expect(step1).toMatch(/IS the orientation read/);
+    expect(step1).toMatch(/do not also read that act by `ids`/);
+    expect(renderSkillBody({ team: 'dawn' })).toMatch(/needs no `ids` read on top/);
+  });
 });
 
 describe('labeling skills skip silently when this session cannot rename (ADR 418)', () => {
@@ -179,6 +189,7 @@ describe('version-bump discipline (ADR 085)', () => {
     26: 'd1af927ac631680d', // ADR 418: orient labels from this session's tool list then always stamps; labeling skills skip silently when the tools are absent
     27: '1d7d5b5f5792efc0', // orient step 2 reconciles memory against the repo via team_next before the seat repeats it (lane 01M2XAXRP3): a carried lane whose work is on main is LANDED, unsubmitted — lane_submit, not a build
     28: '47801df432b79884', // ADR 430 (lane 01M32FHX6J): the woken-session block says the packet IS the orientation — bodies attributed and budgeted — and team_inbox_check is a fetch follow-up, not a step
+    29: 'e1daaa1f77b25315', // lane 01M32WXS59: orient step 1 says the plain inbox read IS the orientation read and already carries any act a ⚡ line named — no `ids` read on top (an `ids` read marks nothing, so ryder saw the act twice); the woken-session block says the same of the packet
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

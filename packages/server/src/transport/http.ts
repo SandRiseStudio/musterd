@@ -819,10 +819,20 @@ function composeInterruptLine(
  * would be told to shell out, which is this lane's mismatch moved rather than fixed. An id is 26
  * characters and the line fires once per raise, so saying both costs a clause the reader skips.
  *
+ * The parenthetical says what the read is FOR (lane 01M32WXS59). It is the mid-task read: one act,
+ * ~1 KB. A seat still orienting makes the unfiltered `team_inbox_check` (or reads its wake packet)
+ * anyway, and that read already carries this act — while an `ids` read is a re-read that marks
+ * nothing, so doing both shows the seat the same act twice. ryder did exactly that on the ADR 429
+ * acceptance wake (act 01M32PQC1E): the line named one read, orientation needed the other, and
+ * nothing said which.
+ *
  * Still inside the ADR 088 §4 / ADR 128 discipline: an act id is a structured field, never `env.body`.
  */
 function byIdRead(id: string): string {
-  return `read exactly it: team_inbox_check {ids:["${id}"]} or 'musterd inbox --id ${id}'`;
+  return (
+    `read exactly it: team_inbox_check {ids:["${id}"]} or 'musterd inbox --id ${id}' ` +
+    `(orienting? your plain inbox read or wake packet already carries it — do one, not both)`
+  );
 }
 
 type RaiseClass = ReturnType<typeof raiseClass>;
