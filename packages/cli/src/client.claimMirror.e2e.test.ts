@@ -54,7 +54,7 @@ describe('claim mirror JOIN — the CLI client is believed by a real server (ADR
   async function fixture(): Promise<{ base: string; agentKey: string; grant: string }> {
     const quiet = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     try {
-      await teamCommand(parseArgs(['create', 'dawn', '--as', 'nick']));
+      await teamCommand(parseArgs(['create', 'dawn', '--member', 'nick']));
       await teamCommand(parseArgs(['add', 'Ada', '--kind', 'agent']));
     } finally {
       quiet.mockRestore();

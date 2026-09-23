@@ -27,7 +27,7 @@ describe('requests command', () => {
 
     // `team create` mints nick as the creator-admin (ADR 071) and auto-binds this folder, so
     // `requests` resolves nick from the binding without an explicit --as.
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
     agentKey = loadConfig().agentKeys['dawn']!;
     await new HttpClient({
       server: serverUrl,

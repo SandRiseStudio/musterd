@@ -24,7 +24,7 @@ describe('lane commands', () => {
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
     // `team create` mints nick as creator-admin and auto-binds this folder, so lane commands
     // resolve nick from the binding without an explicit --as (the acting-identity requirement).
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
   });
 
   afterEach(async () => {

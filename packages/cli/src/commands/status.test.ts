@@ -25,7 +25,7 @@ describe('musterd status — who is in a huddle', () => {
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     process.env['WHITEBOARD_PORT'] = '1'; // nothing listens: the room is skipped, never spawned
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
   });
 
   afterEach(async () => {

@@ -46,7 +46,7 @@ describe('memory command (ADR 093)', () => {
 
   // `team create` auto-binds the cwd identity (ADR 036), so commands resolve `nick` from the binding.
   async function setupTeam(): Promise<void> {
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
   }
 
   it('save → show round-trips the note; clear empties it', async () => {

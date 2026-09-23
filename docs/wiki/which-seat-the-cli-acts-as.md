@@ -14,6 +14,8 @@ Run on 2026-09-17 against daemon build `76b4b16`, one machine, three directories
 
 `cli · binding` is the CLI naming its own source: `.musterd/binding.json` in that folder. The MCP adapter reads the same file, so in a seat's own Workspace **both channels resolve the same seat by construction**. From a teammate's Workspace the CLI acts as *them* — a real way to send under someone else's name, and the one the old wording could not catch.
 
+**Correction (ADR 442):** the cwd is now the *only* thing that decides the seat, and the `~` row above no longer holds. `--as` is removed, and the global-config vault is storage, never a resolution source, so a folder with no binding acts as nobody even when the machine's config holds a human (2026-09-23; falsify: from a folder with no `.musterd/binding.json` and no `MUSTERD_CLAIM` env, run `musterd whoami` — if it names a member, this correction is wrong). <!-- claim: other -->
+
 The cwd decides the seat (2026-09-17; falsify: run `musterd whoami` from a seat Workspace and from a sibling seat's Workspace — if both name the same member, the cwd does not decide identity and this page is wrong). <!-- claim: other -->
 
 ## What the old rule said, and why it was retired

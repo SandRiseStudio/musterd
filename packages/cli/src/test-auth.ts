@@ -1,3 +1,8 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadConfig, saveBinding } from './config.js';
+
 export interface AgentHttpAuth {
   key: string;
   seat: string;
@@ -38,4 +43,34 @@ export async function claimAgentHttp(
     session_lease: string;
   };
   return { key: claim.seat_credential, seat, sessionLease: claim.session_lease };
+}
+
+/**
+ * Test-only (ADR 442): a fresh folder bound to `(team, name)` from this machine's vault, and its path.
+ *
+ * `--as` used to let a fixture act as any vault identity from one folder. That path is gone for
+ * everyone, so a fixture that needs a second actor does what a real one does: stands in that
+ * member's own Workspace. The caller points `process.cwd()` at the returned path for the call.
+ */
+export function bindTempWorkspace(team: string, name: string): string {
+  const config = loadConfig();
+  const held =
+    config.knownIdentities.find((i) => i.team === team && i.name === name) ??
+    (config.identities[team]?.name === name ? config.identities[team] : undefined);
+  if (!held) throw new Error(`no vault identity for ${name} on ${team} — remember it first`);
+  const dir = mkdtempSync(join(tmpdir(), `musterd-as-${name}-`));
+  const isSeatCredential = held.key.startsWith('msac_');
+  saveBinding(dir, {
+    version: 2,
+    server: config.server,
+    team,
+    claim: { mode: 'seat', name },
+    ...(isSeatCredential
+      ? {
+          seat_credential: held.key,
+          ...(held.sessionLease !== undefined ? { session_lease: held.sessionLease } : {}),
+        }
+      : { agent_key: held.key }),
+  });
+  return dir;
 }

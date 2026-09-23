@@ -5,7 +5,7 @@ import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { loadConfig, rememberIdentity, saveConfig } from '../config.js';
-import { claimAgentHttp } from '../test-auth.js';
+import { bindTempWorkspace, claimAgentHttp } from '../test-auth.js';
 import { inboxCommand } from './inbox.js';
 import { lanesCommand } from './lane.js';
 import { sendCommand } from './send.js';
@@ -34,7 +34,7 @@ describe('a CLI seat can converge a shared blocker (incident convergence inc 2)'
     dir = mkdtempSync(join(tmpdir(), 'musterd-incident-'));
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
     // Three reporters, because clustering counts DISTINCT seats: two to trip the threshold and a
     // third to land on the already-open incident. The seats are given vault identities directly
     // rather than walked through the claim handshake — the claim ceremony is covered by claim.test,
@@ -84,8 +84,18 @@ describe('a CLI seat can converge a shared blocker (incident convergence inc 2)'
   }
 
   /** Exactly what the failing gate tells a seat to type. */
+  /** Act from `seat`'s own Workspace — ADR 442 removed `--as`. */
+  async function as<T>(seat: string, fn: () => Promise<T>): Promise<T> {
+    vi.spyOn(process, 'cwd').mockReturnValue(bindTempWorkspace('dawn', seat));
+    try {
+      return await fn();
+    } finally {
+      vi.spyOn(process, 'cwd').mockReturnValue(dir);
+    }
+  }
+
   const report = (seat: string, extra: string[] = []) =>
-    capture(() => sendCommand(parseArgs(['--as', seat, '--blocked-by', GATE, ...extra])));
+    as(seat, () => capture(() => sendCommand(parseArgs(['--blocked-by', GATE, ...extra]))));
 
   async function incidentLanes(): Promise<
     { id: string; title: string; owner_seat: string | null }[]
@@ -121,7 +131,7 @@ describe('a CLI seat can converge a shared blocker (incident convergence inc 2)'
     const [incident] = await incidentLanes();
     await report('nick');
 
-    const inbox = await capture(() => inboxCommand(parseArgs(['--as', 'nick', '--json'])));
+    const inbox = await capture(() => inboxCommand(parseArgs(['--json'])));
     expect(inbox.out).toContain(incident!.id);
     expect(inbox.out).toMatch(/park behind it/);
   });
@@ -156,11 +166,11 @@ describe('a CLI seat can converge a shared blocker (incident convergence inc 2)'
   });
 
   it('an ordinary status_update from both seats opens nothing', async () => {
-    await capture(() =>
-      sendCommand(parseArgs(['--as', 'izzo', '--act', 'status_update', 'shipping the lane board'])),
+    await as('izzo', () =>
+      capture(() => sendCommand(parseArgs(['--act', 'status_update', 'shipping the lane board']))),
     );
-    await capture(() =>
-      sendCommand(parseArgs(['--as', 'dolly', '--act', 'status_update', 'still on the sweep'])),
+    await as('dolly', () =>
+      capture(() => sendCommand(parseArgs(['--act', 'status_update', 'still on the sweep']))),
     );
     expect(await incidentLanes()).toHaveLength(0);
   });

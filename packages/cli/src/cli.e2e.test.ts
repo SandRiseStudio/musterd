@@ -98,7 +98,7 @@ async function run(fn: (p: ReturnType<typeof parseArgs>) => Promise<number>, arg
 
 describe('CLI end-to-end (ADR 350 legacy bootstrap cutover)', () => {
   it('migrates two Workspaces and one host without interrupting an occupied Presence', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
     await run(teamCommand, ['add', 'Grace', '--kind', 'agent']);
     const config = loadConfig();
@@ -228,7 +228,14 @@ describe('CLI end-to-end (ADR 350 legacy bootstrap cutover)', () => {
 describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
   it('creates a team, adds a second human, exchanges a message', async () => {
     // nick creates dawn
-    const created = await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    const created = await run(teamCommand, [
+      'create',
+      'dawn',
+      '--member',
+      'nick',
+      '--role',
+      'lead',
+    ]);
     expect(created.code).toBe(0);
     expect(created.out).toContain('team "dawn" created');
 
@@ -260,7 +267,7 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
   });
 
   it('reports an empty inbox with the canonical string', async () => {
-    await run(teamCommand, ['create', 'solo', '--as', 'nick']);
+    await run(teamCommand, ['create', 'solo', '--member', 'nick']);
     await run(teamCommand, ['add', 'pat', '--kind', 'human']);
     // pat has received nothing
     const added = await run(teamCommand, ['add', 'pat2', '--kind', 'human', '--json']);
@@ -273,7 +280,7 @@ describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
 
 describe('CLI ask contract parity (ADR 147 / finding 006 item 3)', () => {
   it('hands a CLI ask-raiser the same wait/hold marching orders the MCP send returns', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
 
     // Human output carries the shared askContractText — the CLI is no longer silent about the contract.
     const ask = await run(sendCommand, [
@@ -322,7 +329,7 @@ describe('CLI ask contract parity (ADR 147 / finding 006 item 3)', () => {
   });
 
   it('a below-top tier tells the CLI ask-raiser it may proceed with a recorded risk', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     const ask = await run(sendCommand, [
       '--to',
       '@team',
@@ -343,7 +350,7 @@ describe('CLI ask contract parity (ADR 147 / finding 006 item 3)', () => {
 describe('comeback summary on status (ADR 024)', () => {
   it('leads status with the count of unread action-needed messages, then clears once read', async () => {
     // nick creates dawn and adds bo (the away human).
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
     const boToken = JSON.parse(added.out).human_credential as string; // 2nd human's mscr_ credential
 
@@ -366,7 +373,7 @@ describe('comeback summary on status (ADR 024)', () => {
 
 describe('thread-close clears the comeback summary (ADR 025)', () => {
   it('stops nagging once the request is resolved, even before the inbox is read', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     const added = await run(teamCommand, ['add', 'bo', '--kind', 'human', '--json']);
     const boToken = JSON.parse(added.out).human_credential as string; // 2nd human's mscr_ credential
 
@@ -408,7 +415,7 @@ describe('thread-close clears the comeback summary (ADR 025)', () => {
 
 describe('agent-side reachability nudge (ADR 046)', () => {
   it('does not supersede a live same-workspace adapter while re-claiming agent HTTP authority', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     const authority = await claimedAgent('dawn', 'Ada');
     const agentKey = loadConfig().agentKeys['dawn']!;
@@ -451,7 +458,7 @@ describe('agent-side reachability nudge (ADR 046)', () => {
   });
 
   it('re-claims a bound agent before a routine HTTP read when its stored lease is stale', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     const authority = await claimedAgent('dawn', 'Ada');
     const agentKey = loadConfig().agentKeys['dawn']!;
@@ -481,7 +488,7 @@ describe('agent-side reachability nudge (ADR 046)', () => {
 
   it('surfaces a directed act on an unrelated command, then self-clears once the inbox is read', async () => {
     // nick creates dawn and adds Ada (a heads-down agent).
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     // ADR 069: Ada (agent) authenticates with the team agent key + seat:Ada (set by actAs).
     const ada = await claimedAgent('dawn', 'Ada');
@@ -505,7 +512,7 @@ describe('agent-side reachability nudge (ADR 046)', () => {
   });
 
   it('skips commands that show the acts themselves (inbox/status) and suppresses on --json/--quiet', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     // ADR 069: Ada (agent) authenticates with the team agent key + seat:Ada (set by actAs).
     const ada = await claimedAgent('dawn', 'Ada');
@@ -525,7 +532,7 @@ describe('agent-side reachability nudge (ADR 046)', () => {
   });
 
   it('prints nothing for an ambient-only (read) identity — never acts as the global config (ADR 036)', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']); // auto-binds cwdDir as nick
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']); // auto-binds cwdDir as nick
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'real test please']);
 
@@ -544,7 +551,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
   // bare stdout from that event is debug-log only and never reached a model. Same daemon, same line,
   // one wrapper; the common path stays byte-for-byte empty.
   it('--hook claude-code emits the raised line as hookSpecificOutput.additionalContext, and nothing when quiet', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
     const ada = await claimedAgent('dawn', 'Ada');
 
@@ -578,7 +585,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
   });
 
   it('raises one daemon-composed line for a waiting urgent directed act, silent for a plain one', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
     const ada = await claimedAgent('dawn', 'Ada');
 
@@ -629,7 +636,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
   });
 
   it('is silent for an unbound folder and honours MUSTERD_NO_NUDGE=1', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
     const ada = await claimedAgent('dawn', 'Ada');
     await run(sendCommand, [
@@ -667,7 +674,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
 
 describe('reclaim command (ADR 017 follow-up)', () => {
   it('reclaims a member (idempotent with no live session) and 404s an unknown one', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
 
     // No live WS session here, but reclaim is a safe no-op that still succeeds.
@@ -683,7 +690,7 @@ describe('reclaim command (ADR 017 follow-up)', () => {
 
 describe('team remove command (ADR 019)', () => {
   it('soft-removes a member off the roster; unknown member errors', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
 
     // Ada is on the roster before removal.
@@ -707,7 +714,7 @@ describe('team remove command (ADR 019)', () => {
 describe('claim honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
   it('refuses to claim a different member than the cached identity without a key', async () => {
     // nick creates dawn and adds Ada; the cached config identity is nick.
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
 
     // Claiming Ada with no --key must NOT silently relabel nick's key as "Ada"
@@ -722,7 +729,7 @@ describe('claim honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
   });
 
   it('uses the cached key for the named seat without relabeling it', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     const ok = await run(claimCommand, ['nick', '--team', 'dawn', '--json']);
     expect(ok.code).toBe(0);
     expect(JSON.parse(ok.out.trim().split('\n').pop()!)).toMatchObject({
@@ -816,7 +823,7 @@ describe('resolve() identity alignment with the MCP adapter (ADR 018)', () => {
 describe('cachedTeamLive (init reuse probe, ADR 016)', () => {
   it('is true for a live team+token, false for a stale token or a missing team', async () => {
     const server = process.env['MUSTERD_SERVER']!;
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     const token = JSON.parse(readFileSync(nickConfig, 'utf8')).identities.dawn.key as string;
 
     expect(await cachedTeamLive(server, 'dawn', token)).toBe(true);
@@ -828,9 +835,9 @@ describe('cachedTeamLive (init reuse probe, ADR 016)', () => {
 });
 
 describe('an active identity is required to act (ADR 036)', () => {
-  it('an unbound folder reads freely but refuses to act as the ambient config identity', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']); // auto-binds cwdDir as nick
-    // Move to an unrelated, unbound folder — the global config still *caches* nick@dawn (ambient).
+  it('an unbound folder reads freely but acts as nobody — the vault never resolves (ADR 036, ADR 442)', async () => {
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']); // auto-binds cwdDir as nick
+    // Move to an unrelated, unbound folder — the global config still *stores* nick@dawn.
     const elsewhere = mkdtempSync(join(tmpdir(), 'musterd-unbound-'));
     cwdSpy.mockReturnValue(elsewhere);
 
@@ -838,25 +845,23 @@ describe('an active identity is required to act (ADR 036)', () => {
     const status = await run(statusCommand, []);
     expect(status.out).toContain('nick');
 
-    // `resolveRead` reports the ambient identity as NOT explicit (read-only).
+    // The stored identity is not this folder's: nothing resolves (ADR 442 §6).
+    expect(resolveRead({}).identity).toBeUndefined();
     expect(resolveRead({}).explicit).toBe(false);
 
-    // An act refuses — the ambient config can't act; the guidance names claim + --as.
+    // An act refuses, and so does naming the member — `--as` is gone, not merely ignored.
     await expect(
       run(sendCommand, ['--to', 'nick', '--act', 'message', 'hi']),
     ).rejects.toMatchObject({ exitCode: 4 });
-
-    // Naming the member with --as is explicit intent → the act goes through.
-    const sent = await run(sendCommand, ['--as', 'nick', '--to', 'nick', '--act', 'message', 'hi']);
-    expect(sent.code).toBe(0);
-    expect(sent.out).toContain('sent');
-    expect(resolve({ as: 'nick' }).explicit).toBe(true);
+    await expect(
+      run(sendCommand, ['--as', 'nick', '--to', 'nick', '--act', 'message', 'hi']),
+    ).rejects.toMatchObject({ exitCode: 2 });
 
     rmSync(elsewhere, { recursive: true, force: true });
   });
 
   it('team create auto-binds the folder, so the creator acts immediately with no --as', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'bo', '--kind', 'human']);
     // Same (now auto-bound) folder: the binding makes nick explicit without --as.
     expect(resolve({}).identitySource).toBe('binding');
@@ -868,7 +873,7 @@ describe('an active identity is required to act (ADR 036)', () => {
 
 describe('CLI ergonomics papercuts (ADR 067)', () => {
   async function dawnWithAgent(name: string) {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
     return claimedAgent('dawn', name);
   }
@@ -893,7 +898,7 @@ describe('CLI ergonomics papercuts (ADR 067)', () => {
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'please review']);
     await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'refactoring']);
     actAsNobody(); // nick's bound folder is fine; switch sender to Bo for a from-filter contrast
-    await run(sendCommand, ['--as', 'nick', '--to', 'Ada', '--act', 'message', 'from nick only']);
+    await run(sendCommand, ['--to', 'Ada', '--act', 'message', 'from nick only']);
 
     actAs('dawn', 'Ada', authority.key, authority.sessionLease);
     // --act keeps only the request_help
@@ -939,7 +944,7 @@ describe('CLI ergonomics papercuts (ADR 067)', () => {
 
 describe('inbox --waiting — surface waiting acts at the approval prompt (ADR 053)', () => {
   it('prints the directed acts waiting for the bound seat, read-only (cursor stays put)', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     const authority = await claimedAgent('dawn', 'Ada');
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'review the auth PR']);
@@ -962,7 +967,7 @@ describe('inbox --waiting — surface waiting acts at the approval prompt (ADR 0
   });
 
   it('prints nothing (exit 0) when no directed act is waiting', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     const authority = await claimedAgent('dawn', 'Ada');
     // Only broadcast journal traffic — nothing directed at Ada.
@@ -975,7 +980,7 @@ describe('inbox --waiting — surface waiting acts at the approval prompt (ADR 0
   });
 
   it('--limit resizes the rendered acts; --limit 0 shows all (lane 01M2TPW3JAS)', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     const authority = await claimedAgent('dawn', 'Ada');
     for (let i = 0; i < 7; i++) {
@@ -1004,7 +1009,7 @@ describe('inbox --waiting — surface waiting acts at the approval prompt (ADR 0
 describe('inbox --wait — wake on message (ADR 054)', () => {
   /** Stand up dawn with an agent seat; return its claimed HTTP authority. */
   async function dawnWithAgent(name: string) {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', name, '--kind', 'agent', '--json']);
     return claimedAgent('dawn', name);
   }
@@ -1039,7 +1044,7 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
     // A live `inbox --wait` IS a WS claim (ADR 075), so Ada attaches with the team agent key + a
     // standing grant (the grant is threaded resolve()→Identity→watchClaim so the live claim occupies
     // instead of going pending). nick (admin, his mscr_ credential) issues the grant.
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
     const cfg = JSON.parse(readFileSync(nickConfig, 'utf8'));
     const agentKey = cfg.agentKeys.dawn as string;
@@ -1089,7 +1094,7 @@ describe('inbox --wait — wake on message (ADR 054)', () => {
 
 describe('session capture end-to-end (ADR 131 inc 4)', () => {
   it('captures locally and pushes the harness-class-only attestation to the live daemon', async () => {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'scout', '--kind', 'agent']);
     const agentKey = loadConfig().agentKeys['dawn']!;
     const authority = await claimedAgent('dawn', 'scout');
@@ -1156,7 +1161,7 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
    * a second session does not — through the real hook entry point and a real daemon, not a stub.
    */
   it('a captured/ended pair is joinable by digest, and a second session is separable', async () => {
-    await run(teamCommand, ['create', 'dusk', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['create', 'dusk', '--member', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'rook', '--kind', 'agent']);
     const agentKey = loadConfig().agentKeys['dusk']!;
     const authority = await claimedAgent('dusk', 'rook');
@@ -1213,7 +1218,7 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
    *  (gate check, nudge) wakes up in once any other process has claimed since. Returns the LIVE
    *  claimant (the adapter that superseded it), whose lease is the thing a reclaim would kill. */
   async function bindAvaWithStaleLease(): Promise<Awaited<ReturnType<typeof claimedAgent>>> {
-    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['create', 'dawn', '--member', 'nick']);
     await run(teamCommand, ['add', 'ava', '--kind', 'agent']);
     const auth = await claimedAgent('dawn', 'ava');
     // A second claim supersedes the first, revoking the lease we are about to persist — the storm's

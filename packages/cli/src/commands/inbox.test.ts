@@ -33,7 +33,7 @@ describe('inbox command', () => {
     dir = mkdtempSync(join(tmpdir(), 'musterd-inbox-'));
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
     const cfg = loadConfig();
     const nickKey = cfg.identities['dawn']!.key;
     const admin = new HttpClient({ server: serverUrl, key: nickKey });
@@ -583,7 +583,7 @@ describe('inbox --waiting — a down daemon is not an empty queue (dolly, 2026-0
     process.env['MUSTERD_SERVER'] = `http://127.0.0.1:${port}`;
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
     delete process.env['MUSTERD_NO_NUDGE'];
-    await teamCommand(parseArgs(['create', 'dawn', '--as', 'nick']));
+    await teamCommand(parseArgs(['create', 'dawn', '--member', 'nick']));
     reachable = `http://127.0.0.1:${port}`;
     const cfg = loadConfig();
     const nickKey = cfg.identities['dawn']!.key;

@@ -179,7 +179,7 @@ up() {
   # Everything below this line writes. Nothing above it did.
   preflight
 
-  as_admin team create "$TEAM" --as ada >/dev/null
+  as_admin team create "$TEAM" --member ada >/dev/null
 
   # Roster. Names are chosen to spread the seat-identity hue band (memberAvatar derives colour from
   # the name), because the avatar chips are text on those colours and that pairing is measurable

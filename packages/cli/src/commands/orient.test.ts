@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig, rememberIdentity, saveConfig } from '../config.js';
-import { claimAgentHttp } from '../test-auth.js';
+import { bindTempWorkspace, claimAgentHttp } from '../test-auth.js';
 import { doneCommand } from './done.js';
 import { laneCommand, lanesCommand } from './lane.js';
 import { nextCommand } from './next.js';
@@ -27,7 +27,7 @@ describe('next / done commands', () => {
     dir = mkdtempSync(join(tmpdir(), 'musterd-orient-'));
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
   });
 
   afterEach(async () => {
@@ -64,9 +64,7 @@ describe('next / done commands', () => {
    * shared red they assumed was theirs, and `musterd next` is where a CLI session starts.
    */
   it("next leads with an open incident, above the seat's own work", async () => {
-    await capture(() =>
-      sendCommand(parseArgs(['--as', 'nick', '--blocked-by', 'ci:gates/A11y contrast'])),
-    );
+    await capture(() => sendCommand(parseArgs(['--blocked-by', 'ci:gates/A11y contrast'])));
     await capture(() => teamCommand(parseArgs(['add', 'izzo', '--kind', 'agent'])));
     const cfg = loadConfig();
     const authority = await claimAgentHttp(
@@ -84,9 +82,10 @@ describe('next / done commands', () => {
       sessionLease: authority.sessionLease,
     });
     saveConfig(cfg);
-    await capture(() =>
-      sendCommand(parseArgs(['--as', 'izzo', '--blocked-by', 'ci:gates/A11y contrast'])),
-    );
+    // izzo reports from izzo's own Workspace — ADR 442 removed `--as`.
+    vi.spyOn(process, 'cwd').mockReturnValue(bindTempWorkspace('dawn', 'izzo'));
+    await capture(() => sendCommand(parseArgs(['--blocked-by', 'ci:gates/A11y contrast'])));
+    vi.spyOn(process, 'cwd').mockReturnValue(dir);
 
     const res = await capture(() => nextCommand(parseArgs([])));
     expect(res.code).toBe(0);

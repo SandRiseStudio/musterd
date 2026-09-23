@@ -157,7 +157,7 @@ up() {
   # Everything below this line writes. Nothing above it did.
   preflight
 
-  as_admin team create "$TEAM" --as driver >/dev/null
+  as_admin team create "$TEAM" --member driver >/dev/null
   as_admin team policy --reseat-known-agents on >/dev/null
   for i in $(seq 1 "$SEATS"); do
     as_admin team add "s$i" --kind agent >/dev/null

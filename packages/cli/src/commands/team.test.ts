@@ -26,7 +26,7 @@ describe('team policy command', () => {
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
     // Creator becomes the admin and auto-binds this folder, so `team policy` resolves nick without --as.
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
   });
 
   afterEach(async () => {
@@ -510,7 +510,7 @@ describe('team credential command', () => {
     dir = mkdtempSync(join(tmpdir(), 'musterd-cred-'));
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
   });
 
   afterEach(async () => {
@@ -627,7 +627,7 @@ describe('team export — the roster lands in the team home', () => {
     home = join(dir, 'home');
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'ada'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'ada'])));
   });
 
   afterEach(async () => {

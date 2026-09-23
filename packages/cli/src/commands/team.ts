@@ -47,7 +47,7 @@ import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 import { hint, success, sym } from '../render/ui.js';
 import { readSeatFiles, readSeatHues, seatFilePath, setSeatHue, writeSeatFile } from '../roster.js';
-import { findWorkspaceDir, inherited, resolve, resolveRead } from './helpers.js';
+import { findWorkspaceDir, inherited, rejectAs, resolve, resolveRead } from './helpers.js';
 
 export async function teamCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
@@ -679,12 +679,15 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   const slug = parsed.positionals[1];
   if (!slug)
     throw new CliError(
-      'usage: musterd team create <slug> [--as <you>] [--role <role>] [--switch]',
+      'usage: musterd team create <slug> [--member <you>] [--role <role>] [--switch]',
       2,
     );
   const config = loadConfig();
   const server = flagStr(parsed.flags, 'server') ?? config.server;
-  const name = flagStr(parsed.flags, 'as') ?? defaultUser();
+  // `--member` names the founding member (was `--as`, removed by ADR 442 — it is a name to CREATE,
+  // not an identity to resolve, so it keeps a flag of its own).
+  rejectAs(parsed.flags);
+  const name = flagStr(parsed.flags, 'member') ?? defaultUser();
   const role = flagStr(parsed.flags, 'role');
   const display = flagStr(parsed.flags, 'display');
   const http = new HttpClient({ server });
@@ -1447,7 +1450,8 @@ async function teamRemove(parsed: Parsed): Promise<number> {
  */
 async function teamArchive(parsed: Parsed): Promise<number> {
   const slug = parsed.positionals[1];
-  if (!slug) throw new CliError('usage: musterd team archive <slug> [--as <admin>]', 2);
+  if (!slug)
+    throw new CliError("usage: musterd team archive <slug>  (run from an admin's Workspace)", 2);
   const { http } = resolve({ ...parsed.flags, team: slug });
   const res = await http.archiveTeam(slug);
   if (parsed.flags['json']) {

@@ -27,7 +27,7 @@ describe('report command', () => {
     dir = mkdtempSync(join(tmpdir(), 'musterd-report-'));
     process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
-    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+    await capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
     adminKey = loadConfig().identities['dawn']!.key;
   });
 

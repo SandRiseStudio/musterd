@@ -101,6 +101,15 @@ credential custody (ADR 200, ADR 341, and spec §8).
   at epoch 23 without 1b would file the row under its catch-all attestation branch.
 - `--as` users break at once: scripts, the wiki, operator muscle memory. The identity lane (1d)
   announces before it merges. `team create` names its creator with `--member`.
+- **Admin enrollment moves to the admin's own folder** (lane 1d, 2026-09-23). `residency on/off`
+  used `--as <admin>` from the agent's folder. It now runs from an admin's Workspace with `--seat
+  <agent> --workspace <its folder>`: the daemon-issued grant lands in the agent's folder, and the
+  admin's identity never does. Bare `agent --driver` names the member the folder resolves to.
+- **What 1d does not close.** `init`, `claim`, `human`, `team` and `agent` still read the vault as
+  *storage*, to provision or rebind a folder with a credential this machine already holds. A harness
+  session can run them, so an admin provisioning act can still start from a harness. Spec §6 names
+  this: admin-from-a-harness is an operator convention until browser-bound confirmation exists
+  (spec §8). The acting surface is closed: no command resolves the vault as its identity.
 - The Claude Code peer label sweep (`list_sessions` across the machine) is retired. The host labels
   seat sessions (ADR 166). Cursor's self-label path, which touches only the current chat, is kept.
 

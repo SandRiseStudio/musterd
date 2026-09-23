@@ -79,7 +79,7 @@ describe('team create and the machine-wide default', () => {
   ): Promise<{ code: number; out: string }> {
     vi.spyOn(process, 'cwd').mockReturnValue(dir);
     return capture(() =>
-      teamCommand(parseArgs(['create', slug, '--as', 'nick', '--server', server, ...extra])),
+      teamCommand(parseArgs(['create', slug, '--member', 'nick', '--server', server, ...extra])),
     );
   }
 
