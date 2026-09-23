@@ -58,6 +58,15 @@ The rule that keeps bodies out of the packet was drawn wider than its reason. Th
   `residency.context_read` row with `result: 'deny'` (added after #603); no new action name was
   introduced. The allow row's `bytes` remains the whole packet; the v2 parts ride `bytes_by`._
 
+- _2026-09-23 (lane 01M32WXS59): "the interrupt line" stays out of scope, but its read clause no
+  longer contradicts this ADR. The ⚡ line named only `team_inbox_check {ids:[…]}`. That is the
+  mid-task read, and an `ids` read marks nothing. So ryder, on the ADR 429 acceptance wake (act
+  01M32PQC1E), read the act by id and then again in the unfiltered orientation read. The line now
+  adds "orienting? your plain inbox read or wake packet already carries it — do one, not both". The
+  woken-session guidance and orient step 1 say the same (`GUIDANCE_CONTENT_VERSION` 29). Evaluate
+  with the eval above: on a v2 wake, no `team_inbox_check {ids:[…]}` call for an act the packet
+  already carried._
+
 ## Observability & Evaluation
 
 - **Traces:** `residency.context_read` rows carry `version: 2`, `used_bytes`, per-category bytes, `thread_acts`, `omitted`, and emitted `fetch` categories; `residency.context_denied` records refused reads by caller and target kind. The host log's first tool call after a wake (the `wake_turns` row) shows whether the seat's next call after the packet was a real act or a `fetch` follow-up.
