@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { formatAskSlackText, postSlackWebhook } from './slack.js';
+import { formatAskSlackText, formatDoorbellSlackText, postSlackWebhook } from './slack.js';
 
 describe('formatAskSlackText (ADR 149)', () => {
   it('phrases each species at the human and spells the tier contract in words', () => {
@@ -54,5 +54,25 @@ describe('postSlackWebhook', () => {
     await expect(postSlackWebhook('https://hooks.example.com/x', 'hi')).resolves.toEqual({
       ok: false,
     });
+  });
+});
+
+describe('formatDoorbellSlackText (ADR 443)', () => {
+  const base = { team: 'revive', from: 'dolly', act_id: '01X', answer_path: '/live?act=01X' };
+  it('an ask keeps ADR 149 text, body included', () => {
+    const text = formatDoorbellSlackText(
+      { ...base, act: 'ask', species: 'approve', tier: 'blocking' },
+      'ship it?',
+    );
+    expect(text).toContain('[revive] dolly needs your approval');
+    expect(text).toContain('> ship it?');
+  });
+  it.each([
+    ['handoff', 'dolly handed you work'],
+    ['request_help', 'dolly needs your help'],
+    ['steer', 'dolly sent you a steer'],
+  ])('a %s names who and what, and where to open it — never a body', (act, phrase) => {
+    const text = formatDoorbellSlackText({ ...base, act }, 'the secret plan');
+    expect(text).toBe(`[revive] ${phrase}\nOpen it on /live?act=01X`);
   });
 });
