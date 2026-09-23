@@ -4456,6 +4456,10 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     // an unbounded read, and the steer that rang was rendered and never acted on.
     expect(line).not.toContain("run 'musterd inbox' to read it");
     expect(line).not.toContain('ping'); // ADR 088 §4 still holds: never the raw body
+    // Lane 01M32WXS59: the line says the by-id read is not the orientation read, so a seat still
+    // orienting does its plain read (which carries this act) instead of both.
+    expect(line).toMatch(/orienting\? your plain inbox read or wake packet already carries it/);
+    expect(line).toContain('do one, not both');
   });
 
   it('interrupt line (lane 01M2P69FHZ): a multi-act queue points the by-id read at the headline act', async () => {

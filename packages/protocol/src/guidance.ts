@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 28;
+export const GUIDANCE_CONTENT_VERSION = 29;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -274,7 +274,8 @@ export function renderSkillBody(opts: { team: string }): string {
     'for (attributed, the last few acts), everything else open against you, your lane and your own memory,',
     'under a 12 KiB budget. **The packet is the orientation.** Fetch more only for what it lists under',
     '`fetch` (`team_inbox_check`, `team_memory_read`, `lane_board`, or the branch it points at). A packet',
-    'that says `version: 1` is an older daemon: then make those reads as before.',
+    'that says `version: 1` is an older daemon: then make those reads as before. A ⚡ line naming an',
+    'act the packet already showed you needs no `ids` read on top.',
     '',
     '- **Do the thing you were woken for.** A wake naming an act or a lane is work routed to this seat;',
     '  it is not a prompt to survey the board or pick something more interesting.',
@@ -554,6 +555,8 @@ export function renderOrientSkill(): string {
     'block) says so. Orientation ends with a stamp; the nudge repeats every turn until then.',
     '',
     '1. `team_inbox_check` — your first team_* call; it claims the seat and shows what waits.',
+    '   This plain read IS the orientation read, and it already carries any act a ⚡ line named:',
+    '   do not also read that act by `ids` (an `ids` read marks nothing, so you would see it twice).',
     '2. If the orientation block showed a memory headline, `team_memory_read` and pick up where',
     '   the previous session left off — then `team_next` BEFORE you repeat any of it. Memory is',
     '   a point-in-time note with no revision path; the board and the repo are the truth. Each',
