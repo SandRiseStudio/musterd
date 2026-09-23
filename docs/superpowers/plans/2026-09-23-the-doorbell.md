@@ -76,16 +76,19 @@ takes 23, and the doorbell takes **24**, after rebasing on it.
 
 ## Review focus
 
-1. **A team-addressed `ask`.** ADR 147 routes a team-addressed ask to admin humans. Expect: it rings
-   every admin human. Spec §1's "team-addressed acts do not ring" is read as covering `request_help`,
-   `handoff` and review acts, never `ask`. *dolly: confirm this reading.* Pinned in Task 1.
+1. **A team-addressed `ask`.** ADR 147 routes a team-addressed ask to admin humans. It rings every
+   **admin** human, never every human. Spec §1's "team-addressed acts do not ring" covers
+   `request_help`, `handoff` and review acts only. *Confirmed by dolly 2026-09-23; the sentence goes
+   into ADR 443.* Pinned in Task 1.
 2. **A present human.** ADR 155 Increment 2 keeps Slack quiet at raise when an admin human composes
-   as present, and fires on the agent's re-notify. Expect: that modulation carries over to every
-   *off-machine* sink (`slack`, `webhook`), while `live` and `os` ring at once. *dolly: confirm, or
-   say it should be dropped.* Pinned in Task 2.
+   as present, and fires on the agent's re-notify. That modulation carries over to the *off-machine*
+   sinks (`slack`, `webhook`) only; `live` and `os` ring at once. It can only under-ring, never
+   mis-deliver. *Confirmed by dolly 2026-09-23.* Pinned in Task 2.
 3. **`dnd` + `blocking`.** Expect: the ring pierces. `dnd` + `standard`: held, then rung when the
-   human goes `available` if the act is still open. `away` and `off_hours` hold the same way (the
-   `reachability.ts` away set). Pinned in Task 2.
+   human goes `available` if the act is still open. Only a **self-set** `away` or `dnd` holds.
+   `off_hours` does **not** hold: schedule enforcement is out of scope for v1 (AGENTS.md; dolly's
+   review, change a). A hold also ends when the availability lapses by its `until`, flushed on the
+   daemon's existing sweep (change b). Pinned in Task 2.
 4. **An admin reading a teammate's prefs.** Expect: `{sink: 'webhook', on: true, personal: true}`,
    never the URL. Pinned in Task 3.
 5. **An old policy blob with `ask_slack_webhook`.** Expect: it becomes the team's default `slack`
@@ -94,6 +97,10 @@ takes 23, and the doorbell takes **24**, after rebasing on it.
    label, and only the host enrolled under that label raises it. Pinned in Task 5.
 7. **Dead sink endpoint.** Expect: the send returns at normal latency, one `doorbell.surfaced
    {ok:false}` row, no retry. Pinned in Task 4.
+8. **A sink URL into the local network.** A `PUT` of a Slack/webhook URL — personal or team —
+   that is not `https`, or whose host is loopback, link-local or private, is rejected with 422.
+   Otherwise a non-admin human's personal URL makes the daemon POST into the local network (dolly's
+   review, change c). Pinned in Task 3.
 
 ---
 
@@ -107,7 +114,12 @@ takes 23, and the doorbell takes **24**, after rebasing on it.
 - [ ] **Step 1:** Write the ADR: Context (the incident, spec §1), Problem, Decision, Consequences.
   The Decision records:
   - What rings: every `ask`; `request_help`, `handoff`, and `lane_review` asks when **directed** to
-    a human member. Team-addressed `request_help`/`handoff` do not ring.
+    a human member. Team-addressed `request_help`/`handoff` do not ring. The sentence, verbatim: *"A
+    team-addressed ask rings every admin human (ADR 147 routing), never every human; spec §1's
+    'team-addressed acts do not ring' covers `request_help`, `handoff` and review acts only."*
+  - Holds: only a self-set `away`/`dnd`; `off_hours` never holds in v1. ADR 155's present-admin
+    quiet applies to `slack`/`webhook` only.
+  - Sink URLs must be `https` to a public host (review focus 8).
   - The record's fields (Task 1), and that it carries no body. The `slack` exception, per ADR 149.
   - The four sinks and their interface. `live` is always on and cannot be switched off.
   - Routing: team allow-list and defaults, per-human overrides, availability holds, `blocking`
@@ -215,6 +227,8 @@ describe('routing', () => {
 - Modify: `packages/server/src/db/schema.ts` (mirror the migration)
 - Modify: the availability POST handler in `transport/http.ts` (~line 941) — on a change to
   `available`, call `flushHeldRings(ctx, member)`
+- Modify: the daemon's existing tick/sweep — call `flushHeldRings` for every member with a held
+  ring whose availability has lapsed by its `until` (dolly's change b)
 - Test: `packages/server/src/notify/doorbell.test.ts`, `transport/integration.test.ts`
 
 **Interfaces — consumes** Task 1. **Produces** `ringDoorbell`, `flushHeldRings`, the
@@ -249,6 +263,26 @@ describe('ringDoorbell (ADR 443)', () => {
     await setAvailability(nick, 'available');
     expect(surfaced(db)).toHaveLength(0);
   });
+  it('a held ring whose thread was resolved meanwhile is dropped, not rung', async () => {
+    await setAvailability(nick, 'away');
+    const { id } = await send(alice, { to: 'nick', act: 'ask', meta: { species: 'consult', tier: 'standard' } });
+    await send(alice, { to: 'nick', act: 'resolve', thread: id });
+    await setAvailability(nick, 'available');
+    expect(surfaced(db)).toHaveLength(0);
+  });
+  it('off_hours does not hold (no schedule enforcement in v1)', async () => {
+    await setAvailability(nick, 'off_hours');
+    await send(alice, { to: 'nick', act: 'ask', meta: { species: 'consult', tier: 'standard' } });
+    expect(rings(db)[0].state).not.toBe('held');
+  });
+  it('a hold that lapses by its until is flushed on the sweep, with no availability POST', async () => {
+    await setAvailability(nick, 'dnd', { until: now() + 1_000 });
+    await send(alice, { to: 'nick', act: 'ask', meta: { species: 'consult', tier: 'standard' } });
+    expect(rings(db)[0].state).toBe('held');
+    advanceClock(2_000);
+    await runSweep();
+    await eventually(() => expect(rings(db)[0].state).not.toBe('held'));
+  });
   it('the record stored in doorbell_rings carries no body', async () => {
     await send(alice, { to: 'nick', act: 'ask', body: 'the secret plan', meta: { species: 'consult', tier: 'standard' } });
     expect(rings(db)[0].record).not.toMatch(/secret plan/);
@@ -270,12 +304,14 @@ describe('ringDoorbell (ADR 443)', () => {
   - `ringDoorbell` builds `humans`/`admins` from `listMembers`, calls `ringTargets`, and for each
     target: composes the record (Task 1 fields; `deadline_ms` from `askContract(tier)` when the act
     is an ask; `answer_path = /live?act=<id>`), resolves the route, then either
-    - inserts a `held` ring (away/dnd/off_hours and not `blocking`-through-`dnd`), or
+    - inserts a `held` ring (self-set away/dnd, not lapsed, and not `blocking`-through-`dnd`;
+      `off_hours` never holds), or
     - inserts a `queued` ring and hands it to Task 4's dispatcher.
   - The availability test reuses `isSelfSetAway` from `reachability.ts` — export it rather than
     copy it.
-  - `flushHeldRings` re-reads each held ring's act. If an `accept`/`decline`/`resolve` has answered
-    it, the ring goes to `done` with no surface. Otherwise it is dispatched.
+  - `flushHeldRings` re-reads each held ring's act. If an `accept`/`decline` replies to it, or a
+    `resolve` closes its thread, the ring goes to `done` with no surface. Otherwise it is dispatched.
+    It is called from the availability POST and from the daemon's sweep (lapsed `until`).
   - The ADR 155 presence rule applies to `slack` and `webhook` only (review focus 2).
 - [ ] **Step 4:** `pnpm --filter @musterd/server test` in full, keeping the ≥85% bar. The ADR 149
   Slack tests must pass unchanged. If one fails, the carry-over is wrong — fix the code, not the
@@ -298,7 +334,10 @@ describe('ringDoorbell (ADR 443)', () => {
   `{webhook: {on: true, personal: true}}` with no `url` key anywhere in the JSON; (c) a non-admin
   reading another member gets 403; (d) a policy blob holding only `ask_slack_webhook` resolves
   `doorbell.slack_url` to it, and the stored blob is not rewritten; (e) a team whose only sink is a
-  human's personal webhook counts as reachable.
+  human's personal webhook counts as reachable; (f) a `PUT` (personal prefs or team policy) with an
+  `http://` URL, or an `https://` URL whose host is `localhost`, `127.0.0.1`, `[::1]`, `169.254.x`,
+  `10.x`, `172.16–31.x`, `192.168.x` or `fc00::/7`, is rejected 422 naming the sink, and never
+  echoes the URL.
 - [ ] **Step 2:** Run → FAIL.
 - [ ] **Step 3:** Implement. The mask is one function, `maskPrefs(prefs)`, used by every non-self
   read path. The `PUT` validates with `DoorbellPrefsSchema` and rejects a sink outside the team's
@@ -455,8 +494,9 @@ label.
   `packages/cli/src/{host/{doorbell,loop}.ts,commands/doorbell.ts,help/catalog.ts,cli.ts}`;
   `packages/web/src/live/{AsksStrip.tsx,doorbellNotify.ts}`; `docs/decisions/{443,149,222}-*`; `SPEC.md`; `docs/architecture/*`;
   `docs/design/daemon-doorbell-contract.md`; one new `docs/wiki/` page.
-- **Open, for dolly:** review focus 1 (team-addressed asks ring admins) and 2 (ADR 155 modulation
-  kept for off-machine sinks only).
+- **Reviewed by dolly 2026-09-23:** approved, with focus 1 and 2 confirmed and four changes folded
+  in — `off_hours` does not hold; flush on the sweep for a lapsed `until`; `https` + public-host
+  sink URLs; a thread `resolve` counts as answered.
 - **Open, resolved in Task 5's spike:** how a human's `os` sink names its machine.
 - **Not built:** retry or queueing for off-machine sinks; answer-from-Slack (ADR 149's reasons
   stand); per-channel routing by species; a doorbell for team-addressed acts.
