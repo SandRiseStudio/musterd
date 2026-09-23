@@ -500,6 +500,14 @@ Manage **workspace toolkits** — the ADR 026/029/038 provisioning templates, na
 
 **Roster-only** since ADR 296: `role` answers what the *team* recognizes, and never renders workspace equipment. A name that is only a toolkit is not silently printed here under the word "role" — the error names `musterd toolkit show <name>` instead. `role create` outside a roster home is refused rather than downgraded to a local file (a local file may never assert a team responsibility). `role create --profile` survives as a quiet alias delegating to `musterd toolkit create`.
 
+### `musterd doorbell [<sink> <on|off>] | doorbell team`
+
+Where you are rung when something is addressed to you (ADR 443). Bare `doorbell` prints each sink (`live`, `os`, `slack`, `webhook`) as on or off and says where that comes from: always on, team default, your override, or not allowed. `<slack|webhook> on [--url <u>] [--tiers <t,…>]` sets your own; with no `--url` and no team URL it exits 2. `os on` records this machine's host label from `~/.musterd/host-registry.json`, and exits 2 when no host runs here for the team (or pass `--host`). `live off` exits 2. `doorbell team [--allow …] [--defaults …] [--slack <url|off>] [--webhook <url|off>]` is the admin's read-merge-write `POST /policy`. URLs print masked to their host. The command is for humans only: from an agent seat it says so and exits 0. There is no MCP tool; agents do not choose where a human is rung.
+
+The host half of the `os` sink is `host/doorbell.ts`. Each `musterd host` tick claims the rings queued for each (daemon, team, label) group and raises one banner per ring from the record's fields, as argv. A quiet tick logs nothing.
+
+**What this does and does not protect (spec §7).** The doorbell removes a model's choice of where a human is reached. It is not a boundary against a hostile process under the same OS user: such a process can read any binding or config file, or call the daemon's HTTP API directly with a credential it read. Closing that is credential custody (ADR 200, ADR 341).
+
 ### `musterd uninstall [--force|--yes]`
 
 Per-folder **uninstall** (ADR 027 — the reversibility gap `reset` left open): removes _exactly_ what `musterd init` wrote into this folder's harness and restores the prior state — the role-provisioned MCP servers + permission entries (from the manifest, ADR 030), the musterd MCP server itself, the managed AGENTS.md primer block (the user's own prose is kept), and the local `.musterd/` state (binding + manifest) and registry entry. Purely local: it **never touches the server roster** — the member stays on the team (offline); removing it server-side is the v0.3 seat model. Never imports `@musterd/server`. Confirms on a TTY; `--force`/`--yes` skips the prompt.
