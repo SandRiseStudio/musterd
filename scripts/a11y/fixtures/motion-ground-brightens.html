@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>motion fixture</title>
+<style>
+  body { background: #1a1a1a; margin: 0; font: 16px sans-serif; }
+  /* A bright body that walks under the label on an rAF loop — the office's member crossing beneath
+     a nameplate. Settled, the label sits on #1a1a1a (white on it is ~17:1); while the body is under
+     it, it sits on #e8e8e8 (~1.2:1). */
+  #walker { position: absolute; top: 60px; left: 0; width: 160px; height: 60px; background: #e8e8e8; }
+  #label { position: absolute; top: 80px; left: 200px; color: #ffffff; z-index: 1; }
+  /* A control that is fine in every frame, so a pass that flags everything cannot look correct. */
+  #steady { position: absolute; top: 200px; left: 40px; color: #ffffff; }
+</style></head>
+<body>
+  <div id="walker"></div>
+  <p id="label">a nameplate a body walks under</p>
+  <p id="steady">a line on the floor nothing crosses</p>
+  <script>
+    // Crosses x=0..560 every 2s, so the label (x 200..~430) is covered about half the time.
+    const w = document.getElementById('walker');
+    function tick(t) {
+      w.style.left = ((t / 2000) % 1) * 560 - 80 + 'px';
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  </script>
+</body>
+</html>
