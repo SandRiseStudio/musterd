@@ -90,6 +90,9 @@ const flag = (name) => {
 const PROBE = flag('probe');
 const JSON_OUT = flag('json');
 const QUIET = args.includes('--quiet');
+/** Measure WHILE the page moves (lane 01M2NRPMPA): grade each row against the worst ground seen
+ *  across frames rather than one frozen frame. Manual for now — its CI cost is not yet measured. */
+const MOTION = args.includes('--motion');
 /** Container the probe pass injects into. Must be an opaque, representative surface. */
 const PROBE_HOST = flag('probe-host') ?? '.lc-stream';
 
@@ -108,9 +111,12 @@ const { send, exit } = await openChromePage({
    page mid-animation has no single background to measure — the pixel pass below would sample a
    frame nobody stays on. Emulation is best-effort: an older Chrome that rejects it still gets the
    animation-settling pass underneath. */
-await send('Emulation.setEmulatedMedia', {
-  features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
-}).catch(() => {});
+/* --motion measures the page a reader WITHOUT that preference sees, so it skips the emulation:
+   the motion is the thing under test. */
+if (!MOTION)
+  await send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
+  }).catch(() => {});
 await send('Page.navigate', { url });
 
 /**
@@ -405,11 +411,15 @@ const settle = await (async () => {
     if (now === null || now !== prev) since = Date.now();
     if (
       Date.now() - t0 >= SETTLE_MIN &&
-      Date.now() - since >= SETTLE_WINDOW &&
+      /* --motion never waits for stillness: a page that moves is the thing it measures, and /live
+         without reduced motion never goes still, so waiting for it only spends the cap. Loaded and
+         painted is enough. */
+      (MOTION || Date.now() - since >= SETTLE_WINDOW) &&
       now !== null &&
       now.startsWith('complete')
     ) {
       painted = await canvasPainted();
+      if (painted !== false && MOTION) return { how: 'loaded', ms: Date.now() - t0, painted };
       if (painted !== false) {
         /* Keys are stable and the canvas has painted — now check the thing the keys cannot see.
            Two geometry snapshots a beat apart: if any row moved, the page was mid-animation with a
@@ -720,7 +730,7 @@ const RECTS_IN_PAGE = /* js */ `(() => {
   /* Jump every finite animation to its end state first. Infinite ones (the clock sheen, the runway
      shimmer) throw on finish() and are left alone — they are decorative loops with no end state,
      and reduced-motion emulation has already disabled the ones this project controls. */
-  for (const a of document.getAnimations()) { try { a.finish(); } catch {} }
+  if (!window.__a11y_motion) for (const a of document.getAnimations()) { try { a.finish(); } catch {} }
   ${PAPER_SIG}
   const effOpacity = (el) => {
     let o = 1, n = el;
@@ -832,6 +842,156 @@ const OPACITY_IN_PAGE = /* js */ `(() => {
   }
   return outv;
 })()`;
+
+/* ── --motion: grade against the worst ground a row sits on while the page MOVES ─────────────────
+ *
+ * The pass below freezes the page and measures one frame, and that is the right answer for "what
+ * does this row sit on". It cannot answer "what does this row sit on a second later". In the office,
+ * members walk, the night veil runs and bubbles pass under nameplates, so a label that clears AA on
+ * the floor it settles on can be washed out by a body crossing beneath it. Two lighting presets are
+ * two points, not the range a pixel travels (lane 01M2NRPMPA).
+ *
+ * So this mode lets the page run and samples FRAMES frames GAP_MS apart. Each frame holds still only
+ * for its own shutter: rAF callbacks are parked, not dropped, and are handed back to the real
+ * scheduler afterwards, so the scene resumes where it was. Each row is sampled wherever it is in
+ * that frame, and graded against its worst ground among the frames where it is at its most opaque.
+ * A fade is graded at its peak rather than mid-fade, which is where the reader actually reads it.
+ * A row that moves under the shutter is excluded for that frame, exactly like the frozen pass.
+ *
+ * It REPLACES the frozen pass for that run (a page cannot be both frozen and moving) and does not
+ * emulate reduced motion. Run both for full coverage. Manual (`--motion`); its CI cost is measured
+ * in docs/a11y/contrast.md before anyone wires it into the gate.
+ */
+if (MOTION) {
+  const FRAMES = 8;
+  const GAP_MS = 750;
+  const t0 = Date.now();
+  const rows = new Map();
+  for (const r of [...out.live, ...out.skipped]) if (r.key && r.ink) rows.set(r.key, r);
+  const lum = (c) => {
+    const f = (v) => ((v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+  };
+  const ratioOf = (a, b) => {
+    const l1 = lum(a),
+      l2 = lum(b);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  };
+  const hex = (c) =>
+    '#' + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+  const ink = (h, bg, a) => {
+    const f = {
+      r: parseInt(h.slice(1, 3), 16),
+      g: parseInt(h.slice(3, 5), 16),
+      b: parseInt(h.slice(5, 7), 16),
+    };
+    return a >= 1
+      ? f
+      : { r: f.r * a + bg.r * (1 - a), g: f.g * a + bg.g * (1 - a), b: f.b * a + bg.b * (1 - a) };
+  };
+  /** key → [{frame, ratio, on, alpha}] */
+  const seen = new Map();
+  let movedFrames = 0;
+  await evalIn(`window.__a11y_motion = true`);
+  for (let frame = 0; frame < FRAMES; frame++) {
+    if (frame) await new Promise((r) => setTimeout(r, GAP_MS));
+    // Park rAF for this shutter only; the frame already in flight lands first.
+    await evalIn(`(() => {
+      window.__a11y_raf ??= window.requestAnimationFrame.bind(window);
+      window.__a11y_q = [];
+      window.requestAnimationFrame = (cb) => (window.__a11y_q.push(cb), 0);
+      return true;
+    })()`);
+    await new Promise((r) => setTimeout(r, 50));
+    const g1 = await evalIn(RECTS_IN_PAGE);
+    await evalIn(`(() => {
+      const s = document.createElement('style');
+      s.id = '__a11y_glyphs_off';
+      s.textContent = '*,*::before,*::after{color:transparent !important;-webkit-text-fill-color:transparent !important;text-shadow:none !important;caret-color:transparent !important;}';
+      document.head.appendChild(s);
+      return true;
+    })()`);
+    const tall = g1.docH > 20000;
+    const shot = await send('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: !tall,
+      ...(tall ? {} : { clip: { x: 0, y: 0, width: g1.docW, height: g1.docH, scale: 1 } }),
+    });
+    await evalIn(`document.getElementById('__a11y_glyphs_off')?.remove()`);
+    const g2 = await evalIn(RECTS_IN_PAGE);
+    // Hand the parked callbacks back to the real scheduler: the scene resumes where it stopped.
+    await evalIn(`(() => {
+      window.requestAnimationFrame = window.__a11y_raf;
+      for (const cb of window.__a11y_q.splice(0)) window.__a11y_raf(cb);
+      return true;
+    })()`);
+    const after = new Map(g2.rects.map((r) => [r.key, r]));
+    const img = decodePng(Buffer.from(shot.data, 'base64'));
+    const scale = tall ? g1.dpr : img.width / g1.docW;
+    for (const rc of g1.rects) {
+      const row = rows.get(rc.key);
+      if (!row || rc.opacity < 0.05) continue;
+      const b = after.get(rc.key);
+      if (!b || Math.abs(b.x - rc.x) > 1 || Math.abs(b.y - rc.y) > 1) {
+        movedFrames++;
+        continue;
+      }
+      const ix = Math.round((rc.x + rc.w / 2) * scale),
+        iy = Math.round((rc.y + rc.h / 2) * scale);
+      if (ix < 0 || iy < 0 || ix >= img.width || iy >= img.height) continue;
+      const o = iy * img.width * img.channels + ix * img.channels;
+      const bg = { r: img.data[o], g: img.data[o + 1], b: img.data[o + 2] };
+      const ratio = Math.round(ratioOf(ink(row.ink, bg, rc.opacity), bg) * 100) / 100;
+      (seen.get(rc.key) ?? seen.set(rc.key, []).get(rc.key)).push({
+        frame,
+        ratio,
+        on: hex(bg),
+        alpha: Math.round(rc.opacity * 100) / 100,
+      });
+    }
+  }
+  const graded = [];
+  for (const [key, obs] of seen) {
+    const peak = Math.max(...obs.map((x) => x.alpha));
+    const atPeak = obs.filter((x) => x.alpha >= peak - 0.01);
+    const worst = atPeak.reduce((a, b) => (b.ratio < a.ratio ? b : a));
+    const best = atPeak.reduce((a, b) => (b.ratio > a.ratio ? b : a));
+    const row = rows.get(key);
+    graded.push({
+      el: row.el,
+      sample: row.sample,
+      need: row.need,
+      ink: row.ink,
+      ...worst,
+      best: best.ratio,
+      frames: obs.length,
+      peak,
+    });
+  }
+  const fails = graded.filter((g) => g.ratio < g.need).sort((a, b) => a.ratio - b.ratio);
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
+  if (!QUIET) {
+    console.log(`\ncontrast-sweep --motion — ${url}\n`);
+    console.log(
+      `motion: ${graded.length} rows over ${FRAMES} frames ${GAP_MS}ms apart (${secs}s), ${fails.length} below AA at their worst ground`,
+    );
+    for (const g of fails)
+      console.log(
+        `  ${String(g.ratio).padStart(6)} (need ${g.need})  ${g.ink} on ${g.on} at frame ${g.frame}` +
+          ` (best ${g.best}${g.peak < 1 ? `, graded at peak opacity ${g.peak}` : ''})  ${g.el}  "${g.sample}"`,
+      );
+    if (movedFrames)
+      console.log(
+        `\n! ${movedFrames} row-frame(s) moved under the shutter and were excluded for that frame`,
+      );
+  }
+  if (JSON_OUT)
+    writeFileSync(
+      JSON_OUT,
+      JSON.stringify({ url, frames: FRAMES, gapMs: GAP_MS, secs: +secs, graded, fails }, null, 2),
+    );
+  await exit(fails.length ? 1 : 0);
+}
 
 let pixel = null;
 let pixelNote = null;

@@ -231,6 +231,47 @@ The general rule: **a dedupe key that omits any input to the measurement will hi
 instances that differ in it** — and it hides them as a pass, which is the one direction an
 accessibility tool must never fail in.
 
+## Measuring while it moves: `--motion` (manual, not in the gate)
+
+The frozen pass answers "what does this row sit on". It cannot answer "what does it sit on a second
+later". In the office, members walk, the night veil runs and bubbles pass under nameplates. A label
+that clears AA on the floor it settles on can be washed out by a body crossing beneath it, and two
+lighting presets do not catch that (lane 01M2NRPMPA).
+
+`node scripts/a11y/contrast-sweep.mjs <url> --motion` lets the page run. It samples 8 frames 750 ms
+apart, holding each still only for its own shutter: rAF callbacks are parked and then handed back,
+so the scene resumes. Each row is graded against its **worst ground among the frames where it is at
+its most opaque**. A fade is graded at its peak, not mid-fade. A row that moves under a shutter is
+excluded for that frame. The mode skips reduced-motion emulation, because the motion is what it
+tests, and it replaces the frozen pass for that run. Run both for full coverage.
+
+**The falsifier** is `scripts/a11y/fixtures/motion-ground-brightens.html`: white text on `#1a1a1a`,
+with a `#e8e8e8` block walking beneath it on an rAF loop. Measured 2026-09-23: the frozen pass is
+**green 3 of 3**, and `--motion` is **red 3 of 3** at `1.23 on #e8e8e8` (best frame 17.4), while its
+steady control line passes.
+
+**Cost, measured 2026-09-23** against the local daemon (wall clock includes Chrome start and load):
+
+| route | rows | motion loop | wall | below AA |
+| --- | ---: | ---: | ---: | ---: |
+| `/live?light=12` | 130 | 7.4 s | 12 s | 1 |
+| `/live?light=21` | 127 | 7.8 s | 22 s | 0 |
+| `/office-preview?light=12` | 8 | 7.9 s | 25 s | 0 |
+| `/office-preview?light=21` | 8 | 7.7 s | 16 s | 0 |
+
+So the loop is ~8 s per route, and the four office routes would add about 75 s of wall clock to
+`a11y-connected` if they ran as separate sweeps. Until someone decides that is worth it, the mode
+stays manual.
+
+**Findings from those runs, not yet triaged:**
+
+- `/live?light=12`: `lc-chip__avatar lc-asks__who is-over` "D", white on `#5b8dd5`, **3.38** (best
+  frame 4.0). It is below AA in every frame, so this is not a motion finding. The frozen pass runs
+  with reduced motion and did not render this state.
+- `/office-preview?light=12`: one earlier run (with the stricter settle) graded
+  `lc-speech__text` at 4.38 on `#d7605f`, seen in only one frame. That is a character colour, so it
+  may be the moving-bubble mis-sample the frozen pass already documents. It did not repeat.
+
 ## Log
 
 | Date       | Surface                                   | Result                                                                                 |
