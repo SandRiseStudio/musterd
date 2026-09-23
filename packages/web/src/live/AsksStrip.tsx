@@ -19,6 +19,7 @@ import {
 import { sendAct, type LiveConfig } from './client';
 import { asksOpenMode, stillMode } from './stillMode';
 import { initial, memberAvatar, memberColor, kindOf, hueOf } from './format';
+import { newRings, notifyBrowser, openRingsFor, ringNotice } from './doorbellNotify';
 import { scrollToMessage } from './Stream';
 
 /**
@@ -150,6 +151,30 @@ export function AsksStrip({
       document.title = base;
     };
   }, [yoursCount]);
+
+  // The doorbell's `live` sink (ADR 443): a browser notification when an act rings the connected
+  // seat. Only a real roster member is rung (never an observer or a watch link), only for what
+  // arrived after the page loaded, and once per act. Permission is asked from a click, never on load.
+  const ringSeat = canAnswer ? cfg.as : null;
+  const openRings = useMemo(
+    () => openRingsFor(envelopes, roster, ringSeat),
+    [envelopes, roster, ringSeat],
+  );
+  const loadedAt = useRef(Date.now());
+  const rungIds = useRef(new Set<string>());
+  useEffect(() => {
+    for (const env of newRings(openRings, rungIds.current, loadedAt.current)) {
+      rungIds.current.add(env.id);
+      notifyBrowser(ringNotice(env), scrollToMessage);
+    }
+  }, [openRings]);
+  const [notifyPermission, setNotifyPermission] = useState(() =>
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
+  );
+  const askNotifyPermission = useCallback(() => {
+    if (typeof Notification === 'undefined') return;
+    void Notification.requestPermission().then(setNotifyPermission);
+  }, []);
 
   // Dismissal: Escape, and a click anywhere outside. Both are what a floating layer owes the reader —
   // it covers the canvas, so it must be as easy to put away as it was to open.
@@ -371,6 +396,16 @@ export function AsksStrip({
             where you cannot answer there is no such question — the sign-in button beside it already
             names who you would become. Inside the office panel the rail is ~470px, and rendering
             both spends ~60px it does not have. */}
+        {ringSeat && notifyPermission === 'default' && (
+          <button
+            type="button"
+            className="lc-ask__btn lc-asks__link"
+            onClick={askNotifyPermission}
+            title="let this tab raise a notification when something is addressed to you (ADR 443)"
+          >
+            notify me here
+          </button>
+        )}
         {canAnswer && (
           <button
             type="button"

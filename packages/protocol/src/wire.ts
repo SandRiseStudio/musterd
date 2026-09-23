@@ -15,6 +15,8 @@
 export * from './acts.wire.js';
 export * from './ask.wire.js';
 export * from './capabilities.wire.js';
+// The doorbell's ring rule (ADR 443): /live asks "does this act ring me?" without zod.
+export * from './doorbell.wire.js';
 export * from './envelope.wire.js';
 export * from './goals.wire.js';
 export * from './guards.js';

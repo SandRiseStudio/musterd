@@ -148,3 +148,45 @@ describe('the rail, rendered — a lapsed ask must not read as one waiting on yo
     expect(html).toContain('1 elapsed');
   });
 });
+
+/**
+ * The doorbell's `live` sink (ADR 443): the tab offers to notify only a seat that can be rung, only
+ * while the browser has not been asked yet, and never asks by itself — permission comes from a click.
+ */
+describe('the rail, rendered — "notify me here"', () => {
+  const withNotification = (permission: string | undefined, fn: () => void) => {
+    const g = globalThis as { Notification?: unknown };
+    const prior = g.Notification;
+    g.Notification = permission === undefined ? undefined : { permission };
+    try {
+      fn();
+    } finally {
+      g.Notification = prior;
+    }
+  };
+
+  it('is offered to a connected member while permission is undecided', () =>
+    withNotification('default', () =>
+      expect(render([ask('a', 'standard', 1000)])).toContain('notify me here'),
+    ));
+
+  it('is not offered once decided, nor where the browser has no notifications', () => {
+    for (const permission of ['granted', 'denied', undefined]) {
+      withNotification(permission, () =>
+        expect(render([ask('a', 'standard', 1000)])).not.toContain('notify me here'),
+      );
+    }
+  });
+
+  it('is never offered to an observer — only a roster member can be rung', () =>
+    withNotification('default', () => {
+      const html = renderToStaticMarkup(
+        createElement(AsksStrip, {
+          envelopes: [ask('a', 'standard', 1000)],
+          roster,
+          cfg: { as: 'observer-3', team: 'revive' } as unknown as LiveConfig,
+        }),
+      );
+      expect(html).not.toContain('notify me here');
+    }));
+});
