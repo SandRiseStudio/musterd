@@ -1,8 +1,9 @@
 # 445 — Agent traces are captured local-first: every harness action, on the machine that made it
 
-- Status: proposed — 2026-09-24 (scope chosen with nick in session: full fidelity, local-first;
-  narrowed the same day on nick's acceptance of three changes — a scope not a reversal, content
-  opt-in with a credential scrub, a separate trace database — see §1, §3, §4)
+- Status: accepted — 2026-09-24, by nick in session ("approved"), on the narrowed text (scope
+  chosen with nick: full fidelity, local-first; narrowed the same day on nick's acceptance of three
+  changes — a scope not a reversal, content opt-in with a credential scrub, a separate trace
+  database — see §1, §3, §4)
 - Date: 2026-09-24
 - Lane: `01M3AJQXXJ2B6NN43E11A41AKX` (goal `research-corpus`)
 - Scopes: `docs/design/observability.md` §7's first non-goal. The non-goal **stands as a product
@@ -104,10 +105,18 @@ don't build" (§3). §7 gains a dated scope note pointing here; its text stands.
   silently, and a parse failure downgrades the session to structural-only with an audit row. The
   harness's on-disk format is not a contract (Anthropic says so) and this ADR does not make it one.
 - **R3 — harness-native OTel, and the dormant SDK switched on.** For dogfood seats (ADR 082's
-  scope), the launcher marker (`musterd wire`, ADR 286) writes `OTEL_EXPORTER_OTLP_ENDPOINT` into
-  the MCP registration when the daemon's plist carries one, so ADR 089's adapter spans and the
-  ADR 011 link fire; the same path sets `CLAUDE_CODE_ENABLE_TELEMETRY=1` + OTLP exporters for
-  Claude Code seats, content flags off. R3 is a link and a cost/token cross-check, not a store.
+  scope), the adapter and the CLI resolve their OTLP endpoint from **machine-local config** when
+  the standard env is absent: `~/.musterd/config.json` `telemetry.otlp_endpoint`, written by
+  `musterd service install --otlp-endpoint` beside the daemon plist. It is **not** written into the
+  MCP registration env — [ADR 286](286-launcher-surface-convergence.md) §1 fixes that env to exactly
+  `MUSTERD_LAUNCH_SURFACE`, and this ADR keeps it so. `OTEL_SDK_DISABLED=true` still wins, and an
+  explicit `OTEL_EXPORTER_OTLP_*` env still wins over the file, so ADR 015's "operator points us at
+  an endpoint" posture is unchanged in kind: the pointer may live in a file the operator wrote.
+  With that, ADR 089's `musterd.tool.call` / `musterd.cli.command` spans and the ADR 011 link fire.
+  For Claude Code seats the onboarding reconciler (ADR 282) may additionally carry a settings `env`
+  fragment (`CLAUDE_CODE_ENABLE_TELEMETRY=1`, OTLP exporters to the same endpoint, content flags
+  off) — dogfood-only, declined like any other fragment. R3 is a link and a cost/token
+  cross-check, not a store.
 
 ### 3. One table in its own database, two body classes, and what leaves the machine
 
@@ -161,8 +170,10 @@ ADR 184's publication gate; a spans backend.
 
 ### 6. Increments
 
-0. R3 config: adapter/CLI export switched on for dogfood seats via the launcher marker; Claude Code
-   OTel into the existing sink. No schema change. Falsifier: `musterd.tool.call` spans in the sink.
+0. R3: adapter/CLI resolve the OTLP endpoint from `~/.musterd/config.json` when the env is absent
+   (`service install --otlp-endpoint` writes both plist and file); Claude Code OTel `env` fragment
+   into the existing sink. No protocol schema change. Falsifier: `musterd.tool.call` and
+   `claude_code.*` records in the sink after an adapter restart.
 1. R1 in two halves. **1a structural**: `TraceEvent` protocol schema, `trace.db` + `trace_events`
    migration, `POST /teams/:slug/trace/events`, the Claude Code hook payload, then Codex/Cursor/Grok
    hook adapters — no content column written. **1b content**: the credential scrub (with its own
