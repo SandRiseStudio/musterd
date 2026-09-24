@@ -143,6 +143,20 @@ credential custody (ADR 200, ADR 341, and spec §8).
   beneath) keeps re-claiming until lane 3 moves it to `~/musterd/agents/nick`. The member Workspace
   layout is `~/musterd/<repo>/<member>`; the team home `~/musterd/<team>` (`defaultTeamHome`) is a
   leaf and stays bindable. Physical migration of `~/agents` and `~/agents-<seat>` is lane 3.
+- 2026-09-24 (reach spec lane 3 — migration, tooling half): `musterd agent <name>` now provisions
+  new seat Workspaces at `~/musterd/<repo>/<name>` (`memberWorkspaceDir`), never as a sibling of the
+  checkout it ran from — that checkout may be the unbound runtime, whose parent must hold no
+  Workspace. `<repo>` is the group the invoking Workspace already sits in (`~/musterd/agents/nick` →
+  `agents`), else the remote's repo name, else the checkout basename; a legacy sibling
+  `<checkout>-<name>` that already exists is reused, never re-provisioned. The physical move of this
+  machine is `scripts/layout/migrate.ts` (dry-run by default, `--apply` to execute; inventory and
+  runbook in `docs/wiki/workspace-layout.md`): `~/agents` → `~/.musterd/runtime` (unbound),
+  `~/agents-live` → `~/.musterd/runtime-live` (the `service --live` sibling rule, unchanged),
+  `~/agents-<seat>` → `~/musterd/agents/<seat>`, then `git worktree repair`, the eight LaunchAgent
+  plists rewritten in place (flags preserved), the bindings registry / host registry / harness
+  ledger / `~/.claude.json` re-keyed, and `~/.claude/projects/<slug>` transcript folders renamed. The
+  run itself is a human-present, announced action: it bounces the daemon and every seat session whose
+  folder moves.
 
 ## Observability & Evaluation
 

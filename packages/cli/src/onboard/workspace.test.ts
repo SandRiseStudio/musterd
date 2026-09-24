@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { provisionWorkspace, setSeatGitIdentity } from './workspace.js';
+import { memberWorkspaceDir, provisionWorkspace, setSeatGitIdentity } from './workspace.js';
 
 const made: string[] = [];
 function tmp(prefix: string): string {
@@ -41,13 +41,14 @@ describe('provisionWorkspace', () => {
 
   it('creates a git worktree on its own branch inside a repo', () => {
     const repo = tmp('mwd-git-');
+    const home = tmp('mwd-home-');
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['config', 'user.email', 't@t'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const ws = provisionWorkspace('June', { cwd: repo });
-    made.push(ws.dir); // ensure cleanup even though it's a sibling of repo
+    const ws = provisionWorkspace('June', { cwd: repo, home });
+    expect(ws.dir).toBe(join(home, 'musterd', basename(repo), 'June')); // ~/musterd/<repo>/<member>
     expect(ws.kind).toBe('worktree');
     expect(ws.branch).toBe('agent/June');
     expect(existsSync(join(ws.dir, '.git'))).toBe(true);
@@ -60,26 +61,28 @@ describe('provisionWorkspace', () => {
 
   it('reuses an existing worktree directory instead of failing', () => {
     const repo = tmp('mwd-git2-');
+    const home = tmp('mwd-home-');
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['config', 'user.email', 't@t'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const first = provisionWorkspace('June', { cwd: repo });
+    const first = provisionWorkspace('June', { cwd: repo, home });
     made.push(first.dir);
-    const second = provisionWorkspace('June', { cwd: repo });
+    const second = provisionWorkspace('June', { cwd: repo, home });
     expect(second.dir).toBe(first.dir);
     expect(second.created).toBe(false);
   });
 
   it('sets the seat git identity on the worktree, worktree-scoped (ADR 109)', () => {
     const repo = tmp('mwd-git3-');
+    const home = tmp('mwd-home-');
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['config', 'user.email', 'human@example.com'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 'Human'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const ws = provisionWorkspace('June', { cwd: repo, team: 'revive' });
+    const ws = provisionWorkspace('June', { cwd: repo, team: 'revive', home });
     made.push(ws.dir);
     const cfg = (key: string, cwd: string) =>
       execFileSync('git', ['config', key], { cwd, encoding: 'utf8' }).trim();
@@ -96,12 +99,13 @@ describe('provisionWorkspace', () => {
     // any identity, which meant the fix for a broken credential silently stripped seat attribution —
     // and left every later commit from that seat authored as the human.
     const repo = tmp('mwd-path-id-');
+    const home = tmp('mwd-home-');
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['config', 'user.email', 'human@example.com'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 'Human'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const first = provisionWorkspace('June', { cwd: repo, team: 'revive' });
+    const first = provisionWorkspace('June', { cwd: repo, team: 'revive', home });
     made.push(first.dir);
     // Simulate a worktree provisioned before ADR 109 (or one whose config was lost).
     execFileSync('git', ['config', '--worktree', '--unset', 'user.name'], { cwd: first.dir });
@@ -121,12 +125,13 @@ describe('provisionWorkspace', () => {
 
   it('--here in a seat worktree sets the identity too', () => {
     const repo = tmp('mwd-here-id-');
+    const home = tmp('mwd-home-');
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['config', 'user.email', 'human@example.com'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 'Human'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const first = provisionWorkspace('June', { cwd: repo, team: 'revive' });
+    const first = provisionWorkspace('June', { cwd: repo, team: 'revive', home });
     made.push(first.dir);
     execFileSync('git', ['config', '--worktree', '--unset', 'user.name'], { cwd: first.dir });
 
@@ -147,16 +152,17 @@ describe('provisionWorkspace', () => {
 
   it('repairs the seat git identity on reuse (pre-109 worktrees)', () => {
     const repo = tmp('mwd-git4-');
+    const home = tmp('mwd-home-');
     execFileSync('git', ['init', '-q'], { cwd: repo });
     execFileSync('git', ['config', 'user.email', 't@t'], { cwd: repo });
     execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const first = provisionWorkspace('June', { cwd: repo });
+    const first = provisionWorkspace('June', { cwd: repo, home });
     made.push(first.dir);
     execFileSync('git', ['config', '--worktree', '--unset', 'user.name'], { cwd: first.dir });
     execFileSync('git', ['config', '--worktree', '--unset', 'user.email'], { cwd: first.dir });
-    const second = provisionWorkspace('June', { cwd: repo, team: 'revive' });
+    const second = provisionWorkspace('June', { cwd: repo, team: 'revive', home });
     expect(second.created).toBe(false);
     const name = execFileSync('git', ['config', 'user.name'], {
       cwd: second.dir,
@@ -187,5 +193,51 @@ describe('provisionWorkspace', () => {
     expect(
       execFileSync('git', ['config', 'user.email'], { cwd: repo, encoding: 'utf8' }).trim(),
     ).toBe('human@example.com');
+  });
+});
+
+describe('memberWorkspaceDir — ~/musterd/<repo>/<member> (reach spec §6, ADR 442)', () => {
+  const home = '/Users/nick';
+  it('a checkout that is itself a member Workspace keeps its repo group', () => {
+    expect(
+      memberWorkspaceDir('/Users/nick/musterd/agents/nick', 'June', home, 'x/musterd.git'),
+    ).toBe('/Users/nick/musterd/agents/June');
+    expect(memberWorkspaceDir('/Users/nick/musterd/agents/nick/packages/cli', 'June', home)).toBe(
+      '/Users/nick/musterd/agents/June',
+    );
+  });
+  it('otherwise the remote names the repo group — never a sibling of the checkout', () => {
+    expect(
+      memberWorkspaceDir(
+        '/Users/nick/.musterd/runtime',
+        'June',
+        home,
+        'git@github.com:Org/musterd.git',
+      ),
+    ).toBe('/Users/nick/musterd/musterd/June');
+    expect(memberWorkspaceDir('/tmp/x', 'June', home, 'https://github.com/Org/site/')).toBe(
+      '/Users/nick/musterd/site/June',
+    );
+  });
+  it('with no remote, the checkout basename names the group', () => {
+    expect(memberWorkspaceDir('/Users/nick/proj', 'June', home, null)).toBe(
+      '/Users/nick/musterd/proj/June',
+    );
+  });
+  it('legacy sibling worktrees are reused by provisionWorkspace, not re-provisioned', () => {
+    const repo = tmp('mwd-legacy-');
+    const home = tmp('mwd-home-');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
+    const legacy = join(dirname(repo), `${basename(repo)}-June`);
+    execFileSync('git', ['worktree', 'add', '-q', '-b', 'agent/June', legacy, 'HEAD'], {
+      cwd: repo,
+    });
+    made.push(legacy);
+    const ws = provisionWorkspace('June', { cwd: repo, home });
+    expect(realpathSync(ws.dir)).toBe(realpathSync(legacy));
+    expect(ws.created).toBe(false);
   });
 });

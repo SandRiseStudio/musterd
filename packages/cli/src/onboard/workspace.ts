@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { gitToplevel } from '@musterd/protocol/project';
 
@@ -35,6 +36,50 @@ export interface WorkspaceOpts {
   cwd?: string;
   /** Team slug — used for the seat's synthetic git-identity email domain (ADR 109). */
   team?: string;
+  /** The `~` the `~/musterd/<repo>/<member>` layout hangs off; defaults to `os.homedir()` (tests). */
+  home?: string;
+}
+
+/**
+ * Where a member's Workspace lives (reach-and-boundaries spec §6, ADR 442): `~/musterd/<repo>/<member>`.
+ * Grouped by repo, not by member kind — humans and agents alike — and never a sibling of the checkout
+ * it was provisioned from, because that checkout may be the unbound runtime (`~/.musterd/runtime`)
+ * whose parent must hold no Workspace. `<repo>` is, in order: the segment this checkout already sits
+ * under when it is itself a member Workspace (`~/musterd/agents/nick` → `agents`, so a repo keeps one
+ * group however its remote is spelled); else the remote's repo name; else the checkout's basename.
+ */
+export function memberWorkspaceDir(
+  top: string,
+  name: string,
+  home: string = homedir(),
+  remote: string | null = null,
+): string {
+  const roof = join(home, 'musterd');
+  const rel = resolvePath(top).startsWith(roof + '/')
+    ? resolvePath(top).slice(roof.length + 1)
+    : '';
+  const segments = rel.split('/');
+  const repo =
+    segments.length >= 2 && segments[0]
+      ? segments[0]
+      : (remoteRepoName(remote) ?? basename(resolvePath(top)));
+  return join(roof, repo, name);
+}
+
+/** `git@github.com:Org/musterd.git` / `https://…/Org/musterd` → `musterd`; null when unparseable. */
+function remoteRepoName(remote: string | null): string | null {
+  if (!remote) return null;
+  const tail = remote.trim().replace(/\/+$/, '').split(/[/:]/).pop();
+  const name = tail?.replace(/\.git$/, '');
+  return name ? name : null;
+}
+
+function originUrl(top: string): string | null {
+  try {
+    return git(['remote', 'get-url', 'origin'], top);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -95,13 +140,20 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
 
   const top = gitToplevel(cwd);
   if (top) {
-    const dir = join(dirname(top), `${basename(top)}-${name}`);
+    // Pre-layout seats (ADR 065) were siblings of the checkout: `<repo>-<name>`. One that already
+    // exists is that seat's Workspace — reuse it (the identity repair below) rather than provision a
+    // second; the layout move itself is the reach-spec lane 3 migration, not this command.
+    const legacy = join(dirname(top), `${basename(top)}-${name}`);
+    const dir = existsSync(legacy)
+      ? legacy
+      : memberWorkspaceDir(top, name, opts.home, originUrl(top));
     const branch = `agent/${name}`;
     if (existsSync(dir)) {
       // Reuse path repairs identity too, so pre-109 worktrees pick it up on re-run.
       setSeatGitIdentity(name, dir, opts.team);
       return { dir, kind: 'worktree', branch, created: false };
     }
+    mkdirSync(dirname(dir), { recursive: true });
     try {
       // New branch off HEAD so the agent has its own line to commit on.
       git(['worktree', 'add', '-b', branch, dir, 'HEAD'], top);
