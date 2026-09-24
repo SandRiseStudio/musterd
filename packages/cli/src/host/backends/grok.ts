@@ -5,7 +5,7 @@ import { resolveGrokBin } from '../../grokBin.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
 import type { ActuatorBackend, WakeActuation, WakeCompletion } from '../backend.js';
 import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
-import { readGrokWakeUsage } from './grokUsage.js';
+import { findGrokWakeSessionId, readGrokWakeUsage } from './grokUsage.js';
 
 const KILL_GRACE_MS = 10_000;
 const RESUME_VERIFY_WINDOW_MS = 30_000;
@@ -69,6 +69,8 @@ export interface GrokDeps {
   ensurePinned?: (opts: { node: string; binJs: string }) => string | undefined;
   /** ADR 436 clause 2: the usage Grok wrote for this wake, read at settle; injectable for tests. */
   readUsage?: (workspace: string, startedAt: number) => WakeUsage | undefined;
+  /** ADR 436 clause 4: the real session id of a fresh wake, read at exit; injectable for tests. */
+  findSessionId?: (workspace: string, startedAt: number) => string | undefined;
 }
 
 function recordFreshSession(workspace: string, id: string, startedAt: number): void {
@@ -117,6 +119,7 @@ export function grokBackend(deps: GrokDeps = {}): ActuatorBackend {
         args: string[],
         label: 'fresh' | 'resumed',
         timeoutMs: number,
+        resumeId?: string,
       ): Promise<{
         occupied: boolean;
         deferred?: boolean;
@@ -151,6 +154,7 @@ export function grokBackend(deps: GrokDeps = {}): ActuatorBackend {
           child.once('exit', (code) => resolve(code));
           child.once('error', () => resolve(null));
         });
+        const placeholder = `wake-${spec.order.lease_id}`;
         const settled: Promise<WakeCompletion | undefined> = exited.then((code) => {
           clearTimeout(watchdog);
           const duration_ms = Date.now() - startedAt;
@@ -161,10 +165,18 @@ export function grokBackend(deps: GrokDeps = {}): ActuatorBackend {
           const usage = (deps.readUsage ?? readGrokWakeUsage)(spec.workspace, startedAt);
           // Grok prints `costUsdTicks`, a price in a unit the host cannot verify — so the row
           // carries the tokens and says so, and never a converted dollar figure (ADR 364).
+          // ADR 436 clause 4: the capture this wake made or resumed, for the loop to stamp ended. A
+          // fresh wake's capture is the `wake-<lease>` placeholder; name Grok's real session so the
+          // ended capture is the one enumeration sees.
+          const realId =
+            label === 'fresh'
+              ? (deps.findSessionId ?? findGrokWakeSessionId)(spec.workspace, startedAt)
+              : undefined;
           return {
             duration_ms,
             ...(usage ? { usage } : {}),
             unpriced_reason: 'harness_price_unverified',
+            captures: [{ harness: 'grok', ids: [placeholder, resumeId], id: realId }],
           };
         });
         const verified = await ctx.verifyOccupied(
@@ -181,11 +193,7 @@ export function grokBackend(deps: GrokDeps = {}): ActuatorBackend {
               (verified.own_unattested ? ' (own child, lease unattested — ADR 379)' : ''),
           );
           if (label === 'fresh')
-            (deps.recordFreshSession ?? recordFreshSession)(
-              spec.workspace,
-              `wake-${spec.order.lease_id}`,
-              startedAt,
-            );
+            (deps.recordFreshSession ?? recordFreshSession)(spec.workspace, placeholder, startedAt);
           return { occupied: true, reason: '', settled };
         }
         killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
@@ -207,6 +215,7 @@ export function grokBackend(deps: GrokDeps = {}): ActuatorBackend {
           buildGrokResumeArgs(spec.order.composed_line, captured, spec.workspace),
           'resumed',
           spec.bounds.timeout_ms,
+          captured,
         );
         if (resumed.occupied)
           return { outcome: { occupied: true, session: 'resumed' }, settled: resumed.settled };

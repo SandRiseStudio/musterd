@@ -46,6 +46,18 @@ export interface WakeCompletion {
   unpriced_reason?: UnpricedReason;
   /** ADR 364: a price the harness printed that the host cannot attest (opencode). */
   harness_cost_usd?: number;
+  /** ADR 436 clause 4: the session capture(s) this run made or resumed, which the LOOP stamps
+   *  ended at settle. Host-local — stripped before the supplementary report. */
+  captures?: CaptureClaim[];
+}
+
+/** A backend's claim on the binding's captured session (ADR 436 clause 4): the ids this run made
+ *  or resumed, and — for a harness whose fresh capture is a placeholder — the real id to rename it
+ *  to. The loop applies it with `endWakeCapture`; the backend never writes `ended_at` itself. */
+export interface CaptureClaim {
+  harness: string;
+  ids: (string | undefined)[];
+  id?: string | undefined;
 }
 
 /**

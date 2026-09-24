@@ -244,6 +244,7 @@ async function attempt(
   });
   const settled: Promise<WakeCompletion | undefined> = exited.then((code) => {
     clearTimeout(watchdog);
+    threadId ??= parseCodexThreadLine(buffer);
     // The lease file dies with the run, success or failure — a killed wake must not leave a lease
     // for the next occupant of this workspace to find (ADR 354).
     if (child.pid !== undefined)
@@ -261,6 +262,8 @@ async function attempt(
       duration_ms,
       ...(usage ? { usage } : {}),
       unpriced_reason: 'harness_prints_no_price',
+      // ADR 436 clause 4: the capture this run made or resumed — the loop stamps it ended.
+      captures: [{ harness: 'codex', ids: [threadId, expectedId] }],
     };
   });
   const verified = await Promise.race([

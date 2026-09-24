@@ -1070,7 +1070,12 @@ describe('WakeCompletion (inc 5): settled resolves the run summary; fast-fail me
     );
     child.exit(0);
     const completion = await actuation.settled;
-    expect(completion).toEqual({ cost_usd: 0.42, duration_ms: 34_000 });
+    expect(completion).toEqual({
+      cost_usd: 0.42,
+      duration_ms: 34_000,
+      // ADR 436 clause 4: the minted session this attempt ran, for the loop to stamp ended.
+      captures: [{ harness: 'claude-code', ids: ['00000000-0000-4000-8000-000000000000'] }],
+    });
   });
 
   it('an instant crash carries its summary on the PRIMARY outcome (fast-fail merge)', async () => {

@@ -99,3 +99,28 @@ describe('grok settle (ADR 436 clause 1 — every wake settles and prices)', () 
     expect(completion?.usage).toBeUndefined();
   });
 });
+
+describe('grok liveness (ADR 436 clause 4 — a wake that settled is over)', () => {
+  it('settles claiming the wake-<lease> placeholder, renamed to the real Grok session id', async () => {
+    const child = new Child();
+    const backend = grokBackend({
+      resolveBin: async () => '/grok',
+      spawn: (() => child) as never,
+      readSession: () => ({ state: 'none', source: 'slot' }) as never,
+      recordFreshSession: () => undefined,
+      ensurePinned: () => undefined,
+      readUsage: () => undefined,
+      findSessionId: () => 'grok-real',
+    });
+    const ctx: BackendContext = {
+      verifyOccupied: async () => ({ occupied: true, provenance: 'wake', lease_matched: true }),
+      log: () => {},
+    };
+    const result = await backend.wake(spec, ctx);
+    child.exit(0);
+    const completion = await result.settled;
+    expect(completion?.captures).toEqual([
+      { harness: 'grok', ids: ['wake-l', undefined], id: 'grok-real' },
+    ]);
+  });
+});
