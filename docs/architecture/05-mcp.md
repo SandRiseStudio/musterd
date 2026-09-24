@@ -67,6 +67,16 @@ rather than being shadowed by a frozen env copy that outranks the file. (`MUSTER
 manual override for binding-less/CI folders — it just isn't written by `init`/`agent`/`wire`.) Env is kept first-class for host-injection and hosted/no-filesystem
 setups.
 
+**The wall (ADR 442).** The adapter is one side of it and enforces none of it: the session-reach
+refusal lives in the CLI's PreToolUse gate (`04-cli.md`), where the harness calls it. What the
+adapter owes is **identity discipline** — it acts as the seat this Workspace's binding (or
+`MUSTERD_*` env) names and as nothing else; the CLI's credential vault is not on its ladder — and
+**pointer discipline**: a `team_send` ack carries no `delivery_hint` (ADR 167 increment 2 is
+retired; the field stays optional in the schema so an older daemon's ack still parses, and nothing
+acts on one), and every interrupt or wake line it relays is a team-named pointer the seat resolves
+through its own authenticated read. The wall stops model mistakes; it is not a boundary against a
+hostile process under the same OS user (`docs/design/security.md`).
+
 ### The entry carries no per-seat state (ADR 165)
 
 Claude Code keys local-scope MCP config by **repo root**, so every git worktree of a repo shares one

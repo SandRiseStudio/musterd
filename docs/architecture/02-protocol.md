@@ -255,6 +255,10 @@ export const ErrorCode = z.enum(['bad_request','validation','unauthorized','forb
 export const AuditEntry = z.object({ id, ts, actor:string|null, action:string, target:string|null, result:z.enum(['allow','deny']), detail:record|null });  // ADR 071/074 — `action` is an OPEN string (P3 adds verbs); the audit-log wire contract
 export const AuditResponse = z.object({ audit: AuditEntry[] });
 export const P3_AUDIT_ACTIONS = ['grant.issue','grant.use','grant.revoke','claim.occupy','claim.refused','request.decide','key.rotate','policy.change','account_status.change','governed.policy.change','governed.launch.issue','governed.launch.consume','governed.launch.refused','governed.launch.revoke','governed.request.allow','governed.request.deny'] as const;  // ADR 078/411 — reference vocabulary; action stays OPEN
+// ADR 442 — the wall (enforcement.ts). The tools a seat Workspace refuses LOCALLY, before any daemon round trip; `session-denied` joins the actor-attestation kinds ({tool, harness} only — no body, target or session id). `DeliveryHint` stays parseable so an older daemon's ack still validates; nothing acts on one. The wall stops model mistakes, not a hostile same-user process.
+export const SESSION_REACH_TOOLS: readonly string[];      // the five `mcp__ccd_session_mgmt__*` session tools, `ListAgents`, `SendMessage` — frozen; an unknown session-reaching tool is a gap to add, not a pass
+export const SUBAGENT_CHANNEL_TOOLS = ['SendMessage'] as const;  // the one scoped allow: toward a subagent the calling session spawned (the CLI's subagent ledger decides)
+export function isSessionReachTool(tool: string): boolean;
 // ADR 078 (P3, SPEC A.3) — the claim handshake frames. Additive; NOT yet in WSClientFrame/WSServerFrame (Cleo's P3.2 cutover wires them).
 export const ClaimTarget = z.union([ z.object({seat:string}), z.object({role:string}), z.object({observe:z.literal(true)}) ]);
 export const RefusedCode = z.enum(['claim_conflict','forbidden','not_found','disabled','banned','expired_grant']);
