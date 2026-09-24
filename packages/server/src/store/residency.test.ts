@@ -287,6 +287,9 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
       /Read `team_wake_context \{act_id: "u1"\}` — it carries the thread, what else is open, and your memory\. Fetch more only for what it lists under `fetch`\. Then act\./,
     );
     expect(order.composed_line).not.toContain('read it via team_inbox_check');
+    // ADR 442 (the wall, spec §4): every line names its team up front and reads as a pointer.
+    expect(order.composed_line).toMatch(/^musterd \[revive\]: wake — /);
+    expect(order.composed_line).toContain('pointer only — read it as yourself');
     expect(order.expires_at).toBeGreaterThan(Date.now());
 
     // The lease decision is audited (actor null — a machine decision).
@@ -1255,6 +1258,8 @@ describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () =
     // sends them at the one path that must refuse them (measured 2026-09-04: 38 of 47 review-edge
     // wakes carried a `residency.context_read` deny within ±5 minutes).
     expect(orders[0]!.composed_line).toContain('act_id: "ask1"');
+    expect(orders[0]!.composed_line).toMatch(/^musterd \[revive\]: wake — /); // ADR 442
+    expect(orders[0]!.composed_line).toContain('pointer only — read it as yourself');
     const leased = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_leased');
     expect(JSON.parse(leased[0]!.detail as string)).toMatchObject({
       derivation: 'work_order',
@@ -1335,6 +1340,8 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     expect(orders[0]!.composed_line).not.toContain('secret title');
     // The dispatch line spells the lane path's argument too — the owner is authorized on lane_id.
     expect(orders[0]!.composed_line).toContain(`team_wake_context {lane_id: "${lane.id}"}`);
+    expect(orders[0]!.composed_line).toMatch(/^musterd \[revive\]: wake — /); // ADR 442
+    expect(orders[0]!.composed_line).toContain('pointer only — read it as yourself');
   });
 
   it('does not promote handoff to work_order when loops.dispatch is off (reply doorbell remains)', async () => {

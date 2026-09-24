@@ -10,8 +10,8 @@ import { pendingActionSummary, resolveRead } from './helpers.js';
  * release) — print the directed acts waiting for this folder's bound seat, the read-only "what's
  * waiting for me" view a Claude Code `Notification` hook runs at the approval-prompt moment. It moved
  * under `inbox` because "nudge" had come to name six things in two directions — this is a PULL (the
- * seat reads its own inbox), while ADR 167's delivery nudge is a PUSH into a teammate's session — and
- * a reader who had just seen `delivery_hint` expected `musterd nudge` to poke someone else
+ * seat reads its own inbox), while ADR 167's delivery nudge was a PUSH into a teammate's session
+ * (retired by ADR 442), and readers expected `musterd nudge` to poke someone else
  * (docs/wiki/command-and-tool-surface-map.md). When a single-threaded agent loop is parked on a permission prompt, its loop is frozen, so
  * ADR 046's per-command nudge can't fire and a teammate's `request_help` sits unread until the human
  * hand-relays it. The hook fires *exactly* when the agent parks for input, so the dead-wait moment
