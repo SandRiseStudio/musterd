@@ -496,13 +496,17 @@ if (!STATIC_ONLY) {
     // 12 is comfortably under what a connected page renders (25 apiece today) and comfortably
     // over the 1 a sign-in screen renders, so it separates "connected" from "never got there".
     report(await sweep(`${base}/board?team=${team}`), '/board (connected)', 12);
+    /* /live's floor is NOT /board's 12. A /live whose team data never arrives renders its empty
+       screen ("0 seats", "No seats on this team", "Listening.") at ~18 rows, so 12 passed it green.
+       The fixture team paints 260-307 (CI, 2026-09-24); 100 sits ~5x over empty and well under that. */
+    const LIVE_FLOOR = 100;
     // Connected /live mounts the office scene, so its lighting is pinned like the preview's —
     // same clock-dependence, same two-ended bracket. See SCENE_LIGHTS above.
     for (const light of SCENE_LIGHTS) {
       report(
         await sweep(`${base}/live?team=${team}&light=${light}${SCENE_STILL}`),
         `/live (connected, light=${light})`,
-        12,
+        LIVE_FLOOR,
       );
     }
     /* The asks SHEET, open (`?asks-open`). It is `visibility: hidden; opacity: 0` while closed, so
@@ -517,7 +521,7 @@ if (!STATIC_ONLY) {
     report(
       await sweep(`${base}/live?team=${team}&light=${SCENE_LIGHTS[0]}${SCENE_STILL}&asks-open`),
       '/live (connected, asks sheet open)',
-      12,
+      LIVE_FLOOR,
     );
     /* The nameplates, OPEN (`?plates-open`). Same gap as the asks sheet one line up, and wider: the
        harness segment carries its own ink per harness (--lc-hz-{codex,cursor,grok,opencode}-ink) and
@@ -533,7 +537,7 @@ if (!STATIC_ONLY) {
     report(
       await sweep(`${base}/live?team=${team}&light=${SCENE_LIGHTS[0]}${SCENE_STILL}&plates-open`),
       '/live (connected, nameplates open)',
-      12,
+      LIVE_FLOOR,
     );
   } finally {
     await sh(['down']);

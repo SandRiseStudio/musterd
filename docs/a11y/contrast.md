@@ -294,11 +294,16 @@ graded 1 row of 21 green before the guard and exits 2 after it. A settle heurist
 (wait until the row count stops reaching new highs for 2.5 s) and was rejected: it cannot know how
 long a fetch will take, and it still graded that fixture's 1 row.
 
-**What the guard cannot see:** a page whose data never arrives during the run. In 1 of 5 `/live`
-runs the team data did not load at all, so the sweep graded the empty screen ("0 seats", "No seats
-on this team", "Listening.", 18 rows) and nothing grew. That is not specific to `--motion`; the
-frozen pass settles on the same screen. Read the row count: ~120-135 rows on `/live` is the
-populated page, and ~18 is the empty one.
+~~**What the guard cannot see:** a page whose data never arrives during the run.~~ **Guarded since
+2026-09-24.** In 1 of 5 `/live` runs the team data did not load at all, so the sweep graded the
+empty screen ("0 seats", "No seats on this team", "Listening.", 18 rows) and nothing grew. That was
+not specific to `--motion`, and it was not only a manual gap: the CI gate's floor for connected
+`/live` was 12 rows, **under** the empty screen's 18, so an empty `/live` passed CI too. Two changes:
+
+- The gate's connected `/live` floor is now 100. The fixture team paints 260-307 rows in CI
+  (2026-09-24) and the empty screen paints ~18. `/board` keeps its 12.
+- The sweep takes `--min-rows N` for manual runs, both passes. Under the floor it exits 2 as a
+  harness failure. Use ~100 on a populated `/live`. Without the flag, read the row count yourself.
 
 ## Log
 

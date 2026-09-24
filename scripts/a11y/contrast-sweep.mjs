@@ -9,6 +9,7 @@
  *
  * Usage:
  *   node scripts/a11y/contrast-sweep.mjs [url] [--probe cls,cls,…] [--json out.json] [--quiet]
+ *                                         [--motion] [--min-rows N]
  *
  * Exit code is 1 when the LIVE sweep finds a failure, so this can become a gate. The --probe pass
  * never affects the exit code; see "Probing" below for why.
@@ -82,7 +83,12 @@ import { inflateSync } from 'node:zlib';
 import { openChromePage } from './chrome.mjs';
 
 const args = process.argv.slice(2);
-const url = args.find((a) => !a.startsWith('--')) ?? 'http://127.0.0.1:4849/live';
+/* The URL is the first bare argument that is not a flag's VALUE — else `--min-rows 100 <url>`
+   sweeps a URL called "100". */
+const VALUED = new Set(['--probe', '--json', '--probe-host', '--min-rows']);
+const url =
+  args.find((a, i) => !a.startsWith('--') && !VALUED.has(args[i - 1])) ??
+  'http://127.0.0.1:4849/live';
 const flag = (name) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
@@ -93,6 +99,23 @@ const QUIET = args.includes('--quiet');
 /** Measure WHILE the page moves (lane 01M2NRPMPA): grade each row against the worst ground seen
  *  across frames rather than one frozen frame. Manual for now — its CI cost is not yet measured. */
 const MOTION = args.includes('--motion');
+/** The fewest rows a pass must grade for its verdict to be about the page you meant. A /live whose
+ *  team data never arrives renders its empty screen — "0 seats", "No seats on this team",
+ *  "Listening." — at ~18 rows, grades them clean and exits 0, and nothing in the page grows to
+ *  trip the late-render guard (1 of 5 runs, 2026-09-23). The populated page is ~120-300. Only the
+ *  caller knows which page it asked for, so the floor is a flag, not a guess. */
+const MIN_ROWS = Number(flag('min-rows') ?? 0);
+/** Exit 2 when a pass graded fewer rows than --min-rows: not a contrast result, a page that never
+ *  became the page under test. Runs after the report so the reader sees what WAS measured. */
+const floorCheck = async (n, pass) => {
+  if (n >= MIN_ROWS) return;
+  console.error(
+    `contrast-sweep${pass} — graded ${n} rows on ${url}, under --min-rows ${MIN_ROWS}. The page` +
+      ' almost certainly rendered an empty or signed-out state (its data never arrived), so this' +
+      ' is a harness failure, not a contrast result.',
+  );
+  await exit(2);
+};
 /** Container the probe pass injects into. Must be an opaque, representative surface. */
 const PROBE_HOST = flag('probe-host') ?? '.lc-stream';
 
@@ -1024,6 +1047,7 @@ if (MOTION) {
       JSON_OUT,
       JSON.stringify({ url, frames: FRAMES, gapMs: GAP_MS, secs: +secs, graded, fails }, null, 2),
     );
+  await floorCheck(graded.length, ' --motion');
   await exit(fails.length ? 1 : 0);
 }
 
@@ -1515,5 +1539,6 @@ if (JSON_OUT) {
   if (!QUIET) console.log(`\nwrote ${JSON_OUT}`);
 }
 
+await floorCheck(out.live.length, '');
 // Only the live sweep gates. The probe pass is advisory by construction.
 await exit(liveFails.length ? 1 : 0);
