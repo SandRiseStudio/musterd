@@ -52,7 +52,6 @@ interface Instruments {
   seenLatency: Histogram;
   agentTokens: Counter;
   interruptCheck: Counter;
-  ccdNudge: Counter;
 }
 
 // Created lazily on first use (i.e. after startTelemetry has registered a provider) so the
@@ -92,10 +91,6 @@ function ix(): Instruments {
     interruptCheck: meter.createCounter('musterd.interrupt.check', {
       description:
         'Tool-boundary interrupt-line probes, by result (silent | raised) — the mid-loop reachability primitive (ADR 088). result=raised is the delivery half of the steering-latency eval.',
-    }),
-    ccdNudge: meter.createCounter('musterd.delivery.ccd_nudge', {
-      description:
-        'Delivery-rail nudge events, by stage (hinted | relayed | relayed_verbatim) — ADR 167. relayed*/hinted is the relay rate (the honest measure of a model-dependent rail); relayed_verbatim/relayed is the injection-guard verbatim rate.',
     }),
   };
   return instruments;
@@ -270,28 +265,6 @@ export function recordTokenUsage(env: Envelope): void {
  */
 export function recordInterruptCheck(result: 'silent' | 'raised'): void {
   ix().interruptCheck.add(1, { 'musterd.interrupt.result': result });
-}
-
-/** Count a delivery-rail nudge event by stage (ADR 167): `hinted` when a send ack carried a
- *  `delivery_hint`; `relayed`/`relayed_verbatim` when the observer's attestation confirmed the relay
- *  (the split is the verbatim guard — see `confirmNudge`). */
-export function recordCcdNudge(stage: 'hinted' | 'relayed' | 'relayed_verbatim'): void {
-  ix().ccdNudge.add(1, { 'musterd.nudge.stage': stage });
-}
-
-/**
- * Count the rail's decision for EVERY directed-act send, by reason (ADR 173, lane `01KYQ9175S`).
- *
- * `recordCcdNudge('hinted')` counts only successes, so its zero was unreadable: no denominator, and
- * no way to see which leg of the predicate declined. This counts the whole decision space, so the
- * `issued` rate has something to be a rate *of*.
- *
- * Note this is OTel, which is off unless an operator set an endpoint (ADR 089 / ADR 015 posture) —
- * which is precisely why the durable half of this lives in the audit log rather than here. A metric
- * nobody is scraping is not observability.
- */
-export function recordNudgeDecision(reason: string): void {
-  ix().ccdNudge.add(1, { 'musterd.nudge.stage': 'decided', 'musterd.nudge.reason': reason });
 }
 
 /** Count a presence attach/detach for churn (observability.md §4). */

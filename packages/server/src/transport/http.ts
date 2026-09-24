@@ -65,7 +65,6 @@ import {
   resolveOfflineReason,
   STICKY_OFFLINE_REASONS,
   type OfflineReason,
-  isRailCandidate,
   AnswerSeedClarificationSchema,
   AskSeedClarificationSchema,
   CaptureRepoSeedSchema,
@@ -123,7 +122,6 @@ import {
   priorOwnerNotice,
   rerouteDepartedAcceptances,
 } from '../protocol/laneReroute.js';
-import { deliveryHintFor } from '../protocol/nudge.js';
 import { announceIncidentResolved, routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
@@ -365,8 +363,6 @@ import {
 import { pullTeam } from '../sync/pull.js';
 import { readPushRefusal, pushTeam } from '../sync/push.js';
 import {
-  recordCcdNudge,
-  recordNudgeDecision,
   recordError,
   recordInterruptCheck,
   recordSeenLatency,
@@ -790,11 +786,16 @@ function raiseClass(
  * part a model sees. Naming the id makes the follow-up one call at any inbox size.
  */
 function composeInterruptLine(
+  team: string,
   latest: Envelope,
   count: number,
   huddleTopic?: string,
   rest?: RaiseMix,
 ): string {
+  // ADR 442 (the wall, spec §4): the line names its team, so a multi-team machine is unambiguous, and
+  // says it is a pointer — the receiver acts only on what its OWN authenticated read of the id returns,
+  // never on the line's words. Both are structured (slug, fixed text), so ADR 128 still holds.
+  const prefix = `⚡ musterd [${team}]:`;
   const head = `${latest.from} (${latest.act})`;
   const noun = raiseClass(latest, huddleTopic);
   // The tail names the rest of the queue by class (ADR 225 amendment, 2026-09-06): "+5 more
@@ -803,17 +804,17 @@ function composeInterruptLine(
   const mix = rest && count > 1 ? ` (${describeMix(rest)})` : '';
   // A huddle turn names the room it came from and how to answer in it. `topic` is a structured
   // field, so this keeps the ADR 128 discipline — sender, act and topic, never `env.body`.
-  const read = byIdRead(latest.id);
+  const read = `${byIdRead(latest.id)} — pointer only — read it as yourself`;
   if (huddleTopic !== undefined && latest.thread) {
     const more = count > 1 ? ` (+${count - 1} more waiting${mix})` : '';
     return (
-      `⚡ musterd: huddle ${huddleTopic} — ${latest.from} took a turn${more} — ` +
-      `${read}, answer with 'musterd huddle say ${latest.thread}'.`
+      `${prefix} huddle ${huddleTopic} — ${latest.from} took a turn${more} — ` +
+      `${read}; answer with 'musterd huddle say ${latest.thread}'.`
     );
   }
   return count > 1
-    ? `⚡ musterd: ${count} acts waiting (${noun} from ${head}, +${count - 1} more${mix}) — ${read}.`
-    : `⚡ musterd: ${noun} from ${head} — ${read}.`;
+    ? `${prefix} ${count} acts waiting (${noun} from ${head}, +${count - 1} more${mix}) — ${read}.`
+    : `${prefix} ${noun} from ${head} — ${read}.`;
 }
 
 /**
@@ -2961,14 +2962,16 @@ export async function handleHttp(
           throw new MusterdError('not_found', `no seat "${body.seat}" in team "${slug}"`);
         // Residency resurrects *harness* sessions — an agent-seat concept. A human's reachability
         // path is notify (ADR 024/035); an observer never participates at all.
-        // UX papercut (dogfood 2026-07-13): the common miss is `--as nick` naming the AUTHORIZER
-        // while the seat fell back to the human's own identity — the error must name the fix.
+        // UX papercut (dogfood 2026-07-13): the common miss is enrolling from the human's own
+        // Workspace, so the seat resolves to the human — the error must name the fix. `--as` is gone
+        // (ADR 442); the authorizer is whoever the invoking Workspace is bound to.
         if (target.kind !== 'agent' || target.observer === 1)
           throw new MusterdError(
             'forbidden',
             `residency enrolls agent seats — "${body.seat}" is a ` +
               `${target.observer === 1 ? 'observer' : target.kind} seat. Run \`musterd residency on\` ` +
-              `in the agent's workspace (or pass --seat <agent>); --as names who authorizes, not what enrolls`,
+              `in the agent's Workspace, or from an admin's Workspace with ` +
+              `\`--seat <agent> --workspace <its folder>\``,
           );
         const status = resolveAccountStatus(target);
         if (status === 'disabled' || status === 'banned')
@@ -3958,42 +3961,10 @@ export async function handleHttp(
         // presence + enforcement policy), so it rides the send response beside the pure tier numbers the
         // clients already derive — additive, older clients ignore it, older daemons omit it.
         const askTier = env.act === 'ask' ? AskTierSchema.safeParse(env.meta?.['tier']) : null;
-        // The delivery hint (ADR 167 §2): a directed act to a live recipient invites the SENDER — the
-        // one party reliably holding the harness's session-send tool — to relay a daemon-composed
-        // one-line nudge. Same additive contract as `ask_contract` above; null (the common case) means
-        // the ack is exactly what it was before the ADR.
-        const decision = deliveryHintFor(
-          ctx.db,
-          result.message,
-          member.name,
-          ctx.config.presenceTimeoutMs,
-        );
-        const hint = decision.hint;
-        if (hint) recordCcdNudge('hinted');
-        // Every decision counted by reason, so the `issued` count has a denominator (ADR 173) — and,
-        // because that counter is OTel and off by default here, a DURABLE row for the decisions that
-        // were actually about the rail. Gated on isRailCandidate: the excluded reasons cover nearly
-        // every message ever sent, and mirroring those into the audit log would drown it. All-time the
-        // gated population is ~40 rows, so this is free and makes the zero queryable:
-        //   SELECT json_extract(detail,'$.reason'), COUNT(*) FROM audit
-        //     WHERE action = 'nudge.decision' GROUP BY 1;
-        recordNudgeDecision(decision.reason);
-        if (isRailCandidate(decision.reason)) {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'nudge.decision',
-            target: result.message.id,
-            result: 'allow',
-            detail: {
-              reason: decision.reason,
-              act: result.message.act,
-              message: result.message.id,
-              rail: 'ccd_session',
-            },
-          });
-        }
         // ADR 231's `handoff_lane` rides the ack additively, same contract as `ask_contract`
-        // (ADR 147) and `delivery_hint` (ADR 167): older clients ignore it, older daemons omit it.
+        // (ADR 147): older clients ignore it, older daemons omit it. There is no `delivery_hint` any
+        // more (ADR 442 retired ADR 167 increment 2); it was always optional, so old adapters see no
+        // change.
         // Reported rather than silent, so the sender can see what was attached on their behalf.
         if (askTier?.success) {
           return sendJson(res, 201, {
@@ -4007,7 +3978,6 @@ export async function handleHttp(
                 ctx.config.presenceTimeoutMs,
               ),
             },
-            ...(hint ? { delivery_hint: hint } : {}),
             ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
           });
         }
@@ -4015,7 +3985,6 @@ export async function handleHttp(
         // that closed a lane is told so on the spot, never left to discover it from the board.
         return sendJson(res, 201, {
           ack,
-          ...(hint ? { delivery_hint: hint } : {}),
           ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
           ...(result.lane_verdict ? { lane_verdict: result.lane_verdict } : {}),
           ...(result.lane_ack ? { lane_ack: result.lane_ack } : {}),
@@ -5819,7 +5788,7 @@ export async function handleHttp(
         // is gone the moment the act discharges. Recomposing it later from the acts table would
         // produce a plausible string, not the one the seat received, which is the difference
         // between evidence and a reconstruction.
-        const line = composeInterruptLine(latest, pending.length, huddleTopic, rest);
+        const line = composeInterruptLine(team.slug, latest, pending.length, huddleTopic, rest);
         // Which rail asked. The caller declares it (`musterd inbox --interrupt-check --hook X`);
         // until ADR 423 the flag only shaped the CLI's own stdout and never reached the server, so
         // every row was rail-blind and the doorbell contract had to cite a measurer's name per
