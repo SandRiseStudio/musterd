@@ -20,7 +20,13 @@ import { createServer, type RunningServer } from '../index.js';
 import { flushLapsedHolds } from '../notify/doorbell.js';
 import { appendAudit, listAudit } from '../store/audit.js';
 import { openDirectedLedger } from '../store/delivery.js';
-import { listRings, setDoorbellPrefs } from '../store/doorbell.js';
+import {
+  DOORBELL_RING_RETENTION_MS,
+  insertRing,
+  listRings,
+  pruneRings,
+  setDoorbellPrefs,
+} from '../store/doorbell.js';
 import { getMemberById, getMemberByName, setMemberGovernance } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
 import { REVIEW_LOOP_BREAKER_N } from '../store/review.js';
@@ -9293,6 +9299,60 @@ describe('the doorbell (ADR 443)', () => {
     await tick(60);
     flushLapsedHolds(ctx, (id) => getTeamById(server.db, id));
     expect(rings(t.teamId)[0]!.state).not.toBe('held');
+  });
+
+  it('a held ring for a member who left is closed on the sweep, not rung', async () => {
+    const t = await team();
+    await post('/teams/dawn/availability', { status: 'away', until: Date.now() + 40 }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 'l1', consult));
+    server.db
+      .prepare("UPDATE members SET left_at = ? WHERE team_id = ? AND name = 'Dee'")
+      .run(Date.now(), t.teamId);
+    await tick(60);
+    const ctx = { db: server.db, config: { presenceTimeoutMs: 45_000 } } as unknown as Ctx;
+    flushLapsedHolds(ctx, (id) => getTeamById(server.db, id));
+    expect(rings(t.teamId)[0]!.state).toBe('done');
+    expect(surfaced(t.teamId)).toHaveLength(0);
+  });
+
+  it('prunes done and queued rings past retention, and keeps held ones', async () => {
+    const t = await team();
+    const dee = getMemberByName(server.db, t.teamId, 'Dee')!;
+    const old = Date.now() - DOORBELL_RING_RETENTION_MS - 1;
+    const record = {
+      team: 'dawn',
+      from: 'Ada',
+      act: 'handoff',
+      act_id: 'x',
+      answer_path: '/live?act=x',
+    } as const;
+    for (const state of ['done', 'queued', 'held'] as const) {
+      insertRing(server.db, {
+        team_id: t.teamId,
+        member_id: dee.id,
+        act_id: 'x',
+        record,
+        sinks: ['live'],
+        state,
+        host: null,
+        created_at: old,
+      });
+    }
+    insertRing(server.db, {
+      team_id: t.teamId,
+      member_id: dee.id,
+      act_id: 'y',
+      record,
+      sinks: ['live'],
+      state: 'done',
+      host: null,
+    });
+    expect(pruneRings(server.db, Date.now())).toBe(2);
+    expect(
+      rings(t.teamId)
+        .map((r) => r.state)
+        .sort(),
+    ).toEqual(['done', 'held']);
   });
 
   it('a Slack handoff ring names who and what, never the body', async () => {

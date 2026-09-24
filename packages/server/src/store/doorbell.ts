@@ -103,6 +103,21 @@ export function listMembersWithHeldRings(db: Database): { member_id: string; tea
     .all();
 }
 
+/** How long a finished or never-claimed ring is kept (ADR 443 §4, retention). */
+export const DOORBELL_RING_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Delete `done` and `queued` rings older than the retention window, so the ring table does not only
+ * grow. A `queued` ring that old has no host left to claim it. `held` rings are kept: they wait on
+ * a human's own hold, however long. Returns the number deleted.
+ */
+export function pruneRings(db: Database, now: number): number {
+  const cutoff = now - DOORBELL_RING_RETENTION_MS;
+  return db
+    .prepare("DELETE FROM doorbell_rings WHERE state IN ('done', 'queued') AND created_at < ?")
+    .run(cutoff).changes;
+}
+
 /** Every ring for a team, oldest first (tests and the audit-side read). */
 export function listRings(db: Database, teamId: string): Ring[] {
   return db

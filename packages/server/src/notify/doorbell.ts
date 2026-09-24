@@ -1,4 +1,5 @@
 import {
+  actMayRing,
   askContract,
   AskSpeciesSchema,
   AskTierSchema,
@@ -108,6 +109,7 @@ export function ringDoorbell(ctx: Ctx, team: TeamRow, env: Envelope): void {
 }
 
 function ring(ctx: Ctx, team: TeamRow, env: Envelope): void {
+  if (!actMayRing(env.act)) return;
   const members = listMembers(ctx.db, team.id).filter((m) => m.kind === 'human' && !m.observer);
   const humans = new Set(members.map((m) => m.name));
   const admins = new Set(members.filter((m) => resolveCapabilities(m).is_admin).map((m) => m.name));
@@ -203,12 +205,19 @@ export function flushHeldRings(ctx: Ctx, team: TeamRow, member: MemberRow): void
   }
 }
 
-/** The sweep's half (dolly's change b): flush every member whose hold may have lapsed. */
+/**
+ * The sweep's half (dolly's change b): flush every member whose hold may have lapsed. A member who
+ * has left, or a team that is archived, has nobody left to ring — those rings are closed, not rung.
+ */
 export function flushLapsedHolds(ctx: Ctx, teamsById: (id: string) => TeamRow | undefined): void {
   for (const { member_id, team_id } of listMembersWithHeldRings(ctx.db)) {
     const member = getMemberById(ctx.db, member_id);
     const team = teamsById(team_id);
-    if (member && team) flushHeldRings(ctx, team, member);
+    if (member && team && member.left_at === null && team.archived_at === null) {
+      flushHeldRings(ctx, team, member);
+    } else {
+      for (const ring of listHeldRings(ctx.db, member_id)) setRingState(ctx.db, ring.id, 'done');
+    }
   }
 }
 

@@ -93,7 +93,15 @@ old rows still read.
   044). `off_hours` does **not** hold: schedule enforcement is out of scope for v1 (AGENTS.md). A
   held ring is flushed when the human sets `available`, and on the daemon's sweep when the
   availability lapses by its `until`. At flush, a ring whose act has been answered — an `accept` or
-  `decline` replying to it, or a `resolve` of its thread — is dropped, not rung.
+  `decline` replying to it, or a `resolve` of its thread — is dropped, not rung. An unanswered ask
+  still rings at flush after its deadline has passed and its contract has PROCEEDed: the ask is
+  still open, and the human can still answer it. A ring for a human who has left, or on an
+  archived team, is closed at the sweep, not rung.
+- **Held is not unreachable.** A held ring is delayed, not lost. So a human who is `away` with an
+  off-machine sink still counts as reachable for ask routing (ADR 147) — the same as before this
+  ADR. Do not change that into "away is unreachable": it would strand asks that the flush delivers.
+- **Retention.** `done` rings, and `queued` rings no host claimed, are deleted after 30 days on the
+  daemon's sweep. `held` rings are kept for as long as the hold lasts.
 - **Presence (ADR 155 Increment 2) applies to the off-machine sinks only.** When an admin human
   composes as present, `slack` and `webhook` stay quiet at raise and fire on the agent's in-thread
   re-notify. `live` and `os` ring at once. This can only under-ring, never mis-deliver.

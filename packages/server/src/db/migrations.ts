@@ -1679,6 +1679,10 @@ export const MIGRATIONS: Migration[] = [
           created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_doorbell_rings_state ON doorbell_rings(team_id, state);
+        -- The reaper reads held rings every tick, across teams and per member (dolly's #1666 review).
+        CREATE INDEX IF NOT EXISTS idx_doorbell_rings_held ON doorbell_rings(member_id) WHERE state = 'held';
+        -- The retention prune seeks by age within a state.
+        CREATE INDEX IF NOT EXISTS idx_doorbell_rings_age ON doorbell_rings(state, created_at);
       `);
       const cols = db.prepare("SELECT name FROM pragma_table_info('members')").pluck().all();
       if (!cols.includes('doorbell_prefs'))

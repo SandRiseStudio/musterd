@@ -7,6 +7,7 @@ import {
   doorbellPrefsProblem,
   holdsRing,
   maskPrefs,
+  actMayRing,
   publicHttpsUrlProblem,
   resolveRoute,
   ringTargets,
@@ -17,6 +18,14 @@ const humans = new Set(['nick', 'ana']);
 const admins = new Set(['nick']);
 const ring = (act: string, to: string | null, meta: Record<string, unknown> = {}) =>
   ringTargets({ act, to, meta, humans, admins });
+
+describe('actMayRing', () => {
+  it('is true exactly for the acts ringTargets can ring', () => {
+    for (const act of ['ask', 'request_help', 'handoff']) expect(actMayRing(act)).toBe(true);
+    for (const act of ['message', 'status_update', 'accept', 'resolve'])
+      expect(actMayRing(act)).toBe(false);
+  });
+});
 
 describe('what rings the doorbell (ADR 443)', () => {
   it('a directed ask rings its human', () => expect(ring('ask', 'ana')).toEqual(['ana']));
@@ -133,6 +142,8 @@ describe('sink URLs must be https to a public host', () => {
   it.each([
     ['http://hooks.slack.com/x', 'https'],
     ['https://localhost/x', 'private'],
+    ['https://localhost./x', 'private'],
+    ['https://printer.local./x', 'private'],
     ['https://foo.localhost/x', 'private'],
     ['https://127.0.0.1/x', 'private'],
     ['https://[::1]/x', 'private'],

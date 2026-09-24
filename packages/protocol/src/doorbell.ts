@@ -73,6 +73,11 @@ export type DoorbellPrefs = z.infer<typeof DoorbellPrefsSchema>;
 /** The acts that ring a human when **directed** to one (spec §1). */
 const DIRECTED_RINGS = new Set(['ask', 'request_help', 'handoff']);
 
+/** Can this act ring anyone at all? The cheap pre-check before {@link ringTargets} reads members. */
+export function actMayRing(act: string): boolean {
+  return DIRECTED_RINGS.has(act);
+}
+
 /**
  * Which human members this act rings (ADR 443 §2):
  * - a directed `ask`, `request_help` or `handoff` to a human rings that human;
@@ -206,7 +211,8 @@ export function publicHttpsUrlProblem(raw: string): string | null {
     return 'not a valid url';
   }
   if (url.protocol !== 'https:') return 'must use https';
-  const host = url.hostname.toLowerCase();
+  // WHATWG keeps a trailing dot (`localhost.`), and it resolves like the undotted name.
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
   if (isPrivateHost(host)) return 'must not point at a private, loopback or link-local host';
   return null;
 }
