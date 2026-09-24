@@ -172,6 +172,20 @@ stop a same-user process from reading the ring queue or a human's prefs with a c
   `doorbell.surfaced`.
 - A held ring is state the daemon keeps (`doorbell_rings`). A ring is `held`, `queued` (waiting for
   the host), or `done`.
+- **2026-09-23 — which host label rings (the plan's Task 5 spike, landed with PR B).** The host
+  polls once per (daemon, team, label) group in its registry, and the labels are the ones its
+  resident seats enrolled under (ADR 131). A human's `os` sink stores one of those labels, and
+  `musterd doorbell os on`, run on the human's machine, picks it from that machine's host registry.
+  The ring poll uses the wake-lease poll's auth: the team agent key, or, after the bootstrap
+  cutover, a credential scoped to exactly that label. So a host-scoped credential can claim only its
+  own machine's rings. The host claims its rings in one transaction that marks them `done`. A second
+  poll raises nothing twice, and a banner lost to a crash between claim and banner is not retried,
+  like every other sink. A machine that runs no resident seat for the team has no host process, so
+  it has no `os` sink. `live` and the off-machine sinks still reach that human. An agent holding the
+  legacy team agent key can read the ring records for any label. Those records are the same
+  structured fields the firehose already shows it, with no body. The host reports each banner once:
+  `ok` is the notifier process's exit, not the call having returned, and a second report — or one
+  for a ring claimed but not returned — is refused (409).
 
 ## Observability & Evaluation
 

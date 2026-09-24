@@ -24,6 +24,8 @@ import {
   PolicyOverrideSchema,
   DoorbellPrefsSchema,
   doorbellPrefsProblem,
+  DoorbellRingsBodySchema,
+  DoorbellSurfacedBodySchema,
   maskPrefs,
   publicHttpsUrlProblem,
   resolveRoute,
@@ -145,7 +147,14 @@ import {
   handoffNamedLaneOutOfPlay,
   openDirectedLedger,
 } from '../store/delivery.js';
-import { getDoorbellPolicy, memberDoorbellPrefs, setDoorbellPrefs } from '../store/doorbell.js';
+import {
+  claimHostRings,
+  getDoorbellPolicy,
+  getRing,
+  markRingReported,
+  memberDoorbellPrefs,
+  setDoorbellPrefs,
+} from '../store/doorbell.js';
 import { latestFootprint } from '../store/footprint.js';
 import { listGoals } from '../store/goals.js';
 import {
@@ -3108,6 +3117,47 @@ export async function handleHttp(
           ctx.config.presenceTimeoutMs,
         );
         return sendJson(res, 200, { orders });
+      }
+
+      // The doorbell's `os` sink (ADR 443 §3): the host on the human's own machine claims the rings
+      // queued for its label and raises the banners. Same auth as the wake-lease poll — the team
+      // agent key, or a credential scoped to exactly this host label — and the same body-free
+      // shape: a ring is the record, never a message body.
+      if (method === 'POST' && rest === '/doorbell/rings') {
+        const body = parseOrBadRequest(DoorbellRingsBodySchema, await readJson(req));
+        const team = authAgentKeyOnly(ctx, slug, req, body.host);
+        const rings = claimHostRings(ctx.db, team.id, body.host, Date.now()).map(
+          ({ ring, member }) => ({ id: ring.id, member, record: ring.record }),
+        );
+        return sendJson(res, 200, { rings });
+      }
+
+      const surfacedRing = rest.match(/^\/doorbell\/rings\/([^/]+)\/surfaced$/);
+      if (method === 'POST' && surfacedRing) {
+        const body = parseOrBadRequest(DoorbellSurfacedBodySchema, await readJson(req));
+        const team = authAgentKeyOnly(ctx, slug, req, body.host);
+        let ringId: string;
+        try {
+          ringId = decodeURIComponent(surfacedRing[1]!);
+        } catch {
+          throw new MusterdError('bad_request', 'ring id has invalid URL encoding');
+        }
+        const ring = getRing(ctx.db, team.id, ringId);
+        // A host reports only its own rings — a label cannot speak for another machine's banner.
+        // The label is cleared once reported (or never returned), so that ring answers 409.
+        if (!ring || (ring.host !== null && ring.host !== body.host))
+          throw new MusterdError('not_found', 'no such ring for this host');
+        if (!markRingReported(ctx.db, ring.id, body.host))
+          throw new MusterdError('conflict', 'this ring is not awaiting a report');
+        const member = getMemberById(ctx.db, ring.member_id);
+        appendAudit(ctx.db, team.id, {
+          actor: ring.record.from,
+          action: 'doorbell.surfaced',
+          target: member?.name ?? null,
+          result: 'allow',
+          detail: { surface: 'os', ok: body.ok },
+        });
+        return sendJson(res, 200, { ok: true });
       }
 
       // The host's outcome report: settles the lease and writes the actuation audit — the

@@ -1,6 +1,7 @@
 import {
   AvailabilitySchema,
   type Availability,
+  DOORBELL_OS_MAX_AGE_MS,
   type DoorbellPolicy,
   type DoorbellPrefs,
   DoorbellPrefsSchema,
@@ -127,6 +128,64 @@ export function listRings(db: Database, teamId: string): Ring[] {
     >('SELECT * FROM doorbell_rings WHERE team_id = ? ORDER BY created_at, id')
     .all(teamId)
     .map(toRing);
+}
+
+/**
+ * The host's claim of its `os` rings (ADR 443 §3). Every queued ring for this host label moves to
+ * `done` in one transaction, so a second poll raises nothing twice — one attempt, as for every
+ * sink. A ring is claimed but not returned when there is no longer anything to ring for: its act
+ * was answered or its thread resolved, the ask's deadline passed, or (with no deadline) it is older
+ * than {@link DOORBELL_OS_MAX_AGE_MS}.
+ */
+export function claimHostRings(
+  db: Database,
+  teamId: string,
+  host: string,
+  now: number,
+): { ring: Ring; member: string }[] {
+  return db.transaction(() => {
+    const rows = db
+      .prepare<[string, string], RingRow & { member: string }>(
+        `SELECT r.*, m.name AS member FROM doorbell_rings r JOIN members m ON m.id = r.member_id
+          WHERE r.team_id = ? AND r.host = ? AND r.state = 'queued'
+          ORDER BY r.created_at, r.id`,
+      )
+      .all(teamId, host);
+    const out: { ring: Ring; member: string }[] = [];
+    for (const row of rows) {
+      const ring = toRing(row);
+      const expiry = ring.record.deadline_ms ?? ring.created_at + DOORBELL_OS_MAX_AGE_MS;
+      const stale = expiry <= now || actAnsweredOrResolved(db, teamId, ring.act_id);
+      // A returned ring keeps its host label until the host reports it (`markRingReported`); one
+      // claimed but not returned loses it at once, so there is nothing for the host to report.
+      db.prepare("UPDATE doorbell_rings SET state = 'done', host = ? WHERE id = ?").run(
+        stale ? null : row.host,
+        row.id,
+      );
+      if (!stale) out.push({ ring, member: row.member });
+    }
+    return out;
+  })();
+}
+
+/**
+ * Record that a host reported its banner: the ring's host label is cleared, so a second report
+ * finds nothing awaiting one. Returns false when the ring was not awaiting a report from this host.
+ */
+export function markRingReported(db: Database, id: string, host: string): boolean {
+  return (
+    db
+      .prepare("UPDATE doorbell_rings SET host = NULL WHERE id = ? AND host = ? AND state = 'done'")
+      .run(id, host).changes > 0
+  );
+}
+
+/** One ring by id, scoped to its team. */
+export function getRing(db: Database, teamId: string, id: string): Ring | undefined {
+  const row = db
+    .prepare<[string, string], RingRow>('SELECT * FROM doorbell_rings WHERE team_id = ? AND id = ?')
+    .get(teamId, id);
+  return row ? toRing(row) : undefined;
 }
 
 /**
