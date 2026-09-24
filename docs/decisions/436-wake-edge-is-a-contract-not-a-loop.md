@@ -106,6 +106,19 @@ fix five contract holes.
   now sends the capture's own harness. Grok wakes have posted captures since 2026-09-21 21:03, all
   mislabelled. No protocol change: `harness` was already an open string.
 
+- **2026-09-24 (lane `01M330A04F`, clause 5 — discharge):** the composed wake line now says in words
+  what discharges, on every harness: "answer IN its thread (`reply_to: "<act>"`) — accept, decline,
+  resolve, or a reply; a message outside the thread answers nothing" (`composeWakeLine`). **No
+  answered-vs-discharged label, decided:** under ADR 434 an in-thread `message` IS discharge, so
+  the answered-not-discharged class has no in-thread member left, and an out-of-thread message
+  carries no link to the act — labelling it "answered" would be correlation by timing, which ADR
+  236/241 forbid. The remedy is the words, not a field. **Live falsifier (ledger, read 2026-09-24):**
+  the arm-E shape recurred on 2026-09-22 10:47 — ghost answered big-body's `request_help`
+  `01M353JW3F` with a directed message and no thread, while grokbot answered in the thread 61 s
+  later; each seat was leased once for that act and never again in the two days since, so ADR
+  434 §2 holds and nothing re-leases beyond it. Pinned as a test (`residency.test.ts`, the arm-E
+  shape: not re-leased, still an open loop for the sender).
+
 ## Observability & Evaluation
 
 - **Traces:** per wake, the existing `residency.woke` / `residency.wake_cost` / `session_captured`
