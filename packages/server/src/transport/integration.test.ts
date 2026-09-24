@@ -9598,6 +9598,22 @@ describe('the doorbell (ADR 443)', () => {
     ]);
   });
 
+  it('a second report, or a report for a ring never returned, is 409; a bad escape is 400', async () => {
+    const t = await osTeam();
+    await send(t.ada, env('Ada', toDee, 'ask', 'os7', consult));
+    await send(t.ada, env('Ada', toDee, 'handoff', 'os8'));
+    server.db.prepare("UPDATE doorbell_rings SET created_at = 0 WHERE act_id = 'os8'").run();
+    const [ring] = (await claim(t.key, 'mac-a')).json.rings;
+    const stale = listRings(server.db, t.teamId).find((r) => r.act_id === 'os8')!;
+    const report = (id: string) =>
+      post(`/teams/dawn/doorbell/rings/${id}/surfaced`, { host: 'mac-a', ok: true }, t.key);
+    expect((await report(ring.id)).status).toBe(200);
+    expect((await report(ring.id)).status).toBe(409);
+    expect((await report(stale.id)).status).toBe(409);
+    expect((await report('%E0%A4%A')).status).toBe(400);
+    expect(surfaced(t.teamId)).toHaveLength(1);
+  });
+
   it('the ring poll refuses a caller without the team agent key', async () => {
     const t = await osTeam();
     expect((await claim(t.dee, 'mac-a')).status).toBe(401);

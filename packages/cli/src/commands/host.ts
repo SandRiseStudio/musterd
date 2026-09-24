@@ -46,7 +46,10 @@ function parseOptions(flags: Record<string, string | boolean>): z.infer<typeof H
 
 export async function hostCommand(
   parsed: Parsed,
-  deps: Partial<HostPollDeps & DoorbellPollDeps> = {},
+  deps: Partial<HostPollDeps & DoorbellPollDeps> & {
+    /** `false` runs the wake half alone — the doorbell never polls a daemon. */
+    doorbell?: boolean;
+  } = {},
 ): Promise<number> {
   const opts = parseOptions(parsed.flags);
   const backends = new Map<string, ActuatorBackend>();
@@ -87,26 +90,29 @@ export async function hostCommand(
   }
 
   // The doorbell's `os` sink (ADR 443 §3) rides the same tick: same registry, same labels, same
-  // agent-key auth. Its own catch — a doorbell failure never stops a wake.
+  // agent-key auth. Its own catch — a doorbell failure never stops a wake — and it never delays one:
+  // the resident loop does not await it, and skips a tick's ring while the last one is still out.
   const doorbellDeps: DoorbellPollDeps = {
     log,
     ...(hostLabel !== undefined ? { hostLabel } : {}),
     ...deps,
   };
-  // A caller that injected a fake wake client but no doorbell client is a test of the wake path:
-  // the doorbell must not reach past it to a real daemon.
-  const doorbellOff = deps.clientFor !== undefined && deps.doorbellClientFor === undefined;
-  const ringDoorbell = async () => {
-    if (doorbellOff) return 0;
-    return pollDoorbellOnce(doorbellDeps).catch((err: Error) => {
-      log(`! doorbell poll failed: ${err.message}`);
-      return 0;
-    });
+  let ringing: Promise<number> | null = null;
+  const ringDoorbell = (): Promise<number> => {
+    if (deps.doorbell === false) return Promise.resolve(0);
+    ringing ??= pollDoorbellOnce(doorbellDeps)
+      .catch((err: Error) => {
+        log(`! doorbell poll failed: ${err.message}`);
+        return 0;
+      })
+      .finally(() => {
+        ringing = null;
+      });
+    return ringing;
   };
 
   if (opts.once) {
-    await ringDoorbell();
-    const result = await pollHostOnce(pollDeps);
+    const [, result] = await Promise.all([ringDoorbell(), pollHostOnce(pollDeps)]);
     if (result.orders === 0) process.stdout.write(theme.meta('no wakes due') + '\n');
     // Await in-flight runs so the mandatory watchdog outlives every spawn (never orphaned).
     await Promise.allSettled(result.settled);
@@ -124,7 +130,7 @@ export async function hostCommand(
     let timer: NodeJS.Timeout | undefined;
     const inFlight = new Set<Promise<void>>();
     const tick = async () => {
-      await ringDoorbell();
+      void ringDoorbell();
       // Best-effort: a transient daemon/registry failure must not kill the resident loop.
       const result = await pollHostOnce(pollDeps).catch((err: Error) => {
         log(`! poll failed: ${err.message}`);

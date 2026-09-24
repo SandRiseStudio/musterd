@@ -53,9 +53,30 @@ export function buildNotifyCommand(
  * notifier that can't fire must never crash the loop or surface an error.
  */
 export function osNotify(n: NotifyItem): void {
-  const command = buildNotifyCommand(osPlatform(), n);
-  if (!command) return;
-  execFile(command.cmd, command.args, () => {
-    // best-effort: ignore spawn/exec errors (binary absent, etc.)
+  void osNotifyDelivered(n);
+}
+
+/** What {@link osNotifyDelivered} runs — injectable so a test can drive a real failure path. */
+export interface OsNotifyDeps {
+  platform?: NodeJS.Platform;
+  exec?: (cmd: string, args: string[], done: (err: Error | null) => void) => void;
+}
+
+/**
+ * {@link osNotify}, but it says whether the banner was handed to the platform notifier: `false`
+ * on an unsupported platform or when the notifier exits with an error (binary absent, non-zero
+ * exit). The doorbell reports this as `doorbell.surfaced {ok}` (ADR 443 §3), so `ok` must come
+ * from the process, not from the call having returned. Never rejects.
+ */
+export function osNotifyDelivered(n: NotifyItem, deps: OsNotifyDeps = {}): Promise<boolean> {
+  const command = buildNotifyCommand(deps.platform ?? osPlatform(), n);
+  if (!command) return Promise.resolve(false);
+  const exec = deps.exec ?? ((cmd, args, done) => execFile(cmd, args, (err) => done(err)));
+  return new Promise((resolve) => {
+    try {
+      exec(command.cmd, command.args, (err) => resolve(err === null));
+    } catch {
+      resolve(false);
+    }
   });
 }

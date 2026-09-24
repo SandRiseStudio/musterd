@@ -69,13 +69,13 @@ src/
     damp.ts           // one remediation attempt per class per hour then forced escalation; stamp file (never the DB — the DB may be what's down) + daily-heartbeat bookkeeping
     act.ts            // actOn: auto classes shell the guarded service verbs (refresh --live / refresh --pin <last-good> --force), alert classes notify + role-addressed ask; audit failure never breaks a tick
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
-    os.ts             // OS push notification (macOS/Linux/Windows)
+    os.ts             // OS push notification (macOS/Linux/Windows); osNotifyDelivered resolves whether the notifier took it
     select.ts         // pick which away human to nudge
   host/               // the `musterd host` wake actuator — harness residency's per-machine hand (ADR 131 inc 3)
     registry.ts       // machine-local seat → workspace/harness registry (~/.musterd/host-registry.json); written by `residency on`, never by the daemon
     backend.ts        // ActuatorBackend seam: spawn-or-invoke + roster-derived verify + WakeOutcome; native row must stay expressible (ADR 131 §7)
     loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); host_key auth (ADR 395, fallback agent_key) read through workspace bindings; one wake span per actuation; wake-progress after spawn (not on deferred)
-    doorbell.ts       // the doorbell's `os` sink, host half (ADR 443 §3): pollDoorbellOnce claims the rings queued for each (server, team, host label) group with the same key as the wake poll, raises one OS banner per ring from record fields only (doorbellBanner → osNotify, argv not script), reports doorbell.surfaced; a quiet tick logs nothing
+    doorbell.ts       // the doorbell's `os` sink, host half (ADR 443 §3): pollDoorbellOnce claims the rings queued for each (server, team, host label) group with the same key as the wake poll, raises one OS banner per ring from record fields only (doorbellBanner → osNotifyDelivered, argv not script), reports doorbell.surfaced with ok from the notifier's exit; `host` runs it beside the wake poll, never awaited ahead of it; a quiet tick logs nothing
     pinnedBin.ts      // every spawned-harness wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
     wakeLeaseFile.ts  // the wake lease on DISK (ADR 354): written beside binding.json at spawn naming the harness child's pid, cleared at settle — for harnesses that sanitize the MCP env (codex: 12 vars, no MUSTERD_*), where the env channel ADR 241 relies on stops at the child
     engine.ts         // the AgentLoopEngine seam (ADR 251 §3): prompt + tools + bounds → turns/usage/end-reason, provider-neutral; the named insertion point for a second provider (ADR 101/110), with per-turn observation for capture/telemetry

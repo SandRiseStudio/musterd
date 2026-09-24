@@ -1,6 +1,6 @@
 import type { DoorbellRecord } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { buildNotifyCommand, type NotifyItem } from '../notify/os.js';
+import { buildNotifyCommand, type NotifyItem, osNotifyDelivered } from '../notify/os.js';
 import { type DoorbellClient, doorbellBanner, pollDoorbellOnce } from './doorbell.js';
 import type { HostRegistryEntry } from './registry.js';
 
@@ -56,7 +56,10 @@ function deps(
     loadRegistry: () => ({ entries }),
     readAgentKey: () => 'mskey_test',
     doorbellClientFor: () => client,
-    notify: (n: NotifyItem) => notified.push(n),
+    notify: async (n: NotifyItem) => {
+      notified.push(n);
+      return true;
+    },
   };
 }
 
@@ -113,16 +116,65 @@ describe('pollDoorbellOnce — the os sink on the host (ADR 443)', () => {
     expect(lines).toEqual(['! doorbell poll failed for revive: ECONNREFUSED']);
   });
 
+  it('a notifier process that fails is reported ok:false — ok comes from the exit, not the call', async () => {
+    const d = fakeDaemon({ 'mac-a': [{ id: 'r1', member: 'nick', record: record() }] });
+    const run = {
+      ...deps([entry('izzo', 'mac-a')], d.client, []),
+      notify: (n: NotifyItem) =>
+        osNotifyDelivered(n, {
+          platform: 'darwin',
+          exec: (_cmd, _args, done) => setTimeout(() => done(new Error('exit 1')), 1),
+        }),
+    };
+    expect(await pollDoorbellOnce(run)).toBe(0);
+    expect(d.reports).toEqual([{ ring: 'r1', host: 'mac-a', ok: false }]);
+  });
+
   it('a notifier that throws is reported ok:false, not rethrown', async () => {
     const d = fakeDaemon({ 'mac-a': [{ id: 'r1', member: 'nick', record: record() }] });
     const run = {
       ...deps([entry('izzo', 'mac-a')], d.client, []),
-      notify: () => {
+      notify: (): Promise<boolean> => {
         throw new Error('no osascript');
       },
     };
     expect(await pollDoorbellOnce(run)).toBe(0);
     expect(d.reports).toEqual([{ ring: 'r1', host: 'mac-a', ok: false }]);
+  });
+});
+
+describe('osNotifyDelivered — did the platform notifier take the banner?', () => {
+  const banner = { id: 'r', title: 't', body: 'b' };
+  it('false on a platform with no notifier', async () =>
+    expect(await osNotifyDelivered(banner, { platform: 'win32', exec: () => undefined })).toBe(
+      false,
+    ));
+  it('false when the notifier exits with an error', async () =>
+    expect(
+      await osNotifyDelivered(banner, {
+        platform: 'linux',
+        exec: (_c, _a, done) => done(new Error('ENOENT')),
+      }),
+    ).toBe(false));
+  it('false when spawning throws', async () =>
+    expect(
+      await osNotifyDelivered(banner, {
+        platform: 'linux',
+        exec: () => {
+          throw new Error('spawn');
+        },
+      }),
+    ).toBe(false));
+  it('true only once the notifier exits cleanly', async () => {
+    const seen: string[] = [];
+    const ok = await osNotifyDelivered(banner, {
+      platform: 'linux',
+      exec: (cmd, _a, done) => {
+        seen.push(cmd);
+        done(null);
+      },
+    });
+    expect([ok, seen]).toEqual([true, ['notify-send']]);
   });
 });
 

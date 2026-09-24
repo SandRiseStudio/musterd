@@ -1,6 +1,6 @@
 import type { DoorbellRecord, DoorbellRingsResponse } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
-import { type NotifyItem, osNotify } from '../notify/os.js';
+import { type NotifyItem, osNotifyDelivered } from '../notify/os.js';
 import { defaultReadAgentKey, pollGroups } from './loop.js';
 import { type HostRegistryEntry, loadHostRegistry } from './registry.js';
 
@@ -27,7 +27,8 @@ export interface DoorbellPollDeps {
   loadRegistry?: () => { entries: HostRegistryEntry[] };
   readAgentKey?: (workspace: string) => string | undefined;
   doorbellClientFor?: (server: string, agentKey: string) => DoorbellClient;
-  notify?: (n: NotifyItem) => void;
+  /** Raise one banner; resolves whether the platform notifier took it. */
+  notify?: (n: NotifyItem) => Promise<boolean>;
 }
 
 const defaultDoorbellClientFor = (server: string, agentKey: string): DoorbellClient => {
@@ -64,7 +65,7 @@ export async function pollDoorbellOnce(deps: DoorbellPollDeps): Promise<number> 
   const registry = (deps.loadRegistry ?? loadHostRegistry)();
   const readAgentKey = deps.readAgentKey ?? defaultReadAgentKey;
   const clientFor = deps.doorbellClientFor ?? defaultDoorbellClientFor;
-  const notify = deps.notify ?? osNotify;
+  const notify = deps.notify ?? ((n: NotifyItem) => osNotifyDelivered(n));
   let raised = 0;
 
   for (const group of pollGroups(registry.entries, deps.hostLabel).values()) {
@@ -80,13 +81,11 @@ export async function pollDoorbellOnce(deps: DoorbellPollDeps): Promise<number> 
       continue;
     }
     for (const ring of response.rings) {
-      let ok = true;
-      try {
-        notify(doorbellBanner(ring.id, ring.record));
-        raised++;
-      } catch {
-        ok = false;
-      }
+      const banner = doorbellBanner(ring.id, ring.record);
+      const ok = await Promise.resolve()
+        .then(() => notify(banner))
+        .catch(() => false);
+      if (ok) raised++;
       await client.surfaced(group.team, ring.id, group.host, ok).catch((err: Error) => {
         deps.log(`! doorbell report failed for ${group.team}: ${err.message}`);
       });

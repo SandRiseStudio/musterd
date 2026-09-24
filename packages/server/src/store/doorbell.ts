@@ -153,14 +153,31 @@ export function claimHostRings(
       .all(teamId, host);
     const out: { ring: Ring; member: string }[] = [];
     for (const row of rows) {
-      setRingState(db, row.id, 'done');
       const ring = toRing(row);
       const expiry = ring.record.deadline_ms ?? ring.created_at + DOORBELL_OS_MAX_AGE_MS;
-      if (expiry <= now || actAnsweredOrResolved(db, teamId, ring.act_id)) continue;
-      out.push({ ring, member: row.member });
+      const stale = expiry <= now || actAnsweredOrResolved(db, teamId, ring.act_id);
+      // A returned ring keeps its host label until the host reports it (`markRingReported`); one
+      // claimed but not returned loses it at once, so there is nothing for the host to report.
+      db.prepare("UPDATE doorbell_rings SET state = 'done', host = ? WHERE id = ?").run(
+        stale ? null : row.host,
+        row.id,
+      );
+      if (!stale) out.push({ ring, member: row.member });
     }
     return out;
   })();
+}
+
+/**
+ * Record that a host reported its banner: the ring's host label is cleared, so a second report
+ * finds nothing awaiting one. Returns false when the ring was not awaiting a report from this host.
+ */
+export function markRingReported(db: Database, id: string, host: string): boolean {
+  return (
+    db
+      .prepare("UPDATE doorbell_rings SET host = NULL WHERE id = ? AND host = ? AND state = 'done'")
+      .run(id, host).changes > 0
+  );
 }
 
 /** One ring by id, scoped to its team. */
