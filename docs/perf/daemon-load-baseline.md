@@ -76,3 +76,26 @@ invocation records `claim.occupied` + `superseded`), to be judged there, not her
 
 Falsify the headline: rerun the lane window's request mix against build 30f03da and find any
 endpoint over 1 s that is not `/lanes`, `/sync/pull` or `PATCH /lanes/:id`.
+
+## 2026-09-24 — `GET /lanes` reads the board once (lane 01M3ANEQVR)
+
+`listLanes` was reached from the handler, then again from `boardWarnings` → `laneWarnings` for
+**every** lane with a scope (the contention pass), and again from `staleLaneWarnings`. The handler
+now reads the board once and passes it down; `filterLanes` derives the `?mine=1` / `?state=` view
+in memory; `laneWarnings` takes the board as an optional last argument (the single-lane callers on
+open/claim/update still read for themselves).
+
+Same profiler, same live copy, median of 5:
+
+| endpoint | before | after |
+| --- | --- | --- |
+| `GET /lanes` — table reads | 16 | 2 |
+| `GET /lanes` — SQL | 131 ms / 156 stmts | 32 ms / 16 stmts |
+| `GET /lanes` — wall | 267 ms | 210 ms |
+| `GET /lanes?mine=1` — wall | — | 80 ms |
+
+What is left of the 210 ms is not SQLite: `rowToLane` over 1218 rows (JSON-parsing `scope` and
+`detail` per row) and serialising a 2.5 MB body. That is the body-size call the lane defers — page
+the list, or drop `detail` from it (the CLI and /board read it) — and it is where the next 150 ms
+are. One more read of the table remains on the path (8 ms), from a helper that was not traced to
+its caller; not worth chasing at that size.

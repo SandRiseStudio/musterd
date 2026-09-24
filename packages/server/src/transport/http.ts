@@ -184,6 +184,7 @@ import {
   laneWarnings,
   lanesForGoal,
   noGoalWarning,
+  filterLanes,
   listLanes,
   emptyPoolFromSubmitAudit,
   openLane,
@@ -4736,7 +4737,11 @@ export async function handleHttp(
           }
           states.push(parsed.data);
         }
-        const lanes = listLanes(ctx.db, team.id, team.slug, {
+        // One board read per request (lane 01M3ANEQVR): the filtered view, the contention pass and
+        // the staleness pass all derive from it. It used to be read 16 times here — 116 ms of the
+        // endpoint's 267 ms on the live copy.
+        const board = listLanes(ctx.db, team.id, team.slug);
+        const lanes = filterLanes(board, {
           ...(url.searchParams.get('project') !== null
             ? { project: url.searchParams.get('project')! }
             : {}),
@@ -4752,8 +4757,10 @@ export async function handleHttp(
         // so `?mine=1` / `?goal=` scopes carry only their own stale flags.
         const shown = new Set(lanes.map((l) => l.id));
         const warnings = [
-          ...boardWarnings(ctx.db, team.id, team.slug, lanes),
-          ...staleLaneWarnings(ctx.db, team.id, team.slug).filter((w) => shown.has(w.subject)),
+          ...boardWarnings(ctx.db, team.id, team.slug, lanes, board),
+          ...staleLaneWarnings(ctx.db, team.id, team.slug, undefined, board).filter((w) =>
+            shown.has(w.subject),
+          ),
         ];
         // ADR 169: annotate done lanes with the derived verified-ness of their close — read from the
         // lane.closed audit rows, never stored on the lane. Absent = unknown (pre-169 closes).
