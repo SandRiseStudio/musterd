@@ -5908,6 +5908,16 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* …but only where the ladder cannot help. Shrink is weighted by basis, so a ~1,100px ask at shrink 1
+   still hands a 51px count its share of the deficit, and in companion mode (rail ~1,376px, no ladder
+   step fires) the counts rendered as "3." "1." "1." and the link as "s…" while the ask kept 787px.
+   Wherever the ladder keeps them, they hold their width and the ask, which ellipsizes, gives way. */
+@container asks (min-width: 851px) {
+  .lc-asks__rail .lc-asks__meta,
+  .lc-asks__rail .lc-asks__link {
+    flex-shrink: 0;
+  }
+}
 /* Off this machine there is no one-click path to offer, so the invitation drops to a ghost rather
    than dressing a credential form up as something it is not. It borrows `.lc-asks__link`, the rail's
    existing ghost — same weight, same restraint, no new rule on a CSS budget with 8 bytes to spare. */
