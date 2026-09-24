@@ -21,7 +21,7 @@ import { renderBanner } from '../render/rows.js';
 import { paint as pc, theme } from '../render/theme.js';
 import { sym } from '../render/ui.js';
 import { acceptSurface, readDeclined } from './declined.js';
-import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
+import { bindingRefusal, inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { CANONICAL_SKILL_PATH, establishedHarnesses, writeGuidance } from './guidance.js';
 import type { Harness, RefreshHooksOptions } from './harness.js';
 import { HARNESSES, harnessAdapters } from './harnesses/index.js';
@@ -406,6 +406,14 @@ export async function runInit(): Promise<number> {
     process.stderr.write(
       'musterd init is interactive — run it in a terminal (or use `musterd team add` directly).\n',
     );
+    return 2;
+  }
+  // A binding never sits above a Workspace (reach spec §6, ADR 442): `~`, `~/musterd`, or any folder
+  // with a member worktree beneath it would confer its identity on every unbound folder under it.
+  // Hard refusal, before any prompt — unlike the §1b confirm below there is no "yes, I mean it".
+  const refusal = bindingRefusal(process.cwd());
+  if (refusal) {
+    process.stderr.write(`musterd init refused: ${refusal.reason}\n`);
     return 2;
   }
 

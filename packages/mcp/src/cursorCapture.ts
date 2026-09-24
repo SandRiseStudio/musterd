@@ -106,7 +106,9 @@ export function enumerateCursorSessions(
     cursorMemo = { root, at: now, rows: scanCursorTree(root) };
   }
   if (cursorMemo.rows === undefined) return undefined;
-  const target = resolve(workspace);
+  // Scanned roots are REAL paths (seatWorkspaceRoot walks from the real path, reach spec §6), so
+  // the requested workspace is compared the same way.
+  const target = seatWorkspaceRoot(workspace) ?? resolve(workspace);
   return cursorMemo.rows
     .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
     .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))

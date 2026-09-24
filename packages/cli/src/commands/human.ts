@@ -16,6 +16,7 @@ import {
   type Config,
 } from '../config.js';
 import { CliError } from '../errors.js';
+import { bindingRefusal } from '../onboard/guard.js';
 import { theme } from '../render/theme.js';
 import { hint, success, sym } from '../render/ui.js';
 
@@ -236,6 +237,10 @@ function resolveHome(config: Config, team: string, flag: string | undefined): st
       2,
     );
   }
+  // The home is a leaf (reach spec §6, ADR 442): a binding above a Workspace — `~`, `~/musterd`, a
+  // folder with member worktrees beneath — would confer the human on every unbound folder under it.
+  const refusal = bindingRefusal(dir);
+  if (refusal) throw new CliError(`musterd human refused: ${refusal.reason}`, 2);
   mkdirSync(dir, { recursive: true });
   // Guard the floor the moment it exists, before a credential lands on it. `team export` guards it too,
   // but a home is committable long before anyone exports a roster into it — the binding written just

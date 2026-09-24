@@ -11,6 +11,7 @@ import { resolveWorkspace, resolveWorkspaceKey } from '@musterd/protocol/project
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient, watchClaim } from '../client.js';
 import {
+  findBinding,
   loadConfig,
   rememberIdentity,
   requireUsableBinding,
@@ -19,7 +20,7 @@ import {
   wsBase,
 } from '../config.js';
 import { CliError } from '../errors.js';
-import { liveBindingClobber } from '../onboard/guard.js';
+import { bindingRefusal, liveBindingClobber } from '../onboard/guard.js';
 import {
   consumePending,
   listPendingForWorkspace,
@@ -62,6 +63,13 @@ function pendingAge(ms: number): string {
 }
 
 export async function claimCommand(parsed: Parsed): Promise<number> {
+  // A FIRST binding never sits above a Workspace (reach spec §6, ADR 442). A folder already bound
+  // is left to the clobber guard below — this is the layout rule, not a re-claim rule — so the
+  // pre-migration `~/agents` (bound, with worktrees beneath) still re-claims until lane 3 moves it.
+  if (!findBinding(process.cwd(), {})) {
+    const refusal = bindingRefusal(process.cwd());
+    if (refusal) throw new CliError(`claim refused: ${refusal.reason}`, 2);
+  }
   const flags = parsed.flags;
   const config = loadConfig();
   // Strict read (ADR 281/282): claim consumes the binding AS identity (key, grant, claim target),

@@ -131,6 +131,18 @@ credential custody (ADR 200, ADR 341, and spec §8).
   retired paths. The CLI sweeps a stamped copy at either path on every guidance write, so a seat
   provisioned before the wall loses them at its next refresh. `session label-nudge` stays as a
   silent no-op, because hooks installed before the wall still call it.
+- 2026-09-24 (reach spec lane 2 — layout): identity now resolves by **real path** — both readers
+  (`findBinding`/`findWorkspaceSpec` in the CLI, `walkUpForBinding`/`resolveBindingDir` in the MCP
+  adapter) realpath the start folder before walking up, so a symlink into a Workspace resolves as
+  the folder it really is (a not-yet-existing tail resolves through its nearest real ancestor). And
+  a binding never sits above a Workspace: `bindingRefusal` (`onboard/guard.ts`) hard-refuses `~`,
+  `~/musterd`, and any folder with a `.musterd/binding.json` up to two levels beneath it (skipping
+  `node_modules`/`.git`, not following symlinks), compared by real path so a symlinked alias is
+  refused like the real folder. `musterd init` and `musterd human` always refuse; `musterd claim`
+  refuses only a **first** binding, so the pre-migration `~/agents` (bound, with `.worktrees/*` Workspaces
+  beneath) keeps re-claiming until lane 3 moves it to `~/musterd/agents/nick`. The member Workspace
+  layout is `~/musterd/<repo>/<member>`; the team home `~/musterd/<team>` (`defaultTeamHome`) is a
+  leaf and stays bindable. Physical migration of `~/agents` and `~/agents-<seat>` is lane 3.
 
 ## Observability & Evaluation
 

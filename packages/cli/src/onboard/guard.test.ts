@@ -1,9 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Binding, MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { liveBindingClobber, nameBoundElsewhere } from './guard.js';
+import { bindingRefusal, liveBindingClobber, nameBoundElsewhere } from './guard.js';
 
 /** A folder binding whose seat is `name`. */
 const boundTo = (name: string): Binding => ({
@@ -90,5 +90,79 @@ describe('nameBoundElsewhere — a vanished folder is not a collision (ADR 162)'
     } finally {
       rmSync(live, { recursive: true, force: true });
     }
+  });
+});
+
+describe('bindingRefusal — a binding never sits above a Workspace (reach spec §6, ADR 442)', () => {
+  /** A fake `~` with the §6 layout under it: ~/musterd/agents/{dolly,nick} bound, ~/musterd/revive a leaf. */
+  const layout = () => {
+    const home = mkdtempSync(join(tmpdir(), 'musterd-home-'));
+    const bind = (dir: string) => {
+      mkdirSync(join(dir, '.musterd'), { recursive: true });
+      writeFileSync(join(dir, '.musterd', 'binding.json'), '{}');
+    };
+    bind(join(home, 'musterd', 'agents', 'dolly'));
+    bind(join(home, 'musterd', 'agents', 'nick'));
+    mkdirSync(join(home, 'musterd', 'revive'), { recursive: true });
+    mkdirSync(join(home, 'proj', 'node_modules', 'dep'), { recursive: true });
+    bind(join(home, 'proj', 'node_modules', 'dep'));
+    return home;
+  };
+
+  it('refuses `~` itself', () => {
+    const home = layout();
+    expect(bindingRefusal(home, home)?.reason).toMatch(/every folder beneath/);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('refuses `~/musterd` — the roof over every project', () => {
+    const home = layout();
+    expect(bindingRefusal(join(home, 'musterd'), home)?.reason).toMatch(/never holds a binding/);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('refuses `~/musterd/<repo>` because member worktrees lie beneath it, naming one', () => {
+    const home = layout();
+    const got = bindingRefusal(join(home, 'musterd', 'agents'), home);
+    expect(got?.workspace).toBe(realpathSync(join(home, 'musterd', 'agents', 'dolly')));
+    expect(got?.reason).toMatch(/musterd\/<repo>\/<member>/);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('refuses any folder with a Workspace up to two levels beneath it (nested worktrees)', () => {
+    const home = layout();
+    mkdirSync(join(home, 'proj', '.worktrees', 'x', '.musterd'), { recursive: true });
+    writeFileSync(join(home, 'proj', '.worktrees', 'x', '.musterd', 'binding.json'), '{}');
+    expect(bindingRefusal(join(home, 'proj'), home)?.workspace).toBe(
+      realpathSync(join(home, 'proj', '.worktrees', 'x')),
+    );
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('allows a member worktree and a leaf team home; ignores node_modules', () => {
+    const home = layout();
+    expect(bindingRefusal(join(home, 'musterd', 'agents', 'dolly'), home)).toBeNull();
+    expect(bindingRefusal(join(home, 'musterd', 'revive'), home)).toBeNull();
+    expect(bindingRefusal(join(home, 'proj'), home)).toBeNull();
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('refuses a symlinked alias of a refused parent exactly like the real path', () => {
+    const home = layout();
+    symlinkSync(join(home, 'musterd', 'agents'), join(home, 'alias'));
+    expect(bindingRefusal(join(home, 'alias'), home)?.workspace).toBe(
+      realpathSync(join(home, 'musterd', 'agents', 'dolly')),
+    );
+    symlinkSync(home, join(home, 'proj', 'home-alias'));
+    expect(bindingRefusal(join(home, 'proj', 'home-alias'), home)?.reason).toMatch(
+      /every folder beneath/,
+    );
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('never throws: a folder that does not exist is simply not refused', () => {
+    const home = layout();
+    expect(bindingRefusal(join(home, 'nope', 'nor'), home)).toBeNull();
+    rmSync(home, { recursive: true, force: true });
   });
 });

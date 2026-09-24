@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -120,13 +121,37 @@ export function findBinding(
 ): Binding | null {
   const explicit = env['MUSTERD_BINDING'];
   if (explicit) return readBinding(explicit);
-  let dir = startDir;
+  const p = findBindingPath(startDir);
+  return p ? readBinding(p) : null;
+}
+
+/**
+ * Where an identity walk starts: the REAL path of `startDir` (reach spec §6 / ADR 442). A symlink
+ * into a Workspace resolves as the folder it really is — a logical walk from an alias that lands
+ * below the workspace root would never pass that root and read as nobody, or worse, as whatever
+ * binding sits above the alias. Unresolvable → the plain path (the walk then finds nothing).
+ */
+function walkStart(startDir: string): string {
+  return realpathOfNearest(resolve(startDir));
+}
+
+/**
+ * The real path of `p`, or — when `p` does not exist yet — of its nearest existing ancestor with the
+ * missing tail re-joined. `<worktree>/not-yet-created` must still resolve through a symlinked
+ * `<worktree>`; a plain `resolve` would miss the alias, a bare `realpathSync` would throw.
+ */
+function realpathOfNearest(p: string): string {
+  const missing: string[] = [];
+  let dir = p;
   for (;;) {
-    const p = join(dir, BINDING_DIR, BINDING_FILE);
-    if (existsSync(p)) return readBinding(p);
-    const parent = dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
+    try {
+      return missing.length ? join(realpathSync(dir), ...missing.reverse()) : realpathSync(dir);
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) return p;
+      missing.push(dir.slice(parent.length + 1));
+      dir = parent;
+    }
   }
 }
 
@@ -171,8 +196,12 @@ export function loadBinding(dir: string): LocalLoad<Binding> {
  */
 function rosterHomeTeamFor(identityPath: string): string | null {
   try {
-    const dir = resolve(dirname(dirname(identityPath)));
-    const entry = Object.entries(loadConfig().rosterHome).find(([, home]) => resolve(home) === dir);
+    // Both sides by real path: the identity walk resolves symlinks (reach spec §6), the registry
+    // records whatever the human typed.
+    const dir = realpathOfNearest(resolve(dirname(dirname(identityPath))));
+    const entry = Object.entries(loadConfig().rosterHome).find(
+      ([, home]) => realpathOfNearest(resolve(home)) === dir,
+    );
     return entry ? entry[0] : null;
   } catch {
     return null;
@@ -266,7 +295,7 @@ export function requireUsableBinding(
 
 /** The binding file an upward walk from `startDir` would read, or null when none exists. */
 function findBindingPath(startDir: string): string | null {
-  let dir = startDir;
+  let dir = walkStart(startDir);
   for (;;) {
     const p = join(dir, BINDING_DIR, BINDING_FILE);
     if (existsSync(p)) return p;
@@ -422,7 +451,7 @@ export function saveWorkspaceSpec(dir: string, spec: WorkspaceSpec): string {
  * as null — this is an ADVISORY read, and the strict consumers classify via {@link loadWorkspace}.
  */
 export function findWorkspaceSpec(startDir: string = process.cwd()): WorkspaceSpec | null {
-  let dir = startDir;
+  let dir = walkStart(startDir);
   for (;;) {
     const p = join(dir, BINDING_DIR, WORKSPACE_SPEC_FILE);
     if (existsSync(p)) {

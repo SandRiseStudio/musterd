@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   BINDING_DIR,
@@ -89,6 +90,83 @@ export function liveBindingClobber(
   return livePresence?.workspace
     ? { member: bound, workspace: livePresence.workspace }
     : { member: bound };
+}
+
+/**
+ * A binding never sits above a Workspace (reach-and-boundaries spec §6, ADR 442). Identity resolves
+ * by walking UP to the nearest `.musterd/binding.json`, so a binding written at `~`, at `~/musterd`
+ * (the roof over every project — `~/musterd/<repo>/<member>` is the member-worktree layout), or in
+ * any folder with a Workspace beneath it would silently confer that identity on every *unbound*
+ * folder under it. This is the HARD refusal — unlike {@link inspectInitTarget}'s confirm, there is
+ * no "yes, I mean it": the wall (ADR 442) is only as good as the rule that no folder confers an
+ * identity it was not bound to.
+ *
+ * Every comparison is by REAL path: a symlinked alias of a refused folder is refused like the real
+ * one, and a symlinked cwd is judged where it really lives. The beneath-scan is two levels deep
+ * (`<repo>/<member>` and `<repo>/.worktrees/<member>` are both one or two down), skipping
+ * `node_modules` and `.git`, and it does not follow symlinks. Non-throwing: a folder that cannot
+ * be read is not refused — this guard exists to stop a *layout* slip, never to block a genuine run
+ * on a filesystem hiccup.
+ */
+export interface BindingRefusal {
+  /** Why the folder cannot hold a binding, ready to print. */
+  reason: string;
+  /** The Workspace found beneath the folder, when that is the reason (real path). */
+  workspace?: string;
+}
+
+const LAYOUT_HINT = 'Bind a member worktree instead: ~/musterd/<repo>/<member>.';
+
+export function bindingRefusal(cwd: string, home: string = homedir()): BindingRefusal | null {
+  const here = realpathOr(cwd);
+  if (!existsSync(here)) return null;
+  if (here === realpathOr(home)) {
+    return {
+      reason: `${cwd} is your home folder — a binding here would confer one identity on every folder beneath it. ${LAYOUT_HINT}`,
+    };
+  }
+  if (here === realpathOr(join(home, 'musterd'))) {
+    return {
+      reason: `${cwd} is the roof over every project (~/musterd) and never holds a binding. ${LAYOUT_HINT}`,
+    };
+  }
+  const beneath = workspaceBeneath(here, 2);
+  if (beneath) {
+    return {
+      reason: `a Workspace lies beneath ${cwd} (${beneath}) — a binding here would confer its identity on every unbound folder under it. ${LAYOUT_HINT}`,
+      workspace: beneath,
+    };
+  }
+  return null;
+}
+
+/** `realpathSync` with the un-resolvable case folded to a plain absolute path (never throws). */
+function realpathOr(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return resolve(p);
+  }
+}
+
+/** The first folder at most `depth` levels under `dir` holding a `.musterd/binding.json`, or null. */
+function workspaceBeneath(dir: string, depth: number): string | null {
+  if (depth === 0) return null;
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  for (const e of entries) {
+    // Real directories only: a symlinked child is somebody else's folder (and may loop).
+    if (!e.isDirectory() || e.name === 'node_modules' || e.name === '.git') continue;
+    const child = join(dir, e.name);
+    if (e.name !== BINDING_DIR && existsSync(join(child, BINDING_DIR, BINDING_FILE))) return child;
+    const deeper = workspaceBeneath(child, depth - 1);
+    if (deeper) return deeper;
+  }
+  return null;
 }
 
 /** The monorepo root (by package name) or its `packages/{cli,server}` layout. */
