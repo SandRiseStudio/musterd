@@ -9290,25 +9290,28 @@ describe('the doorbell (ADR 443)', () => {
 
   it('a hold that lapses by its until is flushed on the sweep, with no availability POST', async () => {
     const t = await team();
-    await post('/teams/dawn/availability', { status: 'away', until: Date.now() + 40 }, t.dee);
+    // A generous until, then move the deadline — a real 40 ms window loses the race under coverage.
+    await post('/teams/dawn/availability', { status: 'away', until: Date.now() + 5_000 }, t.dee);
     await send(t.ada, env('Ada', toDee, 'ask', 'u1', consult));
     expect(rings(t.teamId)[0]!.state).toBe('held');
     const ctx = { db: server.db, config: { presenceTimeoutMs: 45_000 } } as unknown as Ctx;
     flushLapsedHolds(ctx, (id) => getTeamById(server.db, id));
     expect(rings(t.teamId)[0]!.state).toBe('held'); // not lapsed yet
-    await tick(60);
+    server.db
+      .prepare("UPDATE members SET availability = ? WHERE team_id = ? AND name = 'Dee'")
+      .run(JSON.stringify({ status: 'away', until: Date.now() - 1 }), t.teamId);
     flushLapsedHolds(ctx, (id) => getTeamById(server.db, id));
     expect(rings(t.teamId)[0]!.state).not.toBe('held');
   });
 
   it('a held ring for a member who left is closed on the sweep, not rung', async () => {
     const t = await team();
-    await post('/teams/dawn/availability', { status: 'away', until: Date.now() + 40 }, t.dee);
+    await post('/teams/dawn/availability', { status: 'away', until: Date.now() + 5_000 }, t.dee);
     await send(t.ada, env('Ada', toDee, 'ask', 'l1', consult));
+    expect(rings(t.teamId)[0]!.state).toBe('held');
     server.db
       .prepare("UPDATE members SET left_at = ? WHERE team_id = ? AND name = 'Dee'")
       .run(Date.now(), t.teamId);
-    await tick(60);
     const ctx = { db: server.db, config: { presenceTimeoutMs: 45_000 } } as unknown as Ctx;
     flushLapsedHolds(ctx, (id) => getTeamById(server.db, id));
     expect(rings(t.teamId)[0]!.state).toBe('done');
