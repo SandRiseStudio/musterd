@@ -1,9 +1,10 @@
 # 445 — Agent traces are captured local-first: every harness action, on the machine that made it
 
-- Status: accepted — 2026-09-24, by nick in session ("approved"), on the narrowed text (scope
-  chosen with nick: full fidelity, local-first; narrowed the same day on nick's acceptance of three
-  changes — a scope not a reversal, content opt-in with a credential scrub, a separate trace
-  database — see §1, §3, §4)
+- Status: proposed — 2026-09-24 (scope chosen with nick in session: full fidelity, local-first;
+  narrowed the same day on nick's acceptance of three changes — a scope not a reversal, content
+  opt-in with a credential scrub, a separate trace database — see §1, §3, §4). nick approved the
+  narrowed text in session on 2026-09-24; the status flips to accepted in its own commit, after the
+  R3 correction below lands, so `change-adr:check` sees the Decision unchanged at acceptance.
 - Date: 2026-09-24
 - Lane: `01M3AJQXXJ2B6NN43E11A41AKX` (goal `research-corpus`)
 - Scopes: `docs/design/observability.md` §7's first non-goal. The non-goal **stands as a product
