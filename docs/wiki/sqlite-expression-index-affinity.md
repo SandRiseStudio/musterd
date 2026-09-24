@@ -27,6 +27,10 @@ Fixed by migration v71 (`packages/server/src/db/migrations.ts`): the column, fou
 - **`pragma_table_info` hides a VIRTUAL generated column.** A `cols.includes(...)` guard written against it re-adds the column on a migration replay and fails with `duplicate column name`. Use `pragma_table_xinfo` (2026-09-24; falsify: `SELECT name FROM pragma_table_info('messages')` after v71 — `in_reply_to` is absent; `pragma_table_xinfo` lists it). <!-- claim: other -->
 - **Nothing in the daemon runs `ANALYZE`.** Without `sqlite_stat1` the planner kept choosing `idx_messages_team_ts` (it avoids the `ORDER BY` sort) over the new equality indexes, so two of the three hot statements stayed at ~5 ms per call until the migration analysed the table. `PRAGMA optimize` on close would keep the stats fresh; not wired as of 2026-09-24.
 
+## What it looked like from the request path (2026-09-24)
+
+The daemon log for the lane window (12:50–13:15) shows three endpoints holding the loop ~1135 s of 1500 s — `wake-leases` 98 calls at 7.6 s, `/lanes` 39 at 5.9 s, `/report` 10 at 16 s — all through `openDirectedLedger`; `/inbox`, 52% of requests, averaged 48 ms. The guardian's `vdbeCommit → pagerWalFrames` sample read as "synchronous WAL commits are the problem", and that diagnosis was wrong: a single-row commit costs 0.026 ms on this DB and the daemon writes ~4200 audit rows an hour. The full numbers, the repaired load harness and the ranked levers are in [docs/perf/daemon-load-baseline.md](../perf/daemon-load-baseline.md).
+
 ## Where else this shape lives
 
 `json_extract(detail, '$.act') = ?` on `audit` (`residency.ts`, several sites) is the same pattern on a 228k-row table. It is bounded today by `idx_audit_team_action_ts` narrowing on `action` first, so it did not show in the profile, but it is the next candidate if `audit` grows.
