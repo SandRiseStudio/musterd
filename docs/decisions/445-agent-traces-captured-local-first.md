@@ -1,10 +1,15 @@
 # 445 — Agent traces are captured local-first: every harness action, on the machine that made it
 
-- Status: proposed — 2026-09-24 (scope chosen with nick in session: full fidelity, local-first)
+- Status: proposed — 2026-09-24 (scope chosen with nick in session: full fidelity, local-first;
+  narrowed the same day on nick's acceptance of three changes — a scope not a reversal, content
+  opt-in with a credential scrub, a separate trace database — see §1, §3, §4)
 - Date: 2026-09-24
 - Lane: `01M3AJQXXJ2B6NN43E11A41AKX` (goal `research-corpus`)
-- Reverses: `docs/design/observability.md` §7's first non-goal — for capture on the producing
-  machine only; the "we link, we don't replicate" posture stays for anything that leaves it.
+- Scopes: `docs/design/observability.md` §7's first non-goal. The non-goal **stands as a product
+  boundary** — musterd does not ship agent-internals observability and does not replicate a
+  vendor's trace store. What this ADR adds sits under [ADR 082](082-instrument-by-default-telemetry.md)'s
+  existing line instead: the daemons _we_ run capture their own seats' harness activity as research
+  substrate, on the producing machine, off by default for the product.
 - Builds on: [ADR 015](015-otel-layer1-server.md) / [ADR 082](082-instrument-by-default-telemetry.md)
   (off-by-default, no phone-home, instrument-by-default for dogfood daemons),
   [ADR 089](089-telemetry-l2-client-sdk.md) (the adapter/CLI SDK this ADR switches on),
@@ -51,12 +56,14 @@ build never did it:
   export because the adapter and CLI processes are launched without `OTEL_EXPORTER_OTLP_*`; the
   ADR 011 cross-agent trace has therefore a measured link rate of 0%, as at its baseline.
 
-Why the non-goal no longer holds. It was written for a product that sits _between_ single-agent
-observability vendors; that positioning is unchanged (§3). But the research corpus (ADR 056's produce
-side) and every cookoff/wasted-work number so far were reconstructed from harness transcripts by
-hand — "a non-Claude agent's is unrecoverable" (ADR 082) — and the dataset musterd can uniquely
-publish is _coordination acts joined to what each seat actually did_. Linking to a vendor backend
-nobody runs is not a join. The join has to be made on the machine where both halves exist.
+Why the non-goal needs a scope, not a repeal. It was written for a product that sits _between_
+single-agent observability vendors; that positioning is unchanged (§3) and stays the product
+boundary. But the research corpus (ADR 056's produce side) and every cookoff/wasted-work number so
+far were reconstructed from harness transcripts by hand — "a non-Claude agent's is unrecoverable"
+(ADR 082) — and the dataset musterd can uniquely publish is _coordination acts joined to what each
+seat actually did_. Linking to a vendor backend nobody runs is not a join. The join has to be made
+on the machine where both halves exist, by the daemons we run, as substrate — which is a research
+scope under ADR 082, not a change to what the product ships.
 
 ## Problem
 
@@ -67,14 +74,16 @@ capture it now sits in front of.
 
 ## Decision
 
-### 1. Capture is local-first; the non-goal is reversed for the producing machine only
+### 1. Capture is a research substrate, local-first; §7 stays a product boundary
 
 musterd captures a seat's harness activity — prompts, tool calls with inputs and outputs, reasoning
-where the harness persists it, token usage, hook outcomes, turn and subagent boundaries — into the
-daemon's own store on the machine that produced it. `observability.md` §7's non-goal is amended to
-say so. What §7 still means: musterd does not build a spans database, an LLM-call dashboard or an
-eval platform for _other people's_ traces, and does not ship agent internals anywhere by default.
-Emission to an operator's OTLP backend stays "integrate, don't build" (§3).
+where the harness persists it, token usage, hook outcomes, turn and subagent boundaries — into a
+daemon-owned store on the machine that produced it. This is **scoped under ADR 082**: it is what the
+dogfood daemons do to their own seats so the research corpus stops being reconstructed by hand. It
+is not a product feature and `observability.md` §7 is not reversed: musterd does not build a spans
+database, an LLM-call dashboard or an eval platform for _other people's_ traces, does not ship
+agent internals anywhere by default, and emission to an operator's OTLP backend stays "integrate,
+don't build" (§3). §7 gains a dated scope note pointing here; its text stands.
 
 ### 2. Three rails, in priority order
 
@@ -100,32 +109,53 @@ Emission to an operator's OTLP backend stays "integrate, don't build" (§3).
   ADR 011 link fire; the same path sets `CLAUDE_CODE_ENABLE_TELEMETRY=1` + OTLP exporters for
   Claude Code seats, content flags off. R3 is a link and a cost/token cross-check, not a store.
 
-### 3. One table, two body classes, and what leaves the machine
+### 3. One table in its own database, two body classes, and what leaves the machine
 
 - A per-event table `trace_events` (team, seat, session digest, monotonic seq, ts, harness, kind,
   structural columns) with the content part in a separate nullable column. Per-call rows, not
   aggregates — `tool_call_stats` stays as the hourly view for musterd's own tools.
+- **A separate database file**, `trace.db` beside `musterd.db` (same directory, same
+  `better-sqlite3`, its own migration ladder). Per-call rows with up to 256 KiB of content each will
+  outgrow the coordination store within weeks, and the daemon wedged twice on 2026-09-24 in
+  synchronous SQLite work on `musterd.db`; the trace store must not add to that file's size, lock
+  contention or backup weight. `corpus:snapshot` captures both files; nothing joins across them at
+  write time — the join key (session digest + `tool_use_id`) is carried in both.
 - **Structural** columns follow ADR 184 §2's definition (names, ids, kinds, timings, counts,
   fingerprints) and replicate under ADR 371's `record` kind and export under `dataset:export` as
   today. **Content** columns (inputs, outputs, prompts, responses, reasoning) never replicate, never
   export, and never cross the wire off-machine without ADR 184 §3 consent recorded per author. They
   are readable through the daemon by the seat that produced them and by admins (ADR 128's
   recipient-scoping applied to a seat's own trace).
+- **Content capture is opt-in per team; structural is the default.** A team-level setting
+  `trace.content` (default `off`) decides whether the content column is written at all; `revive` sets
+  it `on`. With it off, R1 still records every event's structural columns, so the coverage eval in
+  §Observability holds either way.
+- **Credentials are scrubbed at the hook, before anything is stored.** Tool inputs and outputs can
+  carry secrets verbatim (a `cat` of a binding, a token in a curl header). The tap replaces every
+  token matching the protocol's `TOKEN_PREFIXES` shapes (`mskey_`, `msgr_`, `mscr_`, `msac_`,
+  `msls_`, and any later prefix registered there) and the generic bearer/API-key shapes
+  (`Authorization: Bearer …`, `sk-…`, `ghp_…`, 32+-char hex/base64 runs after `token=`/`key=`)
+  with `<redacted:kind>` and records `redactions: n` on the row. This is a **credential** scrub
+  only — hard rule 5 ("never log secrets") applied to a new log — not a PII scrubber, which ADR 184
+  §2 rejects as false safety; prose stays prose.
 - Content is bounded: `WAKE_TURN_TRANSCRIPT_MAX_BYTES` (256 KiB) per event, truncation recorded on
   the row; content older than 30 days is pruned unless `corpus:snapshot` captured it; structural
   rows keep the messages table's lifetime.
-- Bash commands in content are stored as text — the sha256 fingerprint stays on the ADR 150 gate
-  rows, which are the enforcement record and unchanged.
+- Bash commands in content are stored as text (after the scrub) — the sha256 fingerprint stays on
+  the ADR 150 gate rows, which are the enforcement record and unchanged.
 
 ### 4. Posture
 
 Off by default for the product (ADR 015/082: no OTLP endpoint → no export; no `trace` config →
-no tap); instrument-by-default on the daemons we run. A seat can see that it is being traced:
-`musterd status` and `team_status` say `traced: hooks+transcript` when the tap is on.
+no tap); structural tap on by default for the daemons we run; content only where `trace.content`
+is `on`. A seat can see that it is being traced and how deep: `musterd status` and `team_status`
+say `traced: structural` or `traced: structural+content` when the tap is on.
 
 ### 5. What this does not decide
 
-The `/live` timeline and `musterd report` views over `trace_events` (an increment of their own);
+The `/live` timeline and `musterd report` views over `trace_events` (increment 4 — **human-gated**:
+views are where a research substrate starts to look like the product §7 says we do not build, so
+that increment opens only on nick's explicit word, not as a natural next step);
 Cursor/Grok/OpenCode transcript parsers (R2 ships Claude Code and Codex first); any change to
 ADR 184's publication gate; a spans backend.
 
@@ -133,18 +163,24 @@ ADR 184's publication gate; a spans backend.
 
 0. R3 config: adapter/CLI export switched on for dogfood seats via the launcher marker; Claude Code
    OTel into the existing sink. No schema change. Falsifier: `musterd.tool.call` spans in the sink.
-1. R1 structural + content, Claude Code first, then Codex/Cursor/Grok hook adapters; `TraceEvent`
-   protocol schema; `trace_events` migration; `POST /teams/:slug/trace/events`.
+1. R1 in two halves. **1a structural**: `TraceEvent` protocol schema, `trace.db` + `trace_events`
+   migration, `POST /teams/:slug/trace/events`, the Claude Code hook payload, then Codex/Cursor/Grok
+   hook adapters — no content column written. **1b content**: the credential scrub (with its own
+   test corpus of every `TOKEN_PREFIXES` shape and the generic shapes), the `trace.content` team
+   setting, and the content column. 1b does not ship without the scrub tests green.
 2. R2 transcript tail for Claude Code and Codex; join on `tool_use_id`; `musterd trace show
    <session>` renders one session end to end.
 3. Replication/export wiring: structural columns into the `record` sync kind and `dataset:export`;
    content pruning; `corpus:snapshot` includes `trace_events`.
-4. Views: `/live` per-seat timeline; `musterd report trace` (coverage, cost per lane, tool mix).
+4. Views (human-gated, §5): `/live` per-seat timeline; `musterd report trace` (coverage, cost per
+   lane, tool mix).
 
 ## Consequences
 
-- `observability.md` §7 is amended in this PR with a dated pointer; §4's "CLI and MCP adapter only
-  get error/diagnostic logging" line, stale since ADR 089, is corrected alongside.
+- `observability.md` §7 keeps its non-goal and gains a dated scope note pointing here (the first
+  cut of this ADR, merged in #1691, struck the line as "reversed"; nick declined that framing the
+  same day and the strike is undone); §4's "CLI and MCP adapter only get error/diagnostic logging"
+  line, stale since ADR 089, is corrected alongside.
 - `07-conventions.md`'s "agent-turn detail" (the ADR 052 section) finally has a referent: the
   `TraceEvent` kinds of §2. ADR 184's table row "spans — prompt by hash + version — enforced" gets a
   dated note: nothing emits a prompt hash today; R1/R2 content is governed by §3 above instead.
@@ -152,10 +188,15 @@ ADR 184's publication gate; a spans backend.
   endpoint and the sink is live; what is dormant is the adapter/CLI side (§2 R3).
 - The research corpus gains the half it has reconstructed by hand since finding 001: per-seat
   action, cost and reasoning joined to coordination acts, for every harness, not only Claude.
-- Risk: content capture makes the daemon's store sensitive in a way the act log already was
-  (ADR 184's `messages.body` is verbatim prose today). The mitigation is §3 — the content column is
-  the only new sensitive surface, it is bounded, pruned, and structurally barred from replication
-  and export — not a scrubber.
+- Risk: content capture makes a daemon-owned store more sensitive than the act log already is
+  (ADR 184's `messages.body` is verbatim prose; tool output can be a file of secrets). The
+  mitigations are §3's, in order of strength: content is off unless a team turns it on; credentials
+  are scrubbed before storage; the column is bounded, pruned, and structurally barred from
+  replication and export; and it lives in a file the coordination store never opens. What remains
+  is prose and code in `trace.db` on the operator's own disk, which is the same exposure as the
+  harness's transcript directory today.
+- Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
+  backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a
   batched POST, so the per-call overhead is what the gate costs now. R2 is a file tail.
 
