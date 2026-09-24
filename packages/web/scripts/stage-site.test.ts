@@ -24,6 +24,8 @@ describe('the public-origin allowlist (ADR 302)', () => {
         'llms-full.txt',
         'robots.txt',
         'sitemap.xml',
+        // The ADR 135 build stamp, so the origin says which commit it serves (ADR 308, lane 01M2XD2RPG).
+        'build.json',
       ].sort(),
     );
   });

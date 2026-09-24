@@ -72,6 +72,15 @@ guessed at least once while this was being written:
   finished change waits. Accepted deliberately — the alternative on the evidence above is publishing
   by a member who has not opened the page in a browser. If the wait becomes the binding constraint,
   the fix is a second authorized member, not a general licence.
+- **2026-09-24 (lane `01M2XD2RPG`): the "cheap first instrument" below now exists.** On 2026-09-19
+  #1561 was merged, accepted and `done` while musterd.io still served the LIVE badge it removed —
+  four homepage strings wrong, every instrument green ([landed is not
+  live](../wiki/landed-is-not-live.md)). The site now carries its build stamp (`/build.json`, ADR 302
+  amendment of the same date), `musterd service site-gap` reports the site-affecting commits between
+  it and `origin/main`, and the live build-publisher runs that check every poll as the `live` service
+  seat, raising one advisory ask to miley per deployed ref and resolving it when the site catches up.
+  The decision is unchanged: the deploy is still miley's act. What changed is that the wait is now a
+  fact in the stream rather than something a seat notices by hand.
 - **This ADR does not decide what verification a deploy requires.** The evidence says a real browser
   on the public origin catches what staging does not, and every deploy so far has been verified that
   way by the seat now holding the authorization. Making that a *requirement* is a separate decision

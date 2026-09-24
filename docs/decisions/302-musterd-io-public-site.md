@@ -78,6 +78,19 @@ Deliberately not done here: a `_redirects` file. The duplicate origin worth remo
 301ing it — a deploy-behaviour change, so it belongs to whoever runs the deploy (ADR 308), not to
 this lane.
 
+## Amendment — 2026-09-24: the public set carries its build stamp
+
+**`build.json` ships on this origin** — the ADR 135 stamp (`{ ref, builtAt }`) that `pnpm build`
+writes beside `dist/client/`, copied into `dist/site/` by `stage-site.mjs` and added to
+`PUBLIC_ALLOW`. Static JSON with no client, admissible for the same reason the 2026-09-01 text files
+are. It exists so the origin can answer "which commit is this": `musterd service site-gap` compares
+it against `origin/main` on `packages/web`, and the live build-publisher runs that comparison every
+poll and asks the deploy-authorized seat when the site is behind — the instrument
+[ADR 308](308-public-site-deploy-authorization.md) §Observability named and this lane
+(`01M2XD2RPG`) built. `stage-site` refuses a build with no stamp or a stamp without a commit ref:
+an unstamped deploy would make the next gap unmeasurable, which is the state this amendment ends.
+See [landed is not live](../wiki/landed-is-not-live.md) for the measured instance.
+
 ## Consequences
 
 - The launch surfaces (product story, docs, launch post) gain a public home; copy is

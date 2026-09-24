@@ -64,6 +64,19 @@ describe('buildLiveBuildScript', () => {
     expect(s).toMatch(/worktree add --detach "\$WORKTREE" origin\/main/);
     expect(s).not.toContain('cd "$WORKTREE" || exit 0');
   });
+  it('measures landed-versus-live on every poll, as the live service seat, before the early exit (ADR 308)', () => {
+    // lane 01M2XD2RPG: a deploy moves musterd.io without moving main, so the check must run on the
+    // polls that build nothing — it sits above the "already current" exit, not below the publish.
+    const check = s.indexOf('musterd service site-gap --raise');
+    const earlyExit = s.indexOf('[ "$PUBLISHED" = "$TIP" ]');
+    expect(check).toBeGreaterThan(0);
+    expect(check).toBeLessThan(earlyExit);
+    expect(s).toContain('MUSTERD_SERVICE_TOKEN_FILE="$(dirname "$WEBROOT")/seat-token"');
+    expect(s).toContain('--tip "$TIP"');
+    expect(s).toMatch(/site-gap[^\n]*\|\| true/); // never fails the publisher
+    expect(s).toContain('command -v musterd'); // a checkout without the CLI on PATH still publishes
+  });
+
   it('is loud on an unrecoverable worktree (exit 1 so launchd + the log show a real failure)', () => {
     expect(s).toMatch(/worktree missing/);
     expect(s).toMatch(/exit 1/);

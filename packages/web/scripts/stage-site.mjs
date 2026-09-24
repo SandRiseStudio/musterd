@@ -33,15 +33,26 @@ for (const r of DAEMON_ROUTES) {
 
 const built = await readdir(BUILD).catch(() => die(`no build at ${BUILD} — run \`pnpm build\` first`));
 
+// The ADR 135 stamp is written by `pnpm build` beside `client/`, not inside it; it is staged from
+// there so the public origin can answer "which commit is this" (`/build.json`, ADR 308).
+const STAMP = join(pkgRoot, 'dist', 'build.json');
+const FROM_DIST_ROOT = ['build.json'];
+
 for (const name of ALLOW) {
+  if (FROM_DIST_ROOT.includes(name)) continue;
   if (!built.includes(name)) die(`build is missing \`${name}\` — did the prerender change?`);
 }
+const stamp = await readFile(STAMP, 'utf8').catch(() => die(`no ${STAMP} — the web build must stamp its commit (ADR 135); run \`pnpm build\``));
+if (!/"ref":"[0-9a-f]{40}(-dirty)?"/.test(stamp))
+  die(`refusing to deploy an unstamped build — ${STAMP} carries no commit ref (built outside git?)`);
 
 await rm(STAGE, { recursive: true, force: true });
 await mkdir(STAGE, { recursive: true });
 for (const name of ALLOW) {
+  if (FROM_DIST_ROOT.includes(name)) continue;
   await cp(join(BUILD, name), join(STAGE, name), { recursive: true });
 }
+await cp(STAMP, join(STAGE, 'build.json'));
 
 // Verify what we are about to hand wrangler, rather than trusting the copy above: a route directory
 // reaching the public origin is the one failure this script exists to prevent.

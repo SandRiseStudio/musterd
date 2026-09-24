@@ -88,6 +88,16 @@ import {
   type ServiceCtx,
 } from '../service/manage.js';
 import {
+  computeSiteGap,
+  DEPLOY_AUTHORIZED_SEAT,
+  nextAction,
+  siteGapAskBody,
+  siteGapLine,
+  type DeployedMarker,
+  type GitReader,
+  type SiteGapStamp,
+} from '../service/siteGap.js';
+import {
   DEFAULT_STREAMWATCH_INTERVAL,
   installStreamwatch,
   statusStreamwatch,
@@ -179,7 +189,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep | --guardian | --stream] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs|site-gap> [--live | --wake | --auto | --sweep | --guardian | --stream] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -928,6 +938,153 @@ async function guardLiveSessions(
  * core principle "musterd connects agents, it does not run them" is intact. macOS only for now;
  * systemd/Windows are the named seam (`serviceSupported`).
  */
+// ── Landed is not live (ADR 308 §Observability, lane 01M2XD2RPG) ──────────────────────────────
+//
+// The public site is published by one seat's standing authorization, outside the merge → accept
+// loop, so a stranger-facing change can be merged, accepted and `done` while musterd.io still
+// serves the old copy (2026-09-19: four homepage strings wrong, every instrument green). This is
+// the instrument ADR 308 asked for. The computation lives in service/siteGap.ts; this is the I/O.
+
+const SITE_ORIGIN_DEFAULT = 'https://musterd.io';
+const SITE_GAP_FETCH_TIMEOUT_MS = 10_000;
+const LIVE_SEAT = 'live';
+
+function siteGapStampPath(): string {
+  return join(dirname(configPath()), 'live', 'site-gap.json');
+}
+
+/** `<origin>/build.json`: the marker, `null` on 404 (a pre-marker deploy), or a thrown Error. */
+async function fetchDeployedMarker(origin: string): Promise<DeployedMarker | null> {
+  const res = await fetch(`${origin}/build.json`, {
+    signal: AbortSignal.timeout(SITE_GAP_FETCH_TIMEOUT_MS),
+    headers: { 'cache-control': 'no-cache' },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`${origin}/build.json → HTTP ${res.status}`);
+  const body = (await res.json()) as { ref?: unknown; builtAt?: unknown };
+  const ref =
+    typeof body.ref === 'string' && /^[0-9a-f]{40}(-dirty)?$/.test(body.ref) ? body.ref : null;
+  return { ref, ...(typeof body.builtAt === 'string' ? { builtAt: body.builtAt } : {}) };
+}
+
+function gitAt(cwd: string, args: string[]): string | null {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 10_000 });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+function siteGitReader(cwd: string): GitReader {
+  return {
+    hasCommit: (ref) => gitAt(cwd, ['cat-file', '-e', `${ref}^{commit}`]) !== null,
+    logRange: (from, to, paths) =>
+      (gitAt(cwd, ['log', '--format=%h%x09%s', `${from}..${to}`, '--', ...paths]) ?? '')
+        .split('\n')
+        .filter((l) => l.length > 0),
+  };
+}
+
+function readSiteGapStamp(path: string): SiteGapStamp | null {
+  try {
+    const j = JSON.parse(readFileSync(path, 'utf8')) as Partial<SiteGapStamp>;
+    return {
+      deployed: typeof j.deployed === 'string' ? j.deployed : null,
+      tip: typeof j.tip === 'string' ? j.tip : '',
+      ask: typeof j.ask === 'string' ? j.ask : null,
+      raised_at: typeof j.raised_at === 'number' ? j.raised_at : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function runSiteGap(parsed: Parsed): Promise<number> {
+  const origin = (flagStr(parsed.flags, 'origin') ?? SITE_ORIGIN_DEFAULT).replace(/\/+$/, '');
+  const raise = parsed.flags['raise'] === true;
+  const cwd = process.cwd();
+  const tip =
+    flagStr(parsed.flags, 'tip') ??
+    gitAt(cwd, ['rev-parse', 'origin/main']) ??
+    gitAt(cwd, ['rev-parse', 'HEAD']);
+  const out = (line: string) => process.stdout.write(`${line}\n`);
+  if (!tip)
+    throw new CliError('site-gap: not in a git checkout — nothing to compare the site against', 2);
+
+  let marker: DeployedMarker | null;
+  try {
+    marker = await fetchDeployedMarker(origin);
+  } catch (err) {
+    // Unreachable is not "behind": say so and change nothing. The publisher's `|| true` and the
+    // untouched stamp mean the next poll simply looks again.
+    out(`${origin} unreachable (${(err as Error).message}) — landed-versus-live not measured`);
+    return 0;
+  }
+  const gap = computeSiteGap(marker, tip, siteGitReader(cwd));
+  out(siteGapLine(gap, origin));
+  for (const c of gap.behind) out(`  ${c.sha} ${c.subject}`);
+
+  if (!raise) {
+    // The human form is a gate: behind exits 1 so a script can ask "is the site current?".
+    return gap.status === 'behind' ? 1 : 0;
+  }
+
+  const stampPath = siteGapStampPath();
+  const prev = readSiteGapStamp(stampPath);
+  const action = nextAction(prev, gap);
+  const auth = serviceSeatAuth();
+  const next: SiteGapStamp = {
+    deployed: gap.deployed,
+    tip: gap.tip,
+    ask: prev?.ask ?? null,
+    raised_at: prev?.raised_at ?? null,
+  };
+  if (action !== 'none') {
+    if (!auth) {
+      // Unprovisioned live seat: the line above is still in the log; nothing is sent (ADR 232 posture).
+      out(
+        `would ${action} but the live service seat is unprovisioned — run \`musterd service install --live\``,
+      );
+    } else if (action === 'resolve') {
+      await auth.http.send(
+        auth.team,
+        makeEnvelope({
+          id: ulid(),
+          team: auth.team,
+          from: LIVE_SEAT,
+          to: { kind: 'member', name: DEPLOY_AUTHORIZED_SEAT },
+          act: 'resolve',
+          thread: prev!.ask!,
+          body:
+            gap.status === 'current'
+              ? `${origin} caught up: now at ${gap.deployed!.slice(0, 8)}.`
+              : `${origin} moved to ${gap.deployed!.slice(0, 8)} and is still behind — a fresh ask follows.`,
+        }),
+      );
+      out(`resolved ${prev!.ask}`);
+      next.ask = null;
+      next.raised_at = null;
+    } else {
+      const id = ulid();
+      await auth.http.send(
+        auth.team,
+        makeEnvelope({
+          id,
+          team: auth.team,
+          from: LIVE_SEAT,
+          to: { kind: 'member', name: DEPLOY_AUTHORIZED_SEAT },
+          act: 'ask',
+          body: siteGapAskBody(gap, origin),
+          meta: { species: 'consult', tier: 'advisory' },
+        }),
+      );
+      out(`asked ${DEPLOY_AUTHORIZED_SEAT} (${id})`);
+      next.ask = id;
+      next.raised_at = Date.now();
+    }
+  }
+  mkdirSync(dirname(stampPath), { recursive: true });
+  writeFileSync(stampPath, JSON.stringify(next) + '\n');
+  return 0;
+}
+
 export async function serviceCommand(
   parsed: Parsed,
   deps: {
@@ -1095,6 +1252,12 @@ export async function serviceCommand(
   // it — the exact `--auto` shape, reusing the autorefresh lifecycle module.
   if (sub === 'guardian-tick') {
     return runGuardianTick(ctx, parsed);
+  }
+  // `site-gap` — landed is not live (ADR 308 §Observability): compare the build marker musterd.io
+  // serves against origin/main. Read-only and daemon-free by default; `--raise` is the live
+  // build-publisher's form, which speaks as the `live` service seat (ADR 232).
+  if (sub === 'site-gap') {
+    return runSiteGap(parsed);
   }
   if (parsed.flags['guardian'] === true) {
     const gCtx = deps.guardianCtx ?? resolveGuardianCtx(ctx.run, parsed);
