@@ -337,6 +337,10 @@ export type AuditAction =
   // secret) and never the body (delivery carries bodies; audit never does, ADR 051). Zero rows on a
   // team that never set `ask_slack_webhook` is itself the guard metric that the default is off.
   | 'ask.surfaced'
+  // ADR 443 (the doorbell): the generalization of `ask.surfaced` — one row per sink attempt for any
+  // act that rings a human, detail `{ surface, ok, status? }`. Never the URL, never a body. New rows
+  // use this action; `ask.surfaced` stays in the union so rows written before ADR 443 still read.
+  | 'doorbell.surfaced'
   // ADR 150 (structural inducement — PreToolUse enforcement gates): one decision row per intercepted
   // tool call that matched a declared enforcement class. `lane.gate` = Gate A (lane-ownership on a
   // contended surface); `action.gate` = Gate B (policy-classed action→ask). Both are SHAPES ONLY —
@@ -567,6 +571,7 @@ export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject> = {
   'ask.risk_accepted': 'actor',
   'ask.stranded': 'actor',
   'ask.surfaced': 'actor',
+  'doorbell.surfaced': 'actor',
   'lane.gate': 'actor',
   'action.gate': 'actor',
   'actor.subagent_write': 'actor',

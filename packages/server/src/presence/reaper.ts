@@ -1,8 +1,10 @@
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
+import { flushLapsedHolds } from '../notify/doorbell.js';
 import { sweepReapedAcceptances } from '../protocol/laneReroute.js';
 import { announceIncidentRouted } from '../protocol/route.js';
 import { appendAudit } from '../store/audit.js';
+import { pruneRings } from '../store/doorbell.js';
 import { routeUnclaimedIncidents } from '../store/incidents.js';
 import { releaseDepartedSeatClaims } from '../store/lanes.js';
 import { sweepAbandonedAcceptance } from '../store/laneSweep.js';
@@ -20,7 +22,7 @@ import {
   listResidencyTeamIds,
   wakeExhaustionKey,
 } from '../store/residency.js';
-import { getPolicy, getTeamBySlug, listActiveTeams } from '../store/teams.js';
+import { getPolicy, getTeamById, getTeamBySlug, listActiveTeams } from '../store/teams.js';
 
 /** Periodically remove stale presence rows and emit offline events for members who lost all presence. */
 export function startReaper(ctx: Ctx): () => void {
@@ -144,6 +146,12 @@ export function startReaper(ctx: Ctx): () => void {
     if (expiredLeases.length > 0) {
       log.info({ msg: 'reap_wake_leases_expired', count: expiredLeases.length });
     }
+
+    // ADR 443 §4: a doorbell hold lapses by its `until` with no availability POST to flush it, so
+    // the tick flushes on its behalf (dolly's review, change b). A still-holding ring is skipped.
+    flushLapsedHolds(ctx, (id) => getTeamById(ctx.db, id));
+    const prunedRings = pruneRings(ctx.db, now);
+    if (prunedRings > 0) log.info({ msg: 'reap_doorbell_rings', count: prunedRings });
 
     // ADR 196: release in-flight lanes still owned by soft-removed seats (pre-fix ghosts + any
     // leave path that skipped the store composition).

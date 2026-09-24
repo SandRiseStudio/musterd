@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { PRESENCE_TIMEOUT_MS } from '../config.js';
 import { openDb } from '../db/open.js';
+import { setDoorbellPrefs } from './doorbell.js';
 import { addMember, setAvailability } from './members.js';
 import { attach } from './presence.js';
 import {
@@ -53,6 +54,32 @@ describe('unblockerReachable (ADR 153 §1)', () => {
     setPolicy(db, team.id, { ask_slack_webhook: 'https://hooks.slack.example/x' });
     expect(adminHumanReachable(db, team.id, T)).toBe(true);
     expect(unblockerReachable(db, team.id, raiser.name, T)).toBe(true);
+  });
+
+  it('human term (ADR 443): an OFFLINE admin whose only off-machine sink is their own personal webhook counts', () => {
+    const { db, team, raiser } = seed();
+    const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
+    makeAdmin(db, nick);
+    expect(adminHumanReachable(db, team.id, T)).toBe(false);
+    setDoorbellPrefs(db, nick.id, {
+      sinks: { webhook: { on: true, url: 'https://ntfy.sh/nick' } },
+    });
+    expect(adminHumanReachable(db, team.id, T)).toBe(true);
+    expect(unblockerReachable(db, team.id, raiser.name, T)).toBe(true);
+  });
+
+  it('human term (ADR 443): a team URL the admin switched off, or a sink the team does not allow, does not count', () => {
+    const { db, team } = seed();
+    const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
+    makeAdmin(db, nick);
+    setPolicy(db, team.id, { ask_slack_webhook: 'https://hooks.slack.example/x' });
+    setDoorbellPrefs(db, nick.id, { sinks: { slack: { on: false } } });
+    expect(adminHumanReachable(db, team.id, T)).toBe(false);
+    setPolicy(db, team.id, { doorbell: { allow: ['live', 'os'] } });
+    setDoorbellPrefs(db, nick.id, {
+      sinks: { webhook: { on: true, url: 'https://ntfy.sh/nick' } },
+    });
+    expect(adminHumanReachable(db, team.id, T)).toBe(false);
   });
 
   it('the webhook alone is NOT reachability — with no admin human seat there is nobody to notify', () => {

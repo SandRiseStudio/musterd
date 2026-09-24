@@ -1,5 +1,13 @@
-import { AvailabilitySchema, type EnforcementPolicy, matchEnforcement } from '@musterd/protocol';
+import {
+  AvailabilitySchema,
+  type DoorbellPolicy,
+  type DoorbellPrefs,
+  type EnforcementPolicy,
+  matchEnforcement,
+  resolveRoute,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { getDoorbellPolicy, memberDoorbellPrefs } from './doorbell.js';
 import { listMembers } from './members.js';
 import { hasLivePresence, listLiveDrivers } from './presence.js';
 import { type MemberRow, resolveCapabilities } from './rows.js';
@@ -22,9 +30,11 @@ import { getPolicy } from './teams.js';
  */
 
 /**
- * "Present or notifiable": an un-left admin human seat exists AND (it has live presence, OR the team's
- * loud reach is wired — `ask_slack_webhook`, ADR 149 — so a raised ask reaches the human off-machine).
- * A team with no admin human seat at all is unreachable on this term regardless of surfaces.
+ * "Present or notifiable": an un-left admin human seat exists AND (it has live presence, OR a raised
+ * blocking ask reaches it off-machine). Since ADR 443 "off-machine" is any admin whose doorbell route
+ * carries a `slack` or `webhook` sink with a URL behind it — the team's, or their own personal one —
+ * not only ADR 149's `ask_slack_webhook` (which `getDoorbellPolicy` reads through as the team slack
+ * URL). A team with no admin human seat at all is unreachable on this term regardless of surfaces.
  */
 export function adminHumanReachable(
   db: Database,
@@ -35,8 +45,18 @@ export function adminHumanReachable(
     (m) => m.kind === 'human' && resolveCapabilities(m).is_admin,
   );
   if (adminHumans.length === 0) return false;
-  if (getPolicy(db, teamId).ask_slack_webhook) return true;
+  const doorbell = getDoorbellPolicy(db, teamId);
+  if (adminHumans.some((m) => hasOffMachineSink(doorbell, memberDoorbellPrefs(m)))) return true;
   return adminHumans.some((m) => hasLivePresence(db, m.id, presenceTimeoutMs));
+}
+
+/** Would a blocking ring reach this human through a configured Slack or webhook URL? */
+function hasOffMachineSink(policy: DoorbellPolicy, prefs: DoorbellPrefs | undefined): boolean {
+  return resolveRoute(policy, prefs, 'blocking').some((sink) => {
+    if (sink === 'slack') return Boolean(prefs?.sinks.slack?.url ?? policy.slack_url);
+    if (sink === 'webhook') return Boolean(prefs?.sinks.webhook?.url ?? policy.webhook_url);
+    return false;
+  });
 }
 
 /** The self-set availability statuses that compose as `away` posture (ADR 044 ∩ ADR 138). */
@@ -72,10 +92,30 @@ export function adminHumanPresent(
   );
   if (adminHumans.length === 0) return false;
   const drivers = listLiveDrivers(db, teamId, presenceTimeoutMs);
-  return adminHumans.some(
-    (m) =>
-      !isSelfSetAway(m) && (hasLivePresence(db, m.id, presenceTimeoutMs) || drivers.has(m.name)),
-  );
+  return adminHumans.some((m) => isPresent(db, m, drivers, presenceTimeoutMs));
+}
+
+/**
+ * One human composes as present — the {@link adminHumanPresent} test for a single member. The
+ * doorbell (ADR 443 §4) uses it for a ring directed at one human: their own presence, not any
+ * admin's, decides whether the off-machine sinks stay quiet at raise.
+ */
+export function humanPresent(
+  db: Database,
+  teamId: string,
+  m: MemberRow,
+  presenceTimeoutMs: number,
+): boolean {
+  return isPresent(db, m, listLiveDrivers(db, teamId, presenceTimeoutMs), presenceTimeoutMs);
+}
+
+function isPresent(
+  db: Database,
+  m: MemberRow,
+  drivers: Set<string>,
+  presenceTimeoutMs: number,
+): boolean {
+  return !isSelfSetAway(m) && (hasLivePresence(db, m.id, presenceTimeoutMs) || drivers.has(m.name));
 }
 
 /** The representative local-merge landing command the route-around probe matches against — the item-2

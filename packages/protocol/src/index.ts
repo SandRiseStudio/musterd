@@ -18,6 +18,7 @@ export * from './incident.js';
 export * from './duration.js';
 export * from './deliveryHint.js';
 export * from './credentials.js';
+export * from './doorbell.js';
 export * from './nodes.js';
 export * from './sync.js';
 export * from './guardian.js';

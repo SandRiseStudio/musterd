@@ -638,7 +638,8 @@ export const MIGRATIONS: Migration[] = [
           working_hours TEXT,
           roles TEXT,
           slack_user_id TEXT,
-          hue INTEGER
+          hue INTEGER,
+          doorbell_prefs TEXT
         );
         INSERT INTO members_new (${colList}) SELECT ${colList} FROM members;
         DROP TABLE members;
@@ -1655,6 +1656,37 @@ export const MIGRATIONS: Migration[] = [
       const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
       if (!cols.includes('guidance_epoch'))
         db.exec('ALTER TABLE presence ADD COLUMN guidance_epoch INTEGER');
+    },
+  },
+  {
+    // ADR 443 (the doorbell): one row per human rung for one act. `record` is the body-less
+    // DoorbellRecord JSON and `sinks` the resolved route; neither ever holds a body or a URL. `held`
+    // waits on the human's self-set away/dnd, `queued` waits on the host named by `host` to raise the
+    // OS banner, `done` is terminal. `members.doorbell_prefs` is the human's own override blob —
+    // it may hold a personal URL, so it is read back only to its owner (ADR 443 §5).
+    version: 70,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS doorbell_rings (
+          id         TEXT PRIMARY KEY,
+          team_id    TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          act_id     TEXT NOT NULL,
+          record     TEXT NOT NULL,
+          sinks      TEXT NOT NULL,
+          state      TEXT NOT NULL CHECK (state IN ('held','queued','done')),
+          host       TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_doorbell_rings_state ON doorbell_rings(team_id, state);
+        -- The reaper reads held rings every tick, across teams and per member (dolly's #1666 review).
+        CREATE INDEX IF NOT EXISTS idx_doorbell_rings_held ON doorbell_rings(member_id) WHERE state = 'held';
+        -- The retention prune seeks by age within a state.
+        CREATE INDEX IF NOT EXISTS idx_doorbell_rings_age ON doorbell_rings(state, created_at);
+      `);
+      const cols = db.prepare("SELECT name FROM pragma_table_info('members')").pluck().all();
+      if (!cols.includes('doorbell_prefs'))
+        db.exec('ALTER TABLE members ADD COLUMN doorbell_prefs TEXT');
     },
   },
 ];

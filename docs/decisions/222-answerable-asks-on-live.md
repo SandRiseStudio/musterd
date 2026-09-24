@@ -14,6 +14,8 @@
   reason to reopen this one: a read cannot reserve, and the cheap mitigation is to **push a branch as
   a draft PR the moment it carries an ADR number**.
 - Date: 2026-08-04
+- Extended by [ADR 443](443-the-doorbell.md) (2026-09-23): the `/live` strip is the doorbell's
+  always-on `live` sink, and an open tab raises a browser notification for a ring.
 - Builds on: [ADR 149](149-ask-surfaces.md) (the asks rail this makes answerable),
   [ADR 147](147-human-ask-stream.md) (the ask stream and its answer acts),
   [ADR 170](170-signin-handoff.md) (the sign-in handoff this generalises, and whose declined

@@ -22,6 +22,11 @@ import {
   type Policy,
   type PolicyOverride,
   PolicyOverrideSchema,
+  DoorbellPrefsSchema,
+  doorbellPrefsProblem,
+  maskPrefs,
+  publicHttpsUrlProblem,
+  resolveRoute,
   EnrollResidencyBodySchema,
   RevokeResidencyBodySchema,
   SessionAttestationBodySchema,
@@ -107,6 +112,7 @@ import { MusterdError, SessionLeaseRefused, asMusterdError } from '../errors.js'
 import { reapOrphans } from '../footprint/reap.js';
 import { log } from '../log.js';
 import { saveNodeEnrollment } from '../node/state.js';
+import { flushHeldRings } from '../notify/doorbell.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
 import {
@@ -139,6 +145,7 @@ import {
   handoffNamedLaneOutOfPlay,
   openDirectedLedger,
 } from '../store/delivery.js';
+import { getDoorbellPolicy, memberDoorbellPrefs, setDoorbellPrefs } from '../store/doorbell.js';
 import { latestFootprint } from '../store/footprint.js';
 import { listGoals } from '../store/goals.js';
 import {
@@ -2678,6 +2685,15 @@ export async function handleHttp(
         // stamps the change so every machine converges. Unreachable hub REFUSES: policy is not an
         // act that may fork.
         const stored = parseOrBadRequest(PolicyOverrideSchema, await readJson(req));
+        // ADR 443 §5: every doorbell sink URL is https to a public host — the daemon POSTs to it.
+        for (const [sink, url] of [
+          ['slack', stored.doorbell?.slack_url],
+          ['slack', stored.ask_slack_webhook],
+          ['webhook', stored.doorbell?.webhook_url],
+        ] as const) {
+          const problem = url === undefined ? null : publicHttpsUrlProblem(url);
+          if (problem) throw new MusterdError('validation', `the team ${sink} url ${problem}`);
+        }
         const enrollment = joinerEnrollment(ctx.db, team.id, team.slug);
         if (enrollment) {
           let answer: { policy: Policy; stored: PolicyOverride };
@@ -6246,8 +6262,60 @@ export async function handleHttp(
             ? { status: body.status, until: body.until }
             : { status: body.status };
         setAvailability(ctx.db, member.id, availability);
+        // ADR 443 §4: leaving away/dnd releases the rings held for you.
+        const updated = getMemberById(ctx.db, member.id);
+        if (updated) flushHeldRings(ctx, team, updated);
         const me = summarize(ctx, team.slug, team.id, member).find((m) => m.name === member.name);
         return sendJson(res, 200, { member: me });
+      }
+
+      // The doorbell (ADR 443 §4–5): a human's own sinks. Self only — the URL carries no name, so
+      // a personal URL is readable by its owner and nobody else. Agents have no doorbell: they do
+      // not choose where a human is rung (§7).
+      if ((method === 'GET' || method === 'PUT') && rest === '/members/me/doorbell') {
+        const { team, member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
+        if (member.kind !== 'human')
+          throw new MusterdError('forbidden', 'the doorbell is for human members');
+        const policy = getDoorbellPolicy(ctx.db, team.id);
+        if (method === 'PUT') {
+          const prefs = parseOrBadRequest(DoorbellPrefsSchema, await readJson(req));
+          const problem = doorbellPrefsProblem(prefs, policy.allow);
+          if (problem) throw new MusterdError('validation', problem);
+          setDoorbellPrefs(ctx.db, member.id, prefs);
+        }
+        const fresh = getMemberById(ctx.db, member.id) ?? member;
+        const prefs = memberDoorbellPrefs(fresh) ?? DoorbellPrefsSchema.parse({});
+        return sendJson(res, 200, {
+          member: member.name,
+          prefs,
+          allow: policy.allow,
+          defaults: policy.defaults,
+          // Whether the team configured each off-machine URL — never the URL (admin-only secret).
+          team_urls: { slack: Boolean(policy.slack_url), webhook: Boolean(policy.webhook_url) },
+          route: resolveRoute(policy, prefs, undefined),
+        });
+      }
+
+      // An admin's view of a teammate's doorbell: that a personal sink exists and whether it is on,
+      // never its URL (ADR 443 §5, `maskPrefs`).
+      const doorbellOf = rest.match(/^\/members\/([^/]+)\/doorbell$/);
+      if (method === 'GET' && doorbellOf) {
+        const { team } = authAdmin(ctx, slug, req);
+        const target = getMemberByName(ctx.db, team.id, decodeURIComponent(doorbellOf[1]!));
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', 'no such member');
+        const prefs = memberDoorbellPrefs(target);
+        return sendJson(res, 200, {
+          member: target.name,
+          sinks: maskPrefs(prefs),
+          route: resolveRoute(getDoorbellPolicy(ctx.db, team.id), prefs, undefined),
+        });
       }
 
       // Seat memory (ADR 093): a seat's private continuity blob. All three are seat-authenticated and

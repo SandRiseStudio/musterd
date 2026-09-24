@@ -14,14 +14,23 @@ import {
 import { ulid } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
+import type { Ctx } from '../context.js';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
+import { flushLapsedHolds } from '../notify/doorbell.js';
 import { appendAudit, listAudit } from '../store/audit.js';
 import { openDirectedLedger } from '../store/delivery.js';
-import { getMemberByName, setMemberGovernance } from '../store/members.js';
+import {
+  DOORBELL_RING_RETENTION_MS,
+  insertRing,
+  listRings,
+  pruneRings,
+  setDoorbellPrefs,
+} from '../store/doorbell.js';
+import { getMemberById, getMemberByName, setMemberGovernance } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
 import { REVIEW_LOOP_BREAKER_N } from '../store/review.js';
-import { getTeamBySlug, mintBootstrapCredential } from '../store/teams.js';
+import { getTeamById, getTeamBySlug, mintBootstrapCredential } from '../store/teams.js';
 
 let server: RunningServer;
 let base: string;
@@ -8856,7 +8865,7 @@ describe('the to-human ask stream (ADR 147)', () => {
   });
 });
 
-describe('ask surfaces — Slack delivery (ADR 149)', () => {
+describe('ask surfaces — Slack delivery (ADR 149, via the ADR 443 doorbell)', () => {
   function env(from: string, to: unknown, act: string, meta: Record<string, unknown>, id: string) {
     return {
       id,
@@ -8890,7 +8899,7 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it('posts a raised ask to the configured webhook and audits ask.surfaced ok:true', async () => {
+  it('posts a raised ask to the configured webhook and audits doorbell.surfaced ok:true', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickCred = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
@@ -8899,9 +8908,10 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
       { ask_slack_webhook: 'https://hooks.slack.test/T/B/x' },
       nickCred,
     );
-    // ADR 155 Inc 2: the at-raise fire is the away-admin case — pin nick away so this test can't be
-    // flipped quiet by an incidental presence touch.
-    await post('/teams/dawn/availability', { status: 'away' }, nickCred);
+    // ADR 155 Inc 2: the at-raise fire is the not-present-admin case — pin nick off_hours so this
+    // test can't be flipped quiet by an incidental presence touch. (Not `away`: since ADR 443 a
+    // self-set away HOLDS the ring until he is back; off_hours is not a hold.)
+    await post('/teams/dawn/availability', { status: 'off_hours' }, nickCred);
     const calls = stubSlack(() => new Response('ok', { status: 200 }));
 
     const sent = await post(
@@ -8920,8 +8930,10 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
     expect(sent.status).toBe(201);
 
     const teamId = getTeamBySlug(server.db, 'dawn')!.id;
-    await pollUntil(() => listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced'));
-    const surfaced = listAudit(server.db, teamId).find((r) => r.action === 'ask.surfaced')!;
+    await pollUntil(() =>
+      listAudit(server.db, teamId).some((r) => r.action === 'doorbell.surfaced'),
+    );
+    const surfaced = listAudit(server.db, teamId).find((r) => r.action === 'doorbell.surfaced')!;
     expect(JSON.parse(surfaced.detail!)).toMatchObject({ surface: 'slack', ok: true, status: 200 });
     // The URL is a secret — the audit row must not carry it.
     expect(surfaced.detail).not.toContain('hooks.slack.test');
@@ -8932,7 +8944,7 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
     expect(calls[0]!.text).toContain('need a call');
   });
 
-  it('a dead webhook cannot fail the send — 201 anyway, ask.surfaced ok:false', async () => {
+  it('a dead webhook cannot fail the send — 201 anyway, doorbell.surfaced ok:false', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickCred = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
@@ -8941,7 +8953,7 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
       { ask_slack_webhook: 'https://hooks.slack.test/T/B/dead' },
       nickCred,
     );
-    await post('/teams/dawn/availability', { status: 'away' }, nickCred);
+    await post('/teams/dawn/availability', { status: 'off_hours' }, nickCred);
     stubSlack(() => {
       throw new Error('ECONNREFUSED');
     });
@@ -8962,12 +8974,14 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
     expect(sent.status).toBe(201);
 
     const teamId = getTeamBySlug(server.db, 'dawn')!.id;
-    await pollUntil(() => listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced'));
-    const surfaced = listAudit(server.db, teamId).find((r) => r.action === 'ask.surfaced')!;
+    await pollUntil(() =>
+      listAudit(server.db, teamId).some((r) => r.action === 'doorbell.surfaced'),
+    );
+    const surfaced = listAudit(server.db, teamId).find((r) => r.action === 'doorbell.surfaced')!;
     expect(JSON.parse(surfaced.detail!)).toMatchObject({ surface: 'slack', ok: false });
   });
 
-  it('fires no outbound call and writes no ask.surfaced row when the knob is unset (default off)', async () => {
+  it('fires no outbound call and writes no doorbell.surfaced row when the knob is unset (default off)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickCred = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
@@ -8992,7 +9006,7 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
     expect(listAudit(server.db, teamId).some((r) => r.action === 'ask.raised')).toBe(true);
     await new Promise((r) => setTimeout(r, 50));
     expect(calls).toHaveLength(0);
-    expect(listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced')).toBe(false);
+    expect(listAudit(server.db, teamId).some((r) => r.action === 'doorbell.surfaced')).toBe(false);
   });
 
   // ── ADR 155 Increment 2: presence informs the ask clock, never the ceiling ──
@@ -9029,7 +9043,7 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
     expect(listAudit(server.db, teamId).some((r) => r.action === 'ask.raised')).toBe(true);
     await new Promise((r) => setTimeout(r, 50));
     expect(calls).toHaveLength(0);
-    expect(listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced')).toBe(false);
+    expect(listAudit(server.db, teamId).some((r) => r.action === 'doorbell.surfaced')).toBe(false);
 
     // The agent's re-notify — an in-thread ask — always fires the loud surface, present admin or not:
     // the human's silence despite presence is exactly what earns the escalation.
@@ -9050,7 +9064,9 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
       { key: team.json.agent_key, seat: 'Ada' },
     );
     expect(renotify.status).toBe(201);
-    await pollUntil(() => listAudit(server.db, teamId).some((r) => r.action === 'ask.surfaced'));
+    await pollUntil(() =>
+      listAudit(server.db, teamId).some((r) => r.action === 'doorbell.surfaced'),
+    );
     expect(calls).toHaveLength(1);
   });
 
@@ -9104,6 +9120,410 @@ describe('ask surfaces — Slack delivery (ADR 149)', () => {
       unblocker_reachable: true,
     });
     expect(away.json.ask_contract).toEqual(present.json.ask_contract);
+  });
+});
+
+describe('the doorbell (ADR 443)', () => {
+  function env(
+    from: string,
+    to: unknown,
+    act: string,
+    id: string,
+    meta: Record<string, unknown> | null = null,
+    extra: Record<string, unknown> = {},
+  ) {
+    return {
+      id,
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from,
+      to,
+      act,
+      body: 'the secret plan',
+      meta,
+      ts: Date.now(),
+      ...extra,
+    };
+  }
+  const consult = { species: 'consult', tier: 'standard' };
+  const toDee = { kind: 'member', name: 'Dee' };
+  const slackPolicy = { ask_slack_webhook: 'https://hooks.slack.test/T/B/x' };
+
+  async function team() {
+    const t = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nick = t.json.human_credential as string;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nick);
+    await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nick);
+    // A human who is NOT an admin, so "directed rings its human" is apart from "asks ring admins".
+    const dee = await post('/teams/dawn/members', { name: 'Dee', kind: 'human' }, nick);
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    return {
+      nick,
+      dee: dee.json.human_credential as string,
+      ada: { key: t.json.agent_key as string, seat: 'Ada' },
+      teamId,
+    };
+  }
+  const send = (auth: Auth, envelope: Record<string, unknown>) =>
+    post('/teams/dawn/messages', { envelope }, auth);
+  const rings = (teamId: string) =>
+    listRings(server.db, teamId).map((r) => ({
+      member: getMemberById(server.db, r.member_id)!.name,
+      state: r.state,
+      act: r.act_id,
+    }));
+  const surfaced = (teamId: string) =>
+    listAudit(server.db, teamId).filter((r) => r.action === 'doorbell.surfaced');
+  const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  const realFetch = globalThis.fetch;
+  /** Intercept the test hooks host only; everything else (the test server) passes through. */
+  function stubHooks(onBody?: (raw: unknown) => void) {
+    const calls: { url: string; text: string }[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('https://hooks.slack.test/')) {
+        const raw = JSON.parse(String(init?.body)) as { text: string };
+        onBody?.(raw);
+        calls.push({ url, text: raw.text });
+        return new Response('ok', { status: 200 });
+      }
+      return realFetch(input as never, init);
+    });
+    return calls;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('rings a directed ask or handoff to a human and a team ask to the admin; never a team request_help or a handoff to an agent', async () => {
+    const t = await team();
+    await send(t.ada, env('Ada', toDee, 'ask', 'd1', consult));
+    await send(t.ada, env('Ada', { kind: 'member', name: 'Bob' }, 'handoff', 'd2'));
+    await send(t.ada, env('Ada', { kind: 'team' }, 'ask', 'd3', consult));
+    await send(t.ada, env('Ada', { kind: 'team' }, 'request_help', 'd4'));
+    await send(t.ada, env('Ada', toDee, 'handoff', 'd5'));
+    expect(rings(t.teamId).map((r) => [r.member, r.act])).toEqual([
+      ['Dee', 'd1'],
+      ['nick', 'd3'],
+      ['Dee', 'd5'],
+    ]);
+  });
+
+  it('the stored record carries no body', async () => {
+    const t = await team();
+    await send(t.ada, env('Ada', toDee, 'ask', 'b1', consult));
+    const raw = server.db
+      .prepare<[], { record: string }>('SELECT record FROM doorbell_rings')
+      .all()
+      .map((r) => r.record)
+      .join('\n');
+    expect(raw).toContain('"act_id":"b1"');
+    expect(raw).not.toMatch(/secret plan/);
+  });
+
+  it('holds a standard ask while the human is dnd, and rings it when they set available', async () => {
+    const t = await team();
+    await post('/teams/dawn/availability', { status: 'dnd' }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 'h1', consult));
+    expect(rings(t.teamId)[0]!.state).toBe('held');
+    await post('/teams/dawn/availability', { status: 'available' }, t.dee);
+    expect(rings(t.teamId)[0]!.state).not.toBe('held');
+  });
+
+  it('a blocking ask pierces dnd', async () => {
+    const t = await team();
+    await post('/teams/dawn/availability', { status: 'dnd' }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 'p1', { species: 'approve', tier: 'blocking' }));
+    expect(rings(t.teamId)[0]!.state).not.toBe('held');
+  });
+
+  it('off_hours does not hold (no schedule enforcement in v1)', async () => {
+    const t = await team();
+    await post('/teams/dawn/availability', { status: 'off_hours' }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 'o1', consult));
+    expect(rings(t.teamId)[0]!.state).not.toBe('held');
+  });
+
+  it('a held ring whose act was answered meanwhile is dropped, not rung', async () => {
+    const t = await team();
+    await post('/teams/dawn/policy', slackPolicy, t.nick);
+    const calls = stubHooks();
+    await post('/teams/dawn/availability', { status: 'away' }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 'a1', consult));
+    await send(
+      t.dee,
+      env('Dee', { kind: 'member', name: 'Ada' }, 'accept', 'a2', { in_reply_to: 'a1' }),
+    );
+    await post('/teams/dawn/availability', { status: 'available' }, t.dee);
+    expect(rings(t.teamId).find((r) => r.act === 'a1')!.state).toBe('done');
+    await tick(50);
+    expect(calls).toHaveLength(0);
+    expect(surfaced(t.teamId)).toHaveLength(0);
+  });
+
+  it('a held ring whose thread was resolved meanwhile is dropped, not rung', async () => {
+    const t = await team();
+    await post('/teams/dawn/policy', slackPolicy, t.nick);
+    const calls = stubHooks();
+    await post('/teams/dawn/availability', { status: 'away' }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 'r1', consult));
+    await send(t.ada, env('Ada', toDee, 'resolve', 'r2', null, { thread: 'r1' }));
+    await post('/teams/dawn/availability', { status: 'available' }, t.dee);
+    expect(rings(t.teamId).find((r) => r.act === 'r1')!.state).toBe('done');
+    await tick(50);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('a held ring rings Slack when released, with the ask body read at dispatch', async () => {
+    const t = await team();
+    await post('/teams/dawn/policy', slackPolicy, t.nick);
+    const calls = stubHooks();
+    await post('/teams/dawn/availability', { status: 'away' }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 's1', consult));
+    await tick(30);
+    expect(calls).toHaveLength(0);
+    await post('/teams/dawn/availability', { status: 'available' }, t.dee);
+    await pollUntil(() => surfaced(t.teamId).length === 1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.text).toContain('the secret plan');
+    expect(surfaced(t.teamId)[0]!.detail).not.toContain('hooks.slack.test');
+  });
+
+  it('a hold that lapses by its until is flushed on the sweep, with no availability POST', async () => {
+    const t = await team();
+    await post('/teams/dawn/availability', { status: 'away', until: Date.now() + 40 }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 'u1', consult));
+    expect(rings(t.teamId)[0]!.state).toBe('held');
+    const ctx = { db: server.db, config: { presenceTimeoutMs: 45_000 } } as unknown as Ctx;
+    flushLapsedHolds(ctx, (id) => getTeamById(server.db, id));
+    expect(rings(t.teamId)[0]!.state).toBe('held'); // not lapsed yet
+    await tick(60);
+    flushLapsedHolds(ctx, (id) => getTeamById(server.db, id));
+    expect(rings(t.teamId)[0]!.state).not.toBe('held');
+  });
+
+  it('a held ring for a member who left is closed on the sweep, not rung', async () => {
+    const t = await team();
+    await post('/teams/dawn/availability', { status: 'away', until: Date.now() + 40 }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 'l1', consult));
+    server.db
+      .prepare("UPDATE members SET left_at = ? WHERE team_id = ? AND name = 'Dee'")
+      .run(Date.now(), t.teamId);
+    await tick(60);
+    const ctx = { db: server.db, config: { presenceTimeoutMs: 45_000 } } as unknown as Ctx;
+    flushLapsedHolds(ctx, (id) => getTeamById(server.db, id));
+    expect(rings(t.teamId)[0]!.state).toBe('done');
+    expect(surfaced(t.teamId)).toHaveLength(0);
+  });
+
+  it('prunes done and queued rings past retention, and keeps held ones', async () => {
+    const t = await team();
+    const dee = getMemberByName(server.db, t.teamId, 'Dee')!;
+    const old = Date.now() - DOORBELL_RING_RETENTION_MS - 1;
+    const record = {
+      team: 'dawn',
+      from: 'Ada',
+      act: 'handoff',
+      act_id: 'x',
+      answer_path: '/live?act=x',
+    } as const;
+    for (const state of ['done', 'queued', 'held'] as const) {
+      insertRing(server.db, {
+        team_id: t.teamId,
+        member_id: dee.id,
+        act_id: 'x',
+        record,
+        sinks: ['live'],
+        state,
+        host: null,
+        created_at: old,
+      });
+    }
+    insertRing(server.db, {
+      team_id: t.teamId,
+      member_id: dee.id,
+      act_id: 'y',
+      record,
+      sinks: ['live'],
+      state: 'done',
+      host: null,
+    });
+    expect(pruneRings(server.db, Date.now())).toBe(2);
+    expect(
+      rings(t.teamId)
+        .map((r) => r.state)
+        .sort(),
+    ).toEqual(['done', 'held']);
+  });
+
+  it('a Slack handoff ring names who and what, never the body', async () => {
+    const t = await team();
+    await post('/teams/dawn/policy', slackPolicy, t.nick);
+    const calls = stubHooks();
+    await post('/teams/dawn/availability', { status: 'off_hours' }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'handoff', 'f1'));
+    await pollUntil(() => surfaced(t.teamId).length === 1);
+    expect(calls[0]!.text).toContain('[dawn] Ada handed you work');
+    expect(calls[0]!.text).toContain('/live?act=f1');
+    expect(calls[0]!.text).not.toContain('secret plan');
+  });
+
+  it('a team Slack URL shared by several rung admins posts once per act', async () => {
+    const t = await team();
+    const ana = await post('/teams/dawn/members', { name: 'Ana', kind: 'human' }, t.nick);
+    const anaRow = getMemberByName(server.db, t.teamId, 'Ana')!;
+    setMemberGovernance(
+      server.db,
+      anaRow.id,
+      null,
+      JSON.stringify({ ...GENERALIST_CAPABILITIES, is_admin: true }),
+    );
+    await post('/teams/dawn/policy', slackPolicy, t.nick);
+    await post('/teams/dawn/availability', { status: 'off_hours' }, t.nick);
+    await post('/teams/dawn/availability', { status: 'off_hours' }, ana.json.human_credential);
+    const calls = stubHooks();
+    await send(t.ada, env('Ada', { kind: 'team' }, 'ask', 'm1', consult));
+    await pollUntil(() => surfaced(t.teamId).length === 1);
+    await tick(30);
+    expect(
+      rings(t.teamId)
+        .map((r) => r.member)
+        .sort(),
+    ).toEqual(['Ana', 'nick']);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('a personal webhook gets the record as JSON, with no body key', async () => {
+    const t = await team();
+    const dee = getMemberByName(server.db, t.teamId, 'Dee')!;
+    setDoorbellPrefs(server.db, dee.id, {
+      sinks: { webhook: { on: true, url: 'https://hooks.slack.test/personal' } },
+    });
+    const bodies: unknown[] = [];
+    stubHooks((raw) => bodies.push(raw));
+    await post('/teams/dawn/availability', { status: 'off_hours' }, t.dee);
+    await send(t.ada, env('Ada', toDee, 'ask', 'w1', consult));
+    await pollUntil(() => surfaced(t.teamId).length === 1);
+    expect(bodies[0]).toMatchObject({ team: 'dawn', from: 'Ada', act: 'ask', act_id: 'w1' });
+    expect(bodies[0]).not.toHaveProperty('body');
+    expect(JSON.parse(surfaced(t.teamId)[0]!.detail!)).toMatchObject({
+      surface: 'webhook',
+      ok: true,
+    });
+  });
+
+  it('a dead sink endpoint cannot slow the send: 201 at once, one ok:false row, no retry', async () => {
+    const t = await team();
+    await post('/teams/dawn/policy', slackPolicy, t.nick);
+    let attempts = 0;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith('https://hooks.slack.test/')) {
+        attempts++;
+        await tick(300);
+        throw new Error('ECONNREFUSED');
+      }
+      return realFetch(input as never, init);
+    });
+    await post('/teams/dawn/availability', { status: 'off_hours' }, t.dee);
+    const started = Date.now();
+    const sent = await send(t.ada, env('Ada', toDee, 'ask', 'x1', consult));
+    expect(sent.status).toBe(201);
+    expect(Date.now() - started).toBeLessThan(250);
+    await pollUntil(() => surfaced(t.teamId).length === 1, 2000);
+    expect(JSON.parse(surfaced(t.teamId)[0]!.detail!)).toMatchObject({
+      surface: 'slack',
+      ok: false,
+    });
+    await tick(50);
+    expect(attempts).toBe(1);
+  });
+
+  // ── prefs, privacy and URL checks (ADR 443 §5) ──
+
+  const put = (path: string, body: unknown, auth: Auth) => req('PUT', path, body, auth);
+  const personal = { sinks: { webhook: { on: true, url: 'https://ntfy.sh/dee-secret-topic' } } };
+
+  it('a human sets and reads back their own prefs, personal URL included', async () => {
+    const t = await team();
+    const set = await put('/teams/dawn/members/me/doorbell', personal, t.dee);
+    expect(set.status).toBe(200);
+    const got = await get('/teams/dawn/members/me/doorbell', t.dee);
+    expect(got.json.prefs.sinks.webhook.url).toBe('https://ntfy.sh/dee-secret-topic');
+    expect(got.json.route).toEqual(['live', 'os', 'webhook']);
+    expect(got.json.team_urls).toEqual({ slack: false, webhook: false });
+  });
+
+  it('an admin sees that a personal sink exists and is on, never its URL', async () => {
+    const t = await team();
+    await put('/teams/dawn/members/me/doorbell', personal, t.dee);
+    const got = await get('/teams/dawn/members/Dee/doorbell', t.nick);
+    expect(got.status).toBe(200);
+    expect(got.json.sinks).toEqual({ webhook: { on: true, personal: true } });
+    expect(JSON.stringify(got.json)).not.toMatch(/ntfy|secret|"url"/);
+  });
+
+  it('a non-admin cannot read another member’s doorbell', async () => {
+    const t = await team();
+    const got = await get('/teams/dawn/members/nick/doorbell', t.dee);
+    expect(got.status).toBe(403);
+  });
+
+  it('an agent has no doorbell', async () => {
+    const t = await team();
+    const got = await get('/teams/dawn/members/me/doorbell', t.ada);
+    expect(got.status).toBe(403);
+    expect(got.json.error.message).toMatch(/for human members/);
+  });
+
+  it('a sink outside the team allow-list is refused 422, naming the sink', async () => {
+    const t = await team();
+    await post('/teams/dawn/policy', { doorbell: { allow: ['live', 'os'] } }, t.nick);
+    const set = await put('/teams/dawn/members/me/doorbell', personal, t.dee);
+    expect(set.status).toBe(422);
+    expect(set.json.error.message).toBe('the webhook sink is not allowed on this team');
+  });
+
+  it.each([
+    'http://ntfy.sh/topic',
+    'https://localhost/x',
+    'https://127.0.0.1/x',
+    'https://[::1]/x',
+    'https://169.254.169.254/latest',
+    'https://10.1.2.3/x',
+    'https://172.20.0.1/x',
+    'https://192.168.0.9/x',
+    'https://[fd12::1]/x',
+  ])('a personal URL %s is refused 422 without echoing it', async (url) => {
+    const t = await team();
+    const set = await put(
+      '/teams/dawn/members/me/doorbell',
+      { sinks: { webhook: { on: true, url } } },
+      t.dee,
+    );
+    expect(set.status).toBe(422);
+    expect(set.json.error.message).toMatch(/^the webhook url must/);
+    expect(JSON.stringify(set.json)).not.toContain(url);
+  });
+
+  it.each([
+    { doorbell: { webhook_url: 'https://10.0.0.1/hook' } },
+    { doorbell: { slack_url: 'http://hooks.slack.com/x' } },
+    { ask_slack_webhook: 'https://192.168.1.1/x' },
+  ])('a team policy with a non-public sink URL is refused 422', async (policy) => {
+    const t = await team();
+    const set = await post('/teams/dawn/policy', policy, t.nick);
+    expect(set.status).toBe(422);
+    expect(set.json.error.message).toMatch(/^the team (slack|webhook) url must/);
+  });
+
+  it('ask_slack_webhook reads through as the team slack sink, and the stored blob is not rewritten', async () => {
+    const t = await team();
+    await post('/teams/dawn/policy', slackPolicy, t.nick);
+    const got = await get('/teams/dawn/members/me/doorbell', t.dee);
+    expect(got.json.defaults).toEqual(['live', 'os', 'slack']);
+    expect(got.json.team_urls).toEqual({ slack: true, webhook: false });
+    expect(JSON.stringify(got.json)).not.toContain('hooks.slack.test');
+    const stored = await get('/teams/dawn/policy', t.nick);
+    expect(stored.json.stored).toEqual(slackPolicy);
   });
 });
 
