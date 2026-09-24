@@ -563,8 +563,19 @@ export function listLanes(
   const rows = db
     .prepare<[string], LaneRow>('SELECT * FROM lanes WHERE team_id = ? ORDER BY created_at')
     .all(teamId);
-  return rows
-    .map((r) => rowToLane(r, teamSlug))
+  return filterLanes(
+    rows.map((r) => rowToLane(r, teamSlug)),
+    filter,
+  );
+}
+
+/**
+ * The in-memory half of `listLanes`, so a caller that already holds the board (one read per
+ * request — lane 01M3ANEQVR: `GET /lanes` used to read the 1218-row table 16 times, 116 ms of its
+ * 267 ms) can derive a filtered view without going back to SQLite.
+ */
+export function filterLanes(lanes: Lane[], filter: LaneFilter = {}): Lane[] {
+  return lanes
     .filter((l) => (filter.project ? l.project === filter.project : true))
     .filter((l) => (filter.owner ? l.owner_seat === filter.owner : true))
     .filter((l) => (filter.openOnly ? l.state === 'open' : true))
@@ -921,10 +932,14 @@ export function laneWarnings(
   lane: Lane,
   goals?: Goal[],
   now = Date.now(),
+  /** The whole board, when the caller already read it — contention is checked against every lane,
+   *  so without this each lane's warnings re-read the table (lane 01M3ANEQVR). */
+  board?: Lane[],
 ): LaneWarning[] {
   const warnings: LaneWarning[] = [];
+  const byId = board ? new Map(board.map((l) => [l.id, l])) : null;
   for (const depId of lane.depends_on) {
-    const dep = getLane(db, teamId, depId, teamSlug);
+    const dep = byId ? (byId.get(depId) ?? null) : getLane(db, teamId, depId, teamSlug);
     if (!dep || dep.state === 'done') continue;
     warnings.push({
       kind: 'unmet_dependency',
@@ -935,7 +950,7 @@ export function laneWarnings(
     });
   }
   if (lane.scope.length > 0 && CONTENDING.has(lane.state)) {
-    for (const other of listLanes(db, teamId, teamSlug)) {
+    for (const other of board ?? listLanes(db, teamId, teamSlug)) {
       if (other.id === lane.id || !CONTENDING.has(other.state)) continue;
       if (!projectsContend(lane.project, other.project)) continue;
       const shared = lane.scope.flatMap((g) =>
@@ -968,12 +983,15 @@ export function boardWarnings(
   teamId: string,
   teamSlug: string,
   lanes: Lane[],
+  /** The unfiltered board, if the caller has it; `lanes` may be a filtered view (`?mine=1`), and
+   *  contention must still be judged against every lane. Read once here otherwise. */
+  board: Lane[] = listLanes(db, teamId, teamSlug),
 ): LaneWarning[] {
   const out: LaneWarning[] = [];
   const seen = new Set<string>();
   const goals = listGoals(db, teamId, teamSlug);
   for (const lane of lanes) {
-    for (const w of laneWarnings(db, teamId, teamSlug, lane, goals)) {
+    for (const w of laneWarnings(db, teamId, teamSlug, lane, goals, Date.now(), board)) {
       // A surface overlap is symmetric — report each pair once (keyed order-independently).
       const key =
         w.kind === 'surface_overlap'

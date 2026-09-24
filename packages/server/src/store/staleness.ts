@@ -47,10 +47,12 @@ export function staleLaneWarnings(
   teamId: string,
   teamSlug: string,
   onlyGoal?: string,
+  /** The board, when the caller already read it (lane 01M3ANEQVR: one read per request). */
+  board?: Lane[],
 ): LaneWarning[] {
   const bumps = goalEpochBumps(db, teamId);
   if (bumps.size === 0) return []; // no direction has changed on any Goal — nothing can be stale.
-  const lanes = listLanes(db, teamId, teamSlug);
+  const lanes = board ?? listLanes(db, teamId, teamSlug);
   const byId = new Map(lanes.map((l) => [l.id, l]));
   const out: LaneWarning[] = [];
 
