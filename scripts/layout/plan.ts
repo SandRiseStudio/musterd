@@ -2,9 +2,8 @@
  * Pure planning for the reach-spec lane 3 layout migration (spec §6, ADR 442):
  *
  *   ~/agents           → ~/.musterd/runtime          (the daemon's/host's build; UNBOUND)
- *   ~/agents-live      → ~/.musterd/runtime-live     (the /live build-publisher's worktree; a sibling
- *                                                     of the runtime, which is how `service --live`
- *                                                     derives it)
+ *   ~/agents-live      → ~/.musterd/live/checkout    (the /live build-publisher's worktree — the live
+ *                                                     service's own home, ADR 132 note 2026-09-24)
  *   ~/agents-<seat>    → ~/musterd/agents/<seat>      (member Workspaces, grouped by repo)
  *
  * Everything here is a function of strings so `plan.test.ts` can pin the mapping, the boundary rule
@@ -35,7 +34,7 @@ export function defaultLayout(home: string, repo = 'agents'): Layout {
     oldMain: join(home, repo),
     runtime: join(home, '.musterd', 'runtime'),
     oldLive: join(home, `${repo}-live`),
-    live: join(home, '.musterd', 'runtime-live'),
+    live: join(home, '.musterd', 'live', 'checkout'),
     group: join(home, 'musterd', repo),
     seatPrefix: join(home, `${repo}-`),
   };

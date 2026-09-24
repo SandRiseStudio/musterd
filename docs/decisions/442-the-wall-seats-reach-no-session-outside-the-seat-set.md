@@ -151,7 +151,7 @@ credential custody (ADR 200, ADR 341, and spec §8).
   `<checkout>-<name>` that already exists is reused, never re-provisioned. The physical move of this
   machine is `scripts/layout/migrate.ts` (dry-run by default, `--apply` to execute; inventory and
   runbook in `docs/wiki/workspace-layout.md`): `~/agents` → `~/.musterd/runtime` (unbound),
-  `~/agents-live` → `~/.musterd/runtime-live` (the `service --live` sibling rule, unchanged),
+  `~/agents-live` → `~/.musterd/live/checkout` (the live service's own home; ADR 132 note),
   `~/agents-<seat>` → `~/musterd/agents/<seat>`, then `git worktree repair`, the eight LaunchAgent
   plists rewritten in place (flags preserved), the bindings registry / host registry / harness
   ledger / `~/.claude.json` re-keyed, and `~/.claude/projects/<slug>` transcript folders renamed. The

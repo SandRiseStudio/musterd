@@ -17,7 +17,7 @@
  *      bootstrapped again at the end.
  *   2. `~/agents` → `~/.musterd/runtime`; its `.musterd/binding.json` deleted (unbound); the human
  *      already has `~/musterd/<repo>/<human>`.
- *   3. `~/agents-live` → `~/.musterd/runtime-live`; `~/agents-<seat>` → `~/musterd/<repo>/<seat>`.
+ *   3. `~/agents-live` → `~/.musterd/live/checkout`; `~/agents-<seat>` → `~/musterd/<repo>/<seat>`.
  *   4. `git worktree repair` from the runtime with every worktree's new path (moved or not: the
  *      Codex/Claude/tmp worktrees stay put but their gitfiles name the old main).
  *   5. `~/.musterd/config.json` bindings registry re-keyed, old main dropped; host-registry.json,
@@ -147,7 +147,7 @@ function musterdHomeTextFiles(): string[] {
   const out: string[] = [];
   const skip = new Set([
     'runtime',
-    'runtime-live',
+    'checkout',
     'backups',
     'corpus-snapshots',
     'dataset-exports',

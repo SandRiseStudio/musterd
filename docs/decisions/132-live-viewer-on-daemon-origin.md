@@ -59,6 +59,11 @@ runs `pnpm -r build` (which builds the web app too), but the viewer's currency n
 
 ## Consequences
 
+- 2026-09-24 (reach spec §6 layout, ADR 442): the viewer worktree is now the live service's own
+  checkout, `~/.musterd/live/checkout`, beside the bundle and build script it already kept there —
+  not a `<daemon checkout>-live` sibling, which after the runtime moved to `~/.musterd/runtime`
+  would have been `~/.musterd/runtime-live`. An existing sibling (every install before this date) is
+  kept when its `.git` is present; `scripts/layout/migrate.ts` moves this machine's to the new path.
 - `/live` is one origin with its data (`http://<host>:<port>/live`), a production bundle, one background
   agent, and it still tracks `main` within the poll interval without ever bouncing the daemon. The
   `:5173` dev server, its proxy, and the second LaunchAgent are gone.
