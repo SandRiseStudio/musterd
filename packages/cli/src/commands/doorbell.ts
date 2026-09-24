@@ -141,7 +141,10 @@ function show(view: DoorbellView, parsed: Parsed): number {
   process.stdout.write(`${theme.accent('doorbell')} — ${view.member}\n`);
   for (const sink of DOORBELL_SINKS) {
     const on = view.route.includes(sink);
-    const mark = on ? theme.ok('◉ on ') : theme.meta('○ off');
+    // `os` routed with no host label rings nothing on this machine — the record goes straight to
+    // done. "on" overstated that (stanley's acceptance nit, 2026-09-24), so it reads idle until labelled.
+    const idle = on && sink === 'os' && !view.prefs.sinks.os?.host;
+    const mark = idle ? theme.warn('◌ idle') : on ? theme.ok('◉ on ') : theme.meta('○ off');
     process.stdout.write(`  ${mark}  ${sink.padEnd(8)} ${theme.meta(why(sink, view))}\n`);
   }
   return 0;

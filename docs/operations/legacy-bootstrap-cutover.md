@@ -19,6 +19,12 @@ the plaintext or hash. If local publication fails, the legacy key remains in the
 same command: the daemon revokes and replaces only an unused migration successor, measuring a fresh
 90-day window from that retry; it never revokes one that has authenticated.
 
+**Close a live session first on an adapter built before 2026-09-24** (falsify: migrate a seat with its
+session open, run the claim below, and see the successor's `first_used_at` populate). An older MCP
+adapter writes the key it booted with back into the binding on every lease renewal, so within about
+three minutes the legacy key is back and the claim below authenticates as `use:"legacy"` while still
+printing `occupied`. The fix (lane 01M3A921SA) makes a renewal keep the key on disk and adopt it.
+
 Adopt the new credential once with the exact command printed by migration (ADR 439):
 
 ```bash

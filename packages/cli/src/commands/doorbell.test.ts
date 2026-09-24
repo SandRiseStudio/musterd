@@ -68,7 +68,9 @@ describe('doorbell command (ADR 443)', () => {
     const res = await run([]);
     expect(res.code).toBe(0);
     expect(res.out).toMatch(/on .*live .*always on/);
-    expect(res.out).toMatch(/on .*os .*team default/);
+    // Routed but unlabelled rings nothing here, so it must not read "on".
+    expect(res.out).toMatch(/idle.*os .*team default · no host label/);
+    expect(res.out).not.toMatch(/on .*os /);
     expect(res.out).toMatch(/off.*slack .*off by team default · no url set/);
   });
 
@@ -106,7 +108,7 @@ describe('doorbell command (ADR 443)', () => {
     });
     const on = await run(['os', 'on'], { loadRegistry: () => registry('mac-a') });
     expect(on.code).toBe(0);
-    expect((await run([])).out).toMatch(/os .*your override · host mac-a/);
+    expect((await run([])).out).toMatch(/◉ on .*os .*your override · host mac-a/);
   });
 
   it('live cannot be switched off', async () => {
