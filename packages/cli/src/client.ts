@@ -46,6 +46,9 @@ import {
   WakeLeasesResponseSchema,
   DoorbellRingsResponseSchema,
   type DoorbellRingsResponse,
+  type DoorbellPrefs,
+  DoorbellPrefsSchema,
+  DoorbellSinkSchema,
   WakeContextRequestSchema,
   WakeContextResponseSchema,
   type EnrollResidencyBody,
@@ -234,6 +237,28 @@ export function isDaemonUnreachable(err: unknown): boolean {
   return (
     err instanceof CliError && err.exitCode === 7 && /can't reach team server/.test(err.message)
   );
+}
+
+/** `GET /members/me/doorbell` (ADR 443): your prefs, the team's allow-list and defaults, whether
+ *  the team set each off-machine URL (never the URL), and the route those resolve to. Parsed at the
+ *  boundary, like {@link HttpClient.doorbellRings}, so a drifted daemon cannot hand `show` a shape
+ *  it never vetted. */
+const DoorbellViewSchema = z.object({
+  member: z.string(),
+  prefs: DoorbellPrefsSchema,
+  allow: z.array(DoorbellSinkSchema),
+  defaults: z.array(DoorbellSinkSchema),
+  team_urls: z.object({ slack: z.boolean(), webhook: z.boolean() }),
+  route: z.array(DoorbellSinkSchema),
+});
+export type DoorbellView = z.infer<typeof DoorbellViewSchema>;
+
+function parseDoorbellView(json: unknown): DoorbellView {
+  const parsed = DoorbellViewSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new CliError('doorbell response did not match the protocol schema', 1);
+  }
+  return parsed.data;
 }
 
 export class HttpClient {
@@ -1172,6 +1197,19 @@ export class HttpClient {
       throw new CliError('wake-leases response did not match the protocol schema', 1);
     }
     return parsed.data;
+  }
+
+  /** Your own doorbell (ADR 443) — `GET /teams/:slug/members/me/doorbell`, humans only. */
+  async getDoorbell(slug: string): Promise<DoorbellView> {
+    return parseDoorbellView(await this.request('GET', `/teams/${slug}/members/me/doorbell`));
+  }
+
+  /** Replace your own doorbell prefs — `PUT /teams/:slug/members/me/doorbell`. The daemon refuses a
+   *  sink outside the team's allow-list, or a URL that is not https to a public host (422). */
+  async putDoorbell(slug: string, prefs: DoorbellPrefs): Promise<DoorbellView> {
+    return parseDoorbellView(
+      await this.request('PUT', `/teams/${slug}/members/me/doorbell`, prefs),
+    );
   }
 
   /**

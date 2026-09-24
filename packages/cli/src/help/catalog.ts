@@ -798,6 +798,27 @@ export const CATALOG: readonly CommandEntry[] = [
     group: 'waiting',
     primary: true,
   },
+  {
+    name: 'doorbell',
+    signature:
+      '[<live|os|slack|webhook> <on|off> [--url <u>] [--tiers <t,…>] [--host <label>]] | team [--allow …] [--defaults …] [--slack <url|off>] [--webhook <url|off>]',
+    summary: 'where you are rung when something is addressed to you (humans only; no MCP tool)',
+    group: 'waiting',
+    primary: false,
+    detail:
+      'The doorbell (ADR 443): an ask, or a handoff or request_help directed to you, rings you through ' +
+      'surfaces musterd owns — live (always on), an OS banner from this machine’s host (`os on` picks ' +
+      'its label), Slack, or a generic webhook. Bare `doorbell` shows each sink and where its state ' +
+      'comes from. A personal URL is private to you and must be https to a public host. A self-set ' +
+      '`away` or `dnd` holds your rings until you are back; `blocking` pierces `dnd`. `doorbell team` ' +
+      'is the admin’s allow-list, defaults and team URLs.',
+    examples: [
+      'musterd doorbell',
+      'musterd doorbell os on',
+      'musterd doorbell webhook on --url https://ntfy.sh/my-topic --tiers blocking',
+      'musterd doorbell team --allow live,os,slack --defaults live,os',
+    ],
+  },
 
   // ── Seats & admin ──────────────────────────────────────────────────────────────────────────
   {

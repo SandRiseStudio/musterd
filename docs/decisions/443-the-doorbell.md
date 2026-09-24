@@ -186,6 +186,11 @@ stop a same-user process from reading the ring queue or a human's prefs with a c
   structured fields the firehose already shows it, with no body. The host reports each banner once:
   `ok` is the notifier process's exit, not the call having returned, and a second report — or one
   for a ring claimed but not returned — is refused (409).
+- **2026-09-23 — the ring rule is also on the zod-free wire entry (PR C).** `ringTargets`,
+  `actMayRing`, `DOORBELL_SINKS` and `OFF_MACHINE_SINKS` moved to `doorbell.wire.ts` and are
+  exported from `@musterd/protocol/wire`, so `/live` folds the same rule the daemon routes with,
+  without shipping zod to the browser. `@musterd/protocol` re-exports them unchanged: no schema, no
+  behavior and no import path changed for existing callers.
 
 ## Observability & Evaluation
 

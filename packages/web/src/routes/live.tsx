@@ -518,6 +518,7 @@ function LivePage() {
                   onSignOut={signOut}
                   board={board}
                   onOpenLane={setBoardLane}
+                  liveIds={liveIds}
                 />
               }
               workCues={WORK_CUES}

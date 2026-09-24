@@ -10,6 +10,11 @@
 > the huddle closed, from measurements made the same day. Clause 7 landed as ADR 088 amendment 3.
 > Nothing else here is decided until an ADR cites it.
 
+> **Name collision, noted 2026-09-23.** "Doorbell" here is the *agent* interrupt rail: how a
+> directed act reaches a busy model. The *human* doorbell — how something addressed to a person
+> rings them through `/live`, an OS banner, Slack or a webhook — is
+> [ADR 443](../decisions/443-the-doorbell.md). They share a word and nothing else.
+
 ## The question
 
 A directed act — a `steer`, a `request_help`, an `ask`, a huddle turn addressed by name — has to reach

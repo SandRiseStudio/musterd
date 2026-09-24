@@ -178,6 +178,7 @@ src/
     whoami.ts         // print the seat this folder resolves to: member/team/surface/source (ADR 067)
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
+    doorbell.ts       // `musterd doorbell` (ADR 443): your route, sink by sink, and where each part comes from; `<sink> on|off` (`os on` takes this machine's host label from the host registry); `team` — the admin's allow-list, defaults and team URLs via read-merge-write POST /policy. Humans only; no MCP tool; a URL prints masked to its host
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
     insight.ts        // insight save/search — team-visible findings via the insight act + FTS search (ADR 327)
     surface.ts        // musterd surface list|decline|accept (ADR 332): the vocabulary for refusing a provisioned surface. `decline` removes it AND records the tombstone (one command, one outcome); `list` names what is refusable here plus any refusal this build no longer recognises; `accept` clears one. `init --refresh-hooks` overrides every tombstone in the folder and says which it resurrected
@@ -498,6 +499,14 @@ Manage **workspace toolkits** — the ADR 026/029/038 provisioning templates, na
 ### `musterd role <list|show|assign>`
 
 **Roster-only** since ADR 296: `role` answers what the *team* recognizes, and never renders workspace equipment. A name that is only a toolkit is not silently printed here under the word "role" — the error names `musterd toolkit show <name>` instead. `role create` outside a roster home is refused rather than downgraded to a local file (a local file may never assert a team responsibility). `role create --profile` survives as a quiet alias delegating to `musterd toolkit create`.
+
+### `musterd doorbell [<sink> <on|off>] | doorbell team`
+
+Where you are rung when something is addressed to you (ADR 443). Bare `doorbell` prints each sink (`live`, `os`, `slack`, `webhook`) as on or off and says where that comes from: always on, team default, your override, or not allowed. `<slack|webhook> on [--url <u>] [--tiers <t,…>]` sets your own; with no `--url` and no team URL it exits 2. `os on` records this machine's host label from `~/.musterd/host-registry.json`, and exits 2 when no host runs here for the team (or pass `--host`). `live off` exits 2. `doorbell team [--allow …] [--defaults …] [--slack <url|off>] [--webhook <url|off>]` is the admin's read-merge-write `POST /policy`. URLs print masked to their host. The command is for humans only: from an agent seat it says so and exits 0. There is no MCP tool; agents do not choose where a human is rung.
+
+The host half of the `os` sink is `host/doorbell.ts`. Each `musterd host` tick claims the rings queued for each (daemon, team, label) group and raises one banner per ring from the record's fields, as argv. A quiet tick logs nothing.
+
+**What this does and does not protect:** see [SPEC §3](../../SPEC.md#3-collaboration-acts) (the doorbell) — one home for that fact.
 
 ### `musterd uninstall [--force|--yes]`
 

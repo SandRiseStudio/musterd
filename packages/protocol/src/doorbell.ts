@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AskSpeciesSchema, AskTierSchema, type AskTier } from './ask.js';
+import { DOORBELL_SINKS, type DoorbellSink, OFF_MACHINE_SINKS } from './doorbell.wire.js';
 import type { Availability } from './member.js';
 
 /**
@@ -12,13 +13,15 @@ import type { Availability } from './member.js';
  * passes roster facts in and resolves URLs itself; the host and `/live` read the same record.
  */
 
-/** The four sinks, in route order. `live` is always on (ADR 443 §3). */
-export const DOORBELL_SINKS = ['live', 'os', 'slack', 'webhook'] as const;
-export const DoorbellSinkSchema = z.enum(DOORBELL_SINKS);
-export type DoorbellSink = z.infer<typeof DoorbellSinkSchema>;
+export {
+  actMayRing,
+  DOORBELL_SINKS,
+  type DoorbellSink,
+  OFF_MACHINE_SINKS,
+  ringTargets,
+} from './doorbell.wire.js';
 
-/** The sinks the daemon POSTs to — the off-machine ones ADR 155's present-admin quiet applies to. */
-export const OFF_MACHINE_SINKS: ReadonlySet<DoorbellSink> = new Set(['slack', 'webhook']);
+export const DoorbellSinkSchema = z.enum(DOORBELL_SINKS);
 
 /**
  * The doorbell record: structured fields only (the ADR 088 §4 discipline). **No body**, and the
@@ -96,43 +99,6 @@ export const DoorbellPrefsSchema = z.object({
   sinks: z.record(DoorbellSinkSchema, DoorbellSinkPrefSchema).default({}),
 });
 export type DoorbellPrefs = z.infer<typeof DoorbellPrefsSchema>;
-
-/** The acts that ring a human when **directed** to one (spec §1). */
-const DIRECTED_RINGS = new Set(['ask', 'request_help', 'handoff']);
-
-/** Can this act ring anyone at all? The cheap pre-check before {@link ringTargets} reads members. */
-export function actMayRing(act: string): boolean {
-  return DIRECTED_RINGS.has(act);
-}
-
-/**
- * Which human members this act rings (ADR 443 §2):
- * - a directed `ask`, `request_help` or `handoff` to a human rings that human;
- * - any other `ask` — team-addressed, or directed to an agent — rings every **admin** human (ADR
- *   147 routing), never every human;
- * - a `lane_review` acceptance ask rings only when directed to a human: between agents it is peer
- *   review, and team-addressed it waits on `/live` like `request_help` and `handoff`;
- * - nothing else rings.
- */
-export function ringTargets(input: {
-  act: string;
-  /** The directed recipient's name, or null for a team/broadcast address. */
-  to: string | null;
-  meta: Record<string, unknown> | null | undefined;
-  humans: ReadonlySet<string>;
-  admins: ReadonlySet<string>;
-}): string[] {
-  const { act, to, meta, humans, admins } = input;
-  if (!DIRECTED_RINGS.has(act)) return [];
-  if (to !== null && humans.has(to)) return [to];
-  if (act !== 'ask' || isLaneReview(meta)) return [];
-  return [...admins].filter((name) => humans.has(name));
-}
-
-function isLaneReview(meta: Record<string, unknown> | null | undefined): boolean {
-  const review = meta?.['lane_review'];
-  return typeof review === 'object' && review !== null;
-}
 
 /**
  * The sinks one human is rung on, in {@link DOORBELL_SINKS} order: always `live`, then each sink the

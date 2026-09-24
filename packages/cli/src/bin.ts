@@ -11,6 +11,7 @@ import { broadcastCommand } from './commands/broadcast.js';
 import { claimCommand } from './commands/claim.js';
 import { codexHookCommand } from './commands/codexHook.js';
 import { doneCommand } from './commands/done.js';
+import { doorbellCommand } from './commands/doorbell.js';
 import { fmtCommand } from './commands/fmt.js';
 import { gateCommand } from './commands/gate.js';
 import { goalCommand } from './commands/goal.js';
@@ -256,6 +257,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return statusCommand(rest);
     case 'availability':
       return availabilityCommand(rest);
+    case 'doorbell':
+      return doorbellCommand(rest);
     case 'insight':
       return insightCommand(rest);
     case 'memory':

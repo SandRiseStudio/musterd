@@ -19,6 +19,7 @@ import {
 import { sendAct, type LiveConfig } from './client';
 import { asksOpenMode, stillMode } from './stillMode';
 import { initial, memberAvatar, memberColor, kindOf, hueOf } from './format';
+import { newRings, notifyBrowser, openRingsFor, ringNotice } from './doorbellNotify';
 import { scrollToMessage } from './Stream';
 
 /**
@@ -38,6 +39,8 @@ import { scrollToMessage } from './Stream';
  * read-only by construction (ADR 063, hidden from the roster), so a watch-link viewer sees the rail
  * without buttons.
  */
+const NO_LIVE_IDS: ReadonlySet<string> = new Set();
+
 export function AsksStrip({
   envelopes,
   roster,
@@ -48,6 +51,7 @@ export function AsksStrip({
   onSignOut,
   board = null,
   onOpenLane,
+  liveIds = NO_LIVE_IDS,
 }: {
   envelopes: Envelope[];
   roster: MemberSummary[];
@@ -62,6 +66,8 @@ export function AsksStrip({
   board?: LaneBoard | null;
   /** Open the room's board overlay on a lane — the review queue's click-through. */
   onOpenLane?: (laneId: string) => void;
+  /** Acts that arrived live over the socket, not in the backfill — the only ones the doorbell rings. */
+  liveIds?: ReadonlySet<string>;
 }) {
   // Answers this browser just sent: the firehose deliberately skips the sender, so the POST ack is the
   // only copy this client sees — fold it into the derivation so the card settles immediately.
@@ -150,6 +156,29 @@ export function AsksStrip({
       document.title = base;
     };
   }, [yoursCount]);
+
+  // The doorbell's `live` sink (ADR 443): a browser notification when an act rings the connected
+  // seat. Only a real roster member is rung (never an observer or a watch link), only for what
+  // arrived live over the socket (never the backfill), and once per act. Permission is asked from a click, never on load.
+  const ringSeat = canAnswer ? cfg.as : null;
+  const openRings = useMemo(
+    () => openRingsFor(envelopes, roster, ringSeat),
+    [envelopes, roster, ringSeat],
+  );
+  const rungIds = useRef(new Set<string>());
+  useEffect(() => {
+    for (const env of newRings(openRings, rungIds.current, liveIds)) {
+      rungIds.current.add(env.id);
+      notifyBrowser(ringNotice(env), scrollToMessage);
+    }
+  }, [openRings, liveIds]);
+  const [notifyPermission, setNotifyPermission] = useState(() =>
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
+  );
+  const askNotifyPermission = useCallback(() => {
+    if (typeof Notification === 'undefined') return;
+    void Notification.requestPermission().then(setNotifyPermission);
+  }, []);
 
   // Dismissal: Escape, and a click anywhere outside. Both are what a floating layer owes the reader —
   // it covers the canvas, so it must be as easy to put away as it was to open.
@@ -371,6 +400,16 @@ export function AsksStrip({
             where you cannot answer there is no such question — the sign-in button beside it already
             names who you would become. Inside the office panel the rail is ~470px, and rendering
             both spends ~60px it does not have. */}
+        {ringSeat && notifyPermission === 'default' && (
+          <button
+            type="button"
+            className="lc-ask__btn lc-asks__link"
+            onClick={askNotifyPermission}
+            title="let this tab raise a notification when something is addressed to you (ADR 443)"
+          >
+            notify me here
+          </button>
+        )}
         {canAnswer && (
           <button
             type="button"
