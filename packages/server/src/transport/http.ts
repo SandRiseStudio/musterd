@@ -245,6 +245,7 @@ import {
   clearOrphanPresence,
   clearMemberPresence,
   clearPresenceById,
+  heldByAttendedSession,
   countLivePresences,
   hasLivePresence,
   listLiveDrivers,
@@ -3631,6 +3632,33 @@ export async function handleHttp(
             message: `seat "${targetMember.name}" is ${acctStatus}`,
             claimable: [],
             hint: 'contact a team admin to re-enable this seat',
+          });
+        }
+
+        // ADR 444: a wake never displaces an attended session — the WS `hello` refuses at the same
+        // point. Before every occupy branch, so no grant is consumed and nothing is displaced.
+        if (
+          targetMember.kind === 'agent' &&
+          targetMember.observer === 0 &&
+          body.provenance === 'wake' &&
+          heldByAttendedSession(
+            ctx.db,
+            ctx.hub.connsForMember(targetMember.id).map((c) => c.presenceId),
+          )
+        ) {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'claim.refused',
+            target: targetMember.name,
+            result: 'deny',
+            detail: { code: 'claim_conflict', reason: 'attended_session' },
+          });
+          return sendJson(res, 409, {
+            type: 'refused',
+            code: 'claim_conflict',
+            message: `seat "${targetMember.name}" is held by an attended session — a wake does not displace it`,
+            claimable: [],
+            hint: 'the act stays due; the wake is retried once the seat is idle',
           });
         }
 

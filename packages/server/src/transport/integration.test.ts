@@ -2824,6 +2824,139 @@ describe('WebSocket', () => {
     ws.close();
   });
 
+  describe('a wake never displaces an attended session (ADR 444)', () => {
+    beforeEach(async () => {
+      await server.close();
+      process.env['MUSTERD_SUPERSEDE_GRACE_MS'] = '120';
+      server = createServer({ db: openDb(':memory:'), port: 0 });
+      const { port } = await server.listen();
+      base = `http://127.0.0.1:${port}`;
+      wsUrl = `ws://127.0.0.1:${port}/ws`;
+    });
+    afterEach(() => {
+      delete process.env['MUSTERD_SUPERSEDE_GRACE_MS'];
+    });
+
+    async function seatAda() {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+      const grant = await standingGrant(team.json.human_credential, 'Ada');
+      return { team, grant };
+    }
+
+    function claimFrame(
+      agentKey: string,
+      grant: string,
+      workspace: string,
+      provenance?: 'wake' | 'session',
+    ) {
+      return {
+        type: 'claim',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        key: agentKey,
+        target: { seat: 'Ada' },
+        grant,
+        surface: 'claude-code',
+        workspace,
+        ...(provenance ? { provenance } : {}),
+      };
+    }
+
+    const refusals = () =>
+      listAudit(server.db, getTeamBySlug(server.db, 'dawn')!.id).filter(
+        (r) => r.action === 'claim.refused',
+      );
+
+    it('refuses a same-workspace wake claim with claim_conflict and never reaps the attended session', async () => {
+      const { team, grant } = await seatAda();
+      const attended = new TestWs();
+      await attended.open();
+      attended.send(claimFrame(team.json.agent_key, grant, 'repo@main', 'session'));
+      await attended.waitFor('occupied');
+
+      const wake = new TestWs();
+      await wake.open();
+      wake.send(claimFrame(team.json.agent_key, grant, 'repo@main', 'wake'));
+      expect(await wake.waitFor('refused')).toMatchObject({ code: 'claim_conflict' });
+
+      // Well past the ADR 092 grace: the attended session is still the occupant.
+      await expect(attended.waitFor('error', 400)).rejects.toThrow(/timeout/);
+      const rows = refusals();
+      expect(rows).toHaveLength(1);
+      expect(JSON.parse(rows[0]!.detail ?? '{}')).toMatchObject({
+        code: 'claim_conflict',
+        reason: 'attended_session',
+      });
+      attended.close();
+      wake.close();
+    });
+
+    it('refuses a wake claim from another workspace, and one with no provenance is protected too', async () => {
+      const { team, grant } = await seatAda();
+      const attended = new TestWs();
+      await attended.open();
+      // An older adapter stamps nothing: absence is not `wake`, so it is protected.
+      attended.send(claimFrame(team.json.agent_key, grant, 'repo@main'));
+      await attended.waitFor('occupied');
+
+      const wake = new TestWs();
+      await wake.open();
+      wake.send(claimFrame(team.json.agent_key, grant, 'other@main', 'wake'));
+      expect(await wake.waitFor('refused')).toMatchObject({ code: 'claim_conflict' });
+      await expect(attended.waitFor('error', 200)).rejects.toThrow(/timeout/);
+      attended.close();
+      wake.close();
+    });
+
+    it('refuses a wake HTTP claim with 409 claim_conflict and no side effects', async () => {
+      const { team, grant } = await seatAda();
+      const attended = new TestWs();
+      await attended.open();
+      attended.send(claimFrame(team.json.agent_key, grant, 'repo@main', 'session'));
+      await attended.waitFor('occupied');
+
+      const r = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(team.json.human_credential, 'Ada'),
+        surface: 'cli',
+        workspace: 'other@main',
+        provenance: 'wake',
+      });
+      expect(r.status).toBe(409);
+      expect(r.json).toMatchObject({ type: 'refused', code: 'claim_conflict' });
+      await expect(attended.waitFor('error', 200)).rejects.toThrow(/timeout/);
+      const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+      expect(listAudit(server.db, teamId).some((a) => a.action === 'claim.superseded')).toBe(false);
+      attended.close();
+    });
+
+    it('still lets an attended claim displace a wake, and a wake displace a wake', async () => {
+      const { team, grant } = await seatAda();
+      const wake1 = new TestWs();
+      await wake1.open();
+      wake1.send(claimFrame(team.json.agent_key, grant, 'repo@main', 'wake'));
+      await wake1.waitFor('occupied');
+
+      const wake2 = new TestWs();
+      await wake2.open();
+      wake2.send(claimFrame(team.json.agent_key, grant, 'other@main', 'wake'));
+      await wake2.waitFor('occupied');
+      expect(await wake1.waitFor('error')).toMatchObject({ code: 'superseded' });
+
+      const attended = new TestWs();
+      await attended.open();
+      attended.send(claimFrame(team.json.agent_key, grant, 'repo@main', 'session'));
+      await attended.waitFor('occupied');
+      expect(await wake2.waitFor('error')).toMatchObject({ code: 'superseded' });
+      expect(refusals()).toHaveLength(0);
+      wake1.close();
+      wake2.close();
+      attended.close();
+    });
+  });
+
   describe('durability-gated same-workspace eviction (ADR 092)', () => {
     // A short grace so the reap fires within a test's patience; the outer beforeEach already stood up a
     // default-grace server, so close it and stand up a short-grace one for these cases.

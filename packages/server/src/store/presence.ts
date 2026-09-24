@@ -211,6 +211,22 @@ export function clearMemberPresence(db: Database, memberId: string): void {
   detachLocalRows(db, 'member_id = ?', [memberId], 'cleared');
 }
 
+/**
+ * ADR 444: is the seat held by a live session a wake claim must not displace? True when any of
+ * `presenceIds` (the member's live sockets) backs a row whose provenance is not `wake` — a session a
+ * person opened (`session`), or an older adapter that stamps nothing. Only live sockets are passed
+ * in: a socketless row is an orphan every claim clears anyway.
+ */
+export function heldByAttendedSession(db: Database, presenceIds: readonly string[]): boolean {
+  const stmt = db.prepare<[string], { provenance: string | null }>(
+    'SELECT provenance FROM presence WHERE id = ?',
+  );
+  return presenceIds.some((id) => {
+    const row = stmt.get(id);
+    return row !== undefined && row.provenance !== 'wake';
+  });
+}
+
 /** Drop a single presence row by id — used to evict exactly a displaced connection (ADR 068). */
 export function clearPresenceById(db: Database, presenceId: string): void {
   detachLocalRows(db, 'id = ?', [presenceId], 'displaced');
