@@ -73,21 +73,24 @@ describe('openRingsFor — the live sink rings the connected seat (ADR 443)', ()
 });
 
 describe('newRings — once, and never for the backfill', () => {
-  const tl = [env('a1', 'ask', { to: toMember('dee'), meta: consult })]; // ts 1000
+  const tl = [env('a1', 'ask', { to: toMember('dee'), meta: consult })];
 
-  it('an act older than the page is backfill and never fires', () =>
-    expect(newRings(openRingsFor(tl, roster, 'dee'), new Set(), 10_000)).toEqual([]));
+  it('an act from the backfill never fires, whatever its timestamp', () =>
+    expect(newRings(openRingsFor(tl, roster, 'dee'), new Set(), new Set())).toEqual([]));
 
-  it('a ring that arrived after the page loaded fires once', () => {
+  it('a ring that arrived live fires once', () => {
     const seen = new Set<string>();
-    const first = newRings(openRingsFor(tl, roster, 'dee'), seen, 500);
+    const live = new Set(['a1']);
+    const first = newRings(openRingsFor(tl, roster, 'dee'), seen, live);
     expect(first.map((e) => e.id)).toEqual(['a1']);
     for (const e of first) seen.add(e.id);
-    expect(newRings(openRingsFor(tl, roster, 'dee'), seen, 500)).toEqual([]);
+    expect(newRings(openRingsFor(tl, roster, 'dee'), seen, live)).toEqual([]);
   });
 
-  it('allows for clock skew between the daemon and the browser', () =>
-    expect(newRings(openRingsFor(tl, roster, 'dee'), new Set(), 2_500)).toHaveLength(1));
+  it('does not compare clocks: a live act stamped long before now still fires', () => {
+    const old = [{ ...env('a2', 'ask', { to: toMember('dee'), meta: consult }), ts: 0 }];
+    expect(newRings(openRingsFor(old, roster, 'dee'), new Set(), new Set(['a2']))).toHaveLength(1);
+  });
 });
 
 describe('ringNotice — who and what, never the body', () => {

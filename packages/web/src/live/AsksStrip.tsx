@@ -39,6 +39,8 @@ import { scrollToMessage } from './Stream';
  * read-only by construction (ADR 063, hidden from the roster), so a watch-link viewer sees the rail
  * without buttons.
  */
+const NO_LIVE_IDS: ReadonlySet<string> = new Set();
+
 export function AsksStrip({
   envelopes,
   roster,
@@ -49,6 +51,7 @@ export function AsksStrip({
   onSignOut,
   board = null,
   onOpenLane,
+  liveIds = NO_LIVE_IDS,
 }: {
   envelopes: Envelope[];
   roster: MemberSummary[];
@@ -63,6 +66,8 @@ export function AsksStrip({
   board?: LaneBoard | null;
   /** Open the room's board overlay on a lane — the review queue's click-through. */
   onOpenLane?: (laneId: string) => void;
+  /** Acts that arrived live over the socket, not in the backfill — the only ones the doorbell rings. */
+  liveIds?: ReadonlySet<string>;
 }) {
   // Answers this browser just sent: the firehose deliberately skips the sender, so the POST ack is the
   // only copy this client sees — fold it into the derivation so the card settles immediately.
@@ -154,20 +159,19 @@ export function AsksStrip({
 
   // The doorbell's `live` sink (ADR 443): a browser notification when an act rings the connected
   // seat. Only a real roster member is rung (never an observer or a watch link), only for what
-  // arrived after the page loaded, and once per act. Permission is asked from a click, never on load.
+  // arrived live over the socket (never the backfill), and once per act. Permission is asked from a click, never on load.
   const ringSeat = canAnswer ? cfg.as : null;
   const openRings = useMemo(
     () => openRingsFor(envelopes, roster, ringSeat),
     [envelopes, roster, ringSeat],
   );
-  const loadedAt = useRef(Date.now());
   const rungIds = useRef(new Set<string>());
   useEffect(() => {
-    for (const env of newRings(openRings, rungIds.current, loadedAt.current)) {
+    for (const env of newRings(openRings, rungIds.current, liveIds)) {
       rungIds.current.add(env.id);
       notifyBrowser(ringNotice(env), scrollToMessage);
     }
-  }, [openRings]);
+  }, [openRings, liveIds]);
   const [notifyPermission, setNotifyPermission] = useState(() =>
     typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   );

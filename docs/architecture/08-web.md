@@ -144,9 +144,9 @@ brand/                          // unified marks — Chip + MusterdWord topbar l
 
 ## The doorbell's `live` sink (ADR 443)
 
-`live/doorbellNotify.ts` is a pure fold over the timeline the page already holds. `openRingsFor` returns the acts that ring the connected seat (the protocol's `ringTargets`, read from `@musterd/protocol/wire`, so no zod) and are still unanswered. `newRings` keeps only what arrived after the page loaded (2 s of clock slack) and was not already rung. `AsksStrip` raises one browser `Notification` per new ring. The text is record fields only, never the body, and a click focuses the tab and scrolls to the act. Only a connected roster member is rung, never an observer or a watch link. Permission is asked from the strip's "notify me here" click, never on load. Measured 2026-09-23: +0.8 KB initial JS gzip on `/live` (135.4 of 136.2 KB).
+`live/doorbellNotify.ts` is a pure fold over the timeline the page already holds. `openRingsFor` returns the acts that ring the connected seat (the protocol's `ringTargets`, read from `@musterd/protocol/wire`, so no zod) and are still unanswered. `newRings` keeps only what arrived live over the socket (`liveIds`, never the backfill — arrival, not timestamps, so a skewed browser clock cannot silence it) and was not already rung. `AsksStrip` raises one browser `Notification` per new ring. The text is record fields only, never the body, and a click focuses the tab and scrolls to the act. Only a connected roster member is rung, never an observer or a watch link. Permission is asked from the strip's "notify me here" click, never on load. Measured 2026-09-23: +0.8 KB initial JS gzip on `/live` (135.4 of 136.2 KB).
 
-**What this does and does not protect (spec §7).** The doorbell removes a model's choice of where a human is reached. It is not a boundary against a hostile process under the same OS user: such a process can read any binding or config file, or call the daemon's HTTP API directly with a credential it read. Closing that is credential custody (ADR 200, ADR 341).
+**What this does and does not protect:** see [SPEC §3](../../SPEC.md#3-collaboration-acts) (the doorbell) — one home for that fact.
 
 ## Testing & verification
 

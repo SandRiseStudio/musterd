@@ -75,21 +75,18 @@ export function openRingsFor(
   });
 }
 
-/** How far before page load an act may be and still count as news — the daemon's clock and the
- *  browser's are different clocks. */
-export const BACKFILL_SLACK_MS = 2_000;
-
 /**
- * Which rings are news: open rings not yet seen, and not older than the page. The caller adds each
- * id it notifies to `seen`, so nothing fires twice; the `loadedAt` bar is what keeps a backfill —
- * which may arrive before or after the roster — from firing on load.
+ * Which rings are news: open rings that arrived live over the socket (`liveIds`, never the
+ * backfill) and have not fired yet. The caller adds each id it notifies to `seen`, so nothing fires
+ * twice. Arrival, not timestamps, is the test: the daemon and the browser keep different clocks,
+ * and a browser clock running ahead would otherwise treat every live act as history.
  */
 export function newRings(
   open: Envelope[],
   seen: ReadonlySet<string>,
-  loadedAt: number,
+  liveIds: ReadonlySet<string>,
 ): Envelope[] {
-  return open.filter((env) => !seen.has(env.id) && env.ts >= loadedAt - BACKFILL_SLACK_MS);
+  return open.filter((env) => liveIds.has(env.id) && !seen.has(env.id));
 }
 
 /** Raise one browser notification, if this tab may. Clicking it brings the tab forward. */

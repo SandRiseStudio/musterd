@@ -208,7 +208,7 @@ Something addressed to a human rings them through surfaces musterd owns, never a
 - **Routing** — `getDoorbellPolicy` (team allow-list, defaults and URLs; ADR 149's `ask_slack_webhook` read through as the team slack URL) → `resolveRoute` with the human's own `members.doorbell_prefs`. A self-set `away`/`dnd` holds (`holdsRing`); `blocking` pierces `dnd`; `off_hours` never holds. `flushHeldRings` runs on the availability POST and `flushLapsedHolds` on the reaper tick (a lapsed `until`). At flush, an answered or resolved act is dropped.
 - **Sinks** — `slack` and `webhook` POST from the daemon: one attempt, detached, `redirect: 'manual'`, one POST per URL per act, ADR 155 present-quiet at raise. `os` waits for the host (`POST /doorbell/rings`, then `/doorbell/rings/:id/surfaced`). `live` needs nothing from the daemon. Every attempt audits `doorbell.surfaced {surface, ok, status?}`, never a URL or a body.
 - **Privacy** — `/members/me/doorbell` is self-only. An admin's `/members/:name/doorbell` goes through `maskPrefs`. Every sink URL must be `https` to a public host (`publicHttpsUrlProblem`), checked at `PUT` and at `POST /policy`.
-- **What this does and does not protect (spec §7).** The doorbell removes a model's choice of where a human is reached. It is not a boundary against a hostile process under the same OS user: such a process can read any binding or config file, or call the daemon's HTTP API directly with a credential it read. Closing that is credential custody (ADR 200, ADR 341).
+- **What this does and does not protect:** see [SPEC §3](../../SPEC.md#3-collaboration-acts) (the doorbell) — one home for that fact.
 
 ## Telemetry (v0.2 — ADR 015, off by default)
 

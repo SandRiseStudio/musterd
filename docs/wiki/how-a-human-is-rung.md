@@ -43,6 +43,4 @@ The check runs on the literal host when a URL is set. It covers personal URLs, t
 
 ## What this does and does not protect
 
-The wall (§2), the pointer rule (§4) and binding-only identity (§6) prevent **cross-session and cross-identity mistakes by models** — the incident's class. They are **not** a boundary against a **hostile process under the same OS user**: such a process can read any binding or config file, `cd` into any Workspace, or call the daemon's HTTP API directly with a credential it read. Closing that is credential custody — ADR 200 and ADR 341 (agents under distinct OS users), and §8's credential work. The same holds for §6's layout and admin rule: they prevent mistakes; same-user filesystem access and direct HTTP are outside this boundary.
-
-The doorbell removes the model's choice of where a human is reached. It does not stop a same-user process that has read a credential.
+The doorbell removes a model's choice of where a human is reached; it is not a boundary against a same-user process that has read a credential. The normative statement lives in [SPEC §3](../../SPEC.md#3-collaboration-acts) — read it there.

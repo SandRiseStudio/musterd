@@ -46,7 +46,8 @@ describe('doorbell command (ADR 443)', () => {
   const run = (args: string[], deps = {}) => capture(() => doorbellCommand(parseArgs(args), deps));
 
   // `team create` auto-binds the cwd identity (ADR 036), so the command resolves `nick`.
-  const setupTeam = () => capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
+  const setupTeam = () =>
+    capture(() => teamCommand(parseArgs(['create', 'dawn', '--member', 'nick'])));
 
   const registry = (host: string): { entries: HostRegistryEntry[] } => ({
     entries: [

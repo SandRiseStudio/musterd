@@ -506,7 +506,7 @@ Where you are rung when something is addressed to you (ADR 443). Bare `doorbell`
 
 The host half of the `os` sink is `host/doorbell.ts`. Each `musterd host` tick claims the rings queued for each (daemon, team, label) group and raises one banner per ring from the record's fields, as argv. A quiet tick logs nothing.
 
-**What this does and does not protect (spec §7).** The doorbell removes a model's choice of where a human is reached. It is not a boundary against a hostile process under the same OS user: such a process can read any binding or config file, or call the daemon's HTTP API directly with a credential it read. Closing that is credential custody (ADR 200, ADR 341).
+**What this does and does not protect:** see [SPEC §3](../../SPEC.md#3-collaboration-acts) (the doorbell) — one home for that fact.
 
 ### `musterd uninstall [--force|--yes]`
 
