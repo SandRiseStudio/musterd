@@ -9548,7 +9548,10 @@ describe('no delivery hint on POST /messages (ADR 442)', () => {
   }
 
   it('never issues delivery_hint, for any recipient kind, and writes no nudge.decision row', async () => {
-    const created = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const created = await post('/teams', {
+      slug: 'dawn',
+      creator: { name: 'nick', kind: 'human' },
+    });
     const nick = created.json.human_credential as string;
     for (const name of ['Ada', 'Bob'])
       await post('/teams/dawn/members', { name, kind: 'agent' }, nick);

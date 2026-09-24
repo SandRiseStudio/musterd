@@ -1356,7 +1356,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
  *
  * The pre-171 doctor iterated the manifest's recorded file list, so a guidance file added to the
  * templates AFTER a folder was provisioned was never expected and therefore could never be missed:
- * the ADR 167 nudge-relay skill was absent from 8 of 8 dogfood worktrees and drew 0 drift lines.
+ * the ADR 167 nudge-relay skill (retired since, ADR 442) was absent from 8 of 8 dogfood worktrees and drew 0 drift lines.
  * Arm 1 below is that incident; arms 2-4 are the guards that keep the wider expected set from
  * inventing drift, and they are expected to pass both before and after (see the ADR).
  */
@@ -1401,12 +1401,12 @@ describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => 
     h.harnesses = [
       harnessWithGuidance('Claude Code', {
         skillPath: '.musterd/skill/SKILL.md', // already written by provisionCanonicalOnly
-        nudgeSkillPath: '.claude/skills/musterd-nudge-relay/SKILL.md',
+        orientSkillPath: '.claude/skills/musterd-orient/SKILL.md',
       }),
     ];
     const r = await inspectProvisioning(dir);
     expect(
-      r.drift.some((d) => d.includes('musterd-nudge-relay') && d.includes('--refresh-guidance')),
+      r.drift.some((d) => d.includes('musterd-orient') && d.includes('--refresh-guidance')),
     ).toBe(true);
   });
 
@@ -1414,19 +1414,19 @@ describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => 
   it('treats a stampless file at an expected path as a note, never drift', async () => {
     const dir = tmp();
     provisionCanonicalOnly(dir);
-    const rel = '.claude/skills/musterd-nudge-relay/SKILL.md';
+    const rel = '.claude/skills/musterd-orient/SKILL.md';
     const abs = join(dir, rel);
     mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(abs, 'my own notes, no musterd stamp\n');
     h.harnesses = [
       harnessWithGuidance('Claude Code', {
         skillPath: '.musterd/skill/SKILL.md',
-        nudgeSkillPath: rel,
+        orientSkillPath: rel,
       }),
     ];
     const r = await inspectProvisioning(dir);
-    expect(r.drift.some((d) => d.includes('musterd-nudge-relay'))).toBe(false);
-    expect(r.notes.some((n) => n.includes('musterd-nudge-relay'))).toBe(true);
+    expect(r.drift.some((d) => d.includes('musterd-orient'))).toBe(false);
+    expect(r.notes.some((n) => n.includes('musterd-orient'))).toBe(true);
   });
 
   // ARM 3 — guard: expectation is scoped to harnesses wired HERE, mirroring the hook check.
@@ -1740,7 +1740,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
         guidance: {
           frontmatter: 'claude-code',
           skillPath: '.musterd/skill/SKILL.md',
-          nudgeSkillPath: '.claude/skills/musterd-nudge-relay/SKILL.md',
+          orientSkillPath: '.claude/skills/musterd-orient/SKILL.md',
         },
         detect: async () => ({ installed: true, configured: true, detail: 'Claude Code' }),
       },
@@ -1768,7 +1768,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
         guidance: {
           frontmatter: 'claude-code',
           skillPath: '.musterd/skill/SKILL.md',
-          nudgeSkillPath: '.claude/skills/musterd-nudge-relay/SKILL.md',
+          orientSkillPath: '.claude/skills/musterd-orient/SKILL.md',
         },
         detect: async () => ({ installed: true, configured: true, detail: 'Claude Code' }),
       },

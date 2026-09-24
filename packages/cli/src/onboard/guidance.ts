@@ -5,10 +5,6 @@ import {
   GUIDANCE_CONTENT_VERSION,
   parseContentStamp,
   renderContentStamp,
-  renderLabelSessionsFrontmatter,
-  renderLabelSessionsSkill,
-  renderNudgeRelayFrontmatter,
-  renderNudgeRelaySkill,
   renderOrientFrontmatter,
   renderOrientSkill,
   renderSelfLabelSessionFrontmatter,
@@ -46,11 +42,28 @@ export const CANONICAL_ORIENT_PATH = '.musterd/skill/orient.md';
 
 const SLASH_COMMANDS = ['standup', 'handoff', 'claim'] as const;
 
+/**
+ * Guidance musterd once wrote and no longer does (ADR 442, the wall). Both reached into sessions
+ * outside the seat: the nudge-relay skill had a seat `send_message` into a teammate's session, and the
+ * Claude Code label sweep ran `list_sessions` + `set_session_title` across every session on the
+ * machine. A seat must not keep a stale copy just because it was provisioned earlier, so every write
+ * sweeps them — stamp-gated, like uninstall, so a user's own file at the path is never touched.
+ *
+ * `HarnessGuidance.nudgeSkillPath` / `sessionsSkillPath` are no longer read here; the declarations
+ * leave the harness definitions with the wall's gate sub-lane (1c).
+ */
+export const RETIRED_GUIDANCE_PATHS: readonly string[] = [
+  '.claude/skills/musterd-nudge-relay/SKILL.md',
+  '.claude/skills/musterd-label-sessions/SKILL.md',
+];
+
 export interface GuidanceWriteResult {
   /** Paths written, relative to the binding folder (for the manifest + init report). */
   files: string[];
   /** Paths skipped because a stampless (user-authored) file was already there. */
   skipped: string[];
+  /** Retired guidance removed by this write ({@link RETIRED_GUIDANCE_PATHS}). */
+  removed: string[];
   /** The content version stamped into every written file. */
   contentVersion: number;
 }
@@ -162,35 +175,12 @@ export function writeGuidance(
     const g = h.guidance;
     if (!g) continue;
     writeOne(dir, g.skillPath, skillFile(g.frontmatter, opts.team), force, written, skipped);
-    if (g.sessionsSkillPath) {
-      // ADR 160/185 cross_rename: peer sweep — only for harnesses that can list/rename each other.
-      writeOne(
-        dir,
-        g.sessionsSkillPath,
-        `${renderLabelSessionsFrontmatter()}\n\n${renderLabelSessionsSkill()}`,
-        force,
-        written,
-        skipped,
-      );
-    }
     if (g.selfLabelSkillPath) {
       // ADR 186 self_rename: current-chat only (Cursor rename_chat) — inverted apply loop.
       writeOne(
         dir,
         g.selfLabelSkillPath,
         `${renderSelfLabelSessionFrontmatter()}\n\n${renderSelfLabelSessionSkill()}`,
-        force,
-        written,
-        skipped,
-      );
-    }
-    if (g.nudgeSkillPath) {
-      // ADR 167: the nudge-relay skill — same per-surface split as label-sessions above, for
-      // harnesses whose sessions can message each other.
-      writeOne(
-        dir,
-        g.nudgeSkillPath,
-        `${renderNudgeRelayFrontmatter()}\n\n${renderNudgeRelaySkill()}`,
         force,
         written,
         skipped,
@@ -214,7 +204,12 @@ export function writeGuidance(
     }
   }
 
-  return { files: written, skipped, contentVersion: GUIDANCE_CONTENT_VERSION };
+  return {
+    files: written,
+    skipped,
+    removed: removeStamped(dir, RETIRED_GUIDANCE_PATHS),
+    contentVersion: GUIDANCE_CONTENT_VERSION,
+  };
 }
 
 /**
@@ -243,14 +238,32 @@ export function guidanceTargets(harnesses: Harness[]): string[] {
     const g = h.guidance;
     if (!g) continue;
     paths.add(g.skillPath);
-    if (g.sessionsSkillPath) paths.add(g.sessionsSkillPath);
     if (g.selfLabelSkillPath) paths.add(g.selfLabelSkillPath);
-    if (g.nudgeSkillPath) paths.add(g.nudgeSkillPath);
     if (g.orientSkillPath) paths.add(g.orientSkillPath);
     if (g.commandsDir)
       for (const n of SLASH_COMMANDS) paths.add(join(g.commandsDir, `musterd-${n}.md`));
   }
   return [...paths];
+}
+
+/** Delete each path that carries a musterd content stamp (never a user-authored file), then prune
+ * its directory if that left it empty. Never throws on a missing file. */
+function removeStamped(dir: string, rels: readonly string[]): string[] {
+  const removed: string[] = [];
+  for (const rel of rels) {
+    const abs = join(dir, rel);
+    const text = existsSync(abs) ? safeRead(abs) : null;
+    if (text === null || parseContentStamp(text) === null) continue;
+    rmSync(abs, { force: true });
+    removed.push(rel);
+    try {
+      const parent = dirname(abs);
+      if (readdirSync(parent).length === 0) rmSync(parent, { recursive: true, force: true });
+    } catch {
+      /* advisory cleanup — never fail the write */
+    }
+  }
+  return removed;
 }
 
 /**
@@ -259,24 +272,10 @@ export function guidanceTargets(harnesses: Harness[]): string[] {
  * is never removed. Prunes musterd's now-empty guidance dirs. Never throws on a missing file.
  */
 export function removeGuidance(dir: string, harnesses: Harness[]): { removed: string[] } {
-  const removed: string[] = [];
-  for (const rel of guidanceTargets(harnesses)) {
-    const abs = join(dir, rel);
-    const text = existsSync(abs) ? safeRead(abs) : null;
-    if (text !== null && parseContentStamp(text) !== null) {
-      rmSync(abs, { force: true });
-      removed.push(rel);
-    }
-  }
+  const removed = removeStamped(dir, [...guidanceTargets(harnesses), ...RETIRED_GUIDANCE_PATHS]);
   // Tidy musterd-owned dirs left empty (best-effort; leave shared dirs like .claude/commands alone
   // if the user has other files there).
-  for (const rel of [
-    '.claude/skills/musterd',
-    '.claude/skills/musterd-label-sessions',
-    '.claude/skills/musterd-nudge-relay',
-    '.claude/skills/musterd-orient',
-    '.musterd/skill',
-  ]) {
+  for (const rel of ['.claude/skills/musterd', '.claude/skills/musterd-orient', '.musterd/skill']) {
     const abs = join(dir, rel);
     try {
       if (existsSync(abs) && readdirSync(abs).length === 0)
@@ -297,19 +296,9 @@ export function removeGuidance(dir: string, harnesses: Harness[]): { removed: st
 export function guidanceFileMap(g: HarnessGuidance, team: string): Record<string, string> {
   const out: Record<string, string> = {};
   out[g.skillPath] = stamped(skillFile(g.frontmatter, team));
-  if (g.sessionsSkillPath) {
-    out[g.sessionsSkillPath] = stamped(
-      `${renderLabelSessionsFrontmatter()}\n\n${renderLabelSessionsSkill()}`,
-    );
-  }
   if (g.selfLabelSkillPath) {
     out[g.selfLabelSkillPath] = stamped(
       `${renderSelfLabelSessionFrontmatter()}\n\n${renderSelfLabelSessionSkill()}`,
-    );
-  }
-  if (g.nudgeSkillPath) {
-    out[g.nudgeSkillPath] = stamped(
-      `${renderNudgeRelayFrontmatter()}\n\n${renderNudgeRelaySkill()}`,
     );
   }
   if (g.orientSkillPath) {

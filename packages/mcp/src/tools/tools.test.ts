@@ -194,7 +194,9 @@ describe('team_send handler', () => {
     expect(text(r)).toContain('sent handoff to Lin');
   });
 
-  it('surfaces a delivery_hint verbatim in text + structuredContent; absent hint leaves both bare (ADR 167)', async () => {
+  // ADR 442 (the wall): no seat relays into another session, so the adapter never passes a hint on
+  // — not even one an older daemon still sends. The model is never told to reach a session.
+  it('never surfaces delivery_hint, even when an old daemon still sends one (ADR 442)', async () => {
     const hint = {
       recipient_live: true,
       rail: 'ccd_session',
@@ -214,25 +216,11 @@ describe('team_send handler', () => {
       config,
     );
     const r = await handler({ to: 'Lin', act: 'handoff', body: 'take this' });
-    expect(text(r)).toContain('VERBATIM');
-    expect(text(r)).toContain(hint.nudge_text); // quoted whole, so the model can relay it unmodified
-    expect((r as any).structuredContent.delivery_hint).toEqual(hint);
-
-    // Older daemon / no hint → byte-identical to the pre-ADR response shape.
-    const bare = capture(
-      registerSend,
-      {
-        joined: true,
-        holdsSeat: true,
-        lastJoinError: null,
-        sendEnvelope: (async () => undefined) as any,
-        markSeen: vi.fn(),
-      },
-      config,
-    );
-    const r2 = await bare({ to: 'Lin', act: 'handoff', body: 'take this' });
-    expect(text(r2)).not.toContain('VERBATIM');
-    expect((r2 as any).structuredContent.delivery_hint).toBeUndefined();
+    expect(text(r)).not.toContain('VERBATIM');
+    expect(text(r)).not.toContain(hint.nudge_text);
+    expect(text(r)).not.toContain('list_sessions');
+    expect(text(r)).not.toContain('send_message');
+    expect((r as any).structuredContent).not.toHaveProperty('delivery_hint');
   });
 
   it('maps @team / @broadcast recipients', async () => {

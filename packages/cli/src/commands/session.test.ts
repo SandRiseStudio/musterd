@@ -1709,7 +1709,10 @@ describe('musterd session label-nudge (evidence-based due)', () => {
     expect(labelSweepDue(NOW, env({ MUSTERD_CCD_SESSIONS_DIR: missing }))).toBe(true);
   });
 
-  it('the command prints the nudge when due and NOTHING when quiet, exiting 0 both times', async () => {
+  // ADR 442 (the wall): the peer sweep this nudge sent sessions to is retired, so the command is
+  // silent even when the evidence says a sweep would be due. The hook stays harmless until 1c
+  // removes it from the installed hook line.
+  it('the command is silent even when a sweep is due — the sweep skill is retired (ADR 442)', async () => {
     const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     const run = () => sessionCommand(parseArgs(['label-nudge']));
     const withEnv = async (e: Record<string, string>): Promise<number> => {
@@ -1736,8 +1739,9 @@ describe('musterd session label-nudge (evidence-based due)', () => {
       titleSource: 'auto',
       isArchived: false,
     });
+    expect(labelSweepDue(NOW, env())).toBe(true);
     expect(await withEnv({ ...env(), TERM_PROGRAM: 'vscode' })).toBe(0);
-    expect(out.mock.calls.map((c) => String(c[0])).join('')).toContain('musterd-label-sessions');
+    expect(out.mock.calls.map((c) => String(c[0])).join('')).toBe('');
     out.mockClear();
     // clear the unlabeled row → quiet
     writeFileSync(

@@ -362,11 +362,7 @@ import {
 } from '../sync/log.js';
 import { pullTeam } from '../sync/pull.js';
 import { readPushRefusal, pushTeam } from '../sync/push.js';
-import {
-  recordError,
-  recordInterruptCheck,
-  recordSeenLatency,
-} from '../telemetry.js';
+import { recordError, recordInterruptCheck, recordSeenLatency } from '../telemetry.js';
 
 /**
  * The content-coding negotiated for this response from its request's `Accept-Encoding`, set once at

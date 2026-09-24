@@ -23,8 +23,6 @@ export const GUIDANCE_INSTALL_PATHS: readonly string[] = [
   '.musterd/skill/orient.md',
   // Claude Code
   '.claude/skills/musterd/SKILL.md',
-  '.claude/skills/musterd-label-sessions/SKILL.md',
-  '.claude/skills/musterd-nudge-relay/SKILL.md',
   '.claude/skills/musterd-orient/SKILL.md',
   '.claude/commands/musterd-standup.md',
   '.claude/commands/musterd-handoff.md',

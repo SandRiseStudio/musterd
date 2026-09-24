@@ -579,7 +579,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
       hookSpecificOutput: { hookEventName: string; additionalContext: string };
     };
     expect(json.hookSpecificOutput.hookEventName).toBe('PostToolUse');
-    expect(json.hookSpecificOutput.additionalContext).toContain('\u26a1 musterd:');
+    expect(json.hookSpecificOutput.additionalContext).toMatch(/^\u26a1 musterd \[dawn\]:/);
     expect(json.hookSpecificOutput.additionalContext).toContain('request_help');
     expect(json.hookSpecificOutput.additionalContext).not.toContain('drop everything'); // §4 still holds
   });

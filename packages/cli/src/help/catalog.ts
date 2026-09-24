@@ -882,9 +882,8 @@ export const CATALOG: readonly CommandEntry[] = [
       'upgrades from fresh to `--resume`, and a live local session defers the wake entirely. ' +
       '`show` is the human view: what is captured here, is it live, would a wake resume or defer. ' +
       '`resolve-labels` is the sidebar-sweep decision engine (ADR 160): session-list JSON in, ' +
-      '`{apply, skipped}` out — the label-sessions skill pipes through it and applies the renames; ' +
-      'it also stamps the machine-wide last-sweep file. `label-nudge` is the hook-driven other ' +
-      'half: one imperative line while that stamp is missing/stale (>4h), silence otherwise. ' +
+      '`{apply, skipped}` out; it also stamps the machine-wide last-sweep file. `label-nudge` is ' +
+      'a silent no-op since ADR 442 retired the peer sweep — a seat never renames another session. ' +
       '`observe --orient` (ADR 333) is the Cursor sessionStart injector: after observe, stdout is ' +
       'JSON `{ additional_context }` wrapping the orientation block. ' +
       '`bind --thread <id>` is ADR 210 repair: a threaded send binds this session to that thread ' +
