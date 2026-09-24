@@ -182,14 +182,24 @@ export function ensurePinnedMusterd(opts: PinnedMusterdOpts): string | undefined
  * its success bar is looser than codex's and tightening it is its own increment); the token is
  * plumbed now so the correlation exists in the ledger and the increment that reads it needs no
  * second rollout.
+ *
+ * `harness` (ADR 436 clause 3 — capture) stamps `MUSTERD_WAKE_HARNESS` with the backend the host
+ * actually spawned, beside the lease. The woken session's capture hook reads it instead of guessing
+ * the harness from its payload's shape — a guess that recorded every OpenCode and Grok wake as
+ * `claude-code`. Set only with a lease: without one there is no wake to speak for.
  */
 export function wakeEnv(
   base: NodeJS.ProcessEnv,
   pinnedDir: string | undefined,
   leaseId?: string,
+  harness?: string,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, MUSTERD_PROVENANCE: 'wake' };
-  if (leaseId) env['MUSTERD_WAKE_LEASE'] = leaseId;
+  delete env['MUSTERD_WAKE_HARNESS'];
+  if (leaseId) {
+    env['MUSTERD_WAKE_LEASE'] = leaseId;
+    if (harness) env['MUSTERD_WAKE_HARNESS'] = harness;
+  }
   if (!pinnedDir) return env;
   env['PATH'] = base['PATH'] ? `${pinnedDir}:${base['PATH']}` : pinnedDir;
   return env;

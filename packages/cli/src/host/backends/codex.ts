@@ -109,7 +109,7 @@ export function codexWakeEnv(
   const allowed = ['HOME', 'PATH', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM'];
   const env: NodeJS.ProcessEnv = {};
   for (const key of allowed) if (base[key] !== undefined) env[key] = base[key];
-  return wakeEnv(env, pinnedDir, leaseId);
+  return wakeEnv(env, pinnedDir, leaseId, 'codex');
 }
 
 function killTree(child: ChildProcess, graceMs: number): void {

@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { WakeOrder } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import type { BackendContext, WakeSpec } from '../backend.js';
-import { buildGrokFreshArgs, buildGrokResumeArgs, grokBackend } from './grok.js';
+import { buildGrokFreshArgs, buildGrokResumeArgs, grokBackend, grokWakeEnv } from './grok.js';
 
 class Child extends EventEmitter {
   pid: number | undefined = 4242;
@@ -122,5 +122,15 @@ describe('grok liveness (ADR 436 clause 4 — a wake that settled is over)', () 
     expect(completion?.captures).toEqual([
       { harness: 'grok', ids: ['wake-l', undefined], id: 'grok-real' },
     ]);
+  });
+});
+
+describe('grok capture (ADR 436 clause 3 — the spawned harness is stamped at spawn)', () => {
+  it('stamps MUSTERD_WAKE_HARNESS=grok beside the lease, and nothing without one', () => {
+    expect(grokWakeEnv({ HOME: '/h' }, 'L42')).toMatchObject({
+      MUSTERD_WAKE_LEASE: 'L42',
+      MUSTERD_WAKE_HARNESS: 'grok',
+    });
+    expect(grokWakeEnv({ HOME: '/h' }).MUSTERD_WAKE_HARNESS).toBeUndefined();
   });
 });

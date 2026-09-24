@@ -99,6 +99,9 @@ describe('Codex residency argv', () => {
     // verifier is back to matching a description.
     expect(codexWakeEnv({ HOME: '/h' }, 'L42').MUSTERD_WAKE_LEASE).toBe('L42');
     expect(codexWakeEnv({ HOME: '/h' }).MUSTERD_WAKE_LEASE).toBeUndefined();
+    // ADR 436 clause 3: the harness the host spawned rides beside the lease, stamped at spawn.
+    expect(codexWakeEnv({ HOME: '/h' }, 'L42').MUSTERD_WAKE_HARNESS).toBe('codex');
+    expect(codexWakeEnv({ HOME: '/h' }).MUSTERD_WAKE_HARNESS).toBeUndefined();
   });
 
   it('puts the pinned actuator build before a Homebrew musterd on PATH', () => {

@@ -98,6 +98,14 @@ fix five contract holes.
   session beside the ended capture stays live; tested). The rename also makes a later `-r` resume
   name a real id. A session that took the slot mid-wake is never stamped: the claim must name it.
 
+- **2026-09-24 (lane `01M3309Y1V`, clause 3 — capture):** the host stamps `MUSTERD_WAKE_HARNESS`
+  with the backend it spawned, beside `MUSTERD_WAKE_LEASE` (`wakeEnv`, only with a lease), and
+  `musterd session start` prefers it over the payload-shape inference. The ledger's `claude-code`
+  rows had a second cause: `pushAttestation` defaulted its harness to `claude-code` and the hook
+  path never passed one, so even a slot that said `grok` was attested as `claude-code`. The push
+  now sends the capture's own harness. Grok wakes have posted captures since 2026-09-21 21:03, all
+  mislabelled. No protocol change: `harness` was already an open string.
+
 ## Observability & Evaluation
 
 - **Traces:** per wake, the existing `residency.woke` / `residency.wake_cost` / `session_captured`
