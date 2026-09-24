@@ -54,7 +54,7 @@ export function gateAskHumanAnswer(
            FROM messages m JOIN members mem ON mem.id = m.from_member
           WHERE m.team_id = ? AND m.act IN ('accept', 'decline')
             AND mem.kind = 'human'
-            AND json_extract(m.meta, '$.in_reply_to') = ?
+            AND m.in_reply_to = ?
           ORDER BY m.ts ASC LIMIT 1`,
       )
       .get(teamId, askId);

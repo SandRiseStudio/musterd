@@ -109,7 +109,7 @@ function anyAnswer(db: Database, msg: MessageRow): { act: string; id: string; ts
     .prepare<[string, string], { act: string; id: string; ts: number }>(
       `SELECT act, id, ts FROM messages
         WHERE team_id = ? AND act IN ('accept','decline')
-          AND json_extract(meta, '$.in_reply_to') = ?
+          AND in_reply_to = ?
         ORDER BY ts ASC LIMIT 1`,
     )
     .get(msg.team_id, msg.id);

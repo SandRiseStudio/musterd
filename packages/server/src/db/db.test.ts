@@ -18,7 +18,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('70');
+    expect(ver?.value).toBe('71');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -145,7 +145,7 @@ describe('db', () => {
       `INSERT INTO seed_thread_entries (id, seed_id, kind, body, member_id, created_at)
        VALUES ('t1', 's1', 'clarification', 'why?', ?, 2)`,
     ).run(member.id);
-    expect(runMigrations(db)).toBe(70);
+    expect(runMigrations(db)).toBe(71);
     const col = (db.pragma('table_info(seeds)') as { name: string; notnull: number }[]).find(
       (c) => c.name === 'slack_user_id',
     );
@@ -333,7 +333,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(70); // runs v18…v70 (governed authorization substrate, audit actor attestation, guidance epoch, doorbell)
+    expect(runMigrations(db)).toBe(71); // runs v18…v71 (governed authorization substrate, audit actor attestation, guidance epoch, doorbell, in_reply_to column)
 
     const scope = (id: string) =>
       db
@@ -397,7 +397,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(70);
+    expect(runMigrations(db)).toBe(71);
 
     const policy = (id: string) =>
       db
@@ -729,7 +729,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     stage(db, 'm1', 1, 1);
 
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(70);
+    expect(runMigrations(db)).toBe(71);
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
     db.close();
@@ -744,7 +744,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     db.exec('DROP INDEX idx_messages_origin; DROP TABLE sync_pull_cursor;');
     db.prepare("UPDATE schema_meta SET value = '55' WHERE key = 'schema_version'").run();
 
-    expect(runMigrations(db)).toBe(70);
+    expect(runMigrations(db)).toBe(71);
 
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_pull_cursor'").get(),
@@ -760,7 +760,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
   it('v58 stamps audit with the origin pair, unique only where a stamp exists', () => {
     const db = withRemoteNode();
     db.prepare("UPDATE schema_meta SET value = '57' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(70);
+    expect(runMigrations(db)).toBe(71);
 
     const insert = db.prepare(
       `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
@@ -830,7 +830,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
       INSERT INTO seat_nodes VALUES ('m', 't', 'nA', 5);
     `);
     db.prepare("UPDATE schema_meta SET value = '62' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(70);
+    expect(runMigrations(db)).toBe(71);
     expect(db.prepare('SELECT member_id, node_id, bound_at FROM seat_nodes').all()).toEqual([
       { member_id: 'm', node_id: 'nA', bound_at: 5 },
     ]);
@@ -839,6 +839,39 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     expect(() => db.prepare("INSERT INTO seat_nodes VALUES ('m', 't', 'nB', 7)").run()).toThrow(
       /UNIQUE|PRIMARY KEY/,
     );
+    db.close();
+  });
+  it('v71 adds messages.in_reply_to as a generated column the discharge lookup can seek on', () => {
+    const db = openDb(':memory:');
+    db.exec(`
+      INSERT INTO teams (id, slug, created_at, updated_at) VALUES ('t', 'alpha', 1, 1);
+      INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+        VALUES ('a', 't', 'ann', 'agent', '', 'forever', 0, 1, 1), ('b', 't', 'bob', 'agent', '', 'forever', 0, 1, 1);
+      INSERT INTO messages (id, team_id, from_member, to_kind, to_member, act, body, meta, ts, created_at, origin_seq)
+        VALUES ('m1', 't', 'a', 'member', 'b', 'request_help', 'x', NULL, 1, 1, 1),
+               ('m2', 't', 'b', 'member', 'a', 'accept', 'ok', '{"in_reply_to":"m1"}', 2, 2, 2);
+    `);
+    // The column IS the json_extract — the same value, now with TEXT affinity.
+    expect(db.prepare('SELECT id, in_reply_to FROM messages ORDER BY id').all()).toEqual([
+      { id: 'm1', in_reply_to: null },
+      { id: 'm2', in_reply_to: 'm1' },
+    ]);
+    // The regression: the discharge check's correlated NOT EXISTS must seek the index, not scan
+    // the team (the 2026-09-24 daemon_wedged pair — a bare json_extract index is never used here
+    // because the expression has no affinity and \`id\` is TEXT).
+    const plan = db
+      .prepare<[], { detail: string }>(
+        `EXPLAIN QUERY PLAN SELECT m.id FROM messages m WHERE m.team_id = 't' AND m.act = 'request_help'
+           AND NOT EXISTS (SELECT 1 FROM messages dr WHERE dr.team_id = m.team_id
+                             AND dr.act IN ('accept','decline') AND dr.in_reply_to = m.id)`,
+      )
+      .all()
+      .map((r) => r.detail)
+      .join('\n');
+    expect(plan).toMatch(/idx_messages_in_reply_to \(team_id=\? AND in_reply_to=\?\)/);
+    // A replay must not re-add the column: table_info hides a VIRTUAL column, table_xinfo shows it.
+    db.prepare("UPDATE schema_meta SET value = '70' WHERE key = 'schema_version'").run();
+    expect(runMigrations(db)).toBe(71);
     db.close();
   });
 });

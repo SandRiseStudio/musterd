@@ -760,7 +760,7 @@ function threadReopenedSince(
          JOIN messages a ON a.id = ?
         WHERE x.team_id = ? AND x.from_member != ? AND x.created_at > ?
           AND (x.thread_id = COALESCE(a.thread_id, a.id)
-               OR json_extract(x.meta, '$.in_reply_to') = a.id)
+               OR x.in_reply_to = a.id)
         LIMIT 1`,
     )
     .get(actId, teamId, memberId, sinceTs);
@@ -1055,7 +1055,7 @@ function dueReviewWorkOrders(
           AND NOT EXISTS (
             SELECT 1 FROM messages r
              WHERE r.team_id = m.team_id AND r.act IN ('accept','decline')
-               AND json_extract(r.meta, '$.in_reply_to') = m.id)
+               AND r.in_reply_to = m.id)
           AND NOT EXISTS (
             SELECT 1 FROM messages v
              WHERE v.team_id = m.team_id AND v.act = 'resolve'
@@ -1111,7 +1111,7 @@ function dueDispatchHandoffWorkOrders(
           AND NOT EXISTS (
             SELECT 1 FROM messages r
              WHERE r.team_id = m.team_id AND r.act IN ('accept','decline')
-               AND json_extract(r.meta, '$.in_reply_to') = m.id)
+               AND r.in_reply_to = m.id)
           AND NOT EXISTS (
             SELECT 1 FROM messages v
              WHERE v.team_id = m.team_id AND v.act = 'resolve'

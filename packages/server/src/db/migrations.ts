@@ -1689,6 +1689,39 @@ export const MIGRATIONS: Migration[] = [
         db.exec('ALTER TABLE members ADD COLUMN doorbell_prefs TEXT');
     },
   },
+  {
+    // The daemon wedged twice on 2026-09-24 (guardian: 97% of samples in sqlite3_step under
+    // Statement.all). One wake-lease poll spent ~6 s in `openDirectedLedger`, whose discharge
+    // check is `NOT EXISTS (… json_extract(dr.meta, '$.in_reply_to') = m.id)`. An expression
+    // index on that json_extract is never used for the equality: the expression has no affinity
+    // and `id` is TEXT, so SQLite applies TEXT affinity to the comparison and the planner falls
+    // back to a per-row team scan (16k messages × 347 candidates). A VIRTUAL generated column
+    // carries TEXT affinity, so an index on it is used — 1.8 s → 10 ms measured on the live copy.
+    // Every `json_extract(meta, '$.in_reply_to')` read now goes through this column; the value is
+    // the same expression by definition, so nothing changes semantically.
+    version: 71,
+    up: (db) => {
+      // table_xinfo, not table_info: a VIRTUAL generated column is hidden from table_info, so the
+      // guard would re-add it on a replay (the v50 containment test replays the whole chain).
+      const cols = db.prepare("SELECT name FROM pragma_table_xinfo('messages')").pluck().all();
+      if (!cols.includes('in_reply_to'))
+        db.exec(
+          "ALTER TABLE messages ADD COLUMN in_reply_to TEXT GENERATED ALWAYS AS (json_extract(meta, '$.in_reply_to')) VIRTUAL",
+        );
+      db.exec(`
+        -- discharge shape 1: "answered by anyone" (accept/decline naming the act).
+        CREATE INDEX IF NOT EXISTS idx_messages_in_reply_to ON messages(team_id, in_reply_to);
+        -- discharge shapes 3/4: the recipient's own reply, by reference or by later thread post.
+        CREATE INDEX IF NOT EXISTS idx_messages_from_reply ON messages(team_id, from_member, in_reply_to);
+        CREATE INDEX IF NOT EXISTS idx_messages_thread_from ON messages(team_id, thread_id, from_member, created_at);
+        -- discharge shape 2: a resolve on the thread.
+        CREATE INDEX IF NOT EXISTS idx_messages_thread_act ON messages(team_id, act, thread_id);
+        -- Without sqlite_stat1 the planner keeps preferring idx_messages_team_ts (it avoids the
+        -- ORDER BY sort) over the new equality indexes; nothing else ever runs ANALYZE.
+        ANALYZE messages;
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

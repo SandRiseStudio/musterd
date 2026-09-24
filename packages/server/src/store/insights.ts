@@ -284,7 +284,7 @@ export function peerDemand(db: Database, teamId: string, now: number = Date.now(
               SUM(CASE WHEN s.kind = 'agent' THEN 1 ELSE 0 END) AS of_agent,
               SUM(CASE WHEN s.kind = 'service' THEN 1 ELSE 0 END) AS of_service
          FROM messages d
-         JOIN messages h ON h.team_id = d.team_id AND h.id = json_extract(d.meta, '$.in_reply_to')
+         JOIN messages h ON h.team_id = d.team_id AND h.id = d.in_reply_to
          JOIN members s ON s.id = h.from_member
         WHERE d.team_id = ? AND d.ts > ? AND d.act = 'decline' AND h.act = 'handoff'`,
     )
@@ -395,10 +395,10 @@ export function deriveSteeringMetrics(
   const replyActs = db
     .prepare<[string, number], ActRow>(
       `SELECT m.id AS id, m.from_member AS from_member, m.ts AS ts,
-              json_extract(m.meta, '$.in_reply_to') AS in_reply_to
+              m.in_reply_to AS in_reply_to
          FROM messages m
         WHERE m.team_id = ? AND m.ts > ?
-          AND json_extract(m.meta, '$.in_reply_to') IS NOT NULL`,
+          AND m.in_reply_to IS NOT NULL`,
     )
     .all(teamId, since);
 
@@ -492,7 +492,7 @@ export function deriveSteeringMetrics(
           WHERE team_id = ? AND from_member = ? AND ts > ?
             AND act IN ('accept','handoff','status_update','resolve')
             AND (
-              json_extract(meta, '$.in_reply_to') = ?
+              in_reply_to = ?
               OR (? IS NOT NULL AND json_extract(meta, '$.goal_id') = ?)
               OR (? IS NOT NULL AND json_extract(meta, '$.goal_id') = ?)
             )`,
