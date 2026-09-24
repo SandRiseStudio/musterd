@@ -29,15 +29,23 @@
  *
  *   node scripts/perf/health-under-burst.mjs
  *   SEATS=6 DEEP=4000 ROUNDS=60 node scripts/perf/health-under-burst.mjs
+ *   CLAIMS=0 SEATS=100 node scripts/perf/health-under-burst.mjs     # the pre-2026-09-24 read-only mix
+ *
+ * Every synthetic seat carries what a real one does after `/claim` — its own seat credential, a
+ * Presence and a session lease — because the wall (2026-09-23) retired agent-key + `x-musterd-seat`
+ * identity, and a harness sending that got 60 rounds of 401s and reported them as latency. Results
+ * are logged in docs/perf/daemon-load-baseline.md.
  *
  * Exits non-zero if `/health` p99 exceeds BUDGET_MS.
  */
 import { makeEnvelope } from '@musterd/protocol';
 import { openDb } from '../../packages/server/dist/db/open.js';
 import { createServer } from '../../packages/server/dist/index.js';
-import { addMember } from '../../packages/server/dist/store/members.js';
+import { addMember, mintAgentSeatCredential } from '../../packages/server/dist/store/members.js';
 import { insertMessage } from '../../packages/server/dist/store/messages.js';
+import { attach as attachPresence } from '../../packages/server/dist/store/presence.js';
 import { enrollResidency } from '../../packages/server/dist/store/residency.js';
+import { mintSessionLease } from '../../packages/server/dist/store/session-leases.js';
 import { createTeam, rotateAgentKey } from '../../packages/server/dist/store/teams.js';
 
 /** Live, enrolled seats — the ones that read their inbox, so their cursor stays current. */
@@ -49,6 +57,8 @@ const SHALLOW = Number(process.env.SHALLOW ?? 60);
 const ROUNDS = Number(process.env.ROUNDS ?? 60);
 /** The guardian's experience. ADR 131 lane acceptance: /health p99 under 100ms. */
 const BUDGET_MS = Number(process.env.BUDGET_MS ?? 100);
+/** Include the CLI re-claim churn (default on; CLAIMS=0 for the pre-2026-09-24 read-only mix). */
+const CLAIMS = Number(process.env.CLAIMS ?? 1);
 const HOST = 'bench.host';
 
 const db = openDb(':memory:');
@@ -57,8 +67,21 @@ const { agent_key: KEY } = rotateAgentKey(db, team.id);
 const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
 
 const live = [];
+// The wall 1d (2026-09-23) retired `x-musterd-seat` + agent-key identity: a seat reads its inbox
+// with its OWN seat credential. Mint one per synthetic seat, as /claim would.
+// The interrupt probe additionally proves a live Presence through its session lease (the wall 1c),
+// so each seat also gets the presence + lease a real claim would leave behind.
+const credentialOf = new Map();
+const leaseOf = new Map();
 for (let i = 0; i < SEATS; i++) {
   const m = addMember(db, team, { name: `seat${i}`, kind: 'agent' }).row;
+  credentialOf.set(m.name, mintAgentSeatCredential(db, m.id).seat_credential);
+  const presence = attachPresence(db, m.id, 'claude-code', null);
+  leaseOf.set(
+    m.name,
+    mintSessionLease(db, { teamId: team.id, memberId: m.id, presenceId: presence.id })
+      .session_lease,
+  );
   enrollResidency(db, team.id, {
     member_id: m.id,
     harness: 'claude-code',
@@ -111,7 +134,11 @@ for (const m of live)
 const server = createServer({ db, port: 0, host: '127.0.0.1', rosterRoots: [] });
 const { port } = await server.listen();
 const base = `http://127.0.0.1:${port}`;
-const seatHeaders = (seat) => ({ authorization: `Bearer ${KEY}`, 'x-musterd-seat': seat });
+const seatHeaders = (seat) => ({
+  authorization: `Bearer ${credentialOf.get(seat)}`,
+  'x-musterd-session-lease': leaseOf.get(seat),
+  'x-musterd-seat': seat,
+});
 
 // Warm up before measuring: the first request through any route prepares its statements and pays
 // V8's first-call cost, so probe #1 was reliably the slowest sample in every run and dominated a p99
@@ -154,6 +181,20 @@ for (let round = 0; round < ROUNDS; round++) {
     await fetch(`${base}/teams/${team.slug}/inbox?unread=1`, { headers: seatHeaders(seat) }).then(
       (r) => r.text(),
     );
+  }
+  // The claim churn measured on revive 2026-09-24: CLI hook invocations re-claim the seat (bursts of
+  // 109/min; 500/h steady), each writing ~6 audit rows plus a presence attach/detach. Every third
+  // round, as `musterd <cmd>` would: the seat proves itself with its own credential, no grant.
+  if (CLAIMS && round % 3 === 0) {
+    await fetch(`${base}/teams/${team.slug}/claim`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: credentialOf.get(seat), target: { seat }, surface: 'cli' }),
+    })
+      .then((r) => r.json())
+      // A re-claim supersedes the seat's Presence and mints a fresh lease; the old one is dead from
+      // here (claim.superseded), exactly as a CLI hook does to a session in production.
+      .then((j) => j.session_lease && leaseOf.set(seat, j.session_lease));
   }
   // The host's 30s wake poll.
   if (round % 10 === 0) {
