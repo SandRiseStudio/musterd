@@ -37,6 +37,14 @@ The record carries no body. The one exception is Slack for an `ask`, which keeps
 
 When the rung human is present (a live presence row or a driver link, and not self-set away), `slack` and `webhook` stay quiet at raise. They fire on the agent's in-thread re-notify. `live` and `os` ring at once. For a ring to the admin group, "present" means any admin is present, which is ADR 155's rule unchanged.
 
+## A quieted sink records nothing (2026-09-24; falsify: ring a present human with a directed `request_help` and find a delivery row for their `webhook`) <!-- claim: other -->
+
+When a present human gets a directed `request_help`, their `webhook` stays silent, and no row says so. The ring only reaches it if the agent re-notifies in the thread. Do not read a missing webhook delivery as a failure while the human was present.
+
+## `os` reads idle until this machine has a host label (2026-09-24; falsify: the `shows each sink` test in `packages/cli/src/commands/doorbell.test.ts`) <!-- claim: other -->
+
+`musterd doorbell` shows `◌ idle` for `os` when it is routed but has no host label. A ring then has nowhere to land, and its record goes straight to done. `musterd doorbell os on` records this machine's label, and the line changes to `◉ on`.
+
 ## Sink URLs are https to a public host (2026-09-23; falsify: `PUT /members/me/doorbell` with `https://10.0.0.1/x` must return 422) <!-- claim: other -->
 
 The check runs on the literal host when a URL is set. It covers personal URLs, team URLs, and `ask_slack_webhook`. Loopback, link-local, RFC 1918, CGNAT, `fc00::/7`, IPv4-mapped IPv6, `localhost` and `.local` are refused. Both sinks send with `redirect: 'manual'`, so a 3xx cannot walk around the check. **Not closed (2026-09-23; falsify: `PUT` a webhook URL on a public name that resolves to `127.0.0.1` — a 422 means this is closed):** DNS is not resolved, so a public name that resolves to a private address passes. Closing that needs resolve-and-pin at dispatch (ADR 443 §5). <!-- claim: defect -->

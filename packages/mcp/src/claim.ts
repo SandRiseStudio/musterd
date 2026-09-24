@@ -186,6 +186,12 @@ export function persistRenewedLease(config: McpConfig): void {
   if (!config.member || !config.bindingDir || !config.sessionLease) return;
   const onDisk = findBinding(config.bindingDir);
   if (!onDisk?.claim || onDisk.claim.mode !== 'seat' || onDisk.claim.name !== config.member) return;
+  // A renewal owns the LEASE, not the credentials. `config` holds the key read at boot; another
+  // process may since have migrated it on disk (`wire --migrate-bootstrap`, ADR 344). Writing the
+  // boot key back re-armed the legacy key within one heartbeat (lane 01M3A921SA, 2026-09-24), so the
+  // disk copy wins — and is adopted, so the next reconnect presents the migrated key too.
+  if (onDisk.agent_key !== undefined) config.agent_key = onDisk.agent_key;
+  if (onDisk.seat_credential !== undefined) config.seatCredential = onDisk.seat_credential;
   persistBinding(config, config.member);
 }
 

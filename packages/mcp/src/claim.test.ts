@@ -9,7 +9,7 @@ import {
   type Binding,
 } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { adoptIdentity, ClaimConflictError, claimAndJoin } from './claim.js';
+import { adoptIdentity, ClaimConflictError, claimAndJoin, persistRenewedLease } from './claim.js';
 import type { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
 import { clearPendingMarker, readAndConsumeResolution, writePendingMarker } from './pending.js';
@@ -263,6 +263,61 @@ describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
   });
 });
 
+// Lane 01M3A921SA (2026-09-24, the ADR 344 cutover): `wire --migrate-bootstrap` rewrote a live seat's
+// agent_key on disk, and the adapter's next lease renewal wrote its BOOT key straight back — so the
+// seat could never leave the legacy key while a session was open. A renewal persists the lease; the
+// credentials it carries are whatever is on disk, never what the process read at launch.
+describe('persistRenewedLease never downgrades a credential it did not mint', () => {
+  let anchor: string;
+  beforeEach(() => {
+    anchor = mkdtempSync(join(tmpdir(), 'musterd-renew-'));
+    mkdirSync(join(anchor, BINDING_DIR), { recursive: true });
+  });
+  afterEach(() => rmSync(anchor, { recursive: true, force: true }));
+
+  const writeOnDisk = (over: Partial<Binding>): void =>
+    writeFileSync(
+      bindingPath(anchor),
+      JSON.stringify({
+        version: 2,
+        server: 'http://x',
+        team: 'dawn',
+        claim: { mode: 'seat', name: 'Ada' },
+        ...over,
+      }),
+    );
+
+  it('keeps the migrated agent_key and seat_credential on disk, and adopts them for reconnect', () => {
+    writeOnDisk({ agent_key: 'mskey_migrated', seat_credential: 'mscr_migrated' });
+    const config = baseConfig({
+      bindingDir: anchor,
+      member: 'Ada',
+      agent_key: 'mskey_legacy',
+      seatCredential: 'mscr_boot',
+      sessionLease: 'lease_renewed',
+    });
+    persistRenewedLease(config);
+    const disk = readBinding(anchor);
+    expect(disk.agent_key).toBe('mskey_migrated');
+    expect(disk.seat_credential).toBe('mscr_migrated');
+    expect(disk.session_lease).toBe('lease_renewed');
+    expect(config.agent_key).toBe('mskey_migrated');
+    expect(config.seatCredential).toBe('mscr_migrated');
+  });
+
+  it('falls back to the boot key when the disk binding carries none', () => {
+    writeOnDisk({});
+    const config = baseConfig({
+      bindingDir: anchor,
+      member: 'Ada',
+      agent_key: 'mskey_boot',
+      sessionLease: 'lease_renewed',
+    });
+    persistRenewedLease(config);
+    expect(readBinding(anchor).agent_key).toBe('mskey_boot');
+  });
+});
+
 describe('pending markers (ADR 033)', () => {
   let cwd: string;
   beforeEach(() => {
@@ -375,6 +430,10 @@ describe('live claim adoption (ADR 034)', () => {
 
 function bindingPath(cwd: string): string {
   return join(cwd, BINDING_DIR, BINDING_FILE);
+}
+
+function readBinding(cwd: string): Binding {
+  return JSON.parse(readFileSync(bindingPath(cwd), 'utf8')) as Binding;
 }
 
 describe('claimAndJoin concurrency + surface authority (live native-wake findings, 2026-08-12)', () => {
