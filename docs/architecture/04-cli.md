@@ -108,6 +108,7 @@ src/
     sweep.ts          // `service --sweep`: the ADR 166 liveness sweep as a StartInterval LaunchAgent — read-only, every 5 min (≤ the 10-min window a demotion persists for, so it cannot miss one)
     streamwatch.ts    // `service --stream`: the ADR 293 stream supervisor as a StartInterval LaunchAgent — one `stream ensure` reconcile pass every 60s, so a crash costs ≤ a minute of dead air plus the boot
     guardian.ts       // `service --guardian`: the pure-code on-call tick (collect → classify → act → stamp, never throws) + the instrument-silence status line (ADR 263)
+    siteGap.ts        // `service site-gap`: landed is not live (ADR 308 §Observability) — pure comparison of the build marker musterd.io serves (`/build.json`) against origin/main on `packages/web`, the one-open-ask-per-deployed-ref damping, and the ask body; the live build-publisher runs it every poll as the `live` seat
     handover.ts       // ADR 274's bounded refresh-handover record: the writer owns lifecycle; the guardian only reads a valid, current record
     logTrim.ts        // pure-ish: size-capped retention for the service logs (ADR 224) — copy-truncate to `<name>.1`, run by the auto-refresh tick; an explicit log list, never a `*.log` glob (the musterd home is a shared temp dir under test isolation)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)

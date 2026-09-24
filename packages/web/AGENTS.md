@@ -40,6 +40,13 @@ different rules and only one of them was in the original sentence — "who may d
 when" is the half that gets guessed at. Deploy authority is also not review authority: it does not
 license merging work miley has not read.
 
+Landed is not live, and something now says so: the origin serves its build stamp at
+`/build.json`, `musterd service site-gap` prints the site-affecting commits between it and
+`origin/main` (exit 1 when behind, so it works as a gate), and the live build-publisher runs the
+same check every poll and asks miley when the site is behind (lane `01M2XD2RPG`). You do not need
+to tell miley a change is waiting; you do need `pnpm build` to have stamped the build you deploy —
+`stage:site` refuses one that has not.
+
 It covers the publish to musterd.io and nothing else. The `/live` bundle is **not** a deploy — merge
 to `main` and the build-publisher republishes within ~60s with no daemon bounce (root `AGENTS.md`,
 [ADR 132](../../docs/decisions/132-live-viewer-on-daemon-origin.md)). `musterd service refresh` is

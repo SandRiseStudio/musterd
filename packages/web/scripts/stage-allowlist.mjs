@@ -40,6 +40,11 @@ export const PUBLIC_ALLOW = [
   // and `blog` directories, which this list copies whole.
   'llms-full.txt',
   '_headers',
+  // The ADR 135 build stamp ({ ref, builtAt }), so the public origin says which commit it serves
+  // and `musterd service site-gap` can measure landed-versus-live (ADR 308 §Observability, lane
+  // 01M2XD2RPG). Static JSON, no client — admissible for the same reason the text files above are.
+  // It is copied from `dist/build.json` (the stamp lives beside `client/`, not inside it).
+  'build.json',
 ];
 
 /**
