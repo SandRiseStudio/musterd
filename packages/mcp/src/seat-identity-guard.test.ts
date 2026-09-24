@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -70,7 +70,7 @@ describe('the cross-worktree seat leak', () => {
   it('never writes a claimed seat back into the other workspace (the clobber this would have become)', () => {
     // resolveBindingDir decides where a claim is persisted. Un-guarded, miley's adapter would have
     // overwritten *dolly's* binding.json with miley's seat.
-    expect(resolveBindingDir(miley, leaked())).toBe(miley);
+    expect(resolveBindingDir(miley, leaked())).toBe(realpathSync(miley));
   });
 
   it('says so out loud — a silently-swapped identity is how this went unnoticed for hours', () => {
@@ -105,19 +105,19 @@ describe('what the guard must NOT break', () => {
   it('honours MUSTERD_BINDING that names this same workspace (belt and braces, not a leak)', () => {
     const env = { MUSTERD_BINDING: join(miley, '.musterd', 'binding.json') };
     expect(findBinding(miley, env)?.claim.name).toBe('miley');
-    expect(resolveBindingDir(miley, env)).toBe(miley);
+    expect(resolveBindingDir(miley, env)).toBe(realpathSync(miley));
   });
 
   it('still resolves the workspace seat with no env at all', () => {
     expect(findBinding(miley, {})?.claim.name).toBe('miley');
-    expect(resolveBindingDir(miley, {})).toBe(miley);
+    expect(resolveBindingDir(miley, {})).toBe(realpathSync(miley));
   });
 
   it('resolves from a subdirectory of the workspace, not just its root', () => {
     const sub = join(miley, 'packages', 'web');
     mkdirSync(sub, { recursive: true });
     expect(findBinding(sub, {})?.claim.name).toBe('miley');
-    expect(resolveBindingDir(sub, {})).toBe(miley);
+    expect(resolveBindingDir(sub, {})).toBe(realpathSync(miley));
   });
 });
 

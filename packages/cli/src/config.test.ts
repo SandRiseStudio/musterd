@@ -4,6 +4,8 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -675,5 +677,59 @@ describe('classified identity loads (ADR 281/282)', () => {
         typeof saveBinding
       >[1]),
     ).toThrow();
+  });
+});
+
+describe('identity resolution is by real path (reach spec §6 — symlink + nesting)', () => {
+  const valid = {
+    version: 2,
+    server: 'http://127.0.0.1:4849',
+    team: 'revive',
+    agent_key: 'mskey_x',
+    claim: { mode: 'seat', name: 'dolly' },
+  };
+  let home: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'musterd-reach-'));
+  });
+
+  const worktree = () => {
+    const dir = join(home, 'musterd', 'agents', 'dolly');
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(join(dir, '.musterd', 'binding.json'), JSON.stringify(valid));
+    writeFileSync(
+      join(dir, '.musterd', 'workspace.json'),
+      JSON.stringify({ version: 2, server: valid.server, team: 'revive', claim: valid.claim }),
+    );
+    return dir;
+  };
+
+  it('a member worktree and any nested subfolder of it resolve to that member', () => {
+    const dir = worktree();
+    mkdirSync(join(dir, 'packages', 'cli'), { recursive: true });
+    expect(findBinding(dir, {})?.claim).toEqual(valid.claim);
+    expect(findBinding(join(dir, 'packages', 'cli'), {})?.claim).toEqual(valid.claim);
+  });
+
+  it('an unbound folder, `~/musterd/<repo>` and `~/musterd` resolve to nobody', () => {
+    worktree();
+    mkdirSync(join(home, 'elsewhere'), { recursive: true });
+    expect(findBinding(join(home, 'elsewhere'), {})).toBeNull();
+    expect(findBinding(join(home, 'musterd', 'agents'), {})).toBeNull();
+    expect(findBinding(join(home, 'musterd'), {})).toBeNull();
+    expect(findWorkspaceSpec(join(home, 'musterd', 'agents'))).toBeNull();
+  });
+
+  it('a symlink INTO a Workspace resolves as its real path — even one that lands below the root', () => {
+    const dir = worktree();
+    mkdirSync(join(dir, 'packages', 'cli'), { recursive: true });
+    // The alias points at a subfolder: a logical walk from alias/x never passes the workspace root.
+    symlinkSync(join(dir, 'packages'), join(home, 'alias'));
+    expect(findBinding(join(home, 'alias', 'cli'), {})?.claim).toEqual(valid.claim);
+    expect(findWorkspaceSpec(join(home, 'alias', 'cli'))?.team).toBe('revive');
+    expect(requireUsableBinding(join(home, 'alias', 'cli'), {})?.claim).toEqual(valid.claim);
+    expect(realpathSync(join(home, 'alias', 'cli'))).toBe(
+      realpathSync(join(dir, 'packages', 'cli')),
+    );
   });
 });

@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -29,9 +37,31 @@ export function findBinding(
   return local ? readBinding(local) : null;
 }
 
-/** The nearest ancestor's `.musterd/binding.json`, walking up from `startDir`. */
+/**
+ * Where an identity walk starts: the REAL path of `startDir` (reach spec §6 / ADR 442; mirrors the
+ * CLI's `walkStart`). A symlink into a Workspace resolves as the folder it really is — a logical walk
+ * from an alias that lands below the workspace root never passes that root. Unresolvable → as given.
+ */
+function walkStart(startDir: string): string {
+  // Not-yet-existing tails resolve through their nearest existing ancestor, so `<alias>/new` still
+  // lands inside the real workspace instead of missing the symlink.
+  const missing: string[] = [];
+  let dir = resolve(startDir);
+  for (;;) {
+    try {
+      return missing.length ? join(realpathSync(dir), ...missing.reverse()) : realpathSync(dir);
+    } catch {
+      const parent = dirname(dir);
+      if (parent === dir) return resolve(startDir);
+      missing.push(dir.slice(parent.length + 1));
+      dir = parent;
+    }
+  }
+}
+
+/** The nearest ancestor's `.musterd/binding.json`, walking up from `startDir` (real path). */
 function walkUpForBinding(startDir: string): string | null {
-  for (let dir = startDir; ; ) {
+  for (let dir = walkStart(startDir); ; ) {
     const p = join(dir, BINDING_DIR, BINDING_FILE);
     if (existsSync(p)) return p;
     const parent = dirname(dir);
@@ -197,7 +227,7 @@ export function resolveBindingDir(
   // MUSTERD_BINDING names the binding *file* (<root>/.musterd/binding.json); its workspace root is two
   // levels up. dirname twice is robust to the fixed `.musterd/binding.json` suffix saveBinding writes.
   if (explicit) return dirname(dirname(explicit));
-  for (let dir = startDir; ; ) {
+  for (let dir = walkStart(startDir); ; ) {
     if (existsSync(join(dir, BINDING_DIR, BINDING_FILE))) return dir;
     if (existsSync(join(dir, BINDING_DIR, WORKSPACE_SPEC_FILE))) return dir;
     const parent = dirname(dir);
@@ -219,7 +249,7 @@ export function findWorkspaceSpec(
 ): WorkspaceSpec | null {
   const explicit = env['MUSTERD_WORKSPACE_SPEC'];
   if (explicit) return readWorkspaceSpec(explicit);
-  let dir = startDir;
+  let dir = walkStart(startDir);
   for (;;) {
     const p = join(dir, BINDING_DIR, WORKSPACE_SPEC_FILE);
     if (existsSync(p)) return readWorkspaceSpec(p);

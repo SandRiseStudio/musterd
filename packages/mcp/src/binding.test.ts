@@ -1,8 +1,22 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolveBindingDir, saveBinding, clearGrantFromBinding, findBinding } from './binding.js';
+import {
+  resolveBindingDir,
+  saveBinding,
+  clearGrantFromBinding,
+  findBinding,
+  seatWorkspaceRoot,
+} from './binding.js';
 import { loadMcpConfig, refreshAttestation } from './config.js';
 
 let dir: string;
@@ -145,7 +159,7 @@ describe('resolveBindingDir (identity anchor — the ambient-cwd clobber fix)', 
     writeFileSync(join(root, '.musterd', 'binding.json'), '{}');
     const sub = join(root, 'a', 'b');
     mkdirSync(sub, { recursive: true });
-    expect(resolveBindingDir(sub, {})).toBe(root);
+    expect(resolveBindingDir(sub, {})).toBe(realpathSync(root));
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -153,8 +167,22 @@ describe('resolveBindingDir (identity anchor — the ambient-cwd clobber fix)', 
     const root = mkdtempSync(join(tmpdir(), 'musterd-anchor-'));
     mkdirSync(join(root, '.musterd'), { recursive: true });
     writeFileSync(join(root, '.musterd', 'workspace.json'), '{}');
-    expect(resolveBindingDir(join(root, 'x'), {})).toBe(root);
+    expect(resolveBindingDir(join(root, 'x'), {})).toBe(realpathSync(root));
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it('resolves a symlink INTO a Workspace as its real path (reach spec §6)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'musterd-anchor-'));
+    mkdirSync(join(root, '.musterd'), { recursive: true });
+    writeFileSync(join(root, '.musterd', 'binding.json'), '{}');
+    mkdirSync(join(root, 'packages', 'cli'), { recursive: true });
+    const outside = mkdtempSync(join(tmpdir(), 'musterd-alias-'));
+    // Points at a SUBFOLDER: a logical walk from alias/cli never passes the workspace root.
+    symlinkSync(join(root, 'packages'), join(outside, 'alias'));
+    expect(resolveBindingDir(join(outside, 'alias', 'cli'), {})).toBe(realpathSync(root));
+    expect(seatWorkspaceRoot(join(outside, 'alias', 'cli'))).toBe(realpathSync(root));
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   });
 
   it('falls back to startDir when no musterd file is on the walk-up path', () => {
