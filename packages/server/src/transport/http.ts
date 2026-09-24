@@ -6093,11 +6093,11 @@ export async function handleHttp(
             ? []
             : ctx.db
                 .prepare<unknown[], { ref: string; by: string }>(
-                  `SELECT json_extract(m.meta, '$.in_reply_to') AS ref, mem.name AS by, MIN(m.ts) AS first_ts
+                  `SELECT m.in_reply_to AS ref, mem.name AS by, MIN(m.ts) AS first_ts
                      FROM messages m JOIN members mem ON mem.id = m.from_member
                     WHERE m.team_id = ?
                       AND m.act IN ('accept','decline')
-                      AND json_extract(m.meta, '$.in_reply_to') IN (${owed.map(() => '?').join(',')})
+                      AND m.in_reply_to IN (${owed.map(() => '?').join(',')})
                     GROUP BY ref`,
                 )
                 .all(team.id, ...owed)

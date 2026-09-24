@@ -45,7 +45,7 @@ export function answeredByAnyoneSql(alias: string): string {
   return `SELECT 1 FROM messages dr
      WHERE dr.team_id = ${alias}.team_id
        AND dr.act IN ('accept','decline')
-       AND json_extract(dr.meta, '$.in_reply_to') = ${alias}.id`;
+       AND dr.in_reply_to = ${alias}.id`;
 }
 
 /** Shape 2 — `SELECT 1` form. */
@@ -67,7 +67,7 @@ export function repliedByRecipientWhere(alias: string, recipient: string): strin
   return `dy.team_id = ${alias}.team_id
        AND dy.from_member = ${recipient}
        AND (
-         json_extract(dy.meta, '$.in_reply_to') = ${alias}.id
+         dy.in_reply_to = ${alias}.id
          OR (
            dy.thread_id = COALESCE(${alias}.thread_id, ${alias}.id)
            AND (dy.created_at > ${alias}.created_at

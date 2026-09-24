@@ -387,7 +387,7 @@ export function authorizeGovernedRequest(
            AND NOT EXISTS (
              SELECT 1 FROM messages r WHERE r.team_id = m.team_id
                AND r.act IN ('accept','decline')
-               AND json_extract(r.meta, '$.in_reply_to') = m.id
+               AND r.in_reply_to = m.id
            )
            AND NOT EXISTS (
              SELECT 1 FROM messages r WHERE r.team_id = m.team_id

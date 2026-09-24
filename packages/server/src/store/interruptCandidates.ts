@@ -88,7 +88,7 @@ export function listInterruptCandidates(
           AND from_member = ?
           AND created_at > ?
           AND (act IN ('resolve','accept','decline')
-               OR json_extract(meta, '$.in_reply_to') IS NOT NULL)`,
+               OR in_reply_to IS NOT NULL)`,
     )
     .all(member.team_id, member.id, opts.cursorTs ?? 0);
 
@@ -276,7 +276,7 @@ function dischargeOutsideTheWindow(
             `SELECT * FROM messages
               WHERE team_id = ?
                 AND act IN ('accept','decline')
-                AND json_extract(meta, '$.in_reply_to') IN (${shared.map(() => '?').join(',')})`,
+                AND in_reply_to IN (${shared.map(() => '?').join(',')})`,
           )
           .all(member.team_id, ...shared);
 

@@ -43,7 +43,7 @@ export function timeToUnblock(db: Database, teamId: string, now: number): TimeTo
            ON o.team_id = c.team_id
           AND o.act IN ('request_help','handoff')
           AND (
-            (c.act IN ('accept','decline') AND o.id = json_extract(c.meta, '$.in_reply_to'))
+            (c.act IN ('accept','decline') AND o.id = c.in_reply_to)
             OR
             (c.act = 'resolve' AND c.thread_id IS NOT NULL
              AND COALESCE(o.thread_id, o.id) = c.thread_id)
@@ -165,7 +165,7 @@ export function diversityFlags(db: Database, teamId: string, now: number): Diver
          JOIN messages o
            ON o.team_id = c.team_id
           AND o.act IN ('request_help','handoff','challenge')
-          AND o.id = json_extract(c.meta, '$.in_reply_to')
+          AND o.id = c.in_reply_to
         WHERE c.team_id = ? AND c.ts > ? AND c.act IN ('accept','decline')
           AND c.from_member != o.from_member
         ORDER BY c.ts ASC`,
