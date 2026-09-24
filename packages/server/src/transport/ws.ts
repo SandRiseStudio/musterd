@@ -33,6 +33,7 @@ import {
   clearPresenceById,
   hasLivePresence,
   heartbeat,
+  heldByAttendedSession,
   presenceById,
   reattestGuidanceEpoch,
   reattestModel,
@@ -474,6 +475,35 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               });
               return;
             }
+          }
+
+          // ADR 444: a wake never displaces an attended session. Refused before any authorization
+          // step so the claim has no side effects — no grant consumed, no request opened.
+          if (
+            targetMember &&
+            targetMember.kind === 'agent' &&
+            targetMember.observer === 0 &&
+            frame.provenance === 'wake' &&
+            heldByAttendedSession(
+              ctx.db,
+              ctx.hub.connsForMember(targetMember.id).map((c) => c.presenceId),
+            )
+          ) {
+            send(ws, {
+              type: 'refused',
+              code: 'claim_conflict',
+              message: `seat "${targetMember.name}" is held by an attended session — a wake does not displace it`,
+              claimable: claimableSeats(ctx, team.id),
+              hint: 'the act stays due; the wake is retried once the seat is idle',
+            });
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'claim.refused',
+              target: targetMember.name,
+              result: 'deny',
+              detail: { code: 'claim_conflict', reason: 'attended_session' },
+            });
+            return;
           }
 
           const sameWorkspacePredecessors: string[] = [];
