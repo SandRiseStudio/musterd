@@ -1,10 +1,10 @@
 # 445 — Agent traces are captured local-first: every harness action, on the machine that made it
 
-- Status: proposed — 2026-09-24 (scope chosen with nick in session: full fidelity, local-first;
-  narrowed the same day on nick's acceptance of three changes — a scope not a reversal, content
-  opt-in with a credential scrub, a separate trace database — see §1, §3, §4). nick approved the
-  narrowed text in session on 2026-09-24; the status flips to accepted in its own commit, after the
-  R3 correction below lands, so `change-adr:check` sees the Decision unchanged at acceptance.
+- Status: accepted — 2026-09-24, by nick in session ("approved"), on the narrowed text (scope
+  chosen with nick: full fidelity, local-first; narrowed the same day on nick's acceptance of three
+  changes — a scope not a reversal, content opt-in with a credential scrub, a separate trace
+  database — see §1, §3, §4; R3 corrected for ADR 286 in #1697 before this flip). Increment 0
+  landed the same day (#1699) and its falsifier held — see Consequences.
 - Date: 2026-09-24
 - Lane: `01M3AJQXXJ2B6NN43E11A41AKX` (goal `research-corpus`)
 - Scopes: `docs/design/observability.md` §7's first non-goal. The non-goal **stands as a product
@@ -207,6 +207,14 @@ ADR 184's publication gate; a spans backend.
   replication and export; and it lives in a file the coordination store never opens. What remains
   is prose and code in `trace.db` on the operator's own disk, which is the same exposure as the
   harness's transcript directory today.
+- **2026-09-24 — increment 0 landed (#1699, `e1284b4f`).** `@musterd/telemetry` reads
+  `telemetry.otlp_endpoint` from the machine config when no `OTEL_*` env is set; `service install
+  --otlp-endpoint` writes it; the dev sink takes `/v1/logs`. Falsifier on the dogfood box, once the
+  daemon checkout had auto-refreshed: `musterd.cli.command` spans in the sink went 2 → 5 across
+  `status` / `whoami` / `session`. One trap surfaced on the way: a CLI build older than a config key
+  erases it on its next write (`readConfigFromDisk` whitelists keys), so a new key is stable only
+  after every CLI touching the machine config is at or past the build that knows it — recorded as
+  a team insight, fix candidate open.
 - Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
   backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a

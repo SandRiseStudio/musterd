@@ -31,7 +31,7 @@ behind it — see [drift](#drift-between-docs-and-the-machine) below.
 | ----------------------------------------------------------------------- | ----------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `musterd.envelope.process` span per act + 9 metrics                     | 015, 082    | yes     | **yes** — 3,667 spans and a metric flush every ~60 s in `~/.musterd/otel-sink.log` (+ `.log.1`)                                         |
 | `meta.otel` traceparent so a handoff is one cross-agent trace           | 011, 089    | yes     | **no** — needs an active span in the adapter; see the dormant row                                                                       |
-| Client SDK: `musterd.tool.call` per MCP tool, `musterd.cli.command`     | 089 inc 1   | yes     | **dormant** — 0 of 3,667 sink spans come from `musterd-mcp` or `musterd-cli`                                                            |
+| Client SDK: `musterd.tool.call` per MCP tool, `musterd.cli.command`     | 089 inc 1   | yes     | ~~**dormant** — 0 of 3,667 sink spans come from `musterd-mcp` or `musterd-cli`~~ FIXED 2026-09-24 by #1699 (ADR 445 increment 0): CLI spans confirmed in the sink the same day; adapter spans on the next adapter launch |
 | MAST views (`musterd report coordination`, per-recipient delivery)      | 090, 091    | yes     | yes                                                                                                                                     |
 | Tool-call aggregates for musterd's own tools (`tool_call_stats`)        | 144 inc 1   | yes     | yes — 25,077 calls since 2026-07-15, hourly buckets, no per-call rows                                                                    |
 | Per-agent tokens (`musterd.agent.tokens` from `meta.usage`)             | 082 slice 4 | opt-in  | **no producer** — nothing in MCP or CLI attaches `meta.usage`; the counter moves only if an agent hand-writes it                         |
@@ -45,8 +45,14 @@ The dormant row is a configuration fact, not a code defect: `@musterd/telemetry`
 `OTEL_EXPORTER_OTLP_*` is set (`packages/telemetry/src/index.ts`, `telemetryEnabled`). The daemon's
 LaunchAgent plist sets it; the MCP adapter is launched by the harness with its own env (for this
 workspace, only `MUSTERD_LAUNCH_SURFACE`), and the CLI runs under the user's shell — neither has the
-variable. Adapter and CLI spans are therefore no-ops on every seat
-(2026-09-24; falsify: `grep -c 'musterd.tool.call' ~/.musterd/otel-sink.log` returns non-zero after an adapter is launched with `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`). <!-- claim: defect -->
+variable. ~~Adapter and CLI spans are therefore no-ops on every seat
+(2026-09-24; falsify: `grep -c 'musterd.tool.call' ~/.musterd/otel-sink.log` returns non-zero after an adapter is launched with `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`).~~ <!-- claim: defect -->
+FIXED 2026-09-24 by #1699: `@musterd/telemetry` now falls back to `~/.musterd/config.json`
+`telemetry.otlp_endpoint` (env still wins; ADR 286's registration env untouched). Measured after the
+daemon checkout auto-refreshed to it: `musterd.cli.command` spans 2 → 5 across three CLI runs. Trap
+met on the way — the pre-#1699 CLI on PATH erased the new key on its next config write, because
+`readConfigFromDisk` whitelists keys; a new config key is only stable once every CLI touching the
+machine config knows it (2026-09-24; falsify: add an unknown top-level key under `MUSTERD_CONFIG`, run `musterd status` from a build that predates it, re-read the file). <!-- claim: other -->
 
 ## What is captured about a seat's harness session
 
