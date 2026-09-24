@@ -125,6 +125,11 @@ export interface GateToolCall {
   bodyFingerprint?: string;
   sessionRef?: string;
   nudgeRef?: string;
+  /**
+   * ADR 442 — `SendMessage` target (`tool_input.to`, else `recipient`). Client-only: the audit row
+   * carries the tool name, never this value. Measured 2026-09-24 on Claude Code 2.1.281.
+   */
+  sendTarget?: string;
 }
 
 /** A class match: the class, the concrete target that matched (path or normalized command), and the

@@ -1,17 +1,21 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { HttpClient } from '../client.js';
+import { findBinding } from '../config.js';
 import { markSessionStart, sessionStartedAt } from '../workingTree.js';
 import {
   attest,
+  harnessFromEnv,
   parseEnvelopeSessionId,
   parseToolCall,
   repoRelativePath,
+  sessionReachReason,
   workingTreeWarning,
 } from './gate.js';
+import { recordSubagent } from './subagentLedger.js';
 
 /**
  * Unit coverage for the gate hook's payload parse (ADR 150). The end-to-end adjudication is covered by
@@ -318,27 +322,20 @@ describe('parseToolCall + attest — session-message observation (ADR 167)', () 
     expect(without?.nudgeRef).toBeUndefined();
   });
 
-  it('attest records kind session-message with fingerprints only', () => {
+  it('attest no longer records session-message — the wall denies the send instead (ADR 442)', () => {
     const { calls, http } = spy();
     const call = parseToolCall(
       JSON.stringify({ tool_name: SEND, tool_input: { message: 'ping', session_id: 'abc' } }),
     );
     expect(call).not.toBeNull();
     if (call) attest(http, 't', call);
-    expect(calls).toHaveLength(1);
-    const rec = calls[0] as Record<string, string>;
-    expect(rec['kind']).toBe('session-message');
-    expect(rec['tool']).toBe(SEND);
-    expect(rec['bodyFingerprint']).toMatch(/^[0-9a-f]{16}$/);
-    expect(rec['sessionRef']).toMatch(/^[0-9a-f]{16}$/);
-    expect(JSON.stringify(rec)).not.toContain('ping');
-    expect(JSON.stringify(rec)).not.toContain('abc');
+    expect(calls).toEqual([]);
   });
 
-  it('an unrecognized input shape still earns a row — "a send happened" is itself the datum', () => {
+  it('an unrecognized send shape earns no session-message row either', () => {
     const { calls, http } = spy();
     attest(http, 't', { tool: SEND });
-    expect(calls).toEqual([{ kind: 'session-message', tool: SEND }]);
+    expect(calls).toEqual([]);
   });
 
   it('list_sessions-style reads on the same server never reach attest with a session-message row', () => {
@@ -471,5 +468,102 @@ describe('the working-tree check (ADR 239, post-verdict)', () => {
     } finally {
       process.chdir(cwd);
     }
+  });
+});
+
+describe('session reach (ADR 442)', () => {
+  const state = (): string => mkdtempSync(join(tmpdir(), 'musterd-gate-reach-'));
+
+  function call(tool: string, extra: Record<string, unknown> = {}) {
+    const raw = JSON.stringify({ tool_name: tool, session_id: 's1', ...extra });
+    const parsed = parseToolCall(raw);
+    if (!parsed) throw new Error('parse');
+    return { raw, parsed, sessionId: parseEnvelopeSessionId(raw) };
+  }
+
+  it('denies ListAgents in a seat Workspace', () => {
+    const c = call('ListAgents');
+    const reason = sessionReachReason(c.parsed, c.sessionId, true, state());
+    expect(reason).toMatch(/musterd seats may not reach other sessions/);
+  });
+
+  it('denies list_sessions and send_message', () => {
+    for (const t of [
+      'mcp__ccd_session_mgmt__list_sessions',
+      'mcp__ccd_session_mgmt__send_message',
+    ]) {
+      const c = call(t);
+      expect(sessionReachReason(c.parsed, c.sessionId, true, state())).toMatch(/may not reach/);
+    }
+  });
+
+  it('allows SendMessage to a subagent this session spawned', () => {
+    const st = state();
+    recordSubagent(st, 's1', 'agent-abc');
+    const c = call('SendMessage', { tool_input: { to: 'agent-abc' } });
+    expect(sessionReachReason(c.parsed, c.sessionId, true, st)).toBeNull();
+  });
+
+  it('denies SendMessage to anything else', () => {
+    const c = call('SendMessage', { tool_input: { to: 'dolly' } });
+    expect(sessionReachReason(c.parsed, c.sessionId, true, state())).toMatch(/may not reach/);
+  });
+
+  it('allows everything in an unbound folder', () => {
+    const c = call('ListAgents');
+    expect(sessionReachReason(c.parsed, c.sessionId, false, state())).toBeNull();
+  });
+
+  it('denies in a nested subfolder of a seat Workspace', () => {
+    const seat = mkdtempSync(join(tmpdir(), 'musterd-gate-seat-'));
+    mkdirSync(join(seat, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(seat, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: 'http://127.0.0.1:9',
+        team: 'revive-test',
+        claim: { mode: 'seat', name: 'wanderer' },
+      }),
+    );
+    mkdirSync(join(seat, 'packages/cli'), { recursive: true });
+    const prev = process.cwd();
+    const saved = process.env['MUSTERD_BINDING'];
+    delete process.env['MUSTERD_BINDING'];
+    try {
+      process.chdir(join(seat, 'packages/cli'));
+      expect(findBinding()).not.toBeNull();
+      const c = call('ListAgents');
+      expect(sessionReachReason(c.parsed, c.sessionId, findBinding() !== null, state())).toMatch(
+        /may not reach/,
+      );
+    } finally {
+      process.chdir(prev);
+      if (saved === undefined) delete process.env['MUSTERD_BINDING'];
+      else process.env['MUSTERD_BINDING'] = saved;
+    }
+  });
+
+  it('parses SendMessage to as sendTarget and does not keep it on an unrelated call', () => {
+    expect(call('SendMessage', { tool_input: { to: 'agent-abc' } }).parsed.sendTarget).toBe(
+      'agent-abc',
+    );
+    expect(call('SendMessage', { tool_input: { recipient: 'dolly' } }).parsed.sendTarget).toBe(
+      'dolly',
+    );
+  });
+});
+
+describe('harnessFromEnv (ADR 442)', () => {
+  it('returns claude-code when CLAUDECODE is set', () => {
+    expect(harnessFromEnv({ CLAUDECODE: '1' })).toBe('claude-code');
+  });
+
+  it('returns cursor when CURSOR_AGENT is set', () => {
+    expect(harnessFromEnv({ CURSOR_AGENT: '1' })).toBe('cursor');
+  });
+
+  it('returns undefined when neither is set', () => {
+    expect(harnessFromEnv({})).toBeUndefined();
   });
 });

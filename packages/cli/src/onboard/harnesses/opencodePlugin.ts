@@ -13,7 +13,8 @@ import { isDeclined } from '../declined.js';
  * hook is: one marker-owned file, no dependencies (no `package.json`, so no `bun install`), a
  * generation stamp the doctor compares against what THIS build writes (ADR 168), and
  * `musterd init --refresh-hooks` as the only writer. Version coupling (finding 3) is bounded to two
- * documented hooks — `tool.execute.after` and `event` — and none of the `experimental.*` seams.
+ * `tool.execute.after` and `event` — and none of the `experimental.*` seams. That after-hook cannot
+ * refuse a tool, so OpenCode's session-reach wall is identity-only (ADR 442).
  *
  * What it does, measured against ghost's eval (`docs/wiki/opencode-live-doorbell-eval.md`):
  * - `tool.execute.after` — at every tool boundary run `musterd inbox --interrupt-check`; a raised

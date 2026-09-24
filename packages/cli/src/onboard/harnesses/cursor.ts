@@ -292,6 +292,9 @@ export function removeMusterdCursorHooks(dir: string = process.cwd()): void {
 }
 
 /** Cursor: configured via .cursor/mcp.json. We write the project-scoped file in cwd. */
+/** ADR 442: Cursor's preToolUse matcher cannot name its session tools. The wall here is identity. */
+export const SESSION_REACH_WALL = 'Cursor: session-reach: not gateable (identity-only) (ADR 442)';
+
 export const cursor: Harness = {
   id: 'cursor',
   label: 'Cursor',

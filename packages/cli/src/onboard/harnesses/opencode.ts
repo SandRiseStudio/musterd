@@ -110,6 +110,9 @@ function musterdEntry(cfg: OpencodeConfig | null): OpencodeLocalMcp | undefined 
   return entry && entry.type === 'local' ? entry : undefined;
 }
 
+/** ADR 442: OpenCode's plugin fires after a tool runs, so it cannot refuse session reach. */
+export const SESSION_REACH_WALL = 'OpenCode: session-reach: not gateable (identity-only) (ADR 442)';
+
 export const opencode: Harness = {
   id: 'opencode',
   label: 'OpenCode',

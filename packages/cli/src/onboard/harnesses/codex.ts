@@ -86,6 +86,9 @@ function toCodexServer(entry: McpServerEntry): CodexServer {
   return { command: entry.command, args: entry.args, env: entry.env };
 }
 
+/** ADR 442: Codex has no PreToolUse hook. The wall here is identity. */
+export const SESSION_REACH_WALL = 'Codex: session-reach: not gateable (identity-only) (ADR 442)';
+
 export const codex: Harness = {
   id: 'codex',
   label: 'Codex',

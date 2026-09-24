@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SESSION_REACH_TOOLS } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Real fs here (unlike claudeCode.test.ts, which mocks node:fs) so the hook writer round-trips to disk.
 import {
@@ -12,6 +13,7 @@ import {
   PRETOOLUSE_HOOK_MARKER,
   removeMusterdHooks,
   SESSIONMSG_HOOK_MARKER,
+  SUBAGENT_LEDGER_HOOK_MARKER,
   SESSION_CAPTURE_HOOK_MARKER,
   SESSION_END_HOOK_MARKER,
   SESSIONSTART_HOOK_MARKER,
@@ -105,21 +107,25 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     );
     expect(global.hooks?.['PreToolUse']).toBeUndefined(); // PreToolUse is NOT global
 
-    // The session-messaging observer (ADR 167) — a SECOND PreToolUse entry, own marker, exact-tool
-    // matcher, same gate CLI (which recognizes the tool and emits an attestation, never a deny).
+    // The session-reach wall (ADR 442) — same marker as the old observer, matcher is the whole list.
     expect(local.hooks?.['PreToolUse']).toHaveLength(2);
     const smsg = local.hooks?.['PreToolUse']?.[1];
     expect(smsg?.hooks?.[0]?.command).toContain(SESSIONMSG_HOOK_MARKER);
     expect(smsg?.hooks?.[0]?.command).toContain('musterd gate check --stdin');
-    expect(smsg?.matcher).toBe('mcp__ccd_session_mgmt__send_message');
+    expect(smsg?.matcher).toBe(SESSION_REACH_TOOLS.join('|'));
+    expect(smsg?.matcher).not.toBe('mcp__ccd_session_mgmt__send_message');
+
+    const ledger = local.hooks?.['PostToolUse']?.find((m) => m.matcher === 'Agent');
+    expect(ledger?.hooks?.[0]?.command).toContain(SUBAGENT_LEDGER_HOOK_MARKER);
+    expect(ledger?.hooks?.[0]?.command).toContain('gate record-subagent --stdin');
   });
 
   it('is idempotent — re-installing replaces in place, never stacks', () => {
     installMusterdHooks();
     installMusterdHooks();
     expect(read(localPath()).hooks?.['Notification']).toHaveLength(1);
-    expect(read(localPath()).hooks?.['PostToolUse']).toHaveLength(1);
-    expect(read(localPath()).hooks?.['PreToolUse']).toHaveLength(2); // gate + sessionmsg observer
+    expect(read(localPath()).hooks?.['PostToolUse']).toHaveLength(2);
+    expect(read(localPath()).hooks?.['PreToolUse']).toHaveLength(2); // gate + session-reach wall
     expect(read(localPath()).hooks?.['SessionStart']).toHaveLength(1);
     expect(read(localPath()).hooks?.['SessionEnd']).toHaveLength(1);
     expect(read(globalPath()).hooks?.['SessionStart']).toHaveLength(1);
@@ -132,15 +138,16 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     mkdirSync(join(cwd, '.claude'), { recursive: true });
     writeFileSync(localPath(), JSON.stringify({ hooks: { Notification: [] } }), 'utf8');
     const drift = inspectClaudeHookDrift(cwd);
-    expect(drift).toHaveLength(6);
+    expect(drift).toHaveLength(7);
     expect(drift[0]).toContain('PostToolUse interrupt hook is missing');
     expect(drift[1]).toContain('PreToolUse enforcement-gate hook is missing');
-    expect(drift[2]).toContain('session-messaging observer hook is missing');
-    expect(drift[3]).toContain('session-capture hook is missing');
-    expect(drift[4]).toContain('SessionEnd hook is missing');
+    expect(drift[2]).toContain('session-reach wall is missing');
+    expect(drift[3]).toContain('subagent-ledger hook is missing');
+    expect(drift[4]).toContain('session-capture hook is missing');
+    expect(drift[5]).toContain('SessionEnd hook is missing');
     // The user-facing half (seat statusline chip) is doctored alongside the agent-facing hooks —
     // its absence is why a correctly-oriented session could still look dead to the human.
-    expect(drift[5]).toContain('`statusLine` seat chip is missing');
+    expect(drift[6]).toContain('`statusLine` seat chip is missing');
 
     // Once init wires them, the drift clears.
     installMusterdHooks();

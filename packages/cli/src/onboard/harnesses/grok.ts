@@ -380,6 +380,9 @@ function toTomlServer(entry: McpServerEntry): CodexServer {
   return { command: entry.command, args: entry.args, env: entry.env };
 }
 
+/** ADR 442: Grok's PreToolUse gate matches write tools only; Grok has no session-reach tool names. */
+export const SESSION_REACH_WALL = 'Grok CLI: session-reach: not gateable (identity-only) (ADR 442)';
+
 export const grok: Harness = {
   id: 'grok',
   label: 'Grok CLI',
