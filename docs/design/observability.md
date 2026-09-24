@@ -77,7 +77,7 @@ src/
 
 > **Instrument-by-default for dogfood (ADR 082, 2026-07-01).** The dogfood daemon now boots this SDK to a local OTLP sink so the next session is measurable live (finding 001), emission staying pure-OTLP (swap the endpoint later if a standalone collector lands). The product default stays off / no-phone-home. The metric set grew (below), plus a structured HTTP request log on `daemon.log`. Setup: `docs/dogfood-telemetry.md`.
 
-Scope: `@musterd/server` first; CLI and MCP adapter only get error/diagnostic logging until there's a reason for more.
+Scope: `@musterd/server` first; ~~CLI and MCP adapter only get error/diagnostic logging until there's a reason for more.~~ The CLI and MCP adapter boot the same SDK since ADR 089 (2026-07-05) — but only export when their own process has `OTEL_EXPORTER_OTLP_*`, which on the dogfood box neither did until [ADR 445](../decisions/445-agent-traces-captured-local-first.md) R3 (audit 2026-09-24: 0 adapter/CLI spans in the sink).
 
 ### Spans
 
@@ -161,6 +161,6 @@ views already ship inside musterd (insight engine / `musterd report`).
 
 ## 7. Non-goals
 
-- Observability of agent internals (reasoning steps, LLM calls) — that's the existing market's job; we link to it, we don't replicate it.
+- ~~Observability of agent internals (reasoning steps, LLM calls) — that's the existing market's job; we link to it, we don't replicate it.~~ **Reversed for the producing machine 2026-09-24 ([ADR 445](../decisions/445-agent-traces-captured-local-first.md)):** a seat's harness activity (prompts, tool calls with inputs/outputs, reasoning, usage, hook outcomes, turn/subagent boundaries) is captured local-first into the daemon's store via the hook tap + transcript tail. What still holds: no spans database or LLM-call dashboard for _other people's_ traces, nothing ships off-machine by default, and content never replicates or exports without ADR 184 consent.
 - Telemetry as a conformance requirement: SPEC.md stays silent on telemetry; all of this is implementation- and product-level.
 - Any metric that ranks Members. See human-agent-dynamics §4.

@@ -188,6 +188,12 @@ deployment rather than of the posture.
   forecloses nothing for a later consented-prose release.
 - A withdrawal cannot un-publish. Stated in the ADR so no consent flow implies otherwise.
 - The flywheel strategy ADR no longer owns this seam; cite this ADR for publication posture.
+- **2026-09-24 (ADR 445 audit).** The Context table's "Spans / traces — prompt by hash + version —
+  enforced" row is enforced only vacuously: no prompt hash or version has ever been emitted. With
+  [ADR 445](445-agent-traces-captured-local-first.md), agent-internal content (prompts, tool
+  inputs/outputs, reasoning) is captured **locally** into `trace_events`; its publication posture is
+  this ADR's §2 (structural columns publish, content columns do not) and §3 (consent) unchanged —
+  the emitted ≠ published line of §1 is exactly what makes local capture safe to add.
 - **2026-08-19 — export path shipped.** `pnpm dataset:export` (`scripts/dataset/export.ts`) is the
   DoD-1 path: structural JSONL, per-release HMAC seat names, prose omitted, pinned
   `scripts/dataset/manifest.v1.json`, `--authorized-by` required. It reads a corpus snapshot, not

@@ -98,9 +98,14 @@ An automatic usage emitter (hook/wrapper that reads harness transcripts and atta
 the git-side metrics (wasted-work ratio, dup-rate — lanes territory); a cross-agent distributed trace
 over ADR 011 traceparent propagation.
 
-**Dogfood export leftover (2026-08-14, ADR 275).** The sink LaunchAgent is listening on `:4318`.
+~~**Dogfood export leftover (2026-08-14, ADR 275).** The sink LaunchAgent is listening on `:4318`.
 The daemon plist on this machine currently has **no** `OTEL_EXPORTER_OTLP_ENDPOINT`, and
-`~/.musterd/otel-sink.log` is startup lines only. Occupancy in SQLite is the instrument until
-the installer surface restores that env (machine-local; do not bounce the shared daemon for a
-UI/telemetry eyeball). The table above describes the *intended* dogfood posture, not the live
-plist.
+`~/.musterd/otel-sink.log` is startup lines only.~~ **Corrected 2026-09-24 (ADR 445 audit):** the
+daemon plist carries `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` and the sink holds 3,667
+`musterd.envelope.process` spans plus a metric flush every ~60 s, so the table above is the live
+posture for the **daemon**. What is dormant is the other side of ADR 089: the MCP adapter and the CLI
+are launched by the harness / the user's shell without that env, so `musterd.tool.call`,
+`musterd.cli.command` and the ADR 011 cross-agent link never export (0 such spans in the sink).
+[ADR 445](decisions/445-agent-traces-captured-local-first.md) R3 routes the endpoint into the MCP
+registration for dogfood seats; the cross-agent trace listed above as "not yet closed" is closed in
+code and open in config until then.

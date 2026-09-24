@@ -1,7 +1,9 @@
 # 144 — The MCP tool surface as a designed product: measure it, then craft it
 
 - Status: accepted — design frozen; increments 1–6 are the build arc (roadmap: `tool-call-telemetry` +
-  `mcp-tool-surface`, both still sequenced behind the wave work)
+  `mcp-tool-surface`, both still sequenced behind the wave work). _Increment 1 shipped (PR #286):
+  `tool_call_stats` has recorded every musterd tool call since 2026-07-15 — noted 2026-09-24, ADR 445
+  audit; the "still sequenced" above is stale for increment 1 only._
 - Date: 2026-07-15
 - Builds on: [ADRs 029–031](029-role-template-format.md) (the per-seat adapter render this arc
   reshapes), [ADR 069](069-v0.3-governance-build-plan.md) (roles/capabilities — the axis to scope a
