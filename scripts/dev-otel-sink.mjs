@@ -98,6 +98,34 @@ function summarizeMetrics(json) {
   return n;
 }
 
+// OTLP logs — what Claude Code's own exporter sends its events as (`claude_code.user_prompt`,
+// `tool_result`, `api_request`, … — ADR 445 R3). One line per record: the event name plus the
+// attributes that identify it; bodies are already redacted by Claude Code unless its OTEL_LOG_*
+// content flags are set, and this sink prints attributes verbatim, so leave those flags off.
+function summarizeLogs(json) {
+  let n = 0;
+  for (const rl of json.resourceLogs ?? []) {
+    for (const sl of rl.scopeLogs ?? []) {
+      for (const rec of sl.logRecords ?? []) {
+        n++;
+        const attrs = Object.fromEntries(
+          (rec.attributes ?? []).map((a) => [
+            a.key,
+            a.value?.stringValue ?? a.value?.intValue ?? a.value?.boolValue ?? '',
+          ]),
+        );
+        const name = attrs['event.name'] ?? rec.body?.stringValue ?? '(log)';
+        const kv = Object.entries(attrs)
+          .filter(([k]) => k !== 'event.name')
+          .map(([k, v]) => `${k}=${String(v).slice(0, 120)}`)
+          .join(' ');
+        emit(`  log "${name}" ${kv}`);
+      }
+    }
+  }
+  return n;
+}
+
 const server = createServer(async (req, res) => {
   if (req.method !== 'POST') {
     res.writeHead(405).end();
@@ -117,6 +145,7 @@ const server = createServer(async (req, res) => {
   if (req.url?.endsWith('/v1/traces')) emit(`/v1/traces — ${summarizeTraces(json)} span(s)`);
   else if (req.url?.endsWith('/v1/metrics'))
     emit(`/v1/metrics — ${summarizeMetrics(json)} metric(s)`);
+  else if (req.url?.endsWith('/v1/logs')) emit(`/v1/logs — ${summarizeLogs(json)} record(s)`);
   else emit(`${req.url} — ${buf.length}B`);
   res.writeHead(200, { 'content-type': 'application/json' }).end('{}');
 });

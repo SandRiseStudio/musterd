@@ -77,7 +77,7 @@ src/
 
 > **Instrument-by-default for dogfood (ADR 082, 2026-07-01).** The dogfood daemon now boots this SDK to a local OTLP sink so the next session is measurable live (finding 001), emission staying pure-OTLP (swap the endpoint later if a standalone collector lands). The product default stays off / no-phone-home. The metric set grew (below), plus a structured HTTP request log on `daemon.log`. Setup: `docs/dogfood-telemetry.md`.
 
-Scope: `@musterd/server` first; ~~CLI and MCP adapter only get error/diagnostic logging until there's a reason for more.~~ The CLI and MCP adapter boot the same SDK since ADR 089 (2026-07-05) — but only export when their own process has `OTEL_EXPORTER_OTLP_*`, which on the dogfood box neither did until [ADR 445](../decisions/445-agent-traces-captured-local-first.md) R3 (audit 2026-09-24: 0 adapter/CLI spans in the sink).
+Scope: `@musterd/server` first; ~~CLI and MCP adapter only get error/diagnostic logging until there's a reason for more.~~ The CLI and MCP adapter boot the same SDK since ADR 089 (2026-07-05) — but only export when their own process has `OTEL_EXPORTER_OTLP_*`, which on the dogfood box neither did until [ADR 445](../decisions/445-agent-traces-captured-local-first.md) R3 (audit 2026-09-24: 0 adapter/CLI spans in the sink). Since R3 increment 0 the shared SDK also reads `~/.musterd/config.json` `telemetry.otlp_endpoint` when no `OTEL_*` env is set (`service install --otlp-endpoint` writes it beside the plist); explicit env and `OTEL_SDK_DISABLED` still win, and the product default is still off — see `docs/dogfood-telemetry.md`.
 
 ### Spans
 

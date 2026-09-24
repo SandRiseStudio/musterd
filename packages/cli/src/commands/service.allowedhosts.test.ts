@@ -176,6 +176,43 @@ describe('service install daemon environment (end to end through the command)', 
     expect(env?.['PATH']).toBe('/fake/bin');
   });
 
+  it('writes the same OTLP endpoint into the machine config for the adapter/CLI (ADR 445 R3)', async () => {
+    const written: string[] = [];
+    const chunks: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c: never) => {
+      chunks.push(String(c));
+      return true;
+    });
+    await serviceCommand(parseArgs(['install', '--otlp-endpoint', 'http://127.0.0.1:4318']), {
+      platform: 'darwin',
+      ctx,
+      health: up,
+      sleep: () => Promise.resolve(),
+      setTelemetryEndpoint: (e) => written.push(e),
+    });
+    expect(written).toEqual(['http://127.0.0.1:4318']);
+    expect(chunks.join('')).toContain('otlp:  http://127.0.0.1:4318 (daemon plist + ');
+  });
+
+  it("'' clears the machine-config endpoint too, and a flagless re-install touches neither", async () => {
+    const written: string[] = [];
+    const deps = {
+      platform: 'darwin' as const,
+      ctx,
+      health: up,
+      sleep: () => Promise.resolve(),
+      setTelemetryEndpoint: (e: string) => written.push(e),
+    };
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    await serviceCommand(parseArgs(['install', '--otlp-endpoint', 'http://127.0.0.1:4318']), deps);
+    await serviceCommand(parseArgs(['install']), deps);
+    await serviceCommand(parseArgs(['install', '--otlp-endpoint', '']), deps);
+    expect(written).toEqual(['http://127.0.0.1:4318', '']);
+    expect(
+      parsePlistEnvironment(readFileSync(ctx.plistPath, 'utf8'))?.['OTEL_EXPORTER_OTLP_ENDPOINT'],
+    ).toBeUndefined();
+  });
+
   it('rejects the daemon-only OTLP endpoint before dispatching a retargeted service command', async () => {
     await expect(
       serviceCommand(parseArgs(['status', '--live', '--otlp-endpoint', 'http://127.0.0.1:4318']), {

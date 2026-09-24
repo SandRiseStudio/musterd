@@ -13,7 +13,7 @@ import { makeEnvelope } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { configPath, loadConfig, serverProvenance } from '../config.js';
+import { configPath, loadConfig, serverProvenance, setTelemetryEndpoint } from '../config.js';
 import { CliError } from '../errors.js';
 import { actOn, dischargeCleared } from '../guardian/act.js';
 import { resolveGuardianTiers, DEFAULT_TIERS } from '../guardian/classify.js';
@@ -1113,6 +1113,8 @@ export async function serviceCommand(
     trimLogs?: () => TrimmedLog[];
     /** ADR 227 inc 2: the warn-only infra-touch gate (injected so tests never reach a daemon). */
     infraGate?: (verb: string) => Promise<string | null>;
+    /** ADR 445 R3: the machine-config write beside the plist env; injectable so tests never touch the real file. */
+    setTelemetryEndpoint?: (endpoint: string) => void;
     /** ADR 232 §3 amendment: the per-tick service-seat presence heartbeat (injected so tests
      *  never read the real token file or reach a daemon). */
     touch?: (ok: (s: string) => void) => Promise<void>;
@@ -1308,6 +1310,10 @@ export async function serviceCommand(
       }
       const res = install(ctx);
       if (!res.ok) fail('install (bootstrap)', res.bootstrap);
+      // ADR 445 R3: the same endpoint goes into the machine config, because the plist env reaches
+      // only the daemon — the MCP adapter and the CLI read `telemetry.otlp_endpoint` from the file.
+      if (otlpEndpoint !== undefined)
+        (deps.setTelemetryEndpoint ?? setTelemetryEndpoint)(otlpEndpoint);
       ctx.run('launchctl', ['kickstart', '-k', `gui/${ctx.uid}/${ctx.label}`]);
       ok(`installed + started the musterd daemon (LaunchAgent ${theme.accent(ctx.label)})`);
       process.stdout.write(theme.meta(`  plist: ${ctx.plistPath}`) + '\n');
@@ -1316,6 +1322,13 @@ export async function serviceCommand(
       if (ctx.env?.['MUSTERD_ALLOWED_HOSTS'])
         process.stdout.write(
           theme.meta(`  hosts: ${ctx.env['MUSTERD_ALLOWED_HOSTS']} (ADR 040 allow-list)`) + '\n',
+        );
+      if (ctx.env?.['OTEL_EXPORTER_OTLP_ENDPOINT'])
+        process.stdout.write(
+          theme.meta(
+            `  otlp:  ${ctx.env['OTEL_EXPORTER_OTLP_ENDPOINT']} (daemon plist` +
+              `${otlpEndpoint !== undefined ? ` + ${configPath()} for the adapter/CLI, ADR 445` : ''})`,
+          ) + '\n',
         );
       process.stdout.write(theme.meta(`  logs:  ${ctx.stdoutPath}`) + '\n');
       await verifyDaemonUp(ctx, health, 'install', ok, deps.sleep);

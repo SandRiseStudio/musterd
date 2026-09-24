@@ -560,6 +560,14 @@ export interface Config {
    * team home); they do not merge.
    */
   teamHome: Record<string, string>;
+  /**
+   * ADR 445 R3: the OTLP endpoint this machine's musterd processes export to when their own env
+   * carries no `OTEL_EXPORTER_OTLP_*`. Written by `musterd service install --otlp-endpoint` beside
+   * the daemon plist's env, so the MCP adapter (launched by the harness) and the CLI (launched by a
+   * shell) reach the same sink as the daemon. `@musterd/telemetry` reads it; the MCP registration
+   * env never carries it (ADR 286 §1). Absent ⇒ off, the ADR 015 default.
+   */
+  telemetry?: { otlp_endpoint?: string };
 }
 
 /** Record a team's roster home (ADR 058 `team export`) — the cutover to file-authoritative. */
@@ -759,6 +767,9 @@ function readConfigFromDisk(): Config {
       agentKeys: parsed.agentKeys ?? {},
       rosterHome: parsed.rosterHome ?? {},
       teamHome: parsed.teamHome ?? {},
+      ...(parsed.telemetry?.otlp_endpoint
+        ? { telemetry: { otlp_endpoint: parsed.telemetry.otlp_endpoint } }
+        : {}),
     };
   } catch {
     // Fresh objects (not DEFAULT's): callers like recordBinding mutate `bindings`/`identities`.
@@ -883,6 +894,14 @@ function threeWayMerge(base: Config, ours: Config, disk: Config): Config {
     agentKeys: mergeMap(base.agentKeys, ours.agentKeys, disk.agentKeys),
     rosterHome: mergeMap(base.rosterHome, ours.rosterHome, disk.rosterHome),
     teamHome: mergeMap(base.teamHome, ours.teamHome, disk.teamHome),
+    ...(() => {
+      const otlp = mergeScalar(
+        base.telemetry?.otlp_endpoint,
+        ours.telemetry?.otlp_endpoint,
+        disk.telemetry?.otlp_endpoint,
+      );
+      return otlp !== undefined ? { telemetry: { otlp_endpoint: otlp } } : {};
+    })(),
   };
 }
 
@@ -978,6 +997,19 @@ export function saveConfig(config: Config): void {
     writeConfigAtomic(merged);
     loadedSnapshots.set(config, structuredClone(merged));
   });
+}
+
+/**
+ * Record (or, with `''`, clear) the machine's OTLP endpoint for the adapter and CLI to read
+ * (ADR 445 R3). `service install --otlp-endpoint` writes the daemon plist env and this key in the
+ * same run so the three processes never disagree about where the sink is.
+ */
+export function setTelemetryEndpoint(endpoint: string): void {
+  const config = loadConfig();
+  const trimmed = endpoint.trim();
+  if (trimmed) config.telemetry = { otlp_endpoint: trimmed };
+  else delete config.telemetry;
+  saveConfig(config);
 }
 
 /** Derive the WS base URL from the HTTP server URL. */
