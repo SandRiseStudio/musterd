@@ -20,6 +20,7 @@ import {
   OBSERVATION_REFRESH_MS,
   refreshModelObservation,
   resolveLabels,
+  resolveWakeHarness,
   scanCcd,
   sessionCommand,
   stampLabelSweep,
@@ -343,6 +344,41 @@ describe('musterd session (capture)', () => {
         'dawn',
         expect.objectContaining({ wake_lease: 'lease-abc' }),
       );
+    });
+
+    it('ADR 436 clause 3: a woken OpenCode child is captured and attested as opencode, not claude-code', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      process.env['MUSTERD_WAKE_LEASE'] = 'lease-oc';
+      process.env['MUSTERD_WAKE_HARNESS'] = 'opencode';
+      try {
+        // A Claude-shaped payload: the shape inference alone says claude-code.
+        await captureSession('start', { session_id: 'oc-1', cwd: wsA, harness: 'claude-code' });
+      } finally {
+        delete process.env['MUSTERD_WAKE_HARNESS'];
+      }
+      expect(readBinding(wsA).session!.harness).toBe('opencode');
+      expect(attest).toHaveBeenCalledWith('dawn', expect.objectContaining({ harness: 'opencode' }));
+    });
+
+    it('a Grok capture attests grok — the push carries the capture’s harness, not a default', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      delete process.env['MUSTERD_WAKE_LEASE'];
+      await captureSession('start', { session_id: 'g-1', cwd: wsA, harness: 'grok' });
+      expect(attest).toHaveBeenCalledWith('dawn', expect.objectContaining({ harness: 'grok' }));
+    });
+
+    it('MUSTERD_WAKE_HARNESS without a lease asserts nothing', () => {
+      expect(resolveWakeHarness({ MUSTERD_WAKE_HARNESS: 'grok' })).toBeUndefined();
+      expect(resolveWakeHarness({ MUSTERD_WAKE_LEASE: 'L', MUSTERD_WAKE_HARNESS: 'grok' })).toBe(
+        'grok',
+      );
+      expect(
+        resolveWakeHarness({ MUSTERD_WAKE_LEASE: 'L', MUSTERD_WAKE_HARNESS: 'Bad Value!' }),
+      ).toBeUndefined();
     });
 
     it('omits the field entirely when unset — an unwoken session claims no lease', async () => {

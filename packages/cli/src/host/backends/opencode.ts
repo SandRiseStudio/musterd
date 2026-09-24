@@ -117,7 +117,7 @@ export function opencodeWakeEnv(
   ];
   const env: NodeJS.ProcessEnv = {};
   for (const key of allowed) if (base[key] !== undefined) env[key] = base[key];
-  return wakeEnv(env, pinnedDir, leaseId);
+  return wakeEnv(env, pinnedDir, leaseId, 'opencode');
 }
 
 function killTree(child: ChildProcess, graceMs: number): void {

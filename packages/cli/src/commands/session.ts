@@ -83,6 +83,19 @@ export async function sessionCommand(
  *  harnesses get their own capture route per the per-class contract (design doc §3). */
 const CAPTURE_HARNESS = 'claude-code';
 
+/**
+ * The harness the host spawned this session as (ADR 436 clause 3 — capture), stamped at spawn in
+ * `MUSTERD_WAKE_HARNESS` beside the wake lease. It outranks the payload-shape inference below: a
+ * woken OpenCode or Grok child fires a hook whose JSON can look like Claude Code's, and on
+ * 2026-09-21/22 every such capture was recorded `claude-code`. Honoured only beside a lease — the
+ * actuator sets both or neither, so a stray variable in an ordinary session asserts nothing.
+ */
+export function resolveWakeHarness(env: NodeJS.ProcessEnv): string | undefined {
+  if (!resolveAttestedWakeLease(env)) return undefined;
+  const raw = env['MUSTERD_WAKE_HARNESS']?.trim();
+  return raw && /^[a-z0-9][a-z0-9-]{0,39}$/.test(raw) ? raw : undefined;
+}
+
 /** Drain stdin with a hard timeout — a hook wiring mistake (no JSON piped) must not hang a shell. */
 function readStdin(timeoutMs = 3_000): Promise<string> {
   return new Promise((resolve) => {
@@ -580,7 +593,10 @@ export async function pushAttestation(
   session: SessionCapture,
   event: 'start' | 'end',
   dir: string,
-  harness: 'claude-code' | 'cursor' | 'grok' | 'codex' = CAPTURE_HARNESS,
+  // The capture's own harness (ADR 436 clause 3). Until 2026-09-24 this defaulted to `claude-code`
+  // and the hook path passed nothing, so the ledger said `claude-code` for every Grok capture even
+  // when the local slot said `grok`.
+  harness: string = session.harness,
   // Whether a refused lease may be answered with a claim. A session event (start/end) may; the
   // tool boundary may only while this slot has never spent its claim — see `claim_attempted_at`.
   mayClaim = true,
@@ -744,7 +760,7 @@ export async function attestSlotIfUnattested(dirHint?: string): Promise<void> {
     if (!binding || !session) return;
     if (session.ended_at !== undefined || session.attested_at !== undefined) return;
     const mayClaim = session.claim_attempted_at === undefined;
-    if (!(await pushAttestation(binding, session, 'start', dir, CAPTURE_HARNESS, mayClaim))) return;
+    if (!(await pushAttestation(binding, session, 'start', dir, session.harness, mayClaim))) return;
     // Re-read: the push is awaited, and a concurrent hook may have rewritten the slot meanwhile.
     // Stamping a slot that has since changed id would mark a DIFFERENT session as announced.
     const fresh = findBinding(dir, {});
@@ -800,7 +816,7 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
       return;
     }
     session = {
-      harness: payload.harness ?? CAPTURE_HARNESS,
+      harness: resolveWakeHarness(process.env) ?? payload.harness ?? CAPTURE_HARNESS,
       id: payload.session_id,
       ...(payload.transcript_path ? { transcript_path: payload.transcript_path } : {}),
       started_at: Date.now(),
@@ -821,7 +837,7 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
   // Expect this to observe NOTHING on a fresh session: the transcript named here is the new one, and
   // it carries no assistant turn yet. `refreshModelObservation` below is what actually lands the
   // observation, at the first tool boundary — this call only catches a resumed transcript.
-  const captureHarness = payload.harness ?? CAPTURE_HARNESS;
+  const captureHarness = session.harness;
   const observed = event === 'start' ? observeModelFor(captureHarness, payload) : undefined;
   const model_observed = observed
     ? { model: observed, harness: captureHarness, observed_at: Date.now() }

@@ -71,6 +71,13 @@ describe('ensurePinnedMusterd', () => {
 });
 
 describe('wakeEnv', () => {
+  it('ADR 436 clause 3: stamps MUSTERD_WAKE_HARNESS only beside a lease, never inherits one', () => {
+    expect(wakeEnv({}, undefined, 'L1', 'grok')['MUSTERD_WAKE_HARNESS']).toBe('grok');
+    expect(wakeEnv({}, undefined, undefined, 'grok')['MUSTERD_WAKE_HARNESS']).toBeUndefined();
+    expect(
+      wakeEnv({ MUSTERD_WAKE_HARNESS: 'stale' }, undefined, 'L1')['MUSTERD_WAKE_HARNESS'],
+    ).toBeUndefined();
+  });
   const HOST_PATH = '/opt/homebrew/Cellar/node@22/22.23.1/bin:/opt/homebrew/bin:/usr/bin:/bin';
 
   it('PREPENDS the pin — appending would lose to the frozen tarball already on the host PATH', () => {

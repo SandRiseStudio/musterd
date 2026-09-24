@@ -218,6 +218,8 @@ describe('claudeCodeBackend.wake', () => {
     expect(calls[0]!.opts.cwd).toBe('/ws/scout');
     expect(calls[0]!.opts.detached).toBe(true);
     expect(calls[0]!.opts.env?.['MUSTERD_PROVENANCE']).toBe('wake');
+    // ADR 436 clause 3: the spawned harness is stamped beside the lease.
+    expect(calls[0]!.opts.env?.['MUSTERD_WAKE_HARNESS']).toBe('claude-code');
     // provenance rides the env, never the argv
     expect(calls[0]!.args.join(' ')).not.toContain('MUSTERD_PROVENANCE');
     expect(actuation.outcome).toEqual({ occupied: true, session: 'fresh' });

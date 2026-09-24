@@ -86,6 +86,9 @@ describe('OpenCode residency argv', () => {
   it('carries the wake lease to the child (ADR 241), and nothing when there is none', () => {
     expect(opencodeWakeEnv({ HOME: '/h' }, 'L42').MUSTERD_WAKE_LEASE).toBe('L42');
     expect(opencodeWakeEnv({ HOME: '/h' }).MUSTERD_WAKE_LEASE).toBeUndefined();
+    // ADR 436 clause 3: the harness the host spawned rides beside the lease, stamped at spawn.
+    expect(opencodeWakeEnv({ HOME: '/h' }, 'L42').MUSTERD_WAKE_HARNESS).toBe('opencode');
+    expect(opencodeWakeEnv({ HOME: '/h' }).MUSTERD_WAKE_HARNESS).toBeUndefined();
   });
 
   it('puts the pinned actuator build before a Homebrew musterd on PATH', () => {
