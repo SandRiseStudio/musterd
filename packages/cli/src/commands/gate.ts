@@ -3,12 +3,16 @@ import {
   CCD_SEND_MESSAGE_TOOL,
   extractUlid,
   type GateToolCall,
+  isSessionReachTool,
   isWriteShaped,
   matchEnforcement,
+  SUBAGENT_CHANNEL_TOOLS,
+  type Surface,
   textFingerprint,
 } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import type { HttpClient } from '../client.js';
+import { findBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import {
   isStageShaped,
@@ -18,6 +22,7 @@ import {
   stalePathWarning,
 } from '../workingTree.js';
 import { resolveRead } from './helpers.js';
+import { isOwnSubagent, recordSubagent, spawnedAgentId } from './subagentLedger.js';
 
 /**
  * `musterd gate check --stdin` (ADR 150 — structural inducement) — the PreToolUse enforcement gate.
@@ -36,6 +41,7 @@ import { resolveRead } from './helpers.js';
 export async function gateCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
   if (sub === 'check') return gateCheck(parsed);
+  if (sub === 'record-subagent') return recordSubagentCommand();
   throw new CliError(
     'usage: musterd gate check --stdin  — hook-driven (a PreToolUse hook pipes the tool call in); ' +
       '`musterd init` provisions the hook',
@@ -132,6 +138,9 @@ export function parseToolCall(raw: string): GateToolCall | null {
           ? input['subagentType']
           : undefined;
     const spawnModel = typeof input['model'] === 'string' ? input['model'] : undefined;
+    const sendTo = typeof input['to'] === 'string' ? input['to'] : undefined;
+    const sendRecipient = typeof input['recipient'] === 'string' ? input['recipient'] : undefined;
+    const sendTarget = sendTo || sendRecipient || undefined;
     // ADR 167 — the harness session-messaging send. The raw body and raw target session id are reduced
     // to sha256-16 HERE, inside this frame, and never assigned onto the returned object: what the rest
     // of the pipeline never holds, it cannot leak (the body is another agent's incoming context, ADR
@@ -154,6 +163,7 @@ export function parseToolCall(raw: string): GateToolCall | null {
       ...(body ? { bodyFingerprint: textFingerprint(body) } : {}),
       ...(targetSession ? { sessionRef: textFingerprint(targetSession) } : {}),
       ...(nudgeRef ? { nudgeRef } : {}),
+      ...(sendTarget ? { sendTarget } : {}),
     };
   } catch {
     return null;
@@ -183,6 +193,49 @@ export function parseEnvelopeSessionId(raw: string): string | undefined {
  *  (see {@link repoRelativePath}), and `musterd init` gitignores `.musterd/`. */
 function stateDir(): string {
   return join(process.cwd(), '.musterd');
+}
+
+const SESSION_REACH_DENY =
+  'musterd seats may not reach other sessions (ADR 442). Directed acts reach teammates through ' +
+  'team_send; a human is reached through their musterd surfaces, never a harness session.';
+
+/** Which harness this hook process is, from env vars the harness evals have actually observed. */
+export function harnessFromEnv(env: NodeJS.ProcessEnv = process.env): Surface | undefined {
+  if (env['CLAUDECODE']) return 'claude-code';
+  if (env['CURSOR_AGENT']) return 'cursor';
+  return undefined;
+}
+
+/**
+ * The wall (ADR 442). Returns the deny reason, or null to allow. A seat Workspace refuses every
+ * session-reaching tool except `SendMessage` aimed at a subagent this session spawned. An unbound
+ * folder is outside the gate's jurisdiction.
+ */
+export function sessionReachReason(
+  call: GateToolCall,
+  sessionId: string | undefined,
+  bound: boolean,
+  state: string,
+): string | null {
+  if (!bound || !isSessionReachTool(call.tool)) return null;
+  const scoped = (SUBAGENT_CHANNEL_TOOLS as readonly string[]).includes(call.tool);
+  if (scoped && sessionId && call.sendTarget && isOwnSubagent(state, sessionId, call.sendTarget)) {
+    return null;
+  }
+  return SESSION_REACH_DENY;
+}
+
+/** PostToolUse `Agent` one-shot. Always exits 0 — a ledger miss must not break the spawn. */
+async function recordSubagentCommand(): Promise<number> {
+  try {
+    const stdin = await readStdin();
+    const sessionId = parseEnvelopeSessionId(stdin);
+    const agentId = spawnedAgentId(stdin);
+    if (sessionId && agentId) recordSubagent(stateDir(), sessionId, agentId);
+  } catch {
+    // Always exit 0.
+  }
+  return 0;
 }
 
 /**
@@ -262,19 +315,8 @@ export function repoRelativePath(path: string): string {
  * intentionally floated, and `recordActor` swallows its own errors.
  */
 export function attest(http: HttpClient, team: string, call: GateToolCall): void {
-  // ADR 167 — a seat used the harness's session-to-session send. Observation only, fingerprints only
-  // (already reduced at parse time); fires even when the input shape was unrecognized, because "a send
-  // happened" is itself the datum the side-channel ledger exists for.
-  if (call.tool === CCD_SEND_MESSAGE_TOOL) {
-    void http.recordActor(team, {
-      kind: 'session-message',
-      tool: call.tool,
-      ...(call.bodyFingerprint ? { bodyFingerprint: call.bodyFingerprint } : {}),
-      ...(call.sessionRef ? { sessionRef: call.sessionRef } : {}),
-      ...(call.nudgeRef ? { nudgeRef: call.nudgeRef } : {}),
-    });
-    return;
-  }
+  // ADR 442 folded ADR 167's session-message observer into the wall: a session-reaching send is
+  // denied (and audited as session-denied) before attest runs. This function no longer records it.
   if (call.tool === 'Agent') {
     if (call.spawnType === undefined && call.spawnModel === undefined) return;
     void http.recordActor(team, {
@@ -314,6 +356,25 @@ async function gateCheck(parsed: Parsed): Promise<number> {
     if (!raw) return; // nothing to match on → allow
     // Normalize the target path to repo-relative BEFORE matching, so class + lane globs compare cleanly.
     const call: GateToolCall = raw.path ? { ...raw, path: repoRelativePath(raw.path) } : raw;
+    // ADR 442 — the wall is decided here, before the working-tree check and before any daemon
+    // round trip. A throw below must not be what opens it.
+    const sessionIdEarly = parseEnvelopeSessionId(stdin);
+    const reason = sessionReachReason(call, sessionIdEarly, findBinding() !== null, stateDir());
+    if (reason) {
+      emitDeny(reason);
+      emitted = true;
+      try {
+        const { http, team } = resolveRead(parsed.flags, { claimSeatPerRequest: false });
+        void http.recordActor(team, {
+          kind: 'session-denied',
+          tool: call.tool,
+          ...(harnessFromEnv() ? { harness: harnessFromEnv() } : {}),
+        });
+      } catch {
+        // The audit is best-effort; the deny above already stands.
+      }
+      return;
+    }
     // ADR 239 — both halves of the working-tree check, before anything that can throw or round-trip.
     // Purely local: the index is a file in this workspace's `.musterd/`, and nothing here is sent.
     const sessionId = parseEnvelopeSessionId(stdin);

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { CCD_SEND_MESSAGE_TOOL, FEATURE_EPOCH } from '@musterd/protocol';
+import { FEATURE_EPOCH, SESSION_REACH_TOOLS } from '@musterd/protocol';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
 import { writeJsonAtomic } from '../atomicWrite.js';
@@ -159,6 +159,7 @@ export const PROMPTSUBMIT_HOOK_MARKER = 'musterd-promptsubmit-hook';
 export const POSTTOOLUSE_HOOK_MARKER = 'musterd-interrupt-hook';
 export const PRETOOLUSE_HOOK_MARKER = 'musterd-gate-hook';
 export const SESSIONMSG_HOOK_MARKER = 'musterd-sessionmsg-hook';
+export const SUBAGENT_LEDGER_HOOK_MARKER = 'musterd-subagent-ledger-hook';
 export const SESSION_CAPTURE_HOOK_MARKER = 'musterd-session-capture-hook';
 export const SESSION_END_HOOK_MARKER = 'musterd-session-end-hook';
 export const STATUSLINE_MARKER = 'musterd-statusline';
@@ -216,15 +217,23 @@ function preToolUseHookCommand(): string {
 }
 
 function sessionMsgHookCommand(): string {
-  // The session-messaging observer (ADR 167). Same command as the ADR 150 gate — `gate check`
-  // recognizes the tool name and emits an emit-only attestation instead of matching the class table —
-  // but a SEPARATE entry with its own marker and matcher, so the gate entry's meaning ("the
-  // enforcement gate over write-shaped tools") stays truthful and each concern installs/uninstalls/
-  // drift-checks alone. Observe-only by construction: the CLI path for this tool never emits a deny.
+  // The session-reach wall (ADR 442). Same `gate check` command as the enforcement gate, but its
+  // own marker and a matcher of every SESSION_REACH_TOOLS name, so a deny is decided before the
+  // tool runs. Replaces ADR 167's observe-only send_message entry in place (same marker).
   return (
     'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
     'command -v musterd >/dev/null 2>&1 && musterd gate check --stdin 2>/dev/null || true ' +
     `# ${SESSIONMSG_HOOK_MARKER}`
+  );
+}
+
+function subagentLedgerHookCommand(): string {
+  // PostToolUse on Agent: record the spawned id so a later SendMessage to it is the seat's own
+  // subagent (ADR 442). Always exits 0.
+  return (
+    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd gate record-subagent --stdin 2>/dev/null || true ' +
+    `# ${SUBAGENT_LEDGER_HOOK_MARKER}`
   );
 }
 
@@ -520,11 +529,20 @@ const LOCAL_HOOKS: readonly LocalHookSpec[] = [
     marker: SESSIONMSG_HOOK_MARKER,
     event: 'PreToolUse',
     command: sessionMsgHookCommand,
-    matcher: CCD_SEND_MESSAGE_TOOL,
+    matcher: SESSION_REACH_TOOLS.join('|'),
     missing:
-      'the Claude Code PreToolUse session-messaging observer hook is missing from ' +
-      ".claude/settings.local.json — this seat's use of the harness's session-to-session messaging " +
-      "won't be logged (ADR 167; observe-only, nothing breaks). Run `musterd init --refresh-hooks` to wire it.",
+      'the Claude Code PreToolUse session-reach wall is missing from ' +
+      '.claude/settings.local.json — this seat can message sessions outside the team (ADR 442). ' +
+      'Run `musterd init --refresh-hooks` to wire it.',
+  },
+  {
+    marker: SUBAGENT_LEDGER_HOOK_MARKER,
+    event: 'PostToolUse',
+    command: subagentLedgerHookCommand,
+    matcher: 'Agent',
+    missing:
+      'the Claude Code PostToolUse subagent-ledger hook is missing from .claude/settings.local.json — ' +
+      'SendMessage to a subagent this session spawned cannot be recognized (ADR 442). Run `musterd init --refresh-hooks` to wire it.',
   },
   {
     marker: SESSION_CAPTURE_HOOK_MARKER,
@@ -571,7 +589,7 @@ export function installMusterdHooks(
   const warnings: string[] = [];
   // Every project-local hook comes off the one table (ADR 168), so adding an entry there installs it
   // AND health-checks it. Each carries its own marker, so entries sharing an event coexist rather
-  // than absorbing each other: the two PreToolUse hooks (ADR 150 gate + ADR 167 observer) and the
+  // than absorbing each other: the two PreToolUse hooks (ADR 150 gate + ADR 442 session-reach wall) and the
   // two SessionStart hooks (local capture + the global orientation below) each live side by side.
   for (const spec of LOCAL_HOOKS) {
     const warning = upsertHook(
@@ -706,7 +724,7 @@ export function surfaceName(event: string): string {
  * Every surface a user may refuse here, for `musterd surface list`.
  *
  * De-duplicated because a surface is a SLOT, not an entry: two of our `LOCAL_HOOKS` share the
- * `PreToolUse` event (the ADR 150 lane gate and the ADR 167 session-message observer), and listing
+ * `PreToolUse` event (the ADR 150 lane gate and the ADR 442 session-reach wall), and listing
  * `claude-code:PreToolUse` twice would offer a name whose two rows a user cannot tell apart or
  * address separately. Declining that one name removes both, which is what `removeClaudeSurface`
  * does — the slot is the unit the user can actually refuse.
@@ -920,6 +938,9 @@ export function removeMusterdHooks(): void {
     isMusterdHookFor(m, NOTIFICATION_HOOK_MARKER),
   );
   dropHook(settingsLocalPath(), 'PostToolUse', (m) => isMusterdHookFor(m, POSTTOOLUSE_HOOK_MARKER));
+  dropHook(settingsLocalPath(), 'PostToolUse', (m) =>
+    isMusterdHookFor(m, SUBAGENT_LEDGER_HOOK_MARKER),
+  );
   dropHook(settingsLocalPath(), 'PreToolUse', (m) => isMusterdHookFor(m, PRETOOLUSE_HOOK_MARKER));
   dropHook(settingsLocalPath(), 'PreToolUse', (m) => isMusterdHookFor(m, SESSIONMSG_HOOK_MARKER));
   dropHook(settingsLocalPath(), 'SessionStart', (m) =>

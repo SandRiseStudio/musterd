@@ -66,11 +66,29 @@ vi.mock('../client.js', () => ({
     error.code === 'unauthorized' && /agent session lease/i.test(error.message),
 }));
 
-const { buildSkewNotes, footprintNotes, inspectProvisioning, runSessionProbe } =
-  await import('./doctor.js');
+const {
+  buildSkewNotes,
+  footprintNotes,
+  inspectProvisioning,
+  runSessionProbe,
+  sessionReachWallNotes,
+} = await import('./doctor.js');
 const { writeGuidance, CANONICAL_SKILL_PATH } = await import('./guidance.js');
 const { writeProvisionManifest, saveProvisioning, loadProvisioning } =
   await import('./manifest.js');
+
+describe('session-reach wall notes (ADR 442)', () => {
+  it('names each ungated harness and does not claim Claude Code is identity-only', () => {
+    const notes = sessionReachWallNotes(['Cursor', 'Codex', 'Grok CLI', 'OpenCode', 'Claude Code']);
+    expect(notes).toHaveLength(4);
+    for (const note of notes) expect(note).toContain('session-reach: not gateable (identity-only)');
+    expect(notes.join('\n')).not.toContain('Claude Code:');
+  });
+
+  it('says nothing about a harness that is not configured', () => {
+    expect(sessionReachWallNotes(['Claude Code'])).toEqual([]);
+  });
+});
 
 function harness(label: string, installed: boolean, configured: boolean, registeredClaim?: string) {
   return {

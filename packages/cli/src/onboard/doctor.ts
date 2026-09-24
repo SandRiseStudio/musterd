@@ -28,7 +28,11 @@ import { foreignAdapterNote, primaryCheckoutFor, siblingWorkspaces } from './ent
 import { contentHash, establishedHarnesses, guidanceTargets, strippedBody } from './guidance.js';
 import type { Harness } from './harness.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
+import { SESSION_REACH_WALL as CODEX_SESSION_REACH_WALL } from './harnesses/codex.js';
+import { SESSION_REACH_WALL as CURSOR_SESSION_REACH_WALL } from './harnesses/cursor.js';
+import { SESSION_REACH_WALL as GROK_SESSION_REACH_WALL } from './harnesses/grok.js';
 import { HARNESSES } from './harnesses/index.js';
+import { SESSION_REACH_WALL as OPENCODE_SESSION_REACH_WALL } from './harnesses/opencode.js';
 import { loadProvisioning, readProvisionManifest } from './manifest.js';
 import { inspectSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget } from './primer.js';
@@ -1091,10 +1095,25 @@ export async function inspectProvisioning(
       ...inspectGitAttribution(binding, cwd),
       ...registryNotes,
       ...labelNotes,
+      ...sessionReachWallNotes(harnesses.filter((h) => h.configured).map((h) => h.label)),
       ...packagedInstallNotes(),
     ],
     anyConfigured,
   };
+}
+
+/**
+ * ADR 442: where a harness cannot express the session-reach gate, say so. Never claim it is gated.
+ * Claude Code is the one harness that installs the wall; it is absent from this list.
+ */
+export function sessionReachWallNotes(configuredLabels: readonly string[]): string[] {
+  const lines: readonly [string, string][] = [
+    ['Cursor', CURSOR_SESSION_REACH_WALL],
+    ['Codex', CODEX_SESSION_REACH_WALL],
+    ['Grok CLI', GROK_SESSION_REACH_WALL],
+    ['OpenCode', OPENCODE_SESSION_REACH_WALL],
+  ];
+  return lines.filter(([label]) => configuredLabels.includes(label)).map(([, line]) => line);
 }
 
 /**

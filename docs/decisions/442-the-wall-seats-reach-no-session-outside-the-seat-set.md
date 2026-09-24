@@ -112,6 +112,20 @@ credential custody (ADR 200, ADR 341, and spec §8).
   (spec §8). The acting surface is closed: no command resolves the vault as its identity.
 - The Claude Code peer label sweep (`list_sessions` across the machine) is retired. The host labels
   seat sessions (ADR 166). Cursor's self-label path, which touches only the current chat, is kept.
+- **Lane 1c spike (2026-09-24, Claude Code 2.1.281 transcripts).** `SendMessage` addresses its
+  target with `tool_input.to` (the same string is also copied to `recipient`). An async `Agent`
+  tool result is text, not a JSON id: a line `agentId: <hex>` and the instruction to continue with
+  `SendMessage` `to` that hex. The gate records that id and allows `SendMessage` only toward it.
+  Foreground `Agent` results that carry no id are not addressable, so a `SendMessage` to them is
+  denied. Per-harness reach after the inventory:
+
+  | Harness | Session-reach gate | Why |
+  | --- | --- | --- |
+  | Claude Code | gated | PreToolUse matcher is `SESSION_REACH_TOOLS`; PostToolUse `Agent` records the spawned id |
+  | Cursor | not gateable, identity-only | preToolUse matcher is only `Shell\|Write\|Delete\|Edit\|Task` |
+  | Codex | not gateable, identity-only | no PreToolUse hook |
+  | Grok | not gateable, identity-only | PreToolUse exists, but Grok has no session-reach tool names to match |
+  | opencode | not gateable, identity-only | the doorbell plugin runs after the tool (`tool.execute.after`) |
 - 2026-09-24 (sub-lane 1b, #1676): the guidance change landed as `GUIDANCE_CONTENT_VERSION` 30. The
   relay and peer-sweep renderers left `@musterd/protocol`, and `GUIDANCE_INSTALL_PATHS` dropped both
   retired paths. The CLI sweeps a stamped copy at either path on every guidance write, so a seat
