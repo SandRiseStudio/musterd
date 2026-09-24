@@ -9,7 +9,7 @@ Where every musterd folder on a machine lives, what is keyed by those paths, and
 | Member Workspace | `~/musterd/<repo>/<member>` — `~/musterd/agents/dolly`, `~/musterd/agents/nick` | that member | a git worktree; humans and agents alike |
 | Service home | `~/.musterd/<service>` (`host`, `guardian`, `sweep`, `live`, `stream`, `autorefresh`) | the service's own seat token | LaunchAgents only |
 | Runtime checkout | `~/.musterd/runtime` | **nobody** — unbound | the daemon's and host's build; `service refresh` self-locates it from the plist |
-| Live publisher worktree | `~/.musterd/runtime-live` | nobody | `service --live` derives it as `<runtime>-live` |
+| Live publisher worktree | `~/.musterd/live/checkout` | nobody | the live service's own home (ADR 132, 2026-09-24); a pre-existing `<checkout>-live` sibling is kept |
 | Team home | `~/musterd/<team>` (`~/musterd/revive`) | the human | a leaf: nothing beneath it is a Workspace |
 
 Identity resolves by walking **up** from the real path to the nearest `.musterd/binding.json` (lane 2, #1693). So `~`, `~/musterd` and `~/musterd/<repo>` never hold a binding — `musterd init` / `human` refuse them, and `claim` refuses a first binding there (`bindingRefusal`, `onboard/guard.ts`). `musterd agent <name>` places a new seat at `~/musterd/<repo>/<name>` (`memberWorkspaceDir`, `onboard/workspace.ts`), where `<repo>` is the group the invoking Workspace already sits in, else the remote's repo name, else the checkout basename.
@@ -43,6 +43,6 @@ Each row is something the move has to carry, and the step of `scripts/layout/mig
 5. Verify: `curl -s :4849/health`; `git -C ~/.musterd/runtime worktree list` (no `prunable`); `musterd whoami` from `~/musterd/agents/nick` → nick, from `~/.musterd/runtime` → nobody; `launchctl print gui/$UID/studio.sandrise.musterd-host | grep state`.
 6. Re-open each seat session in its new folder (`~/musterd/agents/<seat>`); `claude --resume` finds its transcripts there because the project slug moved with it.
 
-## Still to decide
+## Decided since
 
-- `~/.musterd/runtime-live` is where the sibling rule in `service.ts` puts the `/live` publisher's worktree once the runtime is `~/.musterd/runtime`. The spec's service-home shape would be `~/.musterd/live/checkout`; changing that is a `service --live` change, not a migration step, and was left as-is on 2026-09-24.
+- ~~`~/.musterd/runtime-live` is where the sibling rule in `service.ts` puts the `/live` publisher's worktree (2026-09-24)~~ — same day: `service --live` now plants it at `~/.musterd/live/checkout`, the live service's own home, keeping an existing `<checkout>-live` sibling when one is present; the migration moves this machine's `~/agents-live` there.

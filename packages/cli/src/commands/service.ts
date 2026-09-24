@@ -199,8 +199,9 @@ export function liveWebRoot(): string {
 
 /**
  * Resolve the `/live` viewer service (ADR 132) from the running process. The viewer worktree is a
- * sibling of the daemon's own checkout (`…/agents` → `…/agents-live`), added from it since they share
- * the git object store. The generated build script + log live under `~/.musterd/live/`; the plist sits
+ * live service's own checkout (`~/.musterd/live/checkout`; a pre-2026-09-24 `…-live` sibling of the
+ * daemon's checkout is kept when present), added from the daemon's checkout since they share the git
+ * object store. The generated build script + log live under `~/.musterd/live/`; the plist sits
  * beside the daemon's in `~/Library/LaunchAgents`. `gitDir` is resolved so the build's PATH finds git.
  * The `legacy*` fields name the retired ADR 124 dev-server bundle so an in-place upgrade cleans it up.
  */
@@ -581,6 +582,14 @@ export function resolveLiveCtx(ctx: ServiceCtx): LiveCtx {
   const repoRoot = daemonCheckout(ctx) ?? resolvePath(binJs, '../../../..');
   const home = dirname(configPath()); // ~/.musterd
   const liveDir = join(home, 'live');
+  // The viewer worktree is the live service's own checkout, `~/.musterd/live/checkout` — a service
+  // home under platform state (reach spec §6, ADR 442), not a `<checkout>-live` sibling planted
+  // wherever the daemon's checkout happens to be. A sibling that already exists (every install before
+  // 2026-09-24) is kept: the builder keeps it current, and re-planting would cost a full clone.
+  const legacySibling = `${repoRoot}-live`;
+  const worktree = ctx.readFile?.(join(legacySibling, '.git'))
+    ? legacySibling
+    : join(liveDir, 'checkout');
   const agents = join(homedir(), 'Library', 'LaunchAgents');
   const whichGit = run('which', ['git']).stdout.trim();
   const gitDir = whichGit ? dirname(whichGit) : '/opt/homebrew/bin';
@@ -588,7 +597,7 @@ export function resolveLiveCtx(ctx: ServiceCtx): LiveCtx {
     uid: typeof process.getuid === 'function' ? process.getuid() : '',
     buildLabel: LIVE_LABEL,
     legacySyncLabel: LIVE_SYNC_LABEL,
-    worktree: `${repoRoot}-live`,
+    worktree,
     sourceRepo: repoRoot,
     webRoot: liveWebRoot(),
     buildPlistPath: join(agents, `${LIVE_LABEL}.plist`),

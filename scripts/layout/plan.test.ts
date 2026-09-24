@@ -20,9 +20,9 @@ const mapping = pathMapping(layout, [
 ]);
 
 describe('layout mapping (reach spec §6)', () => {
-  it('main → unbound runtime, live → its sibling, seats → ~/musterd/<repo>/<seat>', () => {
+  it('main → unbound runtime, live → the live service home, seats → ~/musterd/<repo>/<seat>', () => {
     expect(mapping.get('/Users/nick/agents')).toBe('/Users/nick/.musterd/runtime');
-    expect(mapping.get('/Users/nick/agents-live')).toBe('/Users/nick/.musterd/runtime-live');
+    expect(mapping.get('/Users/nick/agents-live')).toBe('/Users/nick/.musterd/live/checkout');
     expect(mapping.get('/Users/nick/agents-dolly')).toBe('/Users/nick/musterd/agents/dolly');
     expect(mapping.get('/Users/nick/agents-big-body')).toBe('/Users/nick/musterd/agents/big-body');
     expect(mapping.has('/Users/nick/agents-dolly/nested')).toBe(false);

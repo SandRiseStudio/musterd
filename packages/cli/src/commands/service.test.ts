@@ -121,6 +121,17 @@ describe('serviceCommand', () => {
   // parent from process.argv[1], planting …/Cellar/musterd/<v>/libexec/lib/node_modules-live — which
   // dies on the next `brew upgrade`. The viewer worktree must sit beside the checkout the DAEMON
   // runs from (read back from its installed plist), like `service refresh` (#289).
+  /**
+   * A ctx whose file reads stop at the temp dir: resolveLiveCtx probes `<checkout>-live/.git` to keep
+   * a legacy sibling, and the developer's real `~/agents-live` must not leak into the assertion.
+   */
+  const scopedCtx = (extra: Record<string, string> = {}): ServiceCtx => {
+    const c = ctx(recorder());
+    const readFile = c.readFile;
+    c.readFile = (p) => extra[p] ?? (p.startsWith(dir) ? readFile?.(p) : undefined);
+    return c;
+  };
+
   describe('resolveLiveCtx daemon-checkout preference', () => {
     it('prefers the daemon checkout from the installed plist over the invoked CLI', () => {
       writeFileSync(
@@ -136,15 +147,26 @@ describe('serviceCommand', () => {
           path: '/p',
         }),
       );
-      const live = resolveLiveCtx(ctx(recorder()));
+      const live = resolveLiveCtx(scopedCtx());
       expect(live.sourceRepo).toBe('/Users/nick/agents');
-      expect(live.worktree).toBe('/Users/nick/agents-live');
+      // The worktree is the live service's own checkout under ~/.musterd (reach spec §6), never a
+      // sibling of wherever the daemon's checkout sits.
+      expect(live.worktree).toBe(join(dir, 'live', 'checkout'));
     });
 
-    it('falls back to the invoked CLI checkout when no daemon plist is installed', () => {
-      const live = resolveLiveCtx(ctx(recorder())); // no plist written at ctx.plistPath
-      expect(live.worktree.endsWith('-live')).toBe(true);
-      expect(live.worktree).toBe(`${live.sourceRepo}-live`);
+    it('falls back to the invoked CLI checkout as the source when no daemon plist is installed', () => {
+      const live = resolveLiveCtx(scopedCtx()); // no plist written at ctx.plistPath
+      expect(live.worktree).toBe(join(dir, 'live', 'checkout'));
+      expect(live.sourceRepo.endsWith('-live')).toBe(false);
+    });
+
+    it('keeps a pre-existing `<checkout>-live` sibling worktree (installs before 2026-09-24)', () => {
+      const sourceRepo = resolveLiveCtx(scopedCtx()).sourceRepo;
+      // The sibling's `.git` is a worktree gitfile; its presence is what the ctx reads.
+      const live = resolveLiveCtx(
+        scopedCtx({ [`${sourceRepo}-live/.git`]: 'gitdir: /x/.git/worktrees/live' }),
+      );
+      expect(live.worktree).toBe(`${sourceRepo}-live`);
     });
   });
 
