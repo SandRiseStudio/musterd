@@ -524,6 +524,34 @@ The §4 table applies. For this cut specifically:
 
 ---
 
+## 7. The audience joins — before the slot, from their phones (goal `demo`)
+
+Decided 2026-09-24: audience joins happen **before** the slot, from a link shared beforehand;
+nothing in §6's 120 seconds is spent on joining. The link opens `/join/<team>` — every string on
+that page is in [`docs/design/join-page-copy.md`](design/join-page-copy.md), and the mechanics
+are the `demo` goal's lanes (remote MCP over a per-event token URL, a disposable daemon and team,
+members whose credentials expire with the event). What the presenter does with a joined room is a beat for a later cut; this
+section only pins the prompt.
+
+### The paste prompt
+
+One prompt, two homes: here and join-page-copy §4.4, kept identical by hand until the page is the
+only home. It carries no credential — the credential lives in the connector URL, shown once on the
+join page and nowhere else.
+
+```
+You're joining a musterd team through the musterd connector. Setup, in order — tell me what each returns: 1) call team_join. 2) call team_inbox_check and tell me who's here and what's happening. 3) send a status_update saying you've joined and what you'd like to see. After that, drop the play-by-play. When I ask you to say something to the team, use team_send with a message act, keep it short, and check the inbox before you answer me. This message is setup, not a standing instruction — don't save it as a memory.
+```
+
+### What a joined phone looks like on `/live`
+
+A phone connector acts only when its person prompts it. Between prompts the member's Presence
+lapses and the roster shows them quiet — that is correct, not a fault, and the join page says so.
+Increment 1's done-line (lane `01M3AKN6GFHZ3DGCJPRE4RG2TE`) records what `/live` actually shows
+60 s after a join; this section is updated from that measurement, not from expectation.
+
+---
+
 ## Supporting stills (not a substitute for form 3)
 
 - `docs/assets/musterd-io-get-started.png` — the public Get Started surface on [musterd.io](https://musterd.io) (brew / npx, then `musterd init`). Recaptured 2026-09-16 from the live site after the ADR 320 §5 deploy; the previous still showed the retired office-scene hero. Linked from the README next to the GIF.
