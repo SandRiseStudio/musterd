@@ -3332,16 +3332,20 @@
   background: rgba(255, 233, 208, 0.26);
   background-clip: padding-box;
 }
+/* `top: 0` on a sticky child pins it inside the scroller's PADDING, so it stuck --lc-6 below the
+   panel edge and scrolled rows showed through the band above the title. Pull it up over that
+   padding and give the padding back inside. The fade is the bottom padding only, as a length, not
+   a percentage, so the title always sits on solid ground whatever the head's height. */
 .lc-stream__head {
   position: sticky;
-  top: 0;
+  top: calc(-1 * var(--lc-6));
   z-index: var(--lc-z-overlay);
   display: flex;
   align-items: center;
   gap: var(--lc-4);
-  margin: 0 calc(-1 * var(--lc-8)) var(--lc-5);
-  padding: 0 var(--lc-8) var(--lc-5);
-  background: linear-gradient(var(--lc-ground) 62%, transparent);
+  margin: calc(-1 * var(--lc-6)) calc(-1 * var(--lc-8)) var(--lc-5);
+  padding: var(--lc-6) var(--lc-8) var(--lc-5);
+  background: linear-gradient(var(--lc-ground) calc(100% - var(--lc-5)), transparent);
 }
 .lc-stream__title {
   font-family: var(--font-mono, monospace);
@@ -5441,6 +5445,15 @@
 }
 .lc-asks__lead--quiet:hover {
   color: var(--lc-muted);
+}
+/* Quiet, the verb is the one thing that may give: the bold label already says what the rail is.
+   Without this the lead's overflow cut it mid-letter ("…on a huma") once "notify me here" joined
+   the rail at the office panel's 553px. */
+.lc-asks__lead--quiet .lc-asks__verb {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lc-asks__lead b {
   flex: none;
