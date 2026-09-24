@@ -239,16 +239,8 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           args.act === 'ask' && isAskTier(meta['tier'])
             ? askContractText(envelope.id, meta['tier'], serverContract?.unblocker_reachable)
             : null;
-        // The delivery hint (ADR 167): the daemon says the recipient is live on this machine, and the
-        // relay is the SENDER's to make (only live desktop sessions hold the harness's session-send
-        // tool). Quoted verbatim so the model can relay it unmodified — the fingerprint check on the
-        // other end verifies exactly that. Absent hint (older daemon, offline recipient, damped) ⇒
-        // this response is byte-identical to before the ADR.
-        const hint = ackBody?.delivery_hint;
-        const hintGuidance = hint
-          ? ` Recipient is live: if you have the ccd session tools, find their session via ` +
-            `list_sessions (seat-name label) and send_message this line VERBATIM: "${hint.nudge_text}"`
-          : '';
+        // No `delivery_hint` is read or passed on (ADR 442 retired ADR 167 increment 2): the model is
+        // never invited to reach another session, even by an older daemon that still sends one.
         // The handoff's lane (ADR 231): a `handoff` that named no lane either got one attached —
         // because the sender held exactly one live lane, so there was nothing to choose between —
         // or gets told it holds several and the orientation `why` cannot tell which. Surfaced
@@ -282,7 +274,6 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           (askGuidance
             ? `sent ask to ${toLabel} (id=${envelope.id}). ${askGuidance}`
             : `sent ${args.act} to ${toLabel} (id=${envelope.id})`) +
-          hintGuidance +
           handoffGuidance +
           verdictGuidance +
           ackGuidance;
@@ -299,7 +290,6 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
             ...(args.act === 'ask' && isAskTier(meta['tier'])
               ? { ask_contract: serverContract ?? askContract(meta['tier']) }
               : {}),
-            ...(hint ? { delivery_hint: hint } : {}),
             ...(handoffLane ? { handoff_lane: handoffLane } : {}),
             ...(laneVerdict ? { lane_verdict: laneVerdict } : {}),
             ...(laneAck ? { lane_ack: laneAck } : {}),

@@ -4,7 +4,6 @@ import {
   SeedResultSchema,
   PROTOCOL_VERSION,
   type AskContract,
-  type DeliveryHint,
   type ClaimTarget,
   type Envelope,
   type Goal,
@@ -476,22 +475,20 @@ export class MusterdClient {
 
   /** POST the envelope. On an `ask`, the daemon's ack additionally carries the derived tier contract
    *  with the reachability projection (`unblocker_reachable`, ADR 153) — a fact only the daemon can
-   *  compute; callers fall back to the pure local contract when an older daemon omits it. A directed
-   *  act to a live recipient may also carry a `delivery_hint` (ADR 167): a daemon-composed nudge the
-   *  sender can relay over the harness's session messaging. A `handoff` may carry `handoff_lane`
+   *  compute; callers fall back to the pure local contract when an older daemon omits it. (An older
+   *  daemon may still send a `delivery_hint`; it is not typed here and never read — ADR 442.) A
+   *  `handoff` may carry `handoff_lane`
    *  (ADR 231): either the lane the daemon attached because the sender held exactly one, or a
    *  warning that they hold several and the `why` cannot tell which. All additive — older daemons
    *  omit them. */
   sendEnvelope(envelope: Envelope): Promise<{
     ask_contract?: AskContract;
-    delivery_hint?: DeliveryHint;
     handoff_lane?: HandoffLaneAck;
     lane_verdict?: LaneVerdictWire;
     lane_ack?: { lane: string };
   }> {
     return this.request('POST', `/teams/${this.config.team}/messages`, { envelope }) as Promise<{
       ask_contract?: AskContract;
-      delivery_hint?: DeliveryHint;
       handoff_lane?: HandoffLaneAck;
       lane_verdict?: LaneVerdictWire;
       lane_ack?: { lane: string };

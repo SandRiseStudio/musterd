@@ -279,6 +279,9 @@ export type AuditAction =
   // eligible act all day, addressed to an away human) was indistinguishable from a dead code path,
   // and sat as a suspected defect for two days. A rail whose job is delivery has to be able to say
   // why it declined.
+  //
+  // RETIRED by ADR 442 (the wall): the relay is gone, so no send is a rail candidate and nothing
+  // writes this row any more. The action stays in the union so historical rows still read.
   | 'nudge.decision'
   // ADR 131 increment 5: the SUPPLEMENTARY cost record. The primary wake report lands at roster
   // verification (~seconds, inside the lease TTL); harness-attested cost only exists when the run
@@ -374,7 +377,12 @@ export type AuditAction =
   // carried; when it resolves to a real message the row is a sanctioned delivery-rail relay
   // (`nudge: true`, with `verbatim` saying whether the composed line was relayed unmodified — ADR 167
   // increment 2); rows without it are the organic/side-channel population increment 1 exists to count.
+  // ADR 442 retired increment 2: new rows never carry `nudge`/`verbatim`; older rows keep them.
   | 'actor.session_message'
+  // ADR 442 (the wall): the PreToolUse gate refused a session-reaching tool (`SESSION_REACH_TOOLS`)
+  // client-side, before any round trip, and attested it after. The one actor row whose `result` is
+  // `deny`. Detail `{ tool, harness? }` — never a body, a target, or a session id.
+  | 'gate.session_denied'
   // The inverse of team create: an admin soft-archived the whole team (`POST /teams/:slug/archive`).
   // target = the slug. The row lands in the archived team's own log — readable again only at the db
   // (requireTeam refuses archived teams), but the history survives, which is the point of soft.
@@ -577,6 +585,7 @@ export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject> = {
   'actor.subagent_write': 'actor',
   'actor.subagent_spawn': 'actor',
   'actor.session_message': 'actor',
+  'gate.session_denied': 'actor',
   'credential.rotate': 'actor',
   'signin.handoff_staged': 'actor',
   'signin.handoff_redeemed': 'actor',

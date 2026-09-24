@@ -112,6 +112,11 @@ credential custody (ADR 200, ADR 341, and spec §8).
   (spec §8). The acting surface is closed: no command resolves the vault as its identity.
 - The Claude Code peer label sweep (`list_sessions` across the machine) is retired. The host labels
   seat sessions (ADR 166). Cursor's self-label path, which touches only the current chat, is kept.
+- 2026-09-24 (sub-lane 1b, #1676): the guidance change landed as `GUIDANCE_CONTENT_VERSION` 30. The
+  relay and peer-sweep renderers left `@musterd/protocol`, and `GUIDANCE_INSTALL_PATHS` dropped both
+  retired paths. The CLI sweeps a stamped copy at either path on every guidance write, so a seat
+  provisioned before the wall loses them at its next refresh. `session label-nudge` stays as a
+  silent no-op, because hooks installed before the wall still call it.
 
 ## Observability & Evaluation
 

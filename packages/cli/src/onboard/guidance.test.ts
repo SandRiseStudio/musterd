@@ -153,69 +153,66 @@ describe('guidanceTargets', () => {
   });
 });
 
-describe('label-sessions guidance unit (ADR 160)', () => {
-  it('writes the label-sessions skill for Claude Code and the self-label rule for Cursor (ADR 186)', () => {
+describe('self-label guidance unit (ADR 186)', () => {
+  it('writes the Cursor self-label rule, stamped — the one labeling unit the wall keeps', () => {
     const dir = tmp();
     const res = writeGuidance(dir, [claudeCode, cursor, codex], { team: 'dawn' });
-    const cross = '.claude/skills/musterd-label-sessions/SKILL.md';
     const self = '.cursor/rules/musterd-label-session.mdc';
-    expect(res.files).toContain(cross);
     expect(res.files).toContain(self);
-    const crossText = readFileSync(join(dir, cross), 'utf8');
-    expect(parseContentStamp(crossText)?.version).toBe(GUIDANCE_CONTENT_VERSION);
-    expect(crossText).toContain('name: musterd-label-sessions');
-    expect(crossText).toContain('resolve-labels --stdin');
-    expect(crossText).toContain('never proposed');
     const selfText = readFileSync(join(dir, self), 'utf8');
     expect(parseContentStamp(selfText)?.version).toBe(GUIDANCE_CONTENT_VERSION);
     expect(selfText).toContain('rename_chat');
     expect(selfText).toContain('current chat only');
-    // Codex declares neither — no sibling unit.
-    expect(res.files.filter((f) => f.includes('label-session'))).toEqual([cross, self]);
-  });
-
-  it('is enumerated by guidanceTargets and removed by removeGuidance (dir pruned)', () => {
-    const dir = tmp();
-    writeGuidance(dir, [claudeCode], { team: 'dawn' });
-    const rel = '.claude/skills/musterd-label-sessions/SKILL.md';
-    expect(guidanceTargets([claudeCode])).toContain(rel);
-    const { removed } = removeGuidance(dir, [claudeCode]);
-    expect(removed).toContain(rel);
-    expect(existsSync(join(dir, '.claude/skills/musterd-label-sessions'))).toBe(false);
-  });
-
-  it('never clobbers a stampless user-authored file at the label-sessions path', () => {
-    const dir = tmp();
-    const rel = '.claude/skills/musterd-label-sessions/SKILL.md';
-    write(dir, rel, '# my own sweep\n');
-    const res = writeGuidance(dir, [claudeCode], { team: 'dawn' });
-    expect(res.skipped).toContain(rel);
-    expect(readFileSync(join(dir, rel), 'utf8')).toBe('# my own sweep\n');
+    expect(res.files.filter((f) => f.includes('label-session'))).toEqual([self]);
   });
 });
 
-describe('nudge-relay guidance unit (ADR 167)', () => {
-  it('writes the nudge-relay skill for Claude Code (the only nudgeSkillPath declarer), stamped', () => {
+/**
+ * ADR 442 (the wall): the relay skill and the Claude Code peer label sweep leave. Both reached into
+ * sessions outside the seat — `send_message` to a teammate's session, `list_sessions` +
+ * `set_session_title` across every session on the machine. A seat never writes either again, a
+ * refresh removes the copy a seat already carries, and a user's own file at the path is left alone.
+ */
+describe('retired guidance units (ADR 442)', () => {
+  const RETIRED = [
+    '.claude/skills/musterd-nudge-relay/SKILL.md',
+    '.claude/skills/musterd-label-sessions/SKILL.md',
+  ];
+
+  it('writeGuidance writes neither, on any harness', () => {
     const dir = tmp();
     const res = writeGuidance(dir, [claudeCode, cursor, codex], { team: 'dawn' });
-    const rel = '.claude/skills/musterd-nudge-relay/SKILL.md';
-    expect(res.files).toContain(rel);
-    const text = readFileSync(join(dir, rel), 'utf8');
-    expect(parseContentStamp(text)?.version).toBe(GUIDANCE_CONTENT_VERSION);
-    expect(text).toContain('name: musterd-nudge-relay');
-    expect(text).toContain('VERBATIM');
-    expect(text).toContain('delivery_hint');
-    // Cursor/Codex declare no nudgeSkillPath — no sibling unit appears for them.
-    expect(res.files.filter((f) => f.includes('nudge-relay'))).toEqual([rel]);
+    for (const rel of RETIRED) {
+      expect(res.files).not.toContain(rel);
+      expect(existsSync(join(dir, rel))).toBe(false);
+    }
+    expect(guidanceTargets(HARNESSES)).not.toEqual(expect.arrayContaining([RETIRED[0]]));
+    expect(guidanceTargets(HARNESSES)).not.toEqual(expect.arrayContaining([RETIRED[1]]));
   });
 
-  it('is enumerated by guidanceTargets and removed by removeGuidance (dir pruned)', () => {
+  it('a refresh removes a stamped copy a seat already carries, and prunes the empty dir', () => {
     const dir = tmp();
     writeGuidance(dir, [claudeCode], { team: 'dawn' });
-    const rel = '.claude/skills/musterd-nudge-relay/SKILL.md';
-    expect(guidanceTargets([claudeCode])).toContain(rel);
+    for (const rel of RETIRED)
+      write(dir, rel, `old skill\n\n<!-- musterd:content v29 sha256:0123456789abcdef -->\n`);
+    const res = writeGuidance(dir, [claudeCode], { team: 'dawn' });
+    expect(res.removed).toEqual(expect.arrayContaining(RETIRED));
+    for (const rel of RETIRED) expect(existsSync(dirname(join(dir, rel)))).toBe(false);
+  });
+
+  it('never removes a stampless user-authored file at a retired path', () => {
+    const dir = tmp();
+    write(dir, RETIRED[1]!, '# my own sweep\n');
+    const res = writeGuidance(dir, [claudeCode], { team: 'dawn' });
+    expect(res.removed).not.toContain(RETIRED[1]);
+    expect(readFileSync(join(dir, RETIRED[1]!), 'utf8')).toBe('# my own sweep\n');
+  });
+
+  it('uninstall sweeps a stamped retired copy too', () => {
+    const dir = tmp();
+    write(dir, RETIRED[0]!, `x\n\n<!-- musterd:content v29 sha256:0123456789abcdef -->\n`);
     const { removed } = removeGuidance(dir, [claudeCode]);
-    expect(removed).toContain(rel);
+    expect(removed).toContain(RETIRED[0]);
     expect(existsSync(join(dir, '.claude/skills/musterd-nudge-relay'))).toBe(false);
   });
 });

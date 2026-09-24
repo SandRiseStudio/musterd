@@ -579,7 +579,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
       hookSpecificOutput: { hookEventName: string; additionalContext: string };
     };
     expect(json.hookSpecificOutput.hookEventName).toBe('PostToolUse');
-    expect(json.hookSpecificOutput.additionalContext).toContain('\u26a1 musterd:');
+    expect(json.hookSpecificOutput.additionalContext).toMatch(/^\u26a1 musterd \[dawn\]:/);
     expect(json.hookSpecificOutput.additionalContext).toContain('request_help');
     expect(json.hookSpecificOutput.additionalContext).not.toContain('drop everything'); // §4 still holds
   });
@@ -615,14 +615,14 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
     actAs('dawn', 'Ada', ada.key, ada.sessionLease);
     const raised = await run(inboxCommand, ['--interrupt-check']);
     expect(raised.code).toBe(0);
-    expect(raised.out).toContain('⚡ musterd:');
+    expect(raised.out).toMatch(/⚡ musterd \[[a-z0-9-]+\]:/);
     expect(raised.out).toContain('nick');
     expect(raised.out).toContain('request_help');
     expect(raised.out).not.toContain('drop everything'); // §4: never the message body
 
     // The probe never advances the cursor — it keeps raising until the agent explicitly reads.
     const again = await run(inboxCommand, ['--interrupt-check']);
-    expect(again.out).toContain('⚡ musterd:');
+    expect(again.out).toMatch(/⚡ musterd \[[a-z0-9-]+\]:/);
     await run(inboxCommand, []); // Ada reads her inbox → cursor advances
     // …and that interactive read RE-CLAIMED (ADR 339: interactive reads opt in), superseding the
     // Presence Ada's stored lease was bound to. The env lease `actAs` pinned is now dead, so pick up
@@ -668,7 +668,7 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
 
     // Kill-switch cleared → the urgent act raises.
     const on = await run(inboxCommand, ['--interrupt-check']);
-    expect(on.out).toContain('⚡ musterd:');
+    expect(on.out).toMatch(/⚡ musterd \[[a-z0-9-]+\]:/);
   });
 });
 

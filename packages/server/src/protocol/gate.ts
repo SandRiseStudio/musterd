@@ -15,8 +15,6 @@ import { findGateAsk, gateAskHumanAnswer } from '../store/gateAsk.js';
 import { laneCoveringPath } from '../store/lanes.js';
 import { unblockerReachable } from '../store/reachability.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
-import { recordCcdNudge } from '../telemetry.js';
-import { confirmNudge } from './nudge.js';
 import { routeEnvelope } from './route.js';
 
 /**
@@ -246,9 +244,10 @@ export function adjudicateGate(
 
 /**
  * Record an actor attestation (ADR 163). **Not a gate** — it returns nothing, decides nothing, and
- * always records `result: 'allow'`, because an observer that could deny would be back under the ADR 150
+ * records `result: 'allow'`, because an observer that could deny would be back under the ADR 150
  * declared-class boundary in full. One row per call; the hook only sends write-shaped subagent calls and
- * spawns, so reads never reach here.
+ * spawns, so reads never reach here. The one `deny` row is `session-denied` (ADR 442): it records a
+ * refusal the client already made, and still decides nothing here.
  *
  * **What is persisted, and why the split.** A path-shaped target (`src/x.ts`) is stored in the clear:
  * lane `scope` globs already hold plain repo-relative paths, so a path is not the sensitive class, and
@@ -264,18 +263,26 @@ export function recordActorAttestation(
   member: MemberRow,
   att: ActorAttestation,
 ): void {
+  // ADR 442 (the wall) — the gate refused a session-reaching tool. The one attestation that records a
+  // `deny`: the refusal itself happened client-side, before any round trip (a daemon outage cannot open
+  // it), so this row is its only durable trace. Tool and harness only — no body, target or session id.
+  if (att.kind === 'session-denied') {
+    appendAudit(srv.db, team.id, {
+      actor: member.name,
+      action: 'gate.session_denied',
+      target: null,
+      result: 'deny',
+      detail: { tool: att.tool, ...(att.harness ? { harness: att.harness } : {}) },
+    });
+    return;
+  }
   // ADR 167 — a seat used the harness's session-to-session send. Everything sensitive was reduced to
   // sha256-16 client-side (body AND target session id — stricter than the Bash split below, because a
   // session message is another agent's incoming context and a session id is contractually
   // machine-local), so this row records exactly what arrived and nothing needed redacting here.
+  // ADR 442 retired increment 2's confirmation loop with the relay: nothing is a sanctioned relay any
+  // more, so a `nudgeRef` is recorded as observed and never resolved.
   if (att.kind === 'session-message') {
-    // ADR 167 §D5 — the confirmation loop: a ULID in the body that resolves to a directed message on
-    // this team marks the row a sanctioned delivery-rail relay, and recompose-and-compare says
-    // whether it was verbatim. Fully derived; a non-resolving ULID leaves a plain observation row.
-    const confirmed = att.nudgeRef
-      ? confirmNudge(srv.db, team.id, att.nudgeRef, att.bodyFingerprint)
-      : null;
-    if (confirmed) recordCcdNudge(confirmed.verbatim ? 'relayed_verbatim' : 'relayed');
     appendAudit(srv.db, team.id, {
       actor: member.name,
       action: 'actor.session_message',
@@ -286,7 +293,6 @@ export function recordActorAttestation(
         ...(att.bodyFingerprint ? { body_fingerprint: att.bodyFingerprint } : {}),
         ...(att.sessionRef ? { session_ref: att.sessionRef } : {}),
         ...(att.nudgeRef ? { nudge_ref: att.nudgeRef } : {}),
-        ...(confirmed ?? {}),
       },
     });
     return;

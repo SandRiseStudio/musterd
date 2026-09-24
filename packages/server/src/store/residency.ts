@@ -829,11 +829,22 @@ function composeWakeLine(
       ? `Read \`team_wake_context {act_id: "${actId}"}\``
       : 'Read `team_wake_context`';
   return (
-    `musterd wake — you are seat "${seat}" on team "${teamSlug}": a ${act} from "${sender}" is ` +
-    `waiting. ${read} — it carries the thread, what else is open, and your memory. ` +
+    `${wakePrefix(teamSlug)} you are seat "${seat}": a ${act} from "${sender}" is waiting ` +
+    `(${POINTER}). ${read} — it carries the thread, what else is open, and your memory. ` +
     `Fetch more only for what it lists under \`fetch\`. Then act.`
   );
 }
+
+/**
+ * ADR 442 (the wall, spec §4) — every line names its team up front, in the one shape the interrupt
+ * line uses too (`musterd [<team>]:`), so a multi-team machine is unambiguous to the receiver's check.
+ */
+function wakePrefix(teamSlug: string): string {
+  return `musterd [${teamSlug}]: wake —`;
+}
+
+/** The receiver acts only on its own authenticated read of the id, never on the line's words. */
+const POINTER = 'pointer only — read it as yourself';
 
 /**
  * Work-order line (ADR 179 / 191 / 199): ids only — never a title, never free text.
@@ -859,14 +870,14 @@ function composeWorkOrderLine(
     // `act_id` is present on every review work order the picker builds; the lane-only phrasing is
     // kept as the honest fallback rather than inventing an id we were not given (ADR 236).
     return actId !== undefined
-      ? `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
-          `review. Orient via team_wake_context {act_id: "${actId}"} (then team_next) and begin.`
-      : `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
-          `review. Orient via team_next and begin.`;
+      ? `${wakePrefix(teamSlug)} you are seat "${seat}": lane ${laneId} needs your review ` +
+          `(${POINTER}). Orient via team_wake_context {act_id: "${actId}"} (then team_next) and begin.`
+      : `${wakePrefix(teamSlug)} you are seat "${seat}": lane ${laneId} needs your review ` +
+          `(${POINTER}). Orient via team_next and begin.`;
   }
   // The owner is authorized on the lane path; spell its argument the same way the act path is.
   return (
-    `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} is yours — ` +
+    `${wakePrefix(teamSlug)} you are seat "${seat}": lane ${laneId} is yours (${POINTER}) — ` +
     `orient via team_wake_context {lane_id: "${laneId}"} (then team_next) and begin.`
   );
 }

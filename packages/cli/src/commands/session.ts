@@ -1412,16 +1412,14 @@ export function labelNudgeHasNoSidebarWrite(env: NodeJS.ProcessEnv = process.env
   return typeof tp === 'string' && TERMINAL_TERM_PROGRAMS.has(tp);
 }
 
-/** `session label-nudge` — hook-driven, hence silent-or-one-line and never failing. */
+/**
+ * `session label-nudge` — retired by ADR 442 (the wall). It sent sessions to the Claude Code peer
+ * sweep, which renamed every session on the machine; a seat no longer reaches outside itself, and
+ * the host labels seat sessions (ADR 166). Kept as a silent no-op because seats provisioned before
+ * the wall still run it from their UserPromptSubmit hook — an unknown subcommand there would be
+ * noise on every turn until the hook is refreshed.
+ */
 function labelNudgeCommand(): number {
-  try {
-    if (labelNudgeHasNoSidebarWrite()) return 0;
-    if (labelSweepDue()) {
-      process.stdout.write(`${LABEL_NUDGE_TEXT}\n`);
-    }
-  } catch {
-    // hook contract: never fail, never noise
-  }
   return 0;
 }
 
