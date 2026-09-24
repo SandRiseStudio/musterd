@@ -6,7 +6,7 @@ import { appendAudit, listAudit } from './audit.js';
 import { openLane, updateLane } from './lanes.js';
 import { addMember, getMemberByName } from './members.js';
 import { saveMemory } from './memory.js';
-import { insertMessage } from './messages.js';
+import { countOpenLoops, insertMessage } from './messages.js';
 import { attach } from './presence.js';
 import {
   WAKE_DEFER_SNOOZE_MS,
@@ -284,7 +284,12 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
     expect(order.composed_line).toContain('team_wake_context {act_id: "u1"}');
     // ADR 430 §7: the packet is the orientation; the inbox ritual is no longer prescribed.
     expect(order.composed_line).toMatch(
-      /Read `team_wake_context \{act_id: "u1"\}` — it carries the thread, what else is open, and your memory\. Fetch more only for what it lists under `fetch`\. Then act\./,
+      /Read `team_wake_context \{act_id: "u1"\}` — it carries the thread, what else is open, and your memory\. Fetch more only for what it lists under `fetch`\./,
+    );
+    // ADR 436 clause 5: the line says what discharges — an act IN the thread, never one beside it.
+    expect(order.composed_line).toContain(
+      'Then answer IN its thread (`reply_to: "u1"`) — accept, decline, resolve, or a reply; ' +
+        'a message outside the thread answers nothing.',
     );
     expect(order.composed_line).not.toContain('read it via team_inbox_check');
     // ADR 442 (the wall, spec §4): every line names its team up front and reads as a pointer.
@@ -590,6 +595,21 @@ describe('ADR 434: a discharged act never re-wakes its seat', () => {
     msg(db, team, nick, ada, 'message', 'nudge', woke + 1, { thread: 'h1' });
     const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
     expect(orders.map((o) => o.act_id)).toEqual(['h1']);
+  });
+
+  it("ADR 436 clause 5: an answer sent OUTSIDE the thread is not re-leased, and discharges nothing — ghost's arm-E shape", () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    const woke = Date.now() - 2 * 3_600_000;
+    wakeOutcomeRow(db, team, 'Ada', 'h1', 'residency.woke', woke);
+    // The woken seat answers with a directed message beside the act: no thread, no in_reply_to.
+    msg(db, team, ada, nick, 'message', 'beside', woke + 1);
+    // The wake edge holds (ADR 434 §2: the completed wake spent the act)…
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+    // …but the sender is still owed an answer — which is why the wake line now says, in words, that
+    // only an act IN the thread answers.
+    expect(countOpenLoops(db)).toBe(1);
   });
 
   it("(b) the seat's OWN later turn in the thread does not reopen it", () => {

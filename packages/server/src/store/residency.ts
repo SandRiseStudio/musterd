@@ -828,10 +828,19 @@ function composeWakeLine(
     actId !== undefined
       ? `Read \`team_wake_context {act_id: "${actId}"}\``
       : 'Read `team_wake_context`';
+  // ADR 436 clause 5 — discharge, in words, on every harness. ADR 434's predicate counts only an
+  // act IN the thread (accept/decline, a resolve on it, or the recipient's own reply there); a
+  // directed message sent beside it discharges nothing, and the sender keeps waiting. Ghost's
+  // arm-E answer (2026-09-21) was exactly that shape — no line had ever said otherwise.
+  const answer =
+    actId !== undefined
+      ? `answer IN its thread (\`reply_to: "${actId}"\`)`
+      : 'answer IN its thread';
   return (
     `${wakePrefix(teamSlug)} you are seat "${seat}": a ${act} from "${sender}" is waiting ` +
     `(${POINTER}). ${read} — it carries the thread, what else is open, and your memory. ` +
-    `Fetch more only for what it lists under \`fetch\`. Then act.`
+    `Fetch more only for what it lists under \`fetch\`. Then ${answer} — accept, decline, ` +
+    `resolve, or a reply; a message outside the thread answers nothing.`
   );
 }
 
