@@ -276,6 +276,18 @@ the provisioned agent), so the folder you set up in is immediately active while 
 folder stays read-only. Server-side this needs nothing new: `/health` and the roster are already
 unauthenticated; `inbox` + writes already require a member token.
 
+**The wall's client half (ADR 442).** `gate check --stdin` decides session reach **first** — before
+the working-tree check and before any daemon round trip (`sessionReachReason`), so a throw or an
+outage downstream cannot open it. In a bound folder every `SESSION_REACH_TOOLS` call is refused
+with a deny the harness understands (`hookSpecificOutput.permissionDecision`), except `SendMessage`
+toward a subagent this session recorded through `gate record-subagent` (`subagentLedger.ts`, the
+PostToolUse `Agent` one-shot). The refusal is then attested best-effort as `session-denied`
+`{tool, harness}` — a dead daemon loses the row, never the deny. An unbound folder is outside the
+gate's jurisdiction: no seat, nothing to wall off, nothing audited. The canary for all of it,
+driving the built binary the way a harness does, is `wall.canary.e2e.test.ts` (`06-testing.md`).
+The wall stops model mistakes; it is not a boundary against a hostile process under the same OS
+user (`docs/design/security.md`).
+
 ## Commands (args, flags, output, exit)
 
 All commands accept global `--team <slug>`, `--server <url>`, `--json` (machine output, no color), `--no-color`, `--quiet` (suppress the reachability nudge below). `musterd --version` / `-v` / `version` prints the `@musterd/cli` `package.json` version and exits (ADR 067) — intercepted in `main()` before the help path so it isn't swallowed.

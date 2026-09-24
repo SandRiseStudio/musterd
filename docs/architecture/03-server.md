@@ -199,6 +199,15 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - **`POST /teams/:slug/availability`** (authed via `authMember`): the caller sets **their own** seat's availability axis (SPEC A.6 Axis 2). Body `{ status: available|away|dnd, until? }`; `until` (ms epoch) rides only `away` (the `away_until` encoding) — the handler drops a stray `until` from `available`/`dnd` so the stored shape can't lie. Persisted by `store/members.ts` `setAvailability(db, memberId, availability|null)` into the **existing `members.availability` TEXT column** (JSON-encoded) — **no migration**. `rows.ts` `toMember` parses it back through `AvailabilitySchema` defensively (a malformed/legacy blob degrades to `null` = implicit-available). Returns the updated member summary.
 - **Never inferred, self-only.** Only the member's own authed call sets it; no other seat or heuristic does (contrast presence/activity, which are derived). The roster `summarize` already carries `availability` via `toMember`, so it surfaces with no extra plumbing. The notify loop reads it back **client-side** to tier deliveries (away holds all but `urgent`; dnd passes directed + `urgent`); the server only stores + exposes. The v0.3 governed superset — `off_hours`, schedule enforcement, the `can_*` capability gating who may set/flag — is the named seam, not built here.
 
+## The wall (ADR 442)
+
+A seat reaches no session outside the seat set. The daemon's share of that is small, and all of it is here:
+
+- **No `delivery_hint`.** `routeEnvelope`'s ack carries none for any recipient kind — the seat↔seat relay (ADR 167 increment 2) and its `nudge.decision` audit row are gone. The `DeliveryHint` type stays in `@musterd/protocol` so an older daemon's ack still parses; nothing acts on one.
+- **`gate.session_denied`.** `POST /teams/:slug/actor` with kind `session-denied` writes one audit row per refused call: `result: deny`, `target: null`, detail `{tool, harness?}` — no body, no session id, no credential. The row records a decision the client already made (the CLI gate refuses locally, before any round trip — `04-cli.md`); it is not the decision, and a daemon outage loses only the row.
+- **Lines are pointers.** Every interrupt, wake and nudge line the daemon composes names its team (`musterd [<team>]:`) and says to read it as yourself; it never carries a body. A seat acts only on what its own authenticated read of the named act returns.
+- **What this does and does not protect:** the wall stops model mistakes — cross-session and cross-identity. It is not a boundary against a hostile process under the same OS user; that is credential custody (`docs/design/security.md`).
+
 ## The doorbell (ADR 443)
 
 Something addressed to a human rings them through surfaces musterd owns, never a harness session.

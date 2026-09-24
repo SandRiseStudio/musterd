@@ -96,6 +96,13 @@ Split into what the room found are two different things: an idle **detector** (d
 when the model goes idle?) and idle **delivery** (does what fires reach the model?). Idle at the
 prompt waiting on a human is a third row.
 
+A delivery rail that once ran beside these is gone: the seat↔seat relay (ADR 167 increment 2 — a
+`delivery_hint` on the ack telling one seat to nudge another's session through `SendMessage`) was
+retired whole by [ADR 442](../decisions/442-the-wall-seats-reach-no-session-outside-the-seat-set.md)
+on 2026-09-23. A seat reaches a teammate only through the daemon; the rails scored below are the
+daemon's and the harness's own, never another seat's session. The wall stops model mistakes, not a
+hostile same-user process.
+
 | harness | detector | delivery | idle-at-prompt |
 | --- | --- | --- | --- |
 | cursor | none | none | deaf until a human prompts |

@@ -58,6 +58,20 @@ marker; and a fixture `future.harness` adapter participates in selection/reconci
 attaching as Surface `other`. Exercises only shipped commands and launcher contracts — never
 reconciler internals.
 
+### The wall canary (ADR 442)
+
+[`packages/cli/src/wall.canary.e2e.test.ts`](../../packages/cli/src/wall.canary.e2e.test.ts) is the
+one test that says the wall is up on `main`. Every other ADR 442 test pins one piece in-process;
+this one drives the **built** `musterd gate check --stdin` as a child process — the PreToolUse hook
+contract a harness actually uses — from a folder bound to a seat, against an in-process daemon: a
+session-reaching tool is refused with a deny the harness reads; the refusal lands as
+`gate.session_denied` carrying no body, target or session id; a dead daemon still refuses;
+`SendMessage` toward a subagent the session recorded is allowed and toward anyone else is not; and
+an unbound folder reads nobody's inbox (exit 4) even with a human in the vault. It needs `dist/`
+(`pnpm -r build`) — CI builds before it tests, and a missing build fails the canary rather than
+skipping it. The wall stops model mistakes; it is not a boundary against a hostile process under
+the same OS user.
+
 ### Paved-road acceptance boundary
 
 The optional Tailscale + Aperture paved road does not yet have an automated end-to-end scenario under
