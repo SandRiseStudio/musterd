@@ -84,6 +84,18 @@ seeing that person, and every guard downstream reads the seat as empty.
 - An older wake adapter that does not stamp `wake` is treated as attended by any later wake. The
   cost is a deferral, never a displacement.
 
+- **2026-09-24, host backstop shipped (lane 01M37QHNC8, part (b)).** Before it spawns, the wake
+  host already defers when a transcript in the workspace is being written. It now also defers,
+  with reason `attended-session-open`, when an interactive harness process is running in the
+  workspace or under it (`session/attendedProcess.ts`). For Claude Code, that is a `claude` process
+  that is not a headless `-p` / `--print` run. A wake child is always headless, so it never counts.
+  When the process table cannot be read, or the harness has no process signature, the check
+  answers "cannot tell" and does not defer. This covers the case the server rule cannot: an open
+  session whose presence the daemon has already lost, like nick's session after 11:59:52. One
+  cost: a terminal left open on a seat's workspace holds off that seat's wakes while it stays
+  open. That is intended, because a person has the seat and the act waits in the inbox they are
+  looking at.
+
 ## Observability & Evaluation
 
 - Traces: `claim.refused` rows with `reason: 'attended_session'` count how often the rule fires:

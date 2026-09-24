@@ -99,6 +99,7 @@ function deps(over: Partial<HostPollDeps> & Pick<HostPollDeps, 'backends'>): Hos
     readAgentKey: () => 'mskey_test',
     // Deterministic guard state: default = no local session (the pre-capture world).
     liveness: () => ({ state: 'none' }),
+    attendedProcess: () => null,
     verifyWindowMs: 50,
     verifyPollMs: 5,
     ...over,
@@ -675,6 +676,48 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
       { lease_id: 'L1', occupied: false, deferred: true, reason: 'local-session-live' },
     ]);
     expect(lines.join('\n')).toContain('wake deferred: scout');
+  });
+
+  it('defers when an attended session is open but idle — no fresh transcript (ADR 444 backstop)', async () => {
+    // 2026-09-22: nick's dolly session was open in the workspace, its transcript idle for minutes,
+    // and the daemon no longer saw its presence. The transcript guard passed and a wake ran 25 min
+    // beside it. An open, non-headless harness process in the workspace is the attended session.
+    const { client, calls } = fakeClient([order()]);
+    const { backend, specs } = fakeBackend();
+    const lines: string[] = [];
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        log: (l) => lines.push(l),
+        liveness: () => ({ state: 'resumable' }),
+        attendedProcess: (workspace, harness) => {
+          expect(workspace).toBe('/ws/scout');
+          expect(harness).toBe('claude-code');
+          return { pid: 4242 };
+        },
+      }),
+    );
+    expect(specs).toHaveLength(0);
+    expect(calls.reports).toEqual([
+      { lease_id: 'L1', occupied: false, deferred: true, reason: 'attended-session-open' },
+    ]);
+    expect(lines.join('\n')).toContain('pid 4242');
+  });
+
+  it('spawns when the process check cannot tell (undefined) — cannot tell is not attended', async () => {
+    const { client } = fakeClient([order()]);
+    const { backend, specs } = fakeBackend();
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        attendedProcess: () => undefined,
+      }),
+    );
+    expect(specs).toHaveLength(1);
   });
 
   it('the guard defers on a demoted conflict too — slot live, enumeration disagrees (ADR 166 inc 3)', async () => {
