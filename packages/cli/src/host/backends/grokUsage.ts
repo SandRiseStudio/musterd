@@ -86,3 +86,47 @@ export function readGrokWakeUsage(
     return undefined;
   }
 }
+
+const GrokWakeSummary = z
+  .object({
+    info: z.object({ id: z.string().min(1) }).passthrough(),
+    created_at: z.string().optional(),
+    session_kind: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * The Grok session id of the wake that started at `startedAt` in `workspace` (ADR 436 clause 4). A
+ * fresh Grok wake has no id at spawn, so the host records a `wake-<lease>` placeholder; at exit this
+ * names the real one — the newest HEADLESS session in the workspace's group created at-or-after the
+ * spawn. Headless is the discriminator: a wake runs `grok -p`, and an interactive session a human
+ * opened beside it must never be mistaken for the wake's own. Undefined is "cannot tell".
+ */
+export function findGrokWakeSessionId(
+  workspace: string,
+  startedAt: number,
+  home = process.env['GROK_HOME'] ?? join(homedir(), '.grok'),
+): string | undefined {
+  const dir = grokSessionsDirFor(home, workspace);
+  let best: { created: number; id: string } | undefined;
+  try {
+    for (const entry of readdirSync(dir)) {
+      try {
+        const parsed = GrokWakeSummary.safeParse(
+          JSON.parse(readFileSync(join(dir, entry, 'summary.json'), 'utf8')),
+        );
+        if (!parsed.success) continue;
+        const { info, created_at, session_kind } = parsed.data;
+        if (session_kind !== undefined && session_kind !== 'headless') continue;
+        const created = created_at ? Date.parse(created_at) : NaN;
+        if (!Number.isFinite(created) || created < startedAt) continue;
+        if (!best || created > best.created) best = { created, id: info.id };
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+  return best?.id;
+}

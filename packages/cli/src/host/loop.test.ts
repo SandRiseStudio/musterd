@@ -915,6 +915,35 @@ describe('the supplementary wake-cost report (inc 5)', () => {
   });
 });
 
+describe('a wake that settled is over (ADR 436 clause 4)', () => {
+  it('the LOOP stamps the claimed capture ended at settle, and never reports the claim', async () => {
+    const { client, calls } = fakeClient([order()]);
+    const claim = { harness: 'grok', ids: ['wake-L1', undefined], id: 'grok-real' };
+    const backend: ActuatorBackend = {
+      harness: 'grok',
+      wake: async () => ({
+        outcome: { occupied: true, session: 'fresh' },
+        settled: Promise.resolve({ duration_ms: 900, captures: [claim] }),
+      }),
+    };
+    const ended: { workspace: string; claim: unknown }[] = [];
+    const result = await pollHostOnce(
+      deps({
+        backends: new Map([['grok', backend]]),
+        loadRegistry: () => ({ entries: [entryOf({ harness: 'grok' })] }),
+        clientFor: () => client,
+        endCapture: (workspace, c) => {
+          ended.push({ workspace, claim: c });
+          return true;
+        },
+      }),
+    );
+    await Promise.all(result.settled);
+    expect(ended).toEqual([{ workspace: '/ws/scout', claim }]);
+    expect(calls.reports[1]).toEqual({ lease_id: 'L1', occupied: true, duration_ms: 900 });
+  });
+});
+
 describe('pollHostOnce — wake-progress after spawn (ADR 262)', () => {
   it('posts wake-progress after a spawn, before the outcome report', async () => {
     const { client, calls } = fakeClient([order({ derivation: 'work_order', lane_id: 'L' })]);

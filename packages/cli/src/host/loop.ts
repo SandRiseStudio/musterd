@@ -10,8 +10,15 @@ import { HttpClient } from '../client.js';
 import { findBinding } from '../config.js';
 import { attendedHarnessProcess } from '../session/attendedProcess.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../session/liveness.js';
-import type { ActuatorBackend, VerifyResult, WakeBounds, WakeOutcome } from './backend.js';
+import type {
+  ActuatorBackend,
+  VerifyResult,
+  WakeBounds,
+  WakeCompletion,
+  WakeOutcome,
+} from './backend.js';
 import { canonicalServer, loadHostRegistry, type HostRegistryEntry } from './registry.js';
+import { endWakeCapture } from './wakeCapture.js';
 
 /**
  * The host poll loop (ADR 131 §1) — the actuator half of harness residency, in the `musterd notify`
@@ -58,6 +65,8 @@ export interface HostPollDeps {
   liveness?: (workspace: string, harness?: string) => LocalSessionLiveness;
   /** ADR 444 backstop: an open, non-headless harness process in the workspace. */
   attendedProcess?: (workspace: string, harness?: string) => { pid: number } | null | undefined;
+  /** ADR 436 clause 4: stamp a settled wake's claimed capture ended. */
+  endCapture?: typeof endWakeCapture;
   verifyWindowMs?: number;
   verifyPollMs?: number;
 }
@@ -453,7 +462,14 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
           // ADR 436 clause 1: an occupied wake whose backend settles with nothing still gets a
           // row — host-stamped duration from actuation to settle, priced as "prints no price".
           // Until 2026-09-21 a backend could make a wake vanish from the ledger this way (grok).
-          let completion = settledWith;
+          // ADR 436 clause 4: a wake that settled is over. Stamp the capture(s) the run claims
+          // ended, so a finished wake's still-warm session file cannot read `local-session-live`
+          // and defer the next wake for LOCAL_SESSION_LIVE_MS. Host-local: never reported.
+          const { captures, ...cost } = settledWith ?? {};
+          for (const claim of captures ?? [])
+            if ((deps.endCapture ?? endWakeCapture)(entry.workspace, claim))
+              deps.log(`${order.seat}'s wake session marked ended (${claim.harness})`);
+          let completion: WakeCompletion | undefined = settledWith ? cost : undefined;
           if (!completion && actuation.outcome.occupied) {
             completion = {
               duration_ms: Date.now() - actuatedAt,

@@ -239,6 +239,7 @@ async function attempt(
   });
   const settled: Promise<WakeCompletion | undefined> = exited.then((code) => {
     clearTimeout(watchdog);
+    sessionId ??= parseOpencodeSessionLine(buffer);
     const duration_ms = Date.now() - startedAt;
     ctx.log(
       `run for ${spec.order.seat} (${label}) settled: exit=${code ?? 'error'}` +
@@ -251,6 +252,8 @@ async function attempt(
       ...(usage ? { usage } : {}),
       ...(harnessCost !== undefined ? { harness_cost_usd: harnessCost } : {}),
       unpriced_reason: 'harness_price_unverified',
+      // ADR 436 clause 4: the capture this run made or resumed — the loop stamps it ended.
+      captures: [{ harness: 'opencode', ids: [sessionId, expectedId] }],
     };
   });
   const verified = await Promise.race([

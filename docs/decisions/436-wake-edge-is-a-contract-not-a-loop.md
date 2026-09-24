@@ -86,6 +86,18 @@ fix five contract holes.
   OUTSIDE the thread — ghost's arm-E shape — discharges nothing, and no seat is told so) and to
   whether the ledger carries a distinct answered-vs-discharged label.
 
+- **2026-09-24 (lane `01M3309Z28`, clause 4 — liveness):** the host loop now stamps `ended_at`
+  at settle on every capture a backend's `WakeCompletion.captures` claims (`host/wakeCapture.ts`);
+  backends name the capture, the loop writes it, so the guarantee stays in the loop per Decision 1.
+  The grokbot deferral had two causes, not one: nothing stamped a finished Grok wake ended, **and**
+  a fresh Grok capture was recorded as the `wake-<lease>` placeholder, which enumeration can never
+  match, so the ADR 199 override (`ended_at` outranks a warm file for the SAME session) could not
+  fire even had it been stamped. At settle the Grok backend names the real session — the newest
+  `session_kind: headless` summary created at or after spawn — so an interactive session a human
+  opened beside the wake is never taken for it, and the ADR 166 guardrail holds (a different live
+  session beside the ended capture stays live; tested). The rename also makes a later `-r` resume
+  name a real id. A session that took the slot mid-wake is never stamped: the claim must name it.
+
 ## Observability & Evaluation
 
 - **Traces:** per wake, the existing `residency.woke` / `residency.wake_cost` / `session_captured`

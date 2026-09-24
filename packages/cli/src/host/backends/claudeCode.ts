@@ -346,6 +346,8 @@ interface AttemptResult {
 
 interface AttemptOpts {
   label: 'fresh' | 'resumed';
+  /** The session this attempt runs — minted (`--session-id`) or resumed (`--resume`). */
+  sessionId: string;
   timeoutMs: number;
   verifyWindowMs?: number;
   confirmBeatMs: number;
@@ -432,6 +434,9 @@ function runAttempt(
     return {
       ...(summary?.cost_usd !== undefined ? { cost_usd: summary.cost_usd } : {}),
       duration_ms: summary?.duration_ms ?? Date.now() - spawnedAt,
+      // ADR 436 clause 4: the SessionEnd hook stamps a clean exit; the loop's stamp covers the exits
+      // it never sees — a watchdog kill, a crash — for the session this attempt ran.
+      captures: [{ harness: 'claude-code', ids: [opts.sessionId] }],
     };
   });
 
@@ -668,11 +673,13 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
           if (known.length === 0) return undefined;
           const costs = known.filter((k) => k.cost_usd !== undefined);
           const durations = known.filter((k) => k.duration_ms !== undefined);
+          const captures = known.flatMap((k) => k.captures ?? []);
           return {
             ...(costs.length > 0 ? { cost_usd: costs.reduce((a, k) => a + k.cost_usd!, 0) } : {}),
             ...(durations.length > 0
               ? { duration_ms: durations.reduce((a, k) => a + k.duration_ms!, 0) }
               : {}),
+            ...(captures.length > 0 ? { captures } : {}),
           };
         });
       // Per-order knobs (increment 5): tool policy + turn cap ride the argv; the transcript bound
@@ -754,6 +761,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
           ctx,
           {
             label: 'resumed',
+            sessionId: rung.id,
             timeoutMs: spec.bounds.timeout_ms,
             verifyWindowMs: deps.resumeVerifyWindowMs ?? RESUME_VERIFY_WINDOW_MS,
             confirmBeatMs: deps.confirmBeatMs ?? VERIFY_CONFIRM_BEAT_MS,
@@ -814,6 +822,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         ctx,
         {
           label: 'fresh',
+          sessionId,
           timeoutMs: remaining,
           confirmBeatMs: deps.confirmBeatMs ?? VERIFY_CONFIRM_BEAT_MS,
         },
@@ -851,6 +860,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
           ctx,
           {
             label: 'fresh',
+            sessionId,
             timeoutMs: Math.max(deadline - Date.now(), Math.min(10_000, spec.bounds.timeout_ms)),
             confirmBeatMs: deps.confirmBeatMs ?? VERIFY_CONFIRM_BEAT_MS,
           },
