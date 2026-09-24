@@ -106,6 +106,51 @@ daemon plist carries `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` and the
 posture for the **daemon**. What is dormant is the other side of ADR 089: the MCP adapter and the CLI
 are launched by the harness / the user's shell without that env, so `musterd.tool.call`,
 `musterd.cli.command` and the ADR 011 cross-agent link never export (0 such spans in the sink).
-[ADR 445](decisions/445-agent-traces-captured-local-first.md) R3 routes the endpoint into the MCP
-registration for dogfood seats; the cross-agent trace listed above as "not yet closed" is closed in
-code and open in config until then.
+~~[ADR 445](decisions/445-agent-traces-captured-local-first.md) R3 routes the endpoint into the MCP
+registration for dogfood seats~~ (that would break ADR 286 §1 — the registration env is exactly the
+launch marker); R3 as accepted reads it from the machine config instead, below. The cross-agent
+trace listed above as "not yet closed" is closed in code and open in config until that key is set.
+
+## The adapter and the CLI export too (ADR 445 R3, increment 0)
+
+`@musterd/telemetry` resolves its endpoint in this order: `OTEL_SDK_DISABLED=true` → off; any
+`OTEL_EXPORTER_OTLP_*` env → that (the standard OTel way, unchanged); else
+`~/.musterd/config.json` → `telemetry.otlp_endpoint`; else off. The MCP adapter is launched by the
+harness and the CLI by your shell, so the daemon plist's env never reaches them — the file is how
+all three processes agree on one sink without the registration env carrying anything but
+`MUSTERD_LAUNCH_SURFACE` (ADR 286).
+
+- **Fresh machine:** `musterd service install --otlp-endpoint http://127.0.0.1:4318` writes both the
+  plist env and the config key (`''` clears both). The install line prints `otlp: … (daemon plist +
+  <config path> for the adapter/CLI, ADR 445)`.
+- **This machine (plist already carries the endpoint):** do not bounce the daemon for it — add the
+  key by hand once: `"telemetry": { "otlp_endpoint": "http://127.0.0.1:4318" }` in
+  `~/.musterd/config.json`. Adapters pick it up on their next launch (`/mcp` reload or a new
+  session); the CLI on its next command.
+- **Falsifier:** `grep -c 'musterd.tool.call' ~/.musterd/otel-sink.log` is non-zero after one
+  `team_inbox_check` from a relaunched adapter, and `grep -c 'musterd.cli.command'` after one
+  `musterd status`. Zero after both means the key is not being read.
+
+**Claude Code's own OTel (the harness half of R3).** Claude Code exports its events
+(`claude_code.user_prompt`, `tool_result`, `tool_decision`, `api_request`, …) and cost/token metrics
+over OTLP when told to; the dev sink now summarizes `/v1/logs` too (one `log "<event>"` line per
+record; restart the sink LaunchAgent after this lands: `launchctl kickstart -k
+gui/$(id -u)/studio.sandrise.musterd-otel-sink`). This is a **global** Claude Code setting — it
+reaches every Claude Code session on the machine, not only musterd seats — so it is a hand step,
+not something `musterd` writes for you. In `~/.claude/settings.json`:
+
+```json
+"env": {
+  "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+  "OTEL_METRICS_EXPORTER": "otlp",
+  "OTEL_LOGS_EXPORTER": "otlp",
+  "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
+  "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318"
+}
+```
+
+Leave `OTEL_LOG_USER_PROMPTS` / `OTEL_LOG_ASSISTANT_RESPONSES` / `OTEL_LOG_TOOL_DETAILS` /
+`OTEL_LOG_TOOL_CONTENT` unset: the sink prints attributes verbatim into a plain-text log, and the
+content rails with a credential scrub are ADR 445 R1/R2, not this. `http/json` matters — the sink
+only parses JSON, and Claude Code's default is gRPC. Falsifier: `grep -c 'log "claude_code' ~/.musterd/otel-sink.log`
+non-zero after one prompt in a restarted Claude Code session.

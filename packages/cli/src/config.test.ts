@@ -23,8 +23,51 @@ import {
   requireUsableBinding,
   saveBinding,
   saveConfig,
+  setTelemetryEndpoint,
   type Config,
 } from './config.js';
+
+describe('telemetry.otlp_endpoint (ADR 445 R3)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-cfg-otlp-'));
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+  });
+  afterEach(() => delete process.env['MUSTERD_CONFIG']);
+
+  it('is absent by default — off is the ADR 015 posture', () => {
+    expect(loadConfig().telemetry).toBeUndefined();
+  });
+
+  it('round-trips through set / load, trims, and clears on an empty value', () => {
+    setTelemetryEndpoint(' http://127.0.0.1:4318 ');
+    expect(loadConfig().telemetry).toEqual({ otlp_endpoint: 'http://127.0.0.1:4318' });
+    expect(
+      (JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8')) as Config).telemetry,
+    ).toEqual({ otlp_endpoint: 'http://127.0.0.1:4318' });
+    setTelemetryEndpoint('');
+    expect(loadConfig().telemetry).toBeUndefined();
+    expect('telemetry' in JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'))).toBe(false);
+  });
+
+  it('survives a concurrent writer that did not touch it (ADR 255 three-way merge)', () => {
+    const a = loadConfig();
+    const b = loadConfig();
+    setTelemetryEndpoint('http://127.0.0.1:4318');
+    b.teamHome['revive'] = '/somewhere';
+    saveConfig(b);
+    expect(loadConfig().telemetry).toEqual({ otlp_endpoint: 'http://127.0.0.1:4318' });
+    expect(loadConfig().teamHome['revive']).toBe('/somewhere');
+    // and a writer that clears it wins over a stale snapshot that still carries it
+    delete a.telemetry;
+    saveConfig(a);
+    expect(loadConfig().telemetry).toEqual({ otlp_endpoint: 'http://127.0.0.1:4318' }); // `a` never had it: no change
+    const c = loadConfig();
+    delete c.telemetry;
+    saveConfig(c);
+    expect(loadConfig().telemetry).toBeUndefined();
+  });
+});
 
 describe('binding registry (ADR 020)', () => {
   let dir: string;
