@@ -8,6 +8,7 @@ import { resolveWorkspace } from '@musterd/protocol/project';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import { HttpClient } from '../client.js';
 import { findBinding } from '../config.js';
+import { attendedHarnessProcess } from '../session/attendedProcess.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../session/liveness.js';
 import type { ActuatorBackend, VerifyResult, WakeBounds, WakeOutcome } from './backend.js';
 import { canonicalServer, loadHostRegistry, type HostRegistryEntry } from './registry.js';
@@ -55,6 +56,8 @@ export interface HostPollDeps {
   readAgentKey?: (workspace: string) => string | undefined;
   clientFor?: (server: string, agentKey: string) => WakeClient;
   liveness?: (workspace: string, harness?: string) => LocalSessionLiveness;
+  /** ADR 444 backstop: an open, non-headless harness process in the workspace. */
+  attendedProcess?: (workspace: string, harness?: string) => { pid: number } | null | undefined;
   verifyWindowMs?: number;
   verifyPollMs?: number;
 }
@@ -346,6 +349,26 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
         span.setAttribute('musterd.deferred', true);
         span.setStatus({ code: SpanStatusCode.OK });
         await report({ occupied: false, deferred: true, reason: 'local-session-live' });
+        span.end();
+        continue;
+      }
+      // ADR 444 backstop: the transcript guard cannot see a session that is open but idle — its
+      // person stepped away, so nothing is being written. 2026-09-22: that session had also lost its
+      // presence, the daemon leased a wake, and the wake ran 25 min beside it. An open, non-headless
+      // harness process in the worktree is that session; a wake child is headless and never counts.
+      // "Cannot tell" (`undefined`) does not defer: the transcript guard above already ran.
+      const attended = (deps.attendedProcess ?? attendedHarnessProcess)(
+        entry.workspace,
+        entry.harness,
+      );
+      if (attended) {
+        deps.log(
+          `wake deferred: ${order.seat} — an attended ${entry.harness} session (pid ${attended.pid}) ` +
+            `is open in ${entry.workspace}, idle but not closed; the act stays due`,
+        );
+        span.setAttribute('musterd.deferred', true);
+        span.setStatus({ code: SpanStatusCode.OK });
+        await report({ occupied: false, deferred: true, reason: 'attended-session-open' });
         span.end();
         continue;
       }
