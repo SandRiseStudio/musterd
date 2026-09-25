@@ -1,6 +1,6 @@
 # 446 — Remote MCP over HTTPS with per-seat OAuth, so phone apps can join a team
 
-- Status: proposed — 2026-09-24
+- Status: accepted — 2026-09-25 (increment 1 landed; rehearsal is increment 2)
 - Date: 2026-09-24
 - Lane: `01M3AKN6GFHZ3DGCJPRE4RG2TE` (goal `demo`)
 - Builds on: [ADR 069](069-credential-namespaces.md) (credential namespaces) /
@@ -9,8 +9,13 @@
   a nonce may ride a URL, a secret may not) / [ADR 337](337-agent-http-credential-lease.md)
   (self-identifying HTTP authority + Presence-bound lease) / [ADR 057](057-ambient-presence.md)
   (ambient presence) / SPEC A.2 (servers store only hashes) / SPEC A.7 (prefix-dispatch auth).
-- Needs: no new runtime dependency (`@modelcontextprotocol/server@2.0.0` already ships
-  `createMcpHandler`, the fetch-style HTTP rail; stdio keeps the path it has).
+- Needs: one new runtime dependency for `@musterd/server` — `@modelcontextprotocol/server@2.0.0`
+  (the same pin `@musterd/mcp` already ships; it carries `createMcpHandler`, the fetch-style HTTP
+  rail). Alternative considered: hand-rolling Streamable HTTP framing in the daemon (no dep, but
+  every interop subtlety with the two phone apps becomes ours to discover in rehearsal instead of
+  the SDK's to have handled). The server does NOT import `@musterd/mcp` — the remote tools call
+  the same store paths the REST routes use (`routeEnvelope`, `listInbox`), so there is one
+  semantics, not two, and no cross-package import. stdio keeps the path it has.
 - Review gate: [big-body](.) reviews security before merge (lane requirement).
 
 ## Context
@@ -61,13 +66,16 @@ authorization server whose only user is a seat holder proving what they already 
 The connector URL is `https://<host>/mcp/<team>` — the team rides the path because a phone app
 configures exactly one URL and no musterd headers. `GET` serves the SSE stream, `POST` the JSON-RPC
 frames (Streamable HTTP), `DELETE` terminates the session. Served by SDK `createMcpHandler` with a
-per-request factory: each request builds the same `buildMcpServer` every harness gets (same tools,
-same scope, same telemetry), over a `MusterdClient` bound to the bearer (see §4), never over a
-shared client.
+per-request factory: each request builds a fresh `McpServer` bound to the request's bearer (same
+tool names and input shapes as the adapter, same `routeEnvelope`/`listInbox` store paths the REST
+routes use), never a shared client. Increment 1 registers the Done-line tools only (`team_join` /
+`team_inbox_check` / `team_send` — the join-page prompt's whole vocabulary); the rest of the
+adapter surface converges in increment 3, after rehearsal says which tools a phone reaches for.
 
-Stateful sessions (`mcp-session-id`) are supported with an in-memory session map bounded like the
-handoff relay (cap + TTL, §5's posture); a missing/expired session fails closed to a fresh
-`initialize`, never to another seat's state.
+Stateful sessions (`mcp-session-id`) are served by the SDK handler (one handler per team, bounded
+by the team count — the factory itself holds no seat state); a missing/expired session fails
+closed to a fresh `initialize`, never to another seat's state. Session-map growth under many
+phones is rehearsal-measured hardening (increment 3), not an increment-1 bound.
 
 TLS terminates in front (the tunnel lane); the daemon itself keeps serving HTTP. The OAuth routes
 (§3) **refuse on non-TLS** unless loopback (`isLocalPeer` + `x-forwarded-proto`): a bearer minted
@@ -139,7 +147,9 @@ apps' setup prompts call it; failing there fails the demo).
 - Redirects: exact-match against registered URIs (no prefix/substring matching); `state` passed
   through untouched, never trusted.
 - Rate limits: per-IP buckets on `register` / `authorize` / `token` (5/min register, 10/min authorize,
-  20/min token — tune in rehearsal); code-guessing is uneconomic at 256 bits + single-use + TTL.
+  20/min token — tune in rehearsal); the refusal is `rate_limited` (429, new protocol code — the
+  next move is retry, and a 403 would say it is final); code-guessing is uneconomic at 256 bits +
+  single-use + TTL.
 - Transport: OAuth + `/mcp` bearer refused over non-TLS except loopback (§1); `Cache-Control: no-store`
   + `Pragma: no-cache` on every token/code response; codes and tokens never in URLs except the one
   302 `code` param (the flow both apps require).
@@ -186,9 +196,11 @@ apps' setup prompts call it; failing there fails the demo).
 
 ## Consequences
 
-- `@musterd/protocol` grows two prefixes + OAuth zod schemas (ADR-gated, as required — this ADR is
-  the gate). `@musterd/server` grows three tables + six routes + the `/mcp/:team` mount. No new
-  runtime dependency; no CLI/MCP-adapter wire change (stdio path untouched).
+- `@musterd/protocol` grows two prefixes + OAuth zod schemas + a `rate_limited` (429) error code
+  (ADR-gated, as required — this ADR is the gate). `@musterd/server` grows one runtime dependency
+  (`@modelcontextprotocol/server@2.0.0`, same pin as the adapter), three tables (migration 72),
+  six routes + the `/mcp/:team` mount, and six `oauth.*` audit verbs (server-side union, no wire
+  change). No CLI/MCP-adapter wire change (stdio path untouched).
 - The daemon becomes an OAuth authorization server for exactly one audience (its own teams' humans)
   and exactly one client class (phone MCP apps). The abuse surface in §5 is new and must be reviewed
   as new — hence the merge gate.
@@ -197,10 +209,14 @@ apps' setup prompts call it; failing there fails the demo).
 
 ## Observability & Evaluation
 
-- Falsifier (runs at rehearsal): from a phone on cellular, add the connector, sign in, `team_join`,
-  `team_inbox_check`, `team_send` — the lane Done line. Fails if any step needs a laptop.
-- Audit trail (`oauth.*` verbs) + `GET /report` counting remote-bearer tool calls per seat (proves the
-  demo happened, per seat, without reading bodies).
-- Negative tests ship with increment 1 (§7): PKCE-downgrade refused, code replay refused, refresh
-  reuse revokes chain, cross-team bearer refused, non-TLS authorize/token refused, bearer for a
-  departed seat refused.
+- Traces: `oauth.*` audit verbs (`client_registered / code_issued / token_issued / token_rotated /
+  token_reused_revoked / revoked` — who, which client, when; never the secret) plus a
+  `GET /report` count of remote-bearer tool calls per seat. The demo's evidence is per-seat rows,
+  never bodies.
+- Eval: the rehearsal falsifier (increment 2) — from a phone on cellular, add the connector, sign
+  in, `team_join`, `team_inbox_check`, `team_send`. Fails if any step needs a laptop. Dataset: the
+  three-phone rehearsal matrix (Claude + ChatGPT, one on cellular, fresh team); baseline: today's
+  stdio-only adapter, which cannot complete step one.
+- Experiment: increment-1 negative tests ship with the lane (§7) — PKCE-downgrade refused, code
+  replay refused, refresh reuse revokes the chain, cross-team bearer refused, non-TLS
+  authorize/token refused, bearer for a departed seat refused.

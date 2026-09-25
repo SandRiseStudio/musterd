@@ -35,6 +35,9 @@ const CODE_EXIT: Record<ErrorCode, number> = {
   // ADR 328 §4 (ADR 355 amendment): the seat lives on another machine. Not a conflict (9) and not
   // "could not be decided" (12): the fix is an admin unbind or claiming from where the seat lives.
   bound_elsewhere: 13,
+  // ADR 446 (remote MCP): the OAuth endpoint's per-IP bucket is empty. Like hub_unreachable (12)
+  // this means "retry later" — its own exit so a script can tell "refused" from "come back".
+  rate_limited: 14,
 };
 
 export function exitForCode(code: ErrorCode): number {

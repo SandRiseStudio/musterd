@@ -399,6 +399,16 @@ export type AuditAction =
   // rotate self-announcing, which is the whole reason the bar can sit below admin-only: a rotation
   // nobody authorized still cannot happen quietly.
   | 'credential.rotate'
+  // ADR 446 (remote MCP): the phone authorization server. actor = the human seat (null on
+  // client_registered — registration is unauthenticated — and on revocation/reuse rows where the
+  // token named nothing); target = the client_id (null on revoked, where either token kind may
+  // arrive); detail carries `{ client_name }` / `{}` / `{ reason }` — never a secret or its hash.
+  | 'oauth.client_registered'
+  | 'oauth.code_issued'
+  | 'oauth.token_issued'
+  | 'oauth.token_rotated'
+  | 'oauth.token_reused_revoked'
+  | 'oauth.revoked'
   | 'signin.handoff_staged'
   | 'signin.handoff_redeemed'
   | 'signin.handoff_missed'
@@ -587,6 +597,12 @@ export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject> = {
   'actor.session_message': 'actor',
   'gate.session_denied': 'actor',
   'credential.rotate': 'actor',
+  'oauth.client_registered': 'none',
+  'oauth.code_issued': 'actor',
+  'oauth.token_issued': 'actor',
+  'oauth.token_rotated': 'actor',
+  'oauth.token_reused_revoked': 'none',
+  'oauth.revoked': 'actor',
   'signin.handoff_staged': 'actor',
   'signin.handoff_redeemed': 'actor',
   'signin.handoff_missed': 'none',

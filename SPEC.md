@@ -164,6 +164,8 @@ A new join/auth handshake is a MAJOR-of-MINOR change; it **landed as the isolate
 - **Agent bootstrap credential** — an `mskey_` secret scoped by a server-held record to one seat claim, one declared role-pool claim, or one residency host label (ADR 344). It authenticates only that use, is independently expirable/revocable, and is **not** an identity or sufficient to occupy a seat. Existing Team-wide agent keys remain accepted only as marked legacy records until that Team completes ADR 350's readiness-gated cutover. A Workspace exchanges legacy authority for seat scope only by presenting the legacy key together with its independent `msac_` seat credential. Cutover readiness requires successful scoped authentication—not minting alone—for every held agent seat and active residency host; an administrator MAY force an incomplete cutover, with unmet targets recorded. Cutover atomically revokes legacy records, clears the Team key hash, records the cutover timestamp, and appends its audit evidence.
 - **Grant** — admin-issued authorization to occupy a seat/role. Fields: `{ id, team, scope: seat|role, target, issued_by, lifetime: "once"|"ttl"|"standing", expires_at?, single_use?, revoked? }`. **At live approval the admin picks the lifetime** (once / N-hours TTL / until-revoke), so reconnects within the window don't re-prompt while keeping "no silent grant." Seat/role-scoped, expiring, revocable. Every issue/use/revoke is audited.
 - **Human credential** — per-human-seat secret; acts as that human; observes if role permits.
+- **OAuth access token** — per-human-seat bearer (`msat_`, 1h TTL) minted through the OAuth 2.1 authorization-code flow with PKCE S256 (A.13); authenticates exactly like a human credential (self-identifying, acting-seat must match-or-absent) with no session lease. Scoped to (team, member, client) at mint.
+- **OAuth refresh token** — per-human-seat bearer (`msrt_`, 30d TTL, single-use rotation); reuse of a burned refresh revokes the whole chain.
 - **Admin** — capability on a human seat (creator default).
 
 Servers MUST store only hashes of keys/credentials/grants. A `banned` seat's credential MUST be rejected.
@@ -316,12 +318,20 @@ Delivery is unchanged (at-least-once, cursor-based); **notification tiering** is
 | `GET`/`PUT` | `/teams/:slug/members/me/doorbell`          | a human's own doorbell sinks (ADR 443); personal URLs are readable by their owner only; every sink URL must be `https` to a public host                              |
 | `GET`    | `/teams/:slug/members/:name/doorbell`          | admin; a teammate's doorbell, masked — `{on, personal}` per sink, never a URL (ADR 443)                                                                              |
 | `GET`    | `/teams/:slug/audit`                           | admin; audit records                                                                                                                                                  |
+| `GET`    | `/.well-known/oauth-protected-resource/mcp/:team` | public; resource metadata naming this team's issuer (A.13)                                                                                                         |
+| `GET`    | `/.well-known/oauth-authorization-server/:team` | public; issuer, endpoints, `code_challenge_methods_supported: ["S256"]` (A.13); the global path 404s (multi-tenant honesty)                                     |
+| `POST`   | `/oauth/:team/register`                        | public, rate-limited; RFC 7591 dynamic client registration — public clients only; redirect URIs validated (https, no wildcards, no private hosts)                    |
+| `GET`    | `/oauth/:team/authorize`                       | TLS-except-loopback; renders the consent page (app, team, seat); PKCE S256 required                                                                                  |
+| `POST`   | `/oauth/:team/authorize`                       | TLS-except-loopback, rate-limited; the human proves the seat (`mscr_`); single-use 90s code rides one 302 to the exact registered redirect URI                        |
+| `POST`   | `/oauth/:team/token`                           | TLS-except-loopback, rate-limited; `authorization_code` (PKCE verifier) → `msat_`+`msrt_`; `refresh_token` → rotated pair; OAuth-style errors (`invalid_grant`, …)    |
+| `POST`   | `/oauth/:team/revoke`                          | TLS-except-loopback; RFC 7009 revocation of either token kind; unknown tokens still answer 200                                                                        |
+| `POST`/`GET`/`DELETE` | `/mcp/:team`                          | TLS-except-loopback, bearer (`msat_`); the adapter as Streamable HTTP — `team_join` (no-op when the bearer names the seat), `team_inbox_check`, `team_send`         |
 
 Sending an Envelope still requires the sender to **hold the occupancy** of `from` (replaces token==member). All read endpoints return a **viewer-scoped projection** per the recipient's `visibility_level`.
 
 ## A.8 Error / refusal codes
 
-Add `claim_conflict` (seat occupied; 409), `expired_grant` (410/403). Reuse `forbidden` (bad key / not allowed to observe / not admin), `not_found` (no such seat/role), and surface account states via `refused.code` (`disabled`/`banned`). `version_mismatch` covers an older client hitting this server.
+Add `claim_conflict` (seat occupied; 409), `expired_grant` (410/403). Reuse `forbidden` (bad key / not allowed to observe / not admin), `not_found` (no such seat/role), and surface account states via `refused.code` (`disabled`/`banned`). `version_mismatch` covers an older client hitting this server. `rate_limited` (429) covers the OAuth per-IP buckets — the next move is retry, never re-authenticate.
 
 ## A.9 Migration
 
@@ -490,4 +500,31 @@ ceiling. It returns `decision: "allow"` or `decision: "deny"` with stable refusa
 `denied_context_lane`, `denied_context_orientation`, and `denied_model`. Refusal status is structured
 and metadata-only; prompts, responses, provider payloads, and machine-local secrets never cross this
 boundary.
+
+## A.13 Remote MCP over HTTPS (Increment 1 — ADR 446)
+
+Phone MCP apps (Claude, ChatGPT) cannot spawn a local adapter process; what they can do is add a
+remote MCP server at a public HTTPS URL as a custom connector, speaking Streamable HTTP with
+OAuth 2.1. The daemon is the authorization server for its own teams' humans — no third-party IdP —
+and serves the adapter at `https://<host>/mcp/<team>` (the team rides the path because a phone app
+configures exactly one URL and no musterd headers).
+
+Two bearer kinds (`msat_` access, 1h; `msrt_` refresh, 30d, single-use rotation) are minted
+`prefix + base64url(randomBytes)`, stored only as SHA-256, returned once, never logged, never in
+audit `detail`. Scope is (team, member, client), bound at mint to a **human** seat — agent seats
+stay on the claim handshake. An `msat_` authenticates exactly like an `mscr_` (self-identifying,
+acting-seat must match-or-absent) with no session lease; presence derives from authenticated
+activity (ambient). Credential rotation revokes the seat's OAuth chains with it.
+
+The flow is discovery → dynamic client registration (public clients only) → authorization code
+with PKCE S256 (REQUIRED; `plain`/`none` refused) → bearer tokens. Codes are single-use, 90s TTL,
+bound to client + redirect URI + challenge + team + member; redirects match registered URIs
+exactly; reuse of a burned refresh revokes the whole chain. OAuth + bearer routes refuse non-TLS
+unless loopback. Token errors are OAuth-shaped (`invalid_grant`, `invalid_client`); audit verbs
+are `oauth.client_registered / oauth.code_issued / oauth.token_issued / oauth.token_rotated /
+oauth.token_reused_revoked / oauth.revoked` — who, which client, when; never the secret.
+
+Increment 1 serves the Done-line tools (`team_join` as no-op success when the bearer names the
+seat, `team_inbox_check`, `team_send`) with the adapter's input shapes; the rest of the surface
+converges in increment 3 after rehearsal says which tools a phone reaches for.
 

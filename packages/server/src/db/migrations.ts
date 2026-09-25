@@ -1722,6 +1722,56 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 446 (remote MCP over HTTPS): the daemon's minimal OAuth 2.1 authorization server.
+    // Three tables, sha256-only (SPEC A.2 — plaintext crosses exactly one response body and one
+    // 302 Location, never storage): registered phone-app clients, single-use 90s authorization
+    // codes (PKCE-bound), and access/refresh tokens with single-use refresh rotation (reuse of a
+    // burned refresh revokes the whole chain — the `chain_id` + `replaced_at`/`revoked_at` pair).
+    version: 72,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS oauth_clients (
+          client_id          TEXT PRIMARY KEY,
+          team_id            TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          client_name        TEXT NOT NULL,
+          redirect_uris      TEXT NOT NULL,
+          client_secret_hash TEXT,
+          auth_method        TEXT NOT NULL DEFAULT 'none',
+          created_at         INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_oauth_clients_team ON oauth_clients(team_id);
+        CREATE TABLE IF NOT EXISTS oauth_codes (
+          code_hash      TEXT PRIMARY KEY,
+          team_id        TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id      TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          client_id      TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+          redirect_uri   TEXT NOT NULL,
+          code_challenge TEXT NOT NULL,
+          scope          TEXT,
+          created_at     INTEGER NOT NULL,
+          expires_at     INTEGER NOT NULL,
+          used_at        INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_oauth_codes_team ON oauth_codes(team_id);
+        CREATE TABLE IF NOT EXISTS oauth_tokens (
+          token_hash  TEXT PRIMARY KEY,
+          kind        TEXT NOT NULL CHECK (kind IN ('access', 'refresh')),
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          client_id   TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE,
+          chain_id    TEXT NOT NULL,
+          scope       TEXT,
+          created_at  INTEGER NOT NULL,
+          expires_at  INTEGER NOT NULL,
+          replaced_at INTEGER,
+          revoked_at  INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_oauth_tokens_member ON oauth_tokens(team_id, member_id, revoked_at);
+        CREATE INDEX IF NOT EXISTS idx_oauth_tokens_chain ON oauth_tokens(chain_id);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

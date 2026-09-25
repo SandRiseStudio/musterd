@@ -40,6 +40,17 @@ export const TOKEN_PREFIXES = {
   node_invite: 'msinv_',
   /** A one-shot governed model launch handoff (ADR 411). */
   governed_launch: 'msla_',
+  /**
+   * OAuth access token (ADR 446) — what a phone MCP app presents on `/mcp/:team`. Opaque, 1h
+   * TTL, scoped to (team, member) at mint; authenticates exactly like an `mscr_` in
+   * `authMember` (self-identifying, acting-seat must match-or-absent) with NO session lease.
+   */
+  oauth_access: 'msat_',
+  /**
+   * OAuth refresh token (ADR 446) — 30d TTL, single-use rotation; reuse of a burned refresh
+   * revokes the whole chain (stolen-refresh detection).
+   */
+  oauth_refresh: 'msrt_',
 } as const;
 export type TokenKind = keyof typeof TOKEN_PREFIXES;
 
