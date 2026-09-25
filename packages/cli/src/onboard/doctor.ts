@@ -25,6 +25,7 @@ import { cliBuild } from '../version.js';
 import { isDeclined } from './declined.js';
 import { refreshDriftCache, type RefreshDriftDeps } from './driftCache.js';
 import { foreignAdapterNote, primaryCheckoutFor, siblingWorkspaces } from './entryGuard.js';
+import { borrowedGitRoot } from './guard.js';
 import { contentHash, establishedHarnesses, guidanceTargets, strippedBody } from './guidance.js';
 import type { Harness } from './harness.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
@@ -449,6 +450,25 @@ function inspectGitAttribution(binding: Binding | null, cwd: string): string[] {
       `ADR 109 per-seat rollups will credit the wrong actor. Nothing breaks, which is why this goes ` +
       `unnoticed. Repair it in place; do NOT run \`musterd init\`, which repoints the MCP entry every ` +
       `seat on this machine shares (ADR 143):\n${repair}`,
+  ];
+}
+
+/**
+ * A member Workspace that is not its own git root (ADR 447) — see {@link borrowedGitRoot}. A note,
+ * not drift: `--fix` routes drift to `init`/`wire`, and neither makes a folder a worktree. The repair
+ * keeps the folder's `.claude/` and `.musterd/` in place, so it is safe under a live session.
+ */
+export function borrowedGitRootNotes(cwd: string, home?: string): string[] {
+  const top = borrowedGitRoot(cwd, home);
+  if (!top) return [];
+  const tmp = `${cwd}.wt`;
+  return [
+    `this Workspace is not its own git root — git resolves it to ${top}, so Claude Code looks up ` +
+      `the musterd entry for that repo instead and this seat loads no musterd tools (ADR 447). Make ` +
+      `it a worktree of its repo, then restart its session:\n` +
+      `    git -C <a checkout of its repo> worktree add --detach ${tmp} origin/main\n` +
+      `    rsync -a --ignore-existing ${tmp}/ ${cwd}/ && rm -rf ${tmp}\n` +
+      `    git -C ${cwd} worktree repair`,
   ];
 }
 
@@ -1093,6 +1113,7 @@ export async function inspectProvisioning(
       ...deadHookLease,
       ...seatIdentity.notes,
       ...inspectGitAttribution(binding, cwd),
+      ...borrowedGitRootNotes(cwd),
       ...registryNotes,
       ...labelNotes,
       ...sessionReachWallNotes(harnesses.filter((h) => h.configured).map((h) => h.label)),

@@ -263,7 +263,8 @@ function resolveHome(config: Config, team: string, name: string, flag: string | 
   // folder under it.
   const refusal = bindingRefusal(dir);
   if (refusal) throw new CliError(`musterd human refused: ${refusal.reason}`, 2);
-  if (explicit) provisionWorkspace(name, { path: dir, team, gitIdentity: false });
+  if (explicit)
+    provisionWorkspace(name, { path: dir, team, branch: `human/${name}`, gitIdentity: false });
   // Guard the floor the moment it exists, before a credential lands on it. `team export` guards it too,
   // but a home is committable long before anyone exports a roster into it — the binding written just
   // below is already the secret, and the person may well `git init` here first.

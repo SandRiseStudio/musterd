@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
@@ -11,7 +12,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Binding, MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { bindingRefusal, liveBindingClobber, nameBoundElsewhere } from './guard.js';
+import {
+  bindingRefusal,
+  borrowedGitRoot,
+  liveBindingClobber,
+  nameBoundElsewhere,
+} from './guard.js';
 
 /** A folder binding whose seat is `name`. */
 const boundTo = (name: string): Binding => ({
@@ -187,5 +193,50 @@ describe('bindingRefusal — a binding never sits above a Workspace (reach spec 
     const home = layout();
     expect(bindingRefusal(join(home, 'nope', 'nor'), home)).toBeNull();
     rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe('borrowedGitRoot — a member Workspace is its own git root (ADR 447)', () => {
+  const layout = () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'borrow-')));
+    const teamRoot = join(home, 'musterd', 'revive');
+    const member = join(teamRoot, 'agents', 'fifty');
+    mkdirSync(member, { recursive: true });
+    return { home, teamRoot, member };
+  };
+  const initRepo = (dir: string) => execFileSync('git', ['init', '-q'], { cwd: dir });
+
+  it('names the repo above a plain member folder — fifty inside the team-home repo', () => {
+    const { home, teamRoot, member } = layout();
+    try {
+      initRepo(teamRoot);
+      expect(borrowedGitRoot(member, home)).toBe(teamRoot);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('is quiet when the member folder is its own git root', () => {
+    const { home, teamRoot, member } = layout();
+    try {
+      initRepo(teamRoot);
+      initRepo(member);
+      expect(borrowedGitRoot(member, home)).toBeNull();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('is quiet for a plain folder in no repo, and for folders off the layout', () => {
+    const { home, member } = layout();
+    const elsewhere = join(home, 'code', 'app', 'sub');
+    mkdirSync(elsewhere, { recursive: true });
+    try {
+      expect(borrowedGitRoot(member, home)).toBeNull();
+      initRepo(join(home, 'code', 'app'));
+      expect(borrowedGitRoot(elsewhere, home)).toBeNull();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

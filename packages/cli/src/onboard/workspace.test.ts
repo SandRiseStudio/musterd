@@ -31,6 +31,42 @@ describe('provisionWorkspace', () => {
     expect(existsSync(ws.dir)).toBe(true);
   });
 
+  it('--path from inside a repo makes the new folder a worktree — its own git root (ADR 447)', () => {
+    // fifty, 2026-09-25: `musterd agent fifty --path ~/agents-fifty` from a checkout got a plain
+    // folder. The layout move then carried it into the team-home repo, whose root Claude Code took
+    // as the project — and the seat's musterd entry, keyed to the folder, never loaded.
+    const repo = tmp('mwd-pathgit-');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
+    execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
+    const target = join(tmp('mwd-pathdest-'), 'June');
+
+    const ws = provisionWorkspace('June', { path: target, cwd: repo, team: 'revive' });
+    expect(ws).toMatchObject({
+      dir: target,
+      kind: 'worktree',
+      branch: 'agent/June',
+      created: true,
+    });
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: target,
+      encoding: 'utf8',
+    }).trim();
+    expect(realpathSync(top)).toBe(realpathSync(target));
+
+    const human = join(dirname(target), 'Nick');
+    const h = provisionWorkspace('Nick', { path: human, cwd: repo, branch: 'human/Nick' });
+    expect(h).toMatchObject({ kind: 'worktree', branch: 'human/Nick' });
+  });
+
+  it('--path to a new folder inside the checkout itself stays a plain folder', () => {
+    const repo = tmp('mwd-pathin-');
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    const ws = provisionWorkspace('June', { path: 'sub/spot', cwd: repo });
+    expect(ws).toMatchObject({ dir: join(repo, 'sub', 'spot'), kind: 'folder', created: true });
+  });
+
   it('falls back to a sibling folder outside a git repo', () => {
     const cwd = tmp('mwd-folder-');
     const ws = provisionWorkspace('June', { cwd });
