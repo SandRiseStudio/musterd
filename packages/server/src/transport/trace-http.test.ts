@@ -16,6 +16,8 @@ import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 let server: RunningServer;
 let base: string;
 let auth: AgentHttpAuth;
+let agentKey: string;
+let humanCredential: string;
 
 async function post(path: string, body: unknown, headers: Record<string, string> = {}) {
   const res = await fetch(base + path, {
@@ -48,6 +50,8 @@ beforeEach(async () => {
     { authorization: `Bearer ${team.json.human_credential}` },
   );
   auth = await claimAgentHttp(base, 'dawn', team.json.agent_key, team.json.human_credential, 'Ada');
+  agentKey = team.json.agent_key;
+  humanCredential = team.json.human_credential;
 });
 
 afterEach(async () => {
@@ -201,5 +205,122 @@ describe('POST /teams/:slug/trace/events', () => {
     const h = (await (await fetch(base + '/health')).json()) as Record<string, unknown>;
     expect(h['trace_schema']).toBe(1);
     expect(h['trace_db']).toBe(':memory:');
+  });
+
+  it('writes a trace.downgraded audit row when a tail posts its downgrade marker (increment 2)', async () => {
+    const r = await post(
+      '/teams/dawn/trace/events',
+      {
+        events: [
+          ev({
+            kind: 'unknown',
+            tool_name: undefined,
+            tool_use_id: undefined,
+            outcome: 'error',
+            detail: { parser: 'claude-code@1', downgraded: true, reason: 'transcript truncated' },
+          }),
+          // an ordinary unknown record is NOT a downgrade and writes no audit row
+          ev({ kind: 'unknown', detail: { parser: 'claude-code@1', bytes: 12, type: 'novel' } }),
+        ],
+      },
+      { authorization: `Bearer ${auth.key}`, 'x-musterd-seat': 'Ada' },
+    );
+    expect(r.status).toBe(202);
+    const rows = server.db
+      .prepare<
+        [string],
+        { actor: string; target: string; detail: string }
+      >("SELECT actor, target, detail FROM audit WHERE team_id = ? AND action = 'trace.downgraded'")
+      .all(teamId());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor).toBe('Ada');
+    expect(JSON.parse(rows[0]!.detail)).toEqual({
+      harness: 'claude-code',
+      session_digest: 'abcdef012345',
+      reason: 'transcript truncated',
+    });
+  });
+});
+
+describe('GET /teams/:slug/trace/sessions/:digest (increment 2)', () => {
+  // Unlike the ingest POST (leaseless by design — hooks), the read is an ordinary authenticated
+  // read: an agent seat presents its live session lease like everywhere else.
+  const headers = () => ({
+    authorization: `Bearer ${auth.key}`,
+    'x-musterd-seat': 'Ada',
+    'x-musterd-session-lease': auth.sessionLease,
+  });
+
+  async function get(path: string, hdrs: Record<string, string>) {
+    const res = await fetch(base + path, { headers: hdrs });
+    const text = await res.text();
+    return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
+  }
+
+  beforeEach(async () => {
+    setPolicy(server.db, teamId(), { trace: { content: 'on' } });
+    await post(
+      '/teams/dawn/trace/events',
+      {
+        events: [
+          ev({ kind: 'PreToolUse' }),
+          ev({
+            kind: 'reasoning',
+            tool_name: undefined,
+            detail: { parser: 'claude-code@1', reasoning_bytes: 14 },
+            content: { reasoning: 'think it over', redactions: 0, truncated: false },
+          }),
+          ev({
+            kind: 'usage',
+            tool_name: undefined,
+            detail: { input_tokens: 10, output_tokens: 2 },
+          }),
+        ],
+      },
+      headers(),
+    );
+  });
+
+  it('returns the seat its own session end to end, seq-ordered, content parsed', async () => {
+    const r = await get('/teams/dawn/trace/sessions/abcdef012345', headers());
+    expect(r.status).toBe(200);
+    expect(r.json.events.map((e: any) => [e.seq, e.kind])).toEqual([
+      [0, 'PreToolUse'],
+      [1, 'reasoning'],
+      [2, 'usage'],
+    ]);
+    const reasoning = r.json.events[1];
+    expect(reasoning.content).toEqual({ reasoning: 'think it over' });
+    expect(reasoning.detail).toEqual({ parser: 'claude-code@1', reasoning_bytes: 14 });
+    expect(reasoning.truncated).toBe(false);
+    expect(reasoning.seat).toBe('Ada');
+  });
+
+  it("filters another seat's rows for a non-admin — same empty answer as an unknown digest", async () => {
+    await post(
+      '/teams/dawn/members',
+      { name: 'Bo', kind: 'agent' },
+      { authorization: `Bearer ${humanCredential}` },
+    );
+    const bo = await claimAgentHttp(base, 'dawn', agentKey, humanCredential, 'Bo');
+    const r = await get('/teams/dawn/trace/sessions/abcdef012345', {
+      authorization: `Bearer ${bo.key}`,
+      'x-musterd-seat': 'Bo',
+      'x-musterd-session-lease': bo.sessionLease,
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.events).toEqual([]);
+    const missing = await get('/teams/dawn/trace/sessions/ffffffffffff', headers());
+    expect(missing.json.events).toEqual([]);
+  });
+
+  it('lets an admin read any seat, and refuses a digest that is not a digest', async () => {
+    const r = await get('/teams/dawn/trace/sessions/abcdef012345', {
+      authorization: `Bearer ${humanCredential}`,
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.events).toHaveLength(3);
+    const bad = await get('/teams/dawn/trace/sessions/not-a-digest!', headers());
+    expect(bad.status).toBe(400);
   });
 });

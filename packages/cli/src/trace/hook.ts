@@ -114,6 +114,8 @@ const CONTENT_SOURCES: Record<TraceContentField, readonly string[]> = {
   tool_response: ['tool_response', 'toolResponse', 'output', 'result_json'],
   error: ['error'],
   assistant: ['last_assistant_message'],
+  // Rail R2 only (increment 2): no hook payload carries reasoning — the transcript tail does.
+  reasoning: [],
 };
 
 /** Cut a string to at most `max` UTF-8 bytes without leaving half a character behind. */

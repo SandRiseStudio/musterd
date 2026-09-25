@@ -46,6 +46,8 @@ import {
   type TraceEventBatch,
   type TraceIngestResponse,
   TraceIngestResponseSchema,
+  type TraceSessionResponse,
+  TraceSessionResponseSchema,
   WakeLeasesResponseSchema,
   DoorbellRingsResponseSchema,
   type DoorbellRingsResponse,
@@ -1420,6 +1422,21 @@ export class HttpClient {
     const parsed = TraceIngestResponseSchema.safeParse(json);
     if (!parsed.success) {
       throw new CliError('trace ingest response did not match the protocol schema', 1);
+    }
+    return parsed.data;
+  }
+
+  /**
+   * One session's trace, in sequence order (ADR 445 increment 2) — `GET
+   * /teams/:slug/trace/sessions/:digest`. ADR 128 recipient scoping applies server-side: a seat
+   * reads its own sessions; an admin reads any. An unknown digest is an empty list, not a 404 —
+   * "not yours" and "not there" are deliberately the same answer.
+   */
+  async getTraceSession(slug: string, digest: string): Promise<TraceSessionResponse> {
+    const json = await this.request('GET', `/teams/${slug}/trace/sessions/${digest}`);
+    const parsed = TraceSessionResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('trace session response did not match the protocol schema', 1);
     }
     return parsed.data;
   }

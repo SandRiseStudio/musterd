@@ -111,6 +111,58 @@ describe('Codex hook local evidence', () => {
     expect(calls[1]!.outcome).toEqual({ hook: 'interrupt', detail: { raised: true } });
   });
 
+  it('tails the rollout on end (hook path) and per tool call (binding path) — ADR 445 R2', async () => {
+    const tap = vi.fn().mockResolvedValue(true);
+    const tail = vi.fn().mockResolvedValue(true);
+    // SessionEnd carries its own transcript_path: the tail uses it directly.
+    await handleCodexHook(
+      parseArgs(['end', '--stdin']),
+      event({ cwd: workspace, session_id: 'first', hook_event_name: 'SessionEnd' }),
+      { end: () => undefined, tap, tail },
+    );
+    expect(tail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harness: 'codex',
+        sessionId: 'first',
+        transcriptPath: '/workspace/rollout.jsonl',
+        dir: workspace,
+      }),
+    );
+    // PostToolUse carries none: the tail reads the path the SessionStart capture bound — and a
+    // binding holding ANOTHER session's capture (or none) tails nothing rather than misattribute.
+    await handleCodexHook(
+      parseArgs(['post-tool-use', '--stdin']),
+      JSON.stringify({
+        hook_event_name: 'PostToolUse',
+        session_id: 'first',
+        cwd: workspace,
+        model: 'm',
+      }),
+      { interrupt: () => null, tap, tail },
+    );
+    expect(tail).toHaveBeenCalledTimes(1); // no captured session on the binding yet
+
+    await handleCodexHook(
+      parseArgs(['start', '--stdin']),
+      event({ cwd: workspace, session_id: 'first', transcript_path: '/workspace/rollout.jsonl' }),
+      { probe: () => undefined, tap, tail },
+    );
+    await handleCodexHook(
+      parseArgs(['post-tool-use', '--stdin']),
+      JSON.stringify({
+        hook_event_name: 'PostToolUse',
+        session_id: 'first',
+        cwd: workspace,
+        model: 'm',
+      }),
+      { interrupt: () => null, tap, tail },
+    );
+    expect(tail).toHaveBeenCalledTimes(2);
+    expect(tail).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sessionId: 'first', transcriptPath: '/workspace/rollout.jsonl' }),
+    );
+  });
+
   it('an unbound folder taps nothing', async () => {
     const tap = vi.fn();
     const bare = mkdtempSync(join(tmpdir(), 'musterd-codex-bare-'));

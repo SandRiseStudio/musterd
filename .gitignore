@@ -39,6 +39,13 @@ coverage/
 # would hand every other seat a stranger's drift as its own, and the adapter trusts this file. Listed
 # in the SAME change that creates it, per the rule the session-index amendment above exists to teach.
 **/.musterd/drift.json
+# ADR 445 trace tap state — the content-mode cache the tap learns from its daemon's ingest reply
+# (1b) and the transcript tail's per-session offset cursor (increment 2). Machine-local by
+# definition (the cursor names transcript paths on this machine); before the policy line existed,
+# every traced seat's `pnpm build` stamped `<sha>-dirty` into dist/build.json, which read as
+# adapter-vs-daemon skew (izzo, 2026-09-25, on 52a9cfa).
+**/.musterd/trace-policy.json
+**/.musterd/trace-tail.json
 **/.musterd/skill/
 # Claude Code local settings + the musterd-provisioned skill/slash-commands (`.claude/skills`,
 # `.claude/commands`) — per-workspace + personal, written by `musterd init` / the harness, never committed.
