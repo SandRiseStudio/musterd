@@ -40,6 +40,7 @@ import {
   WakeContextRequestSchema,
   WakeContextResponseSchema,
   ToolTelemetryReportSchema,
+  TraceEventBatchSchema,
   OpenLaneSchema,
   UpdateLaneSchema,
   DeclareGoalSchema,
@@ -109,6 +110,7 @@ import { z } from 'zod';
 import { checkUpgrade, isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
+import { traceSchemaVersion } from '../db/traceDb.js';
 import { MusterdError, SessionLeaseRefused, asMusterdError } from '../errors.js';
 import { reapOrphans } from '../footprint/reap.js';
 import { log, redactPath } from '../log.js';
@@ -341,6 +343,7 @@ import {
   applyPolicyChange,
 } from '../store/teams.js';
 import { applyToolCalls, recordSurfaceRender } from '../store/toolCalls.js';
+import { ingestTraceEvents } from '../store/trace.js';
 import {
   applyTrust,
   arbitrateClaim,
@@ -373,7 +376,12 @@ import {
 } from '../sync/log.js';
 import { pullTeam } from '../sync/pull.js';
 import { readPushRefusal, pushTeam } from '../sync/push.js';
-import { recordError, recordInterruptCheck, recordSeenLatency } from '../telemetry.js';
+import {
+  recordError,
+  recordInterruptCheck,
+  recordSeenLatency,
+  recordTraceIngest,
+} from '../telemetry.js';
 
 /**
  * The content-coding negotiated for this response from its request's `Accept-Encoding`, set once at
@@ -1644,6 +1652,10 @@ export async function handleHttp(
         v: PROTOCOL_VERSION,
         db: ctx.config.dbPath,
         schema: schemaVersion(ctx.db),
+        // The trace store (ADR 445 §3) is a separate file with its own ladder; named here so a
+        // `wrong_db` diagnosis can see both halves and `musterd status` can size it later.
+        trace_db: ctx.config.traceDbPath,
+        trace_schema: traceSchemaVersion(ctx.traceDb),
         connections: countLivePresences(ctx.db, ctx.config.presenceTimeoutMs),
         // Quiescence (2026-08-03 design): age of the newest audited action across live agent seats,
         // for the auto-refresher's quiet-floor — `connections` says who is ATTACHED, this says who
@@ -4874,6 +4886,33 @@ export async function handleHttp(
         applyToolCalls(ctx.db, team.id, member.name, member.role || null, body.events);
         if (body.surface) recordSurfaceRender(ctx.db, team.id, member.name, body.surface);
         return sendJson(res, 200, {});
+      }
+
+      // The hook tap's ingest (ADR 445 §2 R1, increment 1a). Seat credential with or WITHOUT a
+      // session lease — the SessionStart hook fires before the session has joined (the ADR 408
+      // leaseless window), and a lease would prove nothing the credential hash does not: the rows
+      // are the seat's own record of its own session. Presence-neutral by contract (a hook rides
+      // every tool call and must never flip the roster), so no `authTouch`. The seat is the caller —
+      // the body has no field for it. Structural only: `TraceEventSchema` has no content part, so a
+      // hook that sends one meets a schema that strips it before anything is stored. 202, counts
+      // only — the tap is fire-and-forget and nothing downstream reads more.
+      if (method === 'POST' && rest === '/trace/events') {
+        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req), undefined, {
+          leaseless: true,
+        });
+        assertSeatCanRead(member);
+        const body = parseOrBadRequest(TraceEventBatchSchema, await readJson(req));
+        const { accepted } = ingestTraceEvents(ctx.traceDb, team.id, member.name, body.events);
+        const byKey = new Map<string, number>();
+        for (const e of body.events) {
+          const k = `${e.harness}\u0000${e.kind}`;
+          byKey.set(k, (byKey.get(k) ?? 0) + 1);
+        }
+        for (const [k, n] of byKey) {
+          const [harness, kind] = k.split('\u0000') as [string, string];
+          recordTraceIngest(harness, kind, n);
+        }
+        return sendJson(res, 202, { accepted });
       }
 
       // Declared Goals (ADR 048's general-team seam, resolved by ADR 084) — a Goal is an ordinary

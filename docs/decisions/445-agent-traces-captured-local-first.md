@@ -215,6 +215,17 @@ ADR 184's publication gate; a spans backend.
   erases it on its next write (`readConfigFromDisk` whitelists keys), so a new key is stable only
   after every CLI touching the machine config is at or past the build that knows it — recorded as
   a team insight, fix candidate open.
+- **2026-09-25 — increment 1a landed for Claude Code** (lane `01M3CXMVWF4E42WXTW323DHEWG`): `TraceEvent`
+  schema (structural only — no content field exists in the schema), `trace.db` with its own ladder,
+  `POST /teams/:slug/trace/events` (seat credential, leaseless, presence-neutral), the
+  `musterd.trace.ingest` counter, and the Claude Code tap. Two things decided in the build: (1) the
+  daemon assigns `seq` — a hook is a one-shot process with no counter to share; (2) the tap rides
+  the processes the hooks already spawn (gate → PreToolUse, interrupt probe → PostToolUse, capture
+  → SessionStart/End) and only the six events with no musterd hook get a new `musterd trace hook`
+  registration, which is what keeps the per-call cost at "what the gate costs now". The 1a tail —
+  Codex/Cursor/Grok hook adapters and musterd's own `HookOutcome` rows — is open; the
+  `traced: structural` status line (§4) lands with it. The pre-#1699 config-erasure trap is fixed
+  (#1706: unknown top-level keys pass through).
 - Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
   backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a

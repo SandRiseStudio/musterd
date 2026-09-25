@@ -2,7 +2,7 @@
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 
-Store: **SQLite via `better-sqlite3`** (synchronous, embedded). One database file, default `~/.musterd/musterd.db` (override `MUSTERD_DB`). Tests use `:memory:`.
+Store: **SQLite via `better-sqlite3`** (synchronous, embedded). One coordination database file, default `~/.musterd/musterd.db` (override `MUSTERD_DB`), plus — since ADR 445 §3 — a separate **trace store**, `trace.db` in the same directory (override `MUSTERD_TRACE_DB`), with its own ladder (see §Migrations). Nothing joins across the two files. Tests use `:memory:` for both.
 
 Conventions:
 
@@ -121,6 +121,12 @@ Mutable columns hold lifecycle state, explorer, exhaustive final brief, conclusi
 completion time, and a nullable linked Lane id. The relay cursor remains separate. Promotion creates
 the ordinary Lane and links it in the same SQLite transaction. Every accepted capture starts `open`;
 only an active explorer's posted question creates `needs_clarification` (ADR 291/311/312).
+
+### The trace store (ADR 445 §3, increment 1a)
+
+`packages/server/src/db/traceDb.ts` carries `TRACE_MIGRATIONS`, a second forward-only ladder applied by the same runner (`runMigrations(db, ladder)`) to `trace.db`, gated by that file's own `schema_meta`. `pnpm migrations:check` parses both ladders; their versions are independent.
+
+- **trace v1:** `trace_events` — one row per harness hook event: `id` (ULID), `team_id`, `seat`, `session_digest` (the ADR 131 §5 keyed HMAC, never the raw id), `seq` (daemon-assigned, monotonic per `(team_id, session_digest)`, `UNIQUE` with them), `ts`, `received_at`, `harness`, `kind` (the `TraceEvent` kinds), `tool_name`, `tool_use_id`, `agent_id`, `parent_agent_id`, `duration_ms`, `outcome`, `detail` (bounded structural JSON), and three columns reserved for increment 1b and unwritten in 1a: `content`, `redactions`, `truncated`. Indexes on `(team_id, seat, ts)` and `(team_id, tool_use_id)`. No foreign key can reference the coordination store; `team_id` is plain text.
 
 - Single forward-only migration runner. `schema_meta.schema_version` gates it. v1 ships version `1` = the DDL above. A migration is a `(version, up(db))` pair in `packages/server/src/db/migrations.ts`; the runner applies any with version > current inside a transaction, then bumps `schema_version`.
 - No down-migrations in v1.

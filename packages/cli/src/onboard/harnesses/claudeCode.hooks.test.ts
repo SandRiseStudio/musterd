@@ -16,6 +16,8 @@ import {
   SUBAGENT_LEDGER_HOOK_MARKER,
   SESSION_CAPTURE_HOOK_MARKER,
   SESSION_END_HOOK_MARKER,
+  TRACE_HOOK_EVENTS,
+  TRACE_HOOK_MARKER,
   SESSIONSTART_HOOK_MARKER,
 } from './claudeCode.js';
 
@@ -120,6 +122,32 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     expect(ledger?.hooks?.[0]?.command).toContain('gate record-subagent --stdin');
   });
 
+  it('registers the trace tap (ADR 445 R1) on exactly the events no other musterd hook rides', () => {
+    installMusterdHooks();
+    const local = read(localPath());
+    for (const event of TRACE_HOOK_EVENTS) {
+      const entries = local.hooks?.[event] ?? [];
+      expect(entries).toHaveLength(1);
+      expect(entries[0]?.matcher).toBeUndefined(); // every tool / every prompt
+      expect(entries[0]?.hooks?.[0]?.command).toContain(TRACE_HOOK_MARKER);
+      expect(entries[0]?.hooks?.[0]?.command).toContain('musterd trace hook --stdin');
+    }
+    // PreToolUse, PostToolUse, SessionStart and SessionEnd tap from INSIDE the hooks already
+    // registered there — a tool call spawns no extra process for the tap.
+    for (const event of ['PreToolUse', 'PostToolUse', 'SessionStart', 'SessionEnd']) {
+      for (const m of local.hooks?.[event] ?? []) {
+        for (const h of m.hooks) expect(h.command).not.toContain(TRACE_HOOK_MARKER);
+      }
+    }
+    // and the tap is local, never global — it needs the workspace's binding to name a seat (the
+    // global UserPromptSubmit orient-nudge is a different hook and stays)
+    for (const event of TRACE_HOOK_EVENTS) {
+      for (const m of read(globalPath()).hooks?.[event] ?? []) {
+        for (const h of m.hooks) expect(h.command).not.toContain(TRACE_HOOK_MARKER);
+      }
+    }
+  });
+
   it('is idempotent — re-installing replaces in place, never stacks', () => {
     installMusterdHooks();
     installMusterdHooks();
@@ -138,16 +166,20 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     mkdirSync(join(cwd, '.claude'), { recursive: true });
     writeFileSync(localPath(), JSON.stringify({ hooks: { Notification: [] } }), 'utf8');
     const drift = inspectClaudeHookDrift(cwd);
-    expect(drift).toHaveLength(7);
+    expect(drift).toHaveLength(7 + TRACE_HOOK_EVENTS.length);
     expect(drift[0]).toContain('PostToolUse interrupt hook is missing');
     expect(drift[1]).toContain('PreToolUse enforcement-gate hook is missing');
     expect(drift[2]).toContain('session-reach wall is missing');
     expect(drift[3]).toContain('subagent-ledger hook is missing');
     expect(drift[4]).toContain('session-capture hook is missing');
     expect(drift[5]).toContain('SessionEnd hook is missing');
+    // The trace tap (ADR 445 R1): one line per event it is registered on, each named.
+    TRACE_HOOK_EVENTS.forEach((event, i) => {
+      expect(drift[6 + i]).toContain(`${event} trace-tap hook is missing`);
+    });
     // The user-facing half (seat statusline chip) is doctored alongside the agent-facing hooks —
     // its absence is why a correctly-oriented session could still look dead to the human.
-    expect(drift[6]).toContain('`statusLine` seat chip is missing');
+    expect(drift[6 + TRACE_HOOK_EVENTS.length]).toContain('`statusLine` seat chip is missing');
 
     // Once init wires them, the drift clears.
     installMusterdHooks();

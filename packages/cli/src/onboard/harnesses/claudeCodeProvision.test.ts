@@ -185,6 +185,7 @@ describe('claudeCode notification hook (ADR 053)', () => {
         hooks: {
           Notification: [{ hooks: [{ type: 'command', command: 'my-own-thing' }] }],
           Stop: [{ hooks: [{ type: 'command', command: 'mine' }] }],
+          PermissionRequest: [{ hooks: [{ type: 'command', command: 'theirs' }] }],
         },
       }),
     );
@@ -195,7 +196,13 @@ describe('claudeCode notification hook (ADR 053)', () => {
     );
     expect(cmds).toContain('my-own-thing'); // user's hook kept
     expect(cmds.some((c: string) => c.includes('musterd-notify-hook'))).toBe(true); // ours added
-    expect(written.hooks.Stop).toHaveLength(1); // untouched event
+    // Stop now carries the ADR 445 trace tap beside the user's own hook — added, never replaced.
+    const stops = written.hooks.Stop.map(
+      (m: { hooks: { command: string }[] }) => m.hooks[0].command,
+    );
+    expect(stops).toContain('mine');
+    expect(stops.some((c: string) => c.includes('musterd-trace-hook'))).toBe(true);
+    expect(written.hooks.PermissionRequest).toHaveLength(1); // untouched event
   });
 
   it('unprovision removes only musterd’s hook, leaving the user’s', async () => {

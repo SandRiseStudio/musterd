@@ -46,6 +46,7 @@ export * from './lanes.js';
 export * from './seeds.js';
 export * from './autoTarget.js';
 export * from './tool-telemetry.js';
+export * from './trace.js';
 export * from './memory.js';
 export * from './integrations.js';
 export * from './governed.js';

@@ -9,10 +9,12 @@ import { resolveWorkspace } from '@musterd/protocol/project';
 import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
 import { isSessionLeaseRefusal, watchClaim } from '../client.js';
-import { wsBase, type Identity } from '../config.js';
+import { findBinding, wsBase, type Identity } from '../config.js';
 import { CliError } from '../errors.js';
+import { readHookStdin } from '../hookStdin.js';
 import { isActionNeeded, renderInbox, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
+import { tapHook } from '../trace/hook.js';
 import { kindLookup, resolve, resolveRead } from './helpers.js';
 import { waitingCommand } from './nudge.js';
 import { attestSlotIfUnattested, refreshModelObservation } from './session.js';
@@ -372,6 +374,18 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
   // even to a seat whose nudges are muted — so this runs before the MUSTERD_NO_NUDGE gate below.
   // One push per session, not per tool call: the slot's `attested_at` stamp is what bounds it.
   await attestSlotIfUnattested();
+  // ADR 445 R1 — the PostToolUse trace event rides the probe that already runs on every tool call,
+  // so the tap adds a payload to an existing process rather than a process to every call. Only the
+  // Claude Code hook pipes its JSON to this command; the other harnesses' probes come in through
+  // `session observe` / `codex-hook` and will tap there. Started here, awaited at the very end: the
+  // interrupt GET below is the hook's one job and this must never delay or fail it (short stdin
+  // budget — the JSON is already in the pipe when the process starts, or it is not coming).
+  const tapped =
+    hookFlag === 'claude-code'
+      ? readHookStdin(750).then((raw) =>
+          tapHook(raw, { binding: findBinding(), dir: process.cwd(), harness: 'claude-code' }),
+        )
+      : Promise.resolve(false);
   // Spec 2026-09-16 / ADR 408 increment 4: keep `.musterd/drift.json` warm on this cadence, so the
   // adapter's inbox-check surface can REPORT provisioning drift without inspecting the workspace on
   // a seam a busy seat takes many times a minute. Bounded by its own TTL — this is a cheap read
@@ -402,6 +416,7 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
     // written about — and the field it would silently drop is the one this lane exists to record.
     const res = await http.interruptCheck(team, hookFlag ? { rail: hookFlag } : {});
     if (res.raised && res.line) emit(res.line);
+    await tapped;
   } catch (err) {
     // Best-effort: the interrupt probe must never fail the tool call it rides on — with ONE thing it
     // owes the seat before it goes quiet. `GET /inbox/interrupt-check` authenticates as a member, and

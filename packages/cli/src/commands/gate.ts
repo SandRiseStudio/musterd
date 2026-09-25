@@ -14,6 +14,8 @@ import type { Parsed } from '../args.js';
 import type { HttpClient } from '../client.js';
 import { findBinding } from '../config.js';
 import { CliError } from '../errors.js';
+import { readHookStdin } from '../hookStdin.js';
+import { tapHook } from '../trace/hook.js';
 import {
   isStageShaped,
   markSessionStart,
@@ -49,23 +51,7 @@ export async function gateCommand(parsed: Parsed): Promise<number> {
   );
 }
 
-/** Drain stdin with a hard timeout — a hook wiring mistake (no JSON piped) must not hang a tool call. */
-function readStdin(timeoutMs = 3_000): Promise<string> {
-  return new Promise((resolve) => {
-    let data = '';
-    const done = (): void => {
-      clearTimeout(timer);
-      resolve(data);
-    };
-    const timer = setTimeout(done, timeoutMs);
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk: string) => {
-      data += chunk;
-    });
-    process.stdin.on('end', done);
-    process.stdin.on('error', done);
-  });
-}
+const readStdin = readHookStdin;
 
 /**
  * Extract the gate's view of a Claude Code PreToolUse payload: the tool name, and either its target
@@ -399,6 +385,15 @@ async function gateCheck(parsed: Parsed): Promise<number> {
     // latency tax the ADR's guard metric forbids. Fires on undeclared calls by design (ADR 150 §Gate B
     // as amended) — it cannot change whether the call proceeds, so it is not mediation.
     attest(http, team, call);
+    // ADR 445 R1 — the PreToolUse trace event, for the tools this hook is registered on. Same
+    // contract as the attestation above: not awaited, cannot change whether the call proceeds, and
+    // the payload's tool input never leaves this process (the tap reads names, ids and sizes).
+    void tapHook(stdin, {
+      binding: findBinding(),
+      dir: process.cwd(),
+      harness: harnessFromEnv() ?? 'claude-code',
+      kind: 'PreToolUse',
+    });
     const { enforcement } = await http.getEnforcement(team);
     const match = matchEnforcement(enforcement, call);
     if (!match) return; // undeclared call → allow, no daemon round-trip (the common case)
