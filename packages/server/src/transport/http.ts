@@ -241,6 +241,7 @@ import {
   touchNode,
   unbindSeat,
 } from '../store/nodes.js';
+import { revokeAllForMember } from '../store/oauth.js';
 import { deriveNext, deriveNextSummary } from '../store/orientation.js';
 import {
   currentBuild,
@@ -382,6 +383,8 @@ import {
   recordSeenLatency,
   recordTraceIngest,
 } from '../telemetry.js';
+import { handleMcpRoute } from './mcpHttp.js';
+import { handleOAuthRoutes } from './oauth.js';
 
 /**
  * The content-coding negotiated for this response from its request's `Accept-Encoding`, set once at
@@ -1822,6 +1825,12 @@ export async function handleHttp(
         agent_key: migrated.agent_key,
       });
     }
+
+    // Remote MCP (ADR 446): top-level OAuth + Streamable-HTTP routes. Team-scoped paths
+    // (`/oauth/:team/...`, `/mcp/:team`) because a phone app configures one URL and no headers.
+    // Handled before the /teams routes; each returns true when the path belonged to it.
+    if (await handleOAuthRoutes(ctx, req, res, method, path, url)) return;
+    if (await handleMcpRoute(ctx, req, res, method, path, url)) return;
 
     const teamMatch = path.match(/^\/teams\/([^/]+)(\/.*)?$/);
     if (teamMatch) {
@@ -6649,6 +6658,9 @@ export async function handleHttp(
           );
         }
         const { credential } = mintCredential(ctx.db, target.id);
+        // ADR 446 §3: rotation kills the seat's phone sessions too — the old mscr_ is dead, so
+        // every msat_/msrt_ chain minted under it dies with it (admin revoke-all rides this path).
+        const oauthRevoked = revokeAllForMember(ctx.db, team.id, target.id);
         // Attribute honestly: an off-host caller is an authenticated admin (authProvision just proved
         // it); a loopback caller is anonymous by design, so the actor is null and `via` says where the
         // authority came from. `detail` never carries the secret or its hash.
@@ -6661,6 +6673,15 @@ export async function handleHttp(
             via: isLocalPeer(req.socket.remoteAddress, ctx.config.trustProxy) ? 'local' : 'admin',
           },
         });
+        if (oauthRevoked > 0) {
+          appendAudit(ctx.db, team.id, {
+            actor: tryAuth(ctx, slug, req)?.name ?? null,
+            action: 'oauth.revoked',
+            target: target.name,
+            result: 'allow',
+            detail: { reason: 'credential_rotated' },
+          });
+        }
         return sendJson(res, 200, { member: target.name, credential });
       }
 

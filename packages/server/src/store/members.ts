@@ -18,6 +18,7 @@ import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { MusterdError, SessionLeaseRefused } from '../errors.js';
 import { releaseInFlightClaimsForSeat } from './lanes.js';
+import { verifyAccess } from './oauth.js';
 import type { MemberRow, TeamRow } from './rows.js';
 import { parseRoles, resolveAccountStatus, resolveCapabilities } from './rows.js';
 import { hasValidSessionLease } from './session-leases.js';
@@ -469,6 +470,17 @@ export function authMember(
     member = authByAgentSeatCredential(db, team, token, actingSeat, sessionLease, opts.leaseless);
   } else if (token.startsWith(TOKEN_PREFIXES.credential)) {
     member = authByCredential(db, team, token, actingSeat);
+  } else if (token.startsWith(TOKEN_PREFIXES.oauth_access)) {
+    // ADR 446: a phone's `msat_` bearer authenticates exactly like an `mscr_` — self-identifying
+    // (acting-seat must match-or-absent, checked in authByCredential's sibling below via the
+    // shared tail) — with NO session lease: there is no Presence to bind one to. Presence for
+    // the roster derives from authenticated activity (ambient, ADR 057), stamped by the caller.
+    member = verifyAccess(db, team.id, token);
+    if (actingSeat && actingSeat !== member.name)
+      throw new MusterdError(
+        'forbidden',
+        `access token identifies "${member.name}", not "${actingSeat}"`,
+      );
   } else if (token.startsWith(TOKEN_PREFIXES.seat)) {
     member = authByServiceToken(db, team, token, actingSeat);
   } else {
