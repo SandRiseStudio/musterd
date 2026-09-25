@@ -244,6 +244,27 @@ ADR 184's publication gate; a spans backend.
   bump, so it waits for the next Grok hook change rather than forcing one. Falsifier on the dogfood
   box, once autorefresh has run: `SELECT harness, kind, count(*) FROM trace_events GROUP BY 1, 2`
   shows `HookOutcome` rows beside `PreToolUse` / `PostToolUse` from a Claude Code seat.
+- **2026-09-25 — increment 1b landed** (lane `01M3D3FZ5Q6FZE7MJS0JBC71H3`). The protocol gains
+  `TraceContentSchema` (an optional `content` part on `TraceEvent`: prompt / tool input / tool
+  response / error / assistant, bounded together to 256 KiB, with `redactions` and `truncated`), the
+  `trace` policy block (`content: off|on`, default `off`; `musterd team policy --trace-content`), and
+  `traceScrub.ts`. The daemon writes the content column only under `trace.content: on`, after its
+  own second scrub pass; with the setting off, a content part that arrives anyway is dropped. Three
+  things were decided in the build:
+  (1) **The tap learns the policy from the ingest reply.** `202 {accepted, content}` carries the mode,
+  the tap caches it in `.musterd/trace-policy.json`, and content flows from the next hook on. That
+  costs no extra round trip, and a seat that has never heard `on` sends nothing.
+  (2) **Content goes only to a loopback daemon.** A binding can name a remote server; §3's
+  "never cross the wire off-machine" is enforced at the tap, not assumed.
+  (3) **Two scrub findings from the corpus.** A token after a JSON-escaped newline (`\nmskey_…`) or a
+  URL-encoded quote (`%22mskey_…`) slipped past a plain word-boundary test. So the start boundary
+  now accepts escapes, and structured values are scrubbed leaf by leaf before they are stringified.
+  Separately, musterd prefixes carry no start boundary at all, because a miss stores a secret while
+  a false hit costs one identifier its tail. `traced: structural+content` shows where the hooks send
+  content. Pruning at 30 days stays in increment 3 with the rest of the content lifecycle. Falsifier
+  on the dogfood box, after `musterd team policy --trace-content on` on `revive`: rows with non-null
+  `content` appear from the second hook of a session, and
+  `SELECT count(*) FROM trace_events WHERE content LIKE '%mskey\_%' ESCAPE '\'` returns 0.
 - Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
   backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a

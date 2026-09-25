@@ -8,10 +8,10 @@ import { HarnessIdSchema } from './provisioning.js';
  * ADR 082, not a product surface: off unless a daemon runs the tap, and never leaving the machine
  * except through ADR 184's publication gate.
  *
- * **Structural only — by construction.** This module has no field for a tool's input, a tool's
- * response, a prompt, or an assistant message. Increment 1b adds the content part BEHIND the
- * credential scrub and the `trace.content` team setting; until then a client that sends one meets a
- * schema that strips it, so the row structurally cannot carry it. The session id never crosses
+ * **Structural by default.** The top-level fields are names, ids, kinds, timings and sizes. What a
+ * hook actually saw — a tool's input and output, a prompt, an assistant message — lives only in the
+ * optional `content` part (increment 1b), which exists on the wire only behind the credential scrub
+ * and the team's `trace.content` policy. The session id never crosses
  * either: `session_digest` is the ADR 131 §5 keyed HMAC, same as the residency ledger.
  */
 
@@ -62,6 +62,61 @@ export const TraceDetailSchema = z
   });
 
 /**
+ * The content part (ADR 445 §3, increment 1b) — what a hook saw, not just its shape. Every string
+ * here has been through `scrubCredentials` (`traceScrub.ts`) at the hook before it was posted, and goes through
+ * it again at ingest; `redactions` is the hook's count. Bounded as a whole to
+ * {@link TRACE_CONTENT_MAX_BYTES} (the wake transcript bound, ADR 445 §3), with `truncated` set when
+ * the hook had to cut. Sent only when the team's `trace.content` policy is `on` and the daemon is on
+ * this machine; written only when the daemon's own read of that policy agrees. Structured values
+ * (a tool's input object) travel as their JSON text.
+ */
+export const TRACE_CONTENT_MAX_BYTES = 262_144;
+export const TRACE_CONTENT_FIELDS = [
+  'prompt',
+  'tool_input',
+  'tool_response',
+  'error',
+  'assistant',
+] as const;
+export type TraceContentField = (typeof TRACE_CONTENT_FIELDS)[number];
+export const TraceContentSchema = z
+  .object({
+    prompt: z.string().optional(),
+    tool_input: z.string().optional(),
+    tool_response: z.string().optional(),
+    error: z.string().optional(),
+    /** Claude Code's `last_assistant_message` on Stop / SubagentStop. */
+    assistant: z.string().optional(),
+    redactions: z.number().int().min(0),
+    truncated: z.boolean(),
+  })
+  .refine(
+    (c) =>
+      TRACE_CONTENT_FIELDS.reduce(
+        (n, f) => n + (c[f] === undefined ? 0 : Buffer.byteLength(c[f], 'utf8')),
+        0,
+      ) <= TRACE_CONTENT_MAX_BYTES,
+    { message: `content exceeds ${TRACE_CONTENT_MAX_BYTES} bytes` },
+  );
+export type TraceContent = z.infer<typeof TraceContentSchema>;
+
+/**
+ * The team's trace policy (ADR 445 §3–§4), stored under `policy.trace`. `content: off` (the default)
+ * means the content column is never written; structural rows are recorded either way.
+ */
+export const TRACE_CONTENT_MODES = ['off', 'on'] as const;
+export const TracePolicySchema = z.object({
+  content: z.enum(TRACE_CONTENT_MODES).default('off'),
+});
+export type TracePolicy = z.infer<typeof TracePolicySchema>;
+
+/**
+ * Where a workspace caches the content mode its daemon last replied with — `.musterd/<this>`,
+ * beside the binding. Written by the CLI's tap, read by the tap and by both `traced:` lines.
+ */
+export const TRACE_POLICY_FILE = 'trace-policy.json';
+
+/**
  * One structural trace event. `seq` is NOT on the wire: the daemon assigns the monotonic sequence
  * per (team, session) on insert, because a hook is a one-shot process with no shared counter and a
  * client-assigned sequence would either collide or need a lock file per tool call.
@@ -84,6 +139,8 @@ export const TraceEventSchema = z.object({
   duration_ms: z.number().int().min(0).optional(),
   outcome: TraceOutcomeSchema.optional(),
   detail: TraceDetailSchema.optional(),
+  /** Increment 1b — present only when the tap was told content is on (see TraceContentSchema). */
+  content: TraceContentSchema.optional(),
 });
 export type TraceEvent = z.infer<typeof TraceEventSchema>;
 
@@ -96,8 +153,13 @@ export const TraceEventBatchSchema = z.object({
 });
 export type TraceEventBatch = z.infer<typeof TraceEventBatchSchema>;
 
-/** Counts only. The tap is fire-and-forget; nothing downstream reads more than this. */
+/**
+ * Counts, plus the team's content mode — which is how a tap learns the policy with no extra round
+ * trip: it caches this beside the binding and sends content from the next hook on. A daemon before
+ * 1b omits `content`, which a tap reads as `off`.
+ */
 export const TraceIngestResponseSchema = z.object({
   accepted: z.number().int().min(0),
+  content: z.enum(TRACE_CONTENT_MODES).optional(),
 });
 export type TraceIngestResponse = z.infer<typeof TraceIngestResponseSchema>;

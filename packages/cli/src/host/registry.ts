@@ -84,6 +84,16 @@ export function canonicalServer(server: string): string {
   return `${url.protocol.toLowerCase()}//${canonicalHost}${port}${pathname}`;
 }
 
+/** Whether a binding's `server` is this machine's own daemon — the loopback in any spelling
+ *  {@link canonicalServer} folds. The trace tap sends content only to one (ADR 445 §3). */
+export function isLoopbackServer(server: string): boolean {
+  try {
+    return new URL(canonicalServer(server)).hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
 const sameSeat = (a: { server?: string; team: string; seat: string }, b: HostRegistryEntry) =>
   (a.server === undefined || canonicalServer(a.server) === canonicalServer(b.server)) &&
   a.team === b.team &&

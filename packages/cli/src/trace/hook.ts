@@ -1,7 +1,16 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   type Binding,
   bindingSeat,
+  scrubCredentials,
+  scrubToText,
+  TRACE_CONTENT_FIELDS,
+  TRACE_CONTENT_MAX_BYTES,
   TRACE_DETAIL_MAX_BYTES,
+  TRACE_POLICY_FILE,
+  type TraceContent,
+  type TraceContentField,
   type TraceEvent,
   TraceEventKindSchema,
   type TraceEventKind,
@@ -10,6 +19,7 @@ import {
 import { resolveWorkspaceKey } from '@musterd/protocol/project';
 import { HttpClient } from '../client.js';
 import { resolveClaimWorkspace } from '../commands/helpers.js';
+import { isLoopbackServer } from '../host/registry.js';
 import { sessionDigest } from '../session/digest.js';
 
 /**
@@ -18,11 +28,11 @@ import { sessionDigest } from '../session/digest.js';
  *
  * Three properties are load-bearing and each is enforced by construction, not by care:
  *
- * - **Structural only.** {@link parseTraceHook} reads names, ids, kinds and sizes out of the payload
- *   and nothing else; `tool_input`, `tool_response`, `prompt`, `error` and
- *   `last_assistant_message` are never read into a variable that reaches the event. Increment 1b
- *   adds the content part behind the credential scrub. Until then the protocol schema has no field
- *   for it, so even a bug here would meet a schema that strips it.
+ * - **Structural by default; content only behind three gates.** {@link parseTraceHook} reads names,
+ *   ids, kinds and sizes. The content part (increment 1b) is read only when the team's
+ *   `trace.content` is `on` (learned from the daemon's last ingest reply, cached beside the
+ *   binding), the daemon is this machine's own (loopback), and every string has been through the
+ *   credential scrub — in that order, before anything leaves this process.
  * - **The session id never crosses.** The event carries `sessionDigest(agent_key, session_id)`, the
  *   same keyed HMAC the residency ledger uses (ADR 131 §5), so a trace joins a wake and a residency
  *   row without either side holding the raw id.
@@ -44,6 +54,8 @@ export interface ParsedTraceHook {
   parent_agent_id?: string;
   outcome?: TraceEvent['outcome'];
   detail?: NonNullable<TraceEvent['detail']>;
+  /** Only when the caller asked for content — already scrubbed and bounded. */
+  content?: TraceContent;
 }
 
 /** Fields whose SIZE is structural and whose CONTENT is not — recorded as `<name>_bytes` only. */
@@ -94,13 +106,76 @@ export function inferTraceHarness(o: Record<string, unknown>): string | undefine
   return undefined;
 }
 
+/** Where a payload keeps each content field: the Claude Code / Codex names, then Cursor's shell and
+ *  MCP event names (`command` / `output` / `result_json` are top-level only on Cursor's events). */
+const CONTENT_SOURCES: Record<TraceContentField, readonly string[]> = {
+  prompt: ['prompt'],
+  tool_input: ['tool_input', 'toolInput', 'command'],
+  tool_response: ['tool_response', 'toolResponse', 'output', 'result_json'],
+  error: ['error'],
+  assistant: ['last_assistant_message'],
+};
+
+/** Cut a string to at most `max` UTF-8 bytes without leaving half a character behind. */
+function cutBytes(s: string, max: number): string {
+  return Buffer.from(s, 'utf8')
+    .subarray(0, max)
+    .toString('utf8')
+    .replace(/\uFFFD+$/, '');
+}
+
+/**
+ * The content part of a hook payload — scrubbed, then bounded (ADR 445 §3). The scrub runs on each
+ * field BEFORE the cut, so a credential can never survive by being split across the bound. A field
+ * far over the bound is first pre-cut at twice it (the scrub is a regex pass, and a 50 MB tool
+ * response must not cost the tool call it rides on); what the pre-cut discards lies past the final
+ * bound anyway. The fields share one budget, in {@link TRACE_CONTENT_FIELDS} order. Returns
+ * undefined when the payload carries no content field at all.
+ */
+export function extractTraceContent(o: Record<string, unknown>): TraceContent | undefined {
+  let budget = TRACE_CONTENT_MAX_BYTES;
+  let redactions = 0;
+  let truncated = false;
+  const out: Partial<Record<TraceContentField, string>> = {};
+  for (const field of TRACE_CONTENT_FIELDS) {
+    const source = CONTENT_SOURCES[field].find((k) => o[k] !== undefined && o[k] !== null);
+    if (source === undefined) continue;
+    const v = o[source];
+    const text = typeof v === 'string' ? v : JSON.stringify(v);
+    // Normally the leaves are scrubbed before the value is stringified (scrubToText — the scrub
+    // sees real newlines, not `\n` escapes). Over twice the bound, the JSON text is pre-cut and
+    // scrubbed as text instead; the scrub's escape-aware boundary is what covers that path.
+    let scrubbed;
+    if (text.length > 2 * TRACE_CONTENT_MAX_BYTES) {
+      scrubbed = scrubCredentials(text.slice(0, 2 * TRACE_CONTENT_MAX_BYTES));
+      truncated = true;
+    } else {
+      scrubbed = scrubToText(v);
+    }
+    redactions += scrubbed.redactions;
+    let kept = scrubbed.text;
+    if (Buffer.byteLength(kept, 'utf8') > budget) {
+      kept = cutBytes(kept, budget);
+      truncated = true;
+    }
+    budget -= Buffer.byteLength(kept, 'utf8');
+    out[field] = kept;
+  }
+  if (Object.keys(out).length === 0) return undefined;
+  return { ...out, redactions, truncated };
+}
+
 /**
  * Parse a Claude Code-shaped hook payload (the other harnesses' adapters normalize into this shape
  * before calling). `kind` overrides the payload's `hook_event_name` — for a hook that knows which
  * event registered it better than the payload does (the gate is always PreToolUse). Returns null
  * when there is nothing to record: no session id, or an event kind the tap does not know.
  */
-export function parseTraceHook(raw: string, kind?: TraceEventKind): ParsedTraceHook | null {
+export function parseTraceHook(
+  raw: string,
+  kind?: TraceEventKind,
+  opts: { content?: boolean } = {},
+): ParsedTraceHook | null {
   let o: Record<string, unknown>;
   try {
     const json: unknown = JSON.parse(raw);
@@ -155,6 +230,10 @@ export function parseTraceHook(raw: string, kind?: TraceEventKind): ParsedTraceH
     }
     if (Object.keys(detail).length > 0) out.detail = detail;
   }
+  if (opts.content) {
+    const content = extractTraceContent(o);
+    if (content) out.content = content;
+  }
   return out;
 }
 
@@ -178,7 +257,12 @@ export function buildTraceEvent(
     ...rest,
   };
   const ok = TraceEventSchema.safeParse(candidate);
-  return ok.success ? ok.data : null;
+  if (ok.success) return ok.data;
+  // A content part the schema refuses must not cost the structural row it rode on.
+  if (candidate.content === undefined) return null;
+  const { content: _dropped, ...structural } = candidate;
+  const retry = TraceEventSchema.safeParse(structural);
+  return retry.success ? retry.data : null;
 }
 
 /** The seat's own kill switch for the tap (ADR 445 §4): `MUSTERD_NO_TRACE=1` traces nothing. */
@@ -187,19 +271,56 @@ export function traceTapEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /**
+ * The team's `trace.content` as this workspace last heard it from its daemon. `off` when never
+ * heard, unreadable, or anything but `on` — the safe reading of every miss.
+ */
+export function readTraceContentMode(dir: string): 'on' | 'off' {
+  try {
+    const json: unknown = JSON.parse(
+      readFileSync(join(dir, '.musterd', TRACE_POLICY_FILE), 'utf8'),
+    );
+    return (json as { content?: unknown }).content === 'on' ? 'on' : 'off';
+  } catch {
+    return 'off';
+  }
+}
+
+/** Record the mode an ingest reply carried. Written only on a change; silent on every failure. */
+export function writeTraceContentMode(dir: string, mode: 'on' | 'off'): void {
+  if (readTraceContentMode(dir) === mode) return;
+  try {
+    writeFileSync(
+      join(dir, '.musterd', TRACE_POLICY_FILE),
+      JSON.stringify({ content: mode, at: Date.now() }) + '\n',
+    );
+  } catch {
+    /* a missing .musterd/ is an unbound folder — nothing to remember */
+  }
+}
+
+/** Whether this workspace's hooks would send content: the team said `on`, and the daemon is local. */
+export function traceContentEnabled(binding: Pick<Binding, 'server'>, dir: string): boolean {
+  return readTraceContentMode(dir) === 'on' && isLoopbackServer(binding.server);
+}
+
+/**
  * How deep this seat is traced, for the line `musterd status` prints (ADR 445 §4) — or null when the
  * tap would record nothing. Every condition is one the tap itself checks before it posts: the kill
  * switch, a binding that can attribute (agent key) and authenticate (seat credential), and a daemon
- * whose `/health` names a trace store to post into. Always `structural` until increment 1b adds the
- * content column behind `trace.content`.
+ * whose `/health` names a trace store to post into. `structural+content` when, given the workspace
+ * `dir`, the hooks would also send content ({@link traceContentEnabled}).
  */
 export function traceDepth(
-  binding: Pick<Binding, 'agent_key' | 'seat_credential'> | null | undefined,
+  binding: Pick<Binding, 'agent_key' | 'seat_credential' | 'server'> | null | undefined,
   health: { trace_schema?: number } | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
-): 'structural' | null {
+  dir?: string,
+): 'structural' | 'structural+content' | null {
   if (!traceTapEnabled(env) || !binding?.agent_key || !binding.seat_credential) return null;
-  return typeof health?.trace_schema === 'number' && health.trace_schema > 0 ? 'structural' : null;
+  if (typeof health?.trace_schema !== 'number' || health.trace_schema <= 0) return null;
+  return dir !== undefined && traceContentEnabled(binding, dir)
+    ? 'structural+content'
+    : 'structural';
 }
 
 /** How long a hook may wait on the daemon before the event is dropped. The gate's own budget class. */
@@ -236,13 +357,22 @@ export async function emitTraceEvents(
   team: string,
   events: readonly TraceEvent[],
   budgetMs: number = TRACE_POST_BUDGET_MS,
+  /** Told the team's content mode when the post lands (a pre-1b daemon's reply reads as `off`). */
+  onMode?: (mode: 'on' | 'off') => void,
 ): Promise<boolean> {
   if (events.length === 0) return false;
   let timer: NodeJS.Timeout | undefined;
   try {
     const landed = await Promise.race<boolean>([
       http.postTraceEvents(team, { events: [...events] }).then(
-        () => true,
+        (res) => {
+          try {
+            onMode?.(res.content ?? 'off');
+          } catch {
+            /* the mode cache is a convenience; a failure there never fails the tap */
+          }
+          return true;
+        },
         () => false,
       ),
       new Promise<boolean>((resolve) => {
@@ -322,7 +452,9 @@ export async function tapHook(
   try {
     if (!traceTapEnabled(opts.env)) return false;
     if (!opts.binding) return false;
-    const parsed = parseTraceHook(raw, opts.kind);
+    // Content rides only the observed event, and only past the policy + loopback gates.
+    const content = opts.observed !== false && traceContentEnabled(opts.binding, opts.dir);
+    const parsed = parseTraceHook(raw, opts.kind, { content });
     if (!parsed) return false;
     const harness = opts.harness ?? parsed.harness ?? 'claude-code';
     const event = buildTraceEvent(opts.binding, parsed, harness);
@@ -334,7 +466,10 @@ export async function tapHook(
     }
     const http = traceClient(opts.binding, opts.dir);
     if (!http) return false;
-    return await emitTraceEvents(http, opts.binding.team, events);
+    const dir = opts.dir;
+    return await emitTraceEvents(http, opts.binding.team, events, TRACE_POST_BUDGET_MS, (mode) =>
+      writeTraceContentMode(dir, mode),
+    );
   } catch {
     return false;
   }
