@@ -1,5 +1,10 @@
 import type { Parsed } from '../args.js';
-import { inspectProvisioning, runInitDoctor, runSessionProbe } from '../onboard/doctor.js';
+import {
+  inspectProvisioning,
+  refreshWorkspaceDrift,
+  runInitDoctor,
+  runSessionProbe,
+} from '../onboard/doctor.js';
 import {
   runInit,
   runPruneBindings,
@@ -23,17 +28,31 @@ import { wireCommand } from './wire.js';
  * `musterd init --prune-bindings [--apply]` — report (or remove) registry entries whose folder is
  *   gone (ADR 162); credentials are never touched.
  */
+/**
+ * A refresh just changed this folder, so re-measure the drift cache now (ADR 408 inc 4). Without it
+ * the inbox keeps warning about the drift this repair cleared — and prescribing this very repair —
+ * until the cache's TTL runs out. Best-effort: a cache write never fails the repair.
+ */
+function afterRepair(code: number): number {
+  try {
+    refreshWorkspaceDrift(process.cwd(), undefined, { force: true });
+  } catch {
+    /* evidence, not a gate */
+  }
+  return code;
+}
+
 export async function initCommand(parsed: Parsed): Promise<number> {
   // Guidance-only refresh: deliberately checked before `--check`, so `--check --refresh-guidance`
   // means "fix the guidance", never "run the whole interactive flow".
-  if (parsed.flags['refresh-guidance']) return runRefreshGuidance();
+  if (parsed.flags['refresh-guidance']) return afterRepair(runRefreshGuidance());
   // Hook-only refresh (ADR 168), same precedence rule and the same reason: a stale or missing hook
   // is not an identity problem, so its repair must not route through the identity-rewriting flow.
-  if (parsed.flags['refresh-hooks']) return runRefreshHooks().code;
+  if (parsed.flags['refresh-hooks']) return afterRepair(runRefreshHooks().code);
   // Permissions-only refresh (ADR 261 inc 2), same precedence and the same reason: a seat missing
   // its harness floor is not an identity problem. This is the only repair path for seats that
   // existed before increment 1 armed `musterd agent` — the remaining surface of the ryder incident.
-  if (parsed.flags['refresh-permissions']) return runRefreshPermissions();
+  if (parsed.flags['refresh-permissions']) return afterRepair(runRefreshPermissions());
   // Registry prune (ADR 162): reports by default, removes only with --apply. Local-file maintenance
   // like the refresh above — no daemon call, no identity, no credentials.
   if (parsed.flags['prune-bindings']) {

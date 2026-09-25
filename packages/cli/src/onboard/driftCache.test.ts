@@ -57,6 +57,27 @@ describe('drift cache', () => {
     expect(inspect).toHaveBeenCalledTimes(1);
   });
 
+  it('force re-inspects a fresh cache — a repair just changed the folder', () => {
+    // 2026-09-25: `init --refresh-hooks` repaired 6 hooks and the inbox kept warning "behind on 6
+    // hooks" for the rest of the TTL, prescribing the repair that had just run.
+    const d = dir();
+    const inspect = vi
+      .fn<() => typeof drifted>()
+      .mockReturnValueOnce({ guidance: [], hooks: ['a', 'b'], permissions: [] })
+      .mockReturnValueOnce({ guidance: [], hooks: [], permissions: [] });
+    refreshDriftCache(d, { daemonBuild: 'abc', now: 1000, inspect, declined: () => false });
+    const c = refreshDriftCache(d, {
+      daemonBuild: 'abc',
+      now: 1001,
+      inspect,
+      declined: () => false,
+      force: true,
+    });
+    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(c.hooks).toBe(0);
+    expect(readDriftCache(d)?.hooks).toBe(0);
+  });
+
   it('re-inspects when the TTL passes, and immediately when the daemon build changes', () => {
     const d = dir();
     const inspect = vi.fn(() => drifted);
