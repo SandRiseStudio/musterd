@@ -105,7 +105,7 @@ src/
     watcher.ts        // debounced fs.watch over each roster root -> full reconcile (ADR 058)
   telemetry.ts        // minimal OpenTelemetry, off unless an OTLP endpoint is set (ADR 015)
   errors.ts           // MusterdError(code,message) + toHttp()/toFrame()
-  log.ts              // structured logger (07-conventions format)
+  log.ts              // structured logger (07-conventions format) + redactPath: the request path made safe to log or echo (hard rule 5)
 ```
 
 ## Key exported signatures
@@ -222,7 +222,7 @@ Something addressed to a human rings them through surfaces musterd owns, never a
 ## Telemetry (v0.2 — ADR 015, off by default)
 
 - `telemetry.ts` adds minimal OpenTelemetry (observability.md §4). `routeEnvelope` is wrapped in a `musterd.envelope.process` span with `musterd.*` attributes (team/act/from/to.kind/envelope.id/thread + `otel.traceparent` from `meta.otel`, ADR 011; ADR 101 adds `musterd.model` + `musterd.model.family` from the sender's attested occupancy, beside the `musterd.from.id` normalized-seat dimension) — **never the body**. Metrics: `musterd.envelopes` (counter), `musterd.delivery.latency` (histogram, by team), `musterd.errors` (counter; recorded at the transport boundary in `http.ts`/`ws.ts`), `musterd.presence.churn` (counter), and the observable gauges sampled on collection — `musterd.presence.active` (live presences by surface), `musterd.inbox.lag` (age of the slowest unread inbox), and `musterd.insight.diversity_flags` (live model-diversity flags by team, ADR 101), backed by `store/metrics.ts`/`store/mast.ts` and registered via `registerRuntimeGauges` in `listen()` (only when telemetry is enabled). ADR 082 added the coordination metrics `musterd.coordination.loop_latency` (accept/decline/resolve vs the act they close, by team and the closer's model family), `musterd.coordination.seen_latency` (read-side latency by team), and `musterd.coordination.open_loops` (unanswered request_help/handoff, sampled by team via `countOpenLoopsByTeam` in `store/messages.ts`). The opt-in `musterd.agent.tokens` counter remains self-reported via `meta.usage`, now by team, member/direction, and model family.
-- **HTTP request log (ADR 082):** the `createServer` handler emits a structured `http_request` line per request — `method`/`path`/`status`/`ms`, info 2xx/3xx, warn 4xx, error 5xx — path only (no query/headers), `/health` polls skipped. This is the HTTP layer `daemon.log` previously lacked (finding 001).
+- **HTTP request log (ADR 082):** the `createServer` handler emits a structured `http_request` line per request — `method`/`path`/`status`/`ms`, info 2xx/3xx, warn 4xx, error 5xx — path only (no query/headers), and the path passed through `redactPath` (`log.ts`) first — every segment under an `mcp` segment and any credential-shaped segment becomes `[redacted]`, so a remote MCP connector URL (`/mcp/<token>`) never reaches `daemon.log`; the unmatched-route 404 body echoes the same redacted path. `/health` polls skipped. This is the HTTP layer `daemon.log` previously lacked (finding 001).
 - **Off unless** a standard OTLP endpoint env is set (`OTEL_EXPORTER_OTLP_ENDPOINT` etc.); never when `OTEL_SDK_DISABLED=true`. No phone-home. `createServer().listen()` calls `startTelemetry()` (dynamic-imports the SDK only when enabled); `close()` flushes it. When off, the `@opentelemetry/api` calls are no-ops.
 
 ## Seat memory (ADR 093)

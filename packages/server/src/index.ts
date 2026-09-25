@@ -12,7 +12,7 @@ import type { Ctx } from './context.js';
 import { schemaVersion } from './db/migrations.js';
 import { openDb } from './db/open.js';
 import { startFootprintSampler } from './footprint/sampler.js';
-import { log } from './log.js';
+import { log, redactPath } from './log.js';
 import { startReaper } from './presence/reaper.js';
 import { reconcileAll } from './projection/reconcile.js';
 import { startRosterWatcher } from './projection/watcher.js';
@@ -92,10 +92,11 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
     res: import('node:http').ServerResponse,
   ) => {
     // HTTP request log (ADR 082 slice 2): method/path/status/latency on every request — the layer
-    // finding 001 flagged as absent. Path only, never query/headers (no secrets); healthy /health
-    // polls are skipped (the CLI guard polls it — it would drown the log). warn on 4xx, error on 5xx.
+    // finding 001 flagged as absent. Path only, never query/headers, and the path itself redacted
+    // (a remote MCP connector URL carries its secret there — hard rule 5); healthy /health polls are
+    // skipped (the CLI guard polls it — it would drown the log). warn on 4xx, error on 5xx.
     const t0 = Date.now();
-    const path = (req.url ?? '/').split('?')[0]!;
+    const path = redactPath((req.url ?? '/').split('?')[0]!);
     res.on('finish', () => {
       const status = res.statusCode;
       if (path === '/health' && status < 400) return;

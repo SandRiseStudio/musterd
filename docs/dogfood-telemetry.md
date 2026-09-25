@@ -72,7 +72,8 @@ ratio, dup-rate.
 
 Every HTTP request now logs a structured `http_request` line — `method` / `path` / `status` / `ms` —
 info on 2xx/3xx, **warn on 4xx, error on 5xx** (errors land in `daemon.err.log`, which finding 001
-found empty by design). Path only, never query/headers (no secrets); healthy `/health` polls are
+found empty by design). Path only, never query/headers, and the path redacted — anything under
+`/mcp/` and any credential-shaped segment logs as `[redacted]` (no secrets); healthy `/health` polls are
 skipped so the CLI guard doesn't drown the log.
 
 ## Per-agent token usage (slice 4 — the in-band half)
