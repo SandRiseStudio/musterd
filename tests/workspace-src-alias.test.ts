@@ -7,13 +7,13 @@
  * to gitignored dist/ — a different module — and this fails loudly instead of letting the suite
  * silently test stale build output again (four incidents in two days before this existed).
  */
+import * as telemetryViaName from '@musterd/telemetry';
 import { describe, expect, it } from 'vitest';
 import * as mcpViaName from '@musterd/mcp';
 import * as protocolViaName from '@musterd/protocol';
 import * as buildStampViaName from '@musterd/protocol/build-stamp';
 import * as projectViaName from '@musterd/protocol/project';
 import * as serverViaName from '@musterd/server';
-import * as telemetryViaName from '@musterd/telemetry';
 import * as mcpViaSrc from '../packages/mcp/src/index.ts';
 import * as buildStampViaSrc from '../packages/protocol/src/build-stamp.ts';
 import * as protocolViaSrc from '../packages/protocol/src/index.ts';
