@@ -157,6 +157,11 @@ credential custody (ADR 200, ADR 341, and spec §8).
   ledger / `~/.claude.json` re-keyed, and `~/.claude/projects/<slug>` transcript folders renamed. The
   run itself is a human-present, announced action: it bounces the daemon and every seat session whose
   folder moves.
+- 2026-09-25 (ADR 447): the layout note above is superseded — the member Workspace layout is
+  `~/musterd/<team>/<repo>/<member>`, team outermost, and the team home `~/musterd/<team>` is an
+  unbound roof rather than a bindable leaf. `bindingRefusal` now refuses `~/musterd/<team>` and
+  `~/musterd/<team>/<repo>` by position as well as by the Workspace-beneath scan. The rule this ADR
+  states — a binding never sits above a Workspace — is unchanged; the layout that satisfies it moved.
 
 ## Observability & Evaluation
 

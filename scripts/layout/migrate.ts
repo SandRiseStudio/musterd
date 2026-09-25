@@ -1,33 +1,33 @@
 /*
- * Reach-spec lane 3 — move this machine onto the §6 layout (ADR 442):
+ * ADR 447 — move this machine onto the team-first layout:
  *
  *   node scripts/layout/migrate.ts            # plan only: every step, every path, nothing written
- *   node scripts/layout/migrate.ts --apply    # do it (announce first: bounces the daemon AND every
+ *   node scripts/layout/migrate.ts --apply    # do it (announce first: bounces the host AND every
  *                                             #   seat session whose folder moves — including yours)
  *
- * Run it from a shell whose `node` is ≥22 (the daemon's native modules) and NOT from inside a folder
- * that moves — `cd ~` first. Idempotent: a step whose source is gone and target present is skipped,
- * so a run interrupted half-way is resumed by running it again. Every file it rewrites is backed up
- * to `~/.musterd/backups/layout-<ts>/` first.
+ * Run it from a shell whose `node` is ≥22 and NOT from inside a folder that moves — `cd ~` first.
+ * Idempotent: a step whose source is gone and target present is skipped, so a run interrupted
+ * half-way is resumed by running it again. Every file it rewrites is backed up to
+ * `~/.musterd/backups/layout-<ts>/` first.
  *
  * What is path-keyed on this machine, and what happens to each (the inventory lives in
  * docs/wiki/workspace-layout.md):
- *   1. LaunchAgents (daemon, host, guardian, sweep, autorefresh, streamwatch, otel-sink, live) —
- *      booted out, their plists rewritten in place (only the paths; every baked flag survives),
- *      bootstrapped again at the end.
- *   2. `~/agents` → `~/.musterd/runtime`; its `.musterd/binding.json` deleted (unbound); the human
- *      already has `~/musterd/<repo>/<human>`.
- *   3. `~/agents-live` → `~/.musterd/live/checkout`; `~/agents-<seat>` → `~/musterd/<repo>/<seat>`.
- *   4. `git worktree repair` from the runtime with every worktree's new path (moved or not: the
- *      Codex/Claude/tmp worktrees stay put but their gitfiles name the old main).
- *   5. `~/.musterd/config.json` bindings registry re-keyed, old main dropped; host-registry.json,
- *      harness-ledger.json, stream/image.json and the ~/.musterd shell scripts rewritten.
- *   6. `~/.claude.json` re-keyed (projects, mcpServers args, githubRepoPaths);
- *      `~/.claude/projects/<slug>` transcript folders renamed (old main's merge into the human's).
- *   7. The pnpm global `musterd` shim re-linked from the runtime.
+ *   1. LaunchAgents whose plist names a moving folder, plus the host (it wakes seats in their
+ *      Workspace and reads the registry once) — booted out, rewritten in place, bootstrapped again.
+ *   2. `~/musterd/<repo>/<member>` → `~/musterd/<team>/<repo>/<member>`, for every bound member
+ *      Workspace; the team root's own `.musterd/binding.json` deleted (a root is a roof).
+ *   3. `git worktree repair` from each moved worktree's main checkout, with every new path.
+ *   4. `~/.musterd/config.json` bindings registry re-keyed (root entries dropped, `teamHome` moved
+ *      off the root); host-registry.json, harness-ledger.json, stream/image.json and the ~/.musterd
+ *      shell scripts rewritten.
+ *   5. `~/.claude.json` re-keyed (projects, mcpServers args, githubRepoPaths);
+ *      `~/.claude/projects/<slug>` transcript folders renamed; each moved Workspace's own harness
+ *      configs (`.codex/config.toml`, `.opencode/opencode.json`, `.cursor/mcp.json`, …) rewritten.
+ *   6. The team root's `.gitignore` (it is the roster repo) told to ignore the trees beneath it.
  */
 import { spawnSync } from 'node:child_process';
 import {
+  appendFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -39,42 +39,25 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import {
+  type BoundFolder,
   claudeProjectMove,
-  defaultLayout,
-  legacySeat,
   mapPath,
-  pathMapping,
-  rewritePaths,
+  memberMoves,
   rewriteJson,
+  rewritePaths,
   rewriteRegistry,
+  teamRoots,
 } from './plan.ts';
 
 const APPLY = process.argv.includes('--apply');
-const HUMAN = argValue('--human') ?? 'nick';
-const REPO = argValue('--repo') ?? 'agents';
-const LABELS = [
-  'studio.sandrise.musterd',
-  'studio.sandrise.musterd-host',
-  'studio.sandrise.musterd-guardian',
-  'studio.sandrise.musterd-sweep',
-  'studio.sandrise.musterd-autorefresh',
-  'studio.sandrise.musterd-streamwatch',
-  'studio.sandrise.musterd-otel-sink',
-  'studio.sandrise.musterd-live',
-];
-
-function argValue(flag: string): string | undefined {
-  const i = process.argv.indexOf(flag);
-  return i >= 0 ? process.argv[i + 1] : undefined;
-}
+const HOST_LABEL = 'studio.sandrise.musterd-host';
 
 const home = homedir();
-const layout = defaultLayout(home, REPO);
-const humanHome = join(layout.group, HUMAN);
 const launchAgents = join(home, 'Library', 'LaunchAgents');
 const musterdHome = join(home, '.musterd');
+const configPath = join(musterdHome, 'config.json');
 const backupDir = join(
   musterdHome,
   'backups',
@@ -101,15 +84,16 @@ function backup(file: string): void {
   cpSync(file, join(backupDir, basename(file)));
 }
 
-function rewriteFile(file: string, mapping: Map<string, string>): void {
-  if (!existsSync(file)) return;
+function rewriteFile(file: string, mapping: Map<string, string>): boolean {
+  if (!existsSync(file)) return false;
   const before = readFileSync(file, 'utf8');
   const after = rewritePaths(before, mapping);
-  if (before === after) return plan(`unchanged ${file}`);
+  if (before === after) return false;
   plan(`rewrite ${file}`);
-  if (!APPLY) return;
+  if (!APPLY) return true;
   backup(file);
   writeFileSync(file, after);
+  return true;
 }
 
 function moveDir(from: string, to: string): void {
@@ -129,21 +113,21 @@ function moveDir(from: string, to: string): void {
 }
 
 // ---------------------------------------------------------------- inventory
-function seatDirs(): string[] {
-  return readdirSync(home)
-    .map((n) => join(home, n))
-    .filter((p) => legacySeat(layout, p) !== null && statSync(p).isDirectory());
+/** The main checkout a worktree belongs to (its `.git` file names `<main>/.git/worktrees/<n>`), or null. */
+function mainOf(worktree: string): string | null {
+  const gitfile = join(worktree, '.git');
+  try {
+    if (!statSync(gitfile).isFile()) return null;
+    const m = /^gitdir:\s*(.+)$/m.exec(readFileSync(gitfile, 'utf8'));
+    const gitdir = m?.[1]?.trim();
+    if (!gitdir) return null;
+    return resolve(gitdir, '..', '..', '..'); // <main>/.git/worktrees/<n> → <main>
+  } catch {
+    return null;
+  }
 }
 
-function worktrees(main: string): string[] {
-  if (!existsSync(main)) return [];
-  return sh('git', ['-C', main, 'worktree', 'list', '--porcelain'])
-    .split('\n')
-    .filter((l) => l.startsWith('worktree '))
-    .map((l) => l.slice('worktree '.length));
-}
-
-function musterdHomeTextFiles(): string[] {
+function musterdHomeTextFiles(mapping: Map<string, string>): string[] {
   const out: string[] = [];
   const skip = new Set([
     'runtime',
@@ -154,24 +138,24 @@ function musterdHomeTextFiles(): string[] {
     'node_modules',
     'web',
   ]);
+  const keys = [...mapping.keys()];
   const walk = (dir: string, depth: number): void => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name);
       if (e.isDirectory()) {
         if (depth < 1 && !skip.has(e.name)) walk(p, depth + 1);
       } else if (/\.(json|sh|mjs|toml|env)$/.test(e.name) && statSync(p).size < 5_000_000) {
-        if (readFileSync(p, 'utf8').includes(layout.oldMain)) out.push(p);
+        const text = readFileSync(p, 'utf8');
+        if (keys.some((k) => text.includes(k))) out.push(p);
       }
     }
   };
   walk(musterdHome, 0);
-  return out.filter((p) => p !== join(musterdHome, 'config.json'));
+  return out.filter((p) => p !== configPath);
 }
 
 // ---------------------------------------------------------------- preflight
-say(
-  `${APPLY ? 'APPLYING' : 'PLAN (dry run — add --apply to execute)'}: reach-spec §6 layout on ${home}`,
-);
+say(`${APPLY ? 'APPLYING' : 'PLAN (dry run — add --apply to execute)'}: ADR 447 layout on ${home}`);
 const node = Number(process.versions.node.split('.')[0]);
 if (node < 22) {
   say(
@@ -179,82 +163,121 @@ if (node < 22) {
   );
   process.exit(2);
 }
-if (!existsSync(join(humanHome, '.musterd', 'binding.json'))) {
-  say(
-    `✗ ${humanHome} is not a bound Workspace — the human's home must exist before the old main is unbound`,
-  );
+if (!existsSync(configPath)) {
+  say(`✗ ${configPath} missing — nothing is bound on this machine`);
   process.exit(2);
 }
+const cfg = JSON.parse(readFileSync(configPath, 'utf8')) as {
+  bindings?: Record<string, BoundFolder>;
+  teamHome?: Record<string, string>;
+};
+const bindings = cfg.bindings ?? {};
+const mapping = memberMoves(home, bindings);
+const roots = teamRoots(home, bindings);
 const cwd = process.cwd();
-const seats = seatDirs();
-const mapping = pathMapping(layout, seats);
 const inside = [...mapping.keys()].find((k) => cwd === k || cwd.startsWith(k + '/'));
 if (inside && APPLY) {
   say(`✗ you are inside ${inside}, which moves — cd ~ and run again`);
   process.exit(2);
 }
-const trees = worktrees(existsSync(layout.oldMain) ? layout.oldMain : layout.runtime);
-
-say(`\nmapping (${mapping.size} folders):`);
-for (const [from, to] of mapping) say(`  ${from} → ${to}`);
-say(`worktrees on record: ${trees.length}`);
-
-// ---------------------------------------------------------------- steps
-step(1, 'LaunchAgents: boot out every musterd agent');
-const uid = userInfo().uid;
-for (const label of LABELS) {
-  if (!existsSync(join(launchAgents, `${label}.plist`))) continue;
-  plan(`launchctl bootout gui/${uid}/${label}`);
-  if (APPLY) sh('launchctl', ['bootout', `gui/${uid}/${label}`], { ok: [0, 3, 5, 36, 113] });
-}
-
-step(2, `main checkout → unbound runtime`);
-moveDir(layout.oldMain, layout.runtime);
-const runtimeBinding = join(layout.runtime, '.musterd', 'binding.json');
-if (existsSync(runtimeBinding) || existsSync(join(layout.oldMain, '.musterd', 'binding.json'))) {
-  plan(`rm ${runtimeBinding} (the runtime confers nobody)`);
-  if (APPLY && existsSync(runtimeBinding)) {
-    backup(runtimeBinding);
-    rmSync(runtimeBinding);
+// A root's binding is the human's floor (ADR 176). It can only go once they have a member Workspace
+// of that team to stand in instead — otherwise the move would leave the person with no identity.
+for (const root of roots) {
+  const rootBinding = join(root, '.musterd', 'binding.json');
+  if (!existsSync(rootBinding)) continue;
+  const b = JSON.parse(readFileSync(rootBinding, 'utf8')) as {
+    team?: string;
+    claim?: { name?: string };
+  };
+  const floor = Object.entries(bindings).find(
+    ([f, ref]) => ref.team === b.team && ref.seat === b.claim?.name && f !== root,
+  );
+  if (!floor) {
+    say(
+      `✗ ${root} is bound as ${b.claim?.name ?? '?'} on ${b.team ?? '?'} and they have no member Workspace — ` +
+        `give them one first: cd <checkout> && musterd human ${b.claim?.name ?? '<name>'} --team ${b.team ?? '<team>'}`,
+    );
+    process.exit(2);
   }
 }
 
-step(3, 'live worktree and seat Workspaces');
-for (const [from, to] of mapping) if (from !== layout.oldMain) moveDir(from, to);
+say(`\nmapping (${mapping.size} folders):`);
+for (const [from, to] of mapping) say(`  ${from} → ${to}`);
+say(`team roots: ${roots.join(', ') || '(none)'}`);
 
-step(4, 'git worktree repair from the runtime, with every worktree at its new path');
-const repaired = trees.map((t) => mapPath(t, mapping)).filter((t) => existsSync(t) || !APPLY);
-plan(`git -C ${layout.runtime} worktree repair ${repaired.length} paths`);
-if (APPLY) sh('git', ['-C', layout.runtime, 'worktree', 'repair', ...repaired.filter(existsSync)]);
+// ---------------------------------------------------------------- steps
+const uid = userInfo().uid;
+const plists = existsSync(launchAgents)
+  ? readdirSync(launchAgents)
+      .filter((n) => n.startsWith('studio.sandrise.musterd') && n.endsWith('.plist'))
+      .map((n) => join(launchAgents, n))
+  : [];
+const keys = [...mapping.keys()];
+const bounce = new Set(
+  plists.filter((p) => {
+    const text = readFileSync(p, 'utf8');
+    return basename(p, '.plist') === HOST_LABEL || keys.some((k) => text.includes(k));
+  }),
+);
 
-step(5, 'LaunchAgent plists: rewrite paths in place');
-for (const label of LABELS) rewriteFile(join(launchAgents, `${label}.plist`), mapping);
+step(1, 'LaunchAgents: boot out the host and any agent whose plist names a moving folder');
+for (const p of bounce) {
+  const label = basename(p, '.plist');
+  plan(`launchctl bootout gui/${uid}/${label}`);
+  if (APPLY) sh('launchctl', ['bootout', `gui/${uid}/${label}`], { ok: [0, 3, 5, 36, 113] });
+}
+if (bounce.size === 0) plan('nothing to bounce');
 
-step(6, '~/.musterd: bindings registry, host registry, harness ledger, scripts');
-const configPath = join(musterdHome, 'config.json');
-if (existsSync(configPath)) {
-  const cfg = JSON.parse(readFileSync(configPath, 'utf8')) as {
-    bindings?: Record<string, unknown>;
-  };
-  const next = rewriteRegistry(cfg, layout, mapping);
+step(2, 'member Workspaces → ~/musterd/<team>/<repo>/<member>; team roots unbound');
+for (const [from, to] of mapping) moveDir(from, to);
+for (const root of roots) {
+  const rootBinding = join(root, '.musterd', 'binding.json');
+  if (!existsSync(rootBinding)) continue;
+  plan(`rm ${rootBinding} (a team root is a roof — it confers nobody)`);
+  if (APPLY) {
+    backup(rootBinding);
+    rmSync(rootBinding);
+  }
+}
+
+step(3, 'git worktree repair from each main checkout, with every worktree at its new path');
+const byMain = new Map<string, string[]>();
+for (const [from, to] of mapping) {
+  const main = mainOf(existsSync(to) ? to : from);
+  if (!main) {
+    plan(`not a worktree: ${to}`);
+    continue;
+  }
+  byMain.set(main, [...(byMain.get(main) ?? []), to]);
+}
+for (const [main, paths] of byMain) {
+  plan(`git -C ${main} worktree repair ${paths.length} paths`);
+  if (APPLY) sh('git', ['-C', main, 'worktree', 'repair', ...paths.filter(existsSync)]);
+}
+
+step(4, '~/.musterd: bindings registry, host registry, harness ledger, scripts');
+{
+  const next = rewriteRegistry(cfg, home, mapping);
   plan(
-    `rewrite ${configPath} (${Object.keys(cfg.bindings ?? {}).length} → ${Object.keys(next.bindings ?? {}).length} bindings; old main dropped)`,
+    `rewrite ${configPath} (${Object.keys(bindings).length} → ${Object.keys(next.bindings ?? {}).length} bindings; teamHome ${JSON.stringify(next.teamHome ?? {})})`,
   );
   if (APPLY) {
     backup(configPath);
     writeFileSync(configPath, JSON.stringify(next, null, 2) + '\n');
   }
 }
-for (const f of musterdHomeTextFiles()) rewriteFile(f, mapping);
+let rewrote = 0;
+for (const f of musterdHomeTextFiles(mapping)) if (rewriteFile(f, mapping)) rewrote++;
+if (rewrote === 0) plan('no other ~/.musterd file names a moving folder');
 
-step(7, '~/.claude.json and ~/.claude/projects transcript folders');
+step(5, '~/.claude.json and ~/.claude/projects transcript folders');
 const claudeJson = join(home, '.claude.json');
 if (existsSync(claudeJson)) {
   const raw = readFileSync(claudeJson, 'utf8');
   const next = JSON.stringify(rewriteJson(JSON.parse(raw), mapping), null, 2) + '\n';
-  const refs = raw.split(layout.oldMain).length - 1;
-  plan(`rewrite ${claudeJson} (${refs} references to ${layout.oldMain}*)`);
-  if (APPLY) {
+  const refs = keys.reduce((n, k) => n + raw.split(k).length - 1, 0);
+  plan(`rewrite ${claudeJson} (${refs} references to moving folders)`);
+  if (APPLY && refs > 0) {
     backup(claudeJson);
     writeFileSync(claudeJson, next);
   }
@@ -263,7 +286,7 @@ const projects = join(home, '.claude', 'projects');
 if (existsSync(projects)) {
   for (const name of readdirSync(projects)) {
     const from = join(projects, name);
-    const to = claudeProjectMove(from, layout, mapping, humanHome);
+    const to = claudeProjectMove(from, mapping);
     if (!to) continue;
     if (!existsSync(to)) {
       plan(`mv ${from} → ${to}`);
@@ -282,24 +305,50 @@ if (existsSync(projects)) {
   }
 }
 
-step(8, 'pnpm global `musterd` shim → the runtime');
-const pnpm = ['/Users/nick/Library/pnpm/pnpm', 'pnpm'].find(
-  (p) => spawnSync(p, ['--version']).status === 0,
-);
-if (pnpm) {
-  plan(`${pnpm} -C ${join(layout.runtime, 'packages', 'cli')} link --global`);
-  if (APPLY) sh(pnpm, ['-C', join(layout.runtime, 'packages', 'cli'), 'link', '--global']);
-} else
-  plan(
-    'pnpm not found — re-link the global shim by hand (AGENTS.md → "Running the CLI from source")',
-  );
+step(6, 'per-Workspace harness configs that name a moving folder by absolute path');
+// Measured 2026-09-25: `.codex/config.toml`, `.opencode/opencode.json`, `.cursor/mcp.json` and
+// `.grok/config.toml` each embed the MCP adapter's dist path — the 2026-09-24 move missed them and
+// four harnesses started from the new folders with no musterd tools.
+const HARNESS_FILES = [
+  '.mcp.json',
+  '.claude/settings.local.json',
+  '.codex/config.toml',
+  '.opencode/opencode.json',
+  '.cursor/mcp.json',
+  '.grok/config.toml',
+  '.grok/hooks/musterd.json',
+  '.musterd/workspace.json',
+];
+let harnessRewrites = 0;
+for (const to of mapping.values()) {
+  const at = existsSync(to) ? to : mapPath(to, new Map([...mapping].map(([a, b]) => [b, a])));
+  for (const rel of HARNESS_FILES) if (rewriteFile(join(at, rel), mapping)) harnessRewrites++;
+}
+if (harnessRewrites === 0) plan('no harness config names a moving folder');
 
-step(9, 'LaunchAgents: bootstrap every musterd agent again');
-for (const label of LABELS) {
-  const plist = join(launchAgents, `${label}.plist`);
-  if (!existsSync(plist)) continue;
-  plan(`launchctl bootstrap gui/${uid} ${plist}`);
-  if (APPLY) sh('launchctl', ['bootstrap', `gui/${uid}`, plist]);
+step(7, 'team roots that are git repos (the roster): ignore the member trees beneath them');
+const IGNORE =
+  '# ADR 447: the trees beneath a team root are member worktrees of other repos\n/*/\n!/.musterd/\n';
+for (const root of roots) {
+  const ignore = join(root, '.gitignore');
+  if (!existsSync(join(root, '.git'))) continue;
+  const text = existsSync(ignore) ? readFileSync(ignore, 'utf8') : '';
+  if (text.includes('ADR 447')) {
+    plan(`already ignored under ${root}`);
+    continue;
+  }
+  plan(`append to ${ignore}`);
+  if (APPLY) {
+    backup(ignore);
+    appendFileSync(ignore, (text.endsWith('\n') || text === '' ? '' : '\n') + IGNORE);
+  }
+}
+
+step(8, 'LaunchAgents: rewrite plists in place, bootstrap again');
+for (const p of plists) rewriteFile(p, mapping);
+for (const p of bounce) {
+  plan(`launchctl bootstrap gui/${uid} ${p}`);
+  if (APPLY) sh('launchctl', ['bootstrap', `gui/${uid}`, p]);
 }
 
 say('');
@@ -314,7 +363,8 @@ say(
     ? `done with ${failures} failure(s) — see ✗ lines; backups in ${backupDir}`
     : `done — backups in ${backupDir}`,
 );
+const sample = [...mapping.values()][0];
 say(
-  `verify: curl -s http://127.0.0.1:4849/health; git -C ${layout.runtime} worktree list; musterd whoami (from ${humanHome} → ${HUMAN}; from ${layout.runtime} → nobody)`,
+  `verify: musterd whoami (from ${sample ?? '<member>'} → that member; from ${roots[0] ?? '~/musterd/<team>'} → nobody); git -C <main> worktree list (no prunable)`,
 );
 process.exit(failures ? 1 : 0);

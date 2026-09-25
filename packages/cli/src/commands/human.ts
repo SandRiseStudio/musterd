@@ -1,7 +1,7 @@
-import { mkdirSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import * as p from '@clack/prompts';
 import { type Binding, type MemberSummary } from '@musterd/protocol';
+import { gitToplevel } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
@@ -17,22 +17,27 @@ import {
 } from '../config.js';
 import { CliError } from '../errors.js';
 import { bindingRefusal } from '../onboard/guard.js';
+import { provisionWorkspace } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { hint, success, sym } from '../render/ui.js';
 
 /**
  * `musterd human <name>` — the deliberate mirror of `musterd agent <name>` (install-topology §5).
- * The pair *is* the workspace model: **agents stand in worktrees, the human stands in the team home.**
+ * The pair *is* the workspace model: **every member stands in a Workspace of their own** —
+ * `~/musterd/<team>/<repo>/<member>` (ADR 447), humans and agents alike.
  *
  * `agent` mints a seat and stands it in an isolated worktree because it writes code. A human needs
- * something different — a place where their *identity resolves*, so `musterd board`, `musterd inbox
- * --watch` and `musterd send` are simply them, with no `--as` and nothing pasted. Before this
- * command there was no such place: eleven agent worktrees on the dogfood machine and zero for the
- * person, whose binding therefore ended up wherever `team create` happened to run — which on that
- * machine was the daemon's own checkout.
+ * a place where their *identity resolves*, so `musterd board`, `musterd inbox --watch` and `musterd
+ * send` are simply them, with no `--as` and nothing pasted. Before this command there was no such
+ * place: eleven agent worktrees on the dogfood machine and zero for the person, whose binding
+ * therefore ended up wherever `team create` happened to run — which on that machine was the
+ * daemon's own checkout. ADR 176 first gave them the team home `~/musterd/<team>` itself; ADR 447
+ * makes that folder the unbound roof over the team's repos (identity walks up, and a binding there
+ * would confer the person on every member worktree beneath it), so the person's floor is a member
+ * worktree like everyone else's.
  *
  * Everything here is glue over shipped parts (member add, ADR 059 vault, ADR 018 binding, ADR 075
- * claim); the only new state is the `teamHome` config key.
+ * claim); the only new state is the `teamHome` config key — the recorded floor.
  *
  * **On `config.current`.** This command sets it, and says so. `current` is a machine-global "last
  * team I touched", and install-topology §3 argues the home is the better answer to *which team am I
@@ -68,7 +73,7 @@ export async function humanCommand(parsed: Parsed): Promise<number> {
   // person this command exists to serve: their problem *is* that they have no floor to act from.
   const http = new HttpClient({ server, surface: 'cli' });
 
-  const home = resolveHome(config, team, flagStr(parsed.flags, 'home'));
+  const home = resolveHome(config, team, name, flagStr(parsed.flags, 'home'));
 
   // ── 1. the member ────────────────────────────────────────────────────────────────────────────
   const { members } = await http.roster(team);
@@ -180,7 +185,7 @@ export async function humanCommand(parsed: Parsed): Promise<number> {
       `${theme.meta(`(human${role ? `, ${role}` : ''})`)} ${minted === 'added' ? 'on' : 'of'} ${team}\n`,
   );
   process.stdout.write(
-    `${theme.ok(sym.ok)} team home ${home} ${theme.meta('(binding written, 0600)')}\n`,
+    `${theme.ok(sym.ok)} Workspace ${home} ${theme.meta('(binding written, 0600)')}\n`,
   );
   // Never silent about the machine-global write — see the note on `config.current` above.
   process.stdout.write(
@@ -222,26 +227,43 @@ export async function humanCommand(parsed: Parsed): Promise<number> {
 }
 
 /**
- * Resolve the team home: `--home` → a recorded `teamHome[slug]` → `~/musterd/<slug>`, created if
- * absent. Refuses when the directory already carries a **different** team's binding — a home is one
- * team's ground, and silently repointing it would hand this person's credential the last word over
- * somebody else's floor. Rebinding the same team in place is fine (that is the idempotent re-run).
+ * Resolve the person's floor: `--home` → the recorded `teamHome[slug]` → a member worktree of the
+ * repo the command runs in, at `~/musterd/<team>/<repo>/<name>` (ADR 447; the same placement
+ * `musterd agent` uses, minus the seat git identity — the person keeps their own). Outside a repo
+ * there is no default: `--home <dir>` names a plain folder. `~/musterd/<team>` itself is never the
+ * answer — it is the roof over the team's repos, and a binding there would confer the person on
+ * every member worktree beneath it.
+ *
+ * Refuses when the directory already carries a **different** team's binding — a floor is one team's
+ * ground, and silently repointing it would hand this person's credential the last word over
+ * somebody else's. Rebinding the same team in place is fine (that is the idempotent re-run).
  */
-function resolveHome(config: Config, team: string, flag: string | undefined): string {
-  const dir = resolvePath(flag ?? config.teamHome[team] ?? defaultTeamHome(team));
-  const occupant = readBindingAt(dir);
-  if (occupant && occupant.team !== team) {
+function resolveHome(config: Config, team: string, name: string, flag: string | undefined): string {
+  const explicit = flag ?? config.teamHome[team];
+  if (!explicit && !gitToplevel(process.cwd())) {
     throw new CliError(
-      `${dir} is already the team home for "${occupant.team}" — a home belongs to one team.\n` +
-        `  pick another: musterd human --team ${team} --home ~/musterd/${team}`,
+      `musterd human stands a person in a member worktree, ~/musterd/${team}/<repo>/${name} (ADR 447) — ` +
+        `run it inside the project's checkout, or pass --home <dir>`,
       2,
     );
   }
-  // The home is a leaf (reach spec §6, ADR 442): a binding above a Workspace — `~`, `~/musterd`, a
-  // folder with member worktrees beneath — would confer the human on every unbound folder under it.
+  const dir = explicit
+    ? resolvePath(explicit)
+    : provisionWorkspace(name, { team, branch: `human/${name}`, gitIdentity: false }).dir;
+  const occupant = readBindingAt(dir);
+  if (occupant && occupant.team !== team) {
+    throw new CliError(
+      `${dir} is already the floor of "${occupant.team}" — a floor belongs to one team.\n` +
+        `  pick another: musterd human --team ${team} --home ${defaultTeamHome(team)}/<repo>/${name}`,
+      2,
+    );
+  }
+  // Never above a Workspace (reach spec §6, ADR 442): `~`, `~/musterd`, a team root, a repo group, a
+  // folder with member worktrees beneath — a binding there would confer the human on every unbound
+  // folder under it.
   const refusal = bindingRefusal(dir);
   if (refusal) throw new CliError(`musterd human refused: ${refusal.reason}`, 2);
-  mkdirSync(dir, { recursive: true });
+  if (explicit) provisionWorkspace(name, { path: dir, team, gitIdentity: false });
   // Guard the floor the moment it exists, before a credential lands on it. `team export` guards it too,
   // but a home is committable long before anyone exports a roster into it — the binding written just
   // below is already the secret, and the person may well `git init` here first.

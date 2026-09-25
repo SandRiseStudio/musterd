@@ -120,6 +120,16 @@ provision or being swallowed. The floor existing and the seat being occupied are
 facts, and a command that conflated them would either throw away good work on a transient daemon
 error or quietly imply a presence that isn't there (ADR 173).
 
+## Consequences
+
+- 2026-09-25 (ADR 447): §1's placement of the person's binding _at_ `~/musterd/<team>` is
+  superseded. The layout is now `~/musterd/<team>/<repo>/<member>`, so the team home has member
+  worktrees beneath it and a binding there would confer the person on every unbound folder under it
+  (ADR 442). The home stays the real, named, recorded place — the roof over the team's trees, and the
+  roster repo on a file-backed team — but it holds no binding; `musterd human` stands the person in
+  a member worktree of the checkout it runs in, and `teamHome[slug]` records that Workspace. §2–§5
+  (the verb, the three credential branches, `config.current`, online reporting) are unchanged.
+
 ## Alternatives considered
 
 - **`musterd me`.** Rejected: presumes one identity per machine (ADR 059 exists because that is

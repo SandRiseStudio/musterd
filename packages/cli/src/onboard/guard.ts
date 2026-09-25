@@ -93,11 +93,12 @@ export function liveBindingClobber(
 }
 
 /**
- * A binding never sits above a Workspace (reach-and-boundaries spec §6, ADR 442). Identity resolves
- * by walking UP to the nearest `.musterd/binding.json`, so a binding written at `~`, at `~/musterd`
- * (the roof over every project — `~/musterd/<repo>/<member>` is the member-worktree layout), or in
- * any folder with a Workspace beneath it would silently confer that identity on every *unbound*
- * folder under it. This is the HARD refusal — unlike {@link inspectInitTarget}'s confirm, there is
+ * A binding never sits above a Workspace (reach-and-boundaries spec §6, ADR 442; layout ADR 447).
+ * Identity resolves by walking UP to the nearest `.musterd/binding.json`, so a binding written at
+ * `~`, anywhere in the first two levels under `~/musterd` (the roof, a team root `~/musterd/<team>`,
+ * a repo group `~/musterd/<team>/<repo>` — `~/musterd/<team>/<repo>/<member>` is the member-worktree
+ * layout, and only that third level is a Workspace), or in any folder with a Workspace beneath it
+ * would silently confer that identity on every *unbound* folder under it. This is the HARD refusal — unlike {@link inspectInitTarget}'s confirm, there is
  * no "yes, I mean it": the wall (ADR 442) is only as good as the rule that no folder confers an
  * identity it was not bound to.
  *
@@ -115,7 +116,7 @@ export interface BindingRefusal {
   workspace?: string;
 }
 
-const LAYOUT_HINT = 'Bind a member worktree instead: ~/musterd/<repo>/<member>.';
+const LAYOUT_HINT = 'Bind a member worktree instead: ~/musterd/<team>/<repo>/<member>.';
 
 export function bindingRefusal(cwd: string, home: string = homedir()): BindingRefusal | null {
   const here = realpathOr(cwd);
@@ -125,9 +126,10 @@ export function bindingRefusal(cwd: string, home: string = homedir()): BindingRe
       reason: `${cwd} is your home folder — a binding here would confer one identity on every folder beneath it. ${LAYOUT_HINT}`,
     };
   }
-  if (here === realpathOr(join(home, 'musterd'))) {
+  const roof = realpathOr(join(home, 'musterd'));
+  if (here === roof) {
     return {
-      reason: `${cwd} is the roof over every project (~/musterd) and never holds a binding. ${LAYOUT_HINT}`,
+      reason: `${cwd} is the roof over every team (~/musterd) and never holds a binding. ${LAYOUT_HINT}`,
     };
   }
   const beneath = workspaceBeneath(here, 2);
@@ -137,7 +139,26 @@ export function bindingRefusal(cwd: string, home: string = homedir()): BindingRe
       workspace: beneath,
     };
   }
+  // A team root and a repo group are roofs too — refused even while empty, so the first `musterd
+  // human` on a fresh machine cannot plant a binding that every later member worktree sits under.
+  const depth = layoutDepth(here, roof);
+  if (depth === 1) {
+    return {
+      reason: `${cwd} is a team root (~/musterd/<team>) — the roof over that team's repos — and never holds a binding. ${LAYOUT_HINT}`,
+    };
+  }
+  if (depth === 2) {
+    return {
+      reason: `${cwd} is a repo group (~/musterd/<team>/<repo>) — the roof over that repo's member worktrees — and never holds a binding. ${LAYOUT_HINT}`,
+    };
+  }
   return null;
+}
+
+/** How many levels `here` sits beneath the `~/musterd` roof (1 = team root, 2 = repo group, 3 = member); 0 outside it. */
+function layoutDepth(here: string, roof: string): number {
+  if (!here.startsWith(roof + '/')) return 0;
+  return here.slice(roof.length + 1).split('/').length;
 }
 
 /** `realpathSync` with the un-resolvable case folded to a plain absolute path (never throws). */
