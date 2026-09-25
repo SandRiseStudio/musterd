@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -153,6 +154,29 @@ export function bindingRefusal(cwd: string, home: string = homedir()): BindingRe
     };
   }
   return null;
+}
+
+/**
+ * A member Workspace (`~/musterd/<team>/<repo>/<member>`, ADR 447) must be its own git root. A plain
+ * folder there has none, so git — and Claude Code, which keys the musterd MCP entry by the repo it
+ * finds — walks up to whatever repo encloses it, usually the team root's roster repo. The seat then
+ * loads no musterd entry at all. Returns that enclosing root, or null when the folder is its own
+ * root, sits in no repo, or is not a member-level folder. Non-throwing.
+ */
+export function borrowedGitRoot(cwd: string, home: string = homedir()): string | null {
+  const here = realpathOr(cwd);
+  if (layoutDepth(here, realpathOr(join(home, 'musterd'))) !== 3) return null;
+  let top: string;
+  try {
+    top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: here,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null; // in no repo: nothing to borrow
+  }
+  return realpathOr(top) === here ? null : realpathOr(top);
 }
 
 /** How many levels `here` sits beneath the `~/musterd` roof (1 = team root, 2 = repo group, 3 = member); 0 outside it. */

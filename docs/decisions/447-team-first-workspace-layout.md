@@ -102,6 +102,13 @@ unenforceable.
 - A team root that is a git repo (the roster) gains a `.gitignore` rule for `/*/` so the member
   Workspaces beneath it never show as untracked roster changes. Git resolves each Workspace to its own
   `.git` file, so nesting is otherwise inert.
+  - 2026-09-25 (lane 01M3CZ1YFF): inert only for a Workspace that **is** a `git worktree`. fifty was a
+    plain folder (`musterd agent fifty --path ~/agents-fifty` run from a checkout only ran `mkdir`).
+    Once the move put it under `~/musterd/revive`, git resolved it to the roster repo, and Claude Code,
+    which keys the musterd MCP entry by that root (ADR 165), loaded no musterd tools for the seat.
+    `--path` to a new folder from inside a repo now makes a `git worktree` (humans' `--home` gets
+    `human/<name>`), and `musterd doctor` notes a member Workspace whose git root lies above it
+    (`borrowedGitRoot`, `onboard/guard.ts`) with the in-place repair. fifty was repaired by hand.
 - `setSeatGitIdentity` is now opt-out (`gitIdentity: false`), and `provisionWorkspace` takes a
   `branch` — both for the human's Workspace. Agent provisioning is unchanged.
 - Falsifier: `musterd whoami` from `~/musterd/revive` after the move must print "not bound"; from

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import { gitToplevel } from '@musterd/protocol/project';
@@ -123,6 +123,25 @@ export function setSeatGitIdentity(name: string, dir: string, team?: string): vo
   }
 }
 
+/** Real path of `p`, resolved through its nearest existing ancestor (`p` itself may not exist yet). */
+function realpathNearest(p: string): string {
+  const abs = resolvePath(p);
+  const parent = dirname(abs);
+  if (existsSync(abs)) return realpathSync(abs);
+  return parent === abs ? abs : join(realpathNearest(parent), basename(abs));
+}
+
+function addWorktree(top: string, dir: string, branch: string): void {
+  mkdirSync(dirname(dir), { recursive: true });
+  try {
+    // New branch off HEAD so the member has its own line to commit on.
+    git(['worktree', 'add', '-b', branch, dir, 'HEAD'], top);
+  } catch {
+    // Branch already exists (e.g. a prior run): attach a worktree to it.
+    git(['worktree', 'add', dir, branch], top);
+  }
+}
+
 /**
  * Decide + create the workspace directory for an agent named `name`. Pure-ish: the only side effects
  * are `git worktree add` / `mkdir`. Never throws for "already there" — an existing target is reused so
@@ -146,15 +165,32 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
     return { dir: cwd, kind: 'here', created: false };
   }
 
+  const top = gitToplevel(cwd);
+
   if (opts.path) {
     const dir = isAbsolute(opts.path) ? opts.path : resolvePath(cwd, opts.path);
     const created = !existsSync(dir);
+    /*
+     * A NEW folder named from inside a repo is a member of that repo: a worktree, and so its own git
+     * root (ADR 447 §1). A plain folder there is a Workspace with no git root of its own — it borrows
+     * whichever repo it later sits under, and Claude Code keys the musterd entry by that root. fifty
+     * (2026-09-25) was a plain `--path` folder until the layout move put it inside the team-home repo,
+     * and from then on its seat had no musterd tools. A target inside the checkout's own tree stays a
+     * plain folder; an existing target is the repair path above and is never rebuilt.
+     */
+    const outside =
+      top !== null && !(realpathNearest(dir) + '/').startsWith(realpathNearest(top) + '/');
+    if (created && outside) {
+      const branch = opts.branch ?? `agent/${name}`;
+      addWorktree(top, dir, branch);
+      identity(dir);
+      return { dir, kind: 'worktree', branch, created };
+    }
     if (created) mkdirSync(dir, { recursive: true });
     identity(dir);
     return { dir, kind: 'folder', created };
   }
 
-  const top = gitToplevel(cwd);
   if (top) {
     // Pre-layout seats (ADR 065) were siblings of the checkout: `<repo>-<name>`. One that already
     // exists is that seat's Workspace — reuse it (the identity repair below) rather than provision a
@@ -169,14 +205,7 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
       identity(dir);
       return { dir, kind: 'worktree', branch, created: false };
     }
-    mkdirSync(dirname(dir), { recursive: true });
-    try {
-      // New branch off HEAD so the agent has its own line to commit on.
-      git(['worktree', 'add', '-b', branch, dir, 'HEAD'], top);
-    } catch {
-      // Branch already exists (e.g. a prior run): attach a worktree to it.
-      git(['worktree', 'add', dir, branch], top);
-    }
+    addWorktree(top, dir, branch);
     identity(dir);
     return { dir, kind: 'worktree', branch, created: true };
   }

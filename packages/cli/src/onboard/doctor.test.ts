@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,6 +67,7 @@ vi.mock('../client.js', () => ({
 }));
 
 const {
+  borrowedGitRootNotes,
   buildSkewNotes,
   footprintNotes,
   inspectProvisioning,
@@ -2090,6 +2091,26 @@ describe('runSessionProbe self-heal (spec 2026-09-16, ADR 408)', () => {
       expect(refreshed).toEqual([{ cwd: bare, daemonBuild: sha('a') }]);
     } finally {
       rmSync(bare, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('borrowedGitRootNotes — a seat folder that borrows its git root loses its musterd entry (ADR 447)', () => {
+  it('names the enclosing repo and a repair that keeps .claude/ and .musterd/', () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'doc-borrow-')));
+    const teamRoot = join(home, 'musterd', 'revive');
+    const member = join(teamRoot, 'agents', 'fifty');
+    mkdirSync(member, { recursive: true });
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: teamRoot });
+      const [note] = borrowedGitRootNotes(member, home);
+      expect(note).toContain(`git resolves it to ${teamRoot}`);
+      expect(note).toContain('rsync -a --ignore-existing');
+      expect(note).toContain(`git -C ${member} worktree repair`);
+      execFileSync('git', ['init', '-q'], { cwd: member });
+      expect(borrowedGitRootNotes(member, home)).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });
