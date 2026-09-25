@@ -36,7 +36,7 @@ src/
   infra-gate.ts       // warn-only infra-touch check: asks the daemon whether the acting seat holds `platform`; every failure mode is silence, never a block (ADR 227 inc 2)
   hookStdin.ts        // readHookStdin(timeoutMs): the one bounded stdin drain every harness hook uses (gate, capture, codex-hook, trace tap) — a wiring mistake must never hang a tool call (ADR 247: one transform, one home)
   trace/              // ADR 445 R1 — the hook tap, client half
-    hook.ts           // parseTraceHook (names/ids/sizes out of a hook payload — never tool_input/tool_response/prompt/error/transcript_path/cwd) + buildTraceEvent (sessionDigest, never the raw id) + emitTraceEvents (raced against TRACE_POST_BUDGET_MS, swallows everything) + tapHook (the one-call form each hook site uses); MUSTERD_NO_TRACE=1 is the seat's kill switch
+    hook.ts           // parseTraceHook (names/ids/sizes out of a hook payload — never tool_input/tool_response/prompt/error/transcript_path/cwd) + buildTraceEvent (sessionDigest, never the raw id) + emitTraceEvents (raced against TRACE_POST_BUDGET_MS, swallows everything) + tapHook (the one-call form each hook site uses; harness = caller's word → payload spelling (inferTraceHarness: Grok camelCase, Cursor conversation_id) → claude-code; Cursor event names mapped onto the column's; an optional HookOutcome rides the same post) + traceDepth (the `traced: structural` line `musterd status` prints, ADR 445 §4); MUSTERD_NO_TRACE=1 is the seat's kill switch
   workingTree.ts      // session-start marker + the advisory a stage-shaped `git add -A` earns for paths that PREDATE this session; local-only, warn-never-deny (ADR 239 verdict)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
@@ -156,7 +156,7 @@ src/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report; --check --fix → `wire` for entry drift, full init otherwise (ADR 165)
     wire.ts           // musterd wire: headless fragment reconcile, plus --migrate-bootstrap atomic replacement of a Workspace's legacy Team key while Presence stays occupied (ADR 080/282/350)
     harness.ts        // musterd harness configure|status: the ONE desired-set editor/legacy converter + the read-only fragment inspection (ADR 281/282/286)
-    codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence; SessionStart runs the shared self-heal probe; PostToolUse returns a raised daemon line only as Codex hookSpecificOutput additional context (ADR 249/397); start also emits the ADR 326 orientation block on stdout (ADR 333)
+    codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence; SessionStart runs the shared self-heal probe; PostToolUse returns a raised daemon line only as Codex hookSpecificOutput additional context (ADR 249/397); start also emits the ADR 326 orientation block on stdout (ADR 333); each subcommand taps its ADR 445 event as `codex` (post-tool-use adds the interrupt probe's HookOutcome)
     sessionProbe.ts   // lazy, fail-open SessionStart self-heal seam shared by harness capture/observe handlers (ADR 419)
     agent.ts          // musterd agent <name> [--role <label>] [--profile <profile>] [--harness claude-code|cursor|codex|opencode|grok]: add an agent + isolated worktree + binding + MCP register (any harness) + standing grant + committed workspace.json (ADR 065/080/116); --role = team fact, --profile = local setup (ADR 272); `--path <dir>` to a new folder from inside a repo makes it a worktree too — a member Workspace is its own git root (ADR 447)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
@@ -184,7 +184,7 @@ src/
     nudge.ts          // `inbox --waiting`: the waiting-acts banner + the acts behind it, read-only — the approval-prompt hook target (ADR 053); `musterd nudge` is the hidden pre-2026-09-03 alias
     reap.ts           // musterd reap [--yes] (ADR 242): list orphaned MCP sidecars from the daemon's footprint tick; --yes asks the daemon to kill them (re-verified server-side, audited)
     whoami.ts         // print the seat this folder resolves to: member/team/surface/source (ADR 067)
-    status.ts         // status
+    status.ts         // status; ends with `traced: structural` when this seat's hooks would record (ADR 445 §4)
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     doorbell.ts       // `musterd doorbell` (ADR 443): your route, sink by sink, and where each part comes from; `<sink> on|off` (`os on` takes this machine's host label from the host registry); `team` — the admin's allow-list, defaults and team URLs via read-merge-write POST /policy. Humans only; no MCP tool; a URL prints masked to its host
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)

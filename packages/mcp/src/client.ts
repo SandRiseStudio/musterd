@@ -450,7 +450,25 @@ export class MusterdClient {
     return (await this.request('GET', '/health')) as { ok?: boolean; build?: string };
   }
 
-  private daemonBuildMemo: { value: string | undefined; at: number } | null = null;
+  private healthMemo: {
+    value: { build?: string; trace_schema?: number } | undefined;
+    at: number;
+  } | null = null;
+
+  /** `/health`, memoized for 60s — the one read both {@link daemonBuild} and {@link traceDepth}
+   *  answer from, so a status call that asks both costs one round trip. Errors → undefined. */
+  private async daemonHealth(): Promise<{ build?: string; trace_schema?: number } | undefined> {
+    const now = Date.now();
+    if (this.healthMemo && now - this.healthMemo.at < 60_000) return this.healthMemo.value;
+    let value: { build?: string; trace_schema?: number } | undefined;
+    try {
+      value = (await this.health()) as { build?: string; trace_schema?: number };
+    } catch {
+      value = undefined;
+    }
+    this.healthMemo = { value, at: now };
+    return value;
+  }
 
   /**
    * The daemon's build ref from `/health` (ADR 130/134) — the reference every client compares its own
@@ -459,18 +477,21 @@ export class MusterdClient {
    * Errors → undefined (the skew check stays silent rather than guessing).
    */
   async daemonBuild(): Promise<string | undefined> {
-    const now = Date.now();
-    if (this.daemonBuildMemo && now - this.daemonBuildMemo.at < 60_000) {
-      return this.daemonBuildMemo.value;
-    }
-    let value: string | undefined;
-    try {
-      value = (await this.health()).build;
-    } catch {
-      value = undefined;
-    }
-    this.daemonBuildMemo = { value, at: now };
-    return value;
+    return (await this.daemonHealth())?.build;
+  }
+
+  /**
+   * How deep this seat's hooks are traced (ADR 445 §4), for the `traced:` line on `team_status` — or
+   * null when the tap would record nothing. The adapter does not run the tap (the CLI hooks do), so
+   * this mirrors the conditions the tap checks: the `MUSTERD_NO_TRACE` kill switch, a key to
+   * attribute with and a seat credential to post with, and a daemon whose `/health` names a trace
+   * store. `structural` until increment 1b adds the content column.
+   */
+  async traceDepth(env: NodeJS.ProcessEnv = process.env): Promise<'structural' | null> {
+    if (env['MUSTERD_NO_TRACE'] === '1') return null;
+    if (!this.config.agent_key || !this.config.seatCredential) return null;
+    const schema = (await this.daemonHealth())?.trace_schema;
+    return typeof schema === 'number' && schema > 0 ? 'structural' : null;
   }
 
   /** POST the envelope. On an `ask`, the daemon's ack additionally carries the derived tier contract

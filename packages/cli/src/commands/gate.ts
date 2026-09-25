@@ -336,8 +336,14 @@ async function gateCheck(parsed: Parsed): Promise<number> {
   // enforcement decision always wins it (a deny must never be swallowed), and the ADR 239 warning is
   // flushed afterwards only if nothing was emitted. Tracked locally — this process handles one call.
   let emitted = false;
+  // ADR 445 R1 — what the trace tap needs once the decision is made: the payload (names, ids and
+  // sizes are all the tap reads of it) and how the gate ruled.
+  let tapPayload: string | undefined;
+  // Widened by hand: tsc cannot see the assignments inside `decide` and would narrow to 'allow'.
+  let decision = 'allow' as 'allow' | 'deny' | 'warn';
   const decide = async (): Promise<void> => {
     const stdin = await readStdin();
+    tapPayload = stdin;
     const raw = parseToolCall(stdin);
     if (!raw) return; // nothing to match on → allow
     // Normalize the target path to repo-relative BEFORE matching, so class + lane globs compare cleanly.
@@ -349,6 +355,7 @@ async function gateCheck(parsed: Parsed): Promise<number> {
     if (reason) {
       emitDeny(reason);
       emitted = true;
+      decision = 'deny';
       try {
         const { http, team } = resolveRead(parsed.flags, { claimSeatPerRequest: false });
         void http.recordActor(team, {
@@ -385,19 +392,10 @@ async function gateCheck(parsed: Parsed): Promise<number> {
     // latency tax the ADR's guard metric forbids. Fires on undeclared calls by design (ADR 150 §Gate B
     // as amended) — it cannot change whether the call proceeds, so it is not mediation.
     attest(http, team, call);
-    // ADR 445 R1 — the PreToolUse trace event, for the tools this hook is registered on. Same
-    // contract as the attestation above: not awaited, cannot change whether the call proceeds, and
-    // the payload's tool input never leaves this process (the tap reads names, ids and sizes).
-    void tapHook(stdin, {
-      binding: findBinding(),
-      dir: process.cwd(),
-      harness: harnessFromEnv() ?? 'claude-code',
-      kind: 'PreToolUse',
-    });
     const { enforcement } = await http.getEnforcement(team);
     const match = matchEnforcement(enforcement, call);
     if (!match) return; // undeclared call → allow, no daemon round-trip (the common case)
-    const decision = await http.gateCheck(team, {
+    const verdict = await http.gateCheck(team, {
       kind: match.cls.kind,
       class: match.cls.class,
       fingerprint: match.fingerprint,
@@ -405,12 +403,14 @@ async function gateCheck(parsed: Parsed): Promise<number> {
       tool: call.tool,
       target: match.target,
     });
-    if (decision.decision === 'deny') {
-      emitDeny(decision.reason);
+    if (verdict.decision === 'deny') {
+      emitDeny(verdict.reason);
       emitted = true;
-    } else if (decision.outcome === 'warned' && decision.reason) {
-      emitWarn(decision.reason);
+      decision = 'deny';
+    } else if (verdict.outcome === 'warned' && verdict.reason) {
+      emitWarn(verdict.reason);
       emitted = true;
+      decision = 'warn';
     }
   };
   try {
@@ -421,5 +421,23 @@ async function gateCheck(parsed: Parsed): Promise<number> {
   // The ADR 239 advisory survives a failure above on purpose: an unreachable daemon is exactly when a
   // second session in the folder is least likely to be noticed any other way.
   if (wtWarn && !emitted) emitWarn(wtWarn);
+  // ADR 445 R1 — the PreToolUse trace event and the gate's own HookOutcome, in ONE post, after the
+  // decision is on stdout: it cannot change whether the call proceeds, and the payload's tool input
+  // never leaves this process. Bounded and silent (TRACE_POST_BUDGET_MS); an unbound folder, a seat
+  // with no credential, or MUSTERD_NO_TRACE=1 all make it a no-op. Harness: env first, then the
+  // payload's spelling — Grok sets no env var the gate can read.
+  if (tapPayload) {
+    await tapHook(tapPayload, {
+      binding: findBinding(),
+      dir: process.cwd(),
+      harness: harnessFromEnv(),
+      kind: 'PreToolUse',
+      outcome: {
+        hook: 'gate',
+        outcome: decision === 'deny' ? 'denied' : 'ok',
+        detail: { decision },
+      },
+    });
+  }
   return 0;
 }

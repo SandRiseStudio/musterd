@@ -226,6 +226,24 @@ ADR 184's publication gate; a spans backend.
   Codex/Cursor/Grok hook adapters and musterd's own `HookOutcome` rows — is open; the
   `traced: structural` status line (§4) lands with it. The pre-#1699 config-erasure trap is fixed
   (#1706: unknown top-level keys pass through).
+- **2026-09-25 — the 1a tail landed** (lane `01M3D1S9CE6K1JXEKS4FCBAXEC`). Codex taps `SessionStart` /
+  `SessionEnd` / `PostToolUse` from `codex-hook`; Cursor taps from `session observe` (its camelCase
+  events map onto this column's spelling; `postToolUse`, `afterShellExecution` and `afterMCPExecution`
+  all record as `PostToolUse`, with the source name kept in `detail.hook_event` so a reader can
+  de-duplicate an IDE call that fired two of them). The gate now infers the harness from the payload
+  when its env names none, which fixes a mis-attribution: Grok's `PreToolUse` rows had been recorded
+  as `claude-code`. `HookOutcome` rows ship for the gate (`decision`, `outcome: denied` on a deny) and
+  for each harness's interrupt probe (`raised`, `deaf`). `duration_ms` is the hook process's whole
+  life, node boot included, because that is what the tool call waited for. Each hook sends its
+  observed event and its outcome in ONE post, and the gate posts after its decision is on stdout
+  (it used to fire mid-decision). `musterd status` and `team_status` print `traced: structural` when
+  the tap would record: no kill switch, an agent key and a seat credential, and a daemon whose
+  `/health` names `trace_schema`. **Open, and recorded rather than built:** Grok's `Stop` hook runs
+  the interrupt check with stdin ignored, and its PreToolUse probe carries no `--hook` flag, so
+  neither is tapped. Closing that means rewriting the Grok hook lines, which needs a `FEATURE_EPOCH`
+  bump, so it waits for the next Grok hook change rather than forcing one. Falsifier on the dogfood
+  box, once autorefresh has run: `SELECT harness, kind, count(*) FROM trace_events GROUP BY 1, 2`
+  shows `HookOutcome` rows beside `PreToolUse` / `PostToolUse` from a Claude Code seat.
 - Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
   backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a

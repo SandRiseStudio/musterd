@@ -377,15 +377,28 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
   // ADR 445 R1 — the PostToolUse trace event rides the probe that already runs on every tool call,
   // so the tap adds a payload to an existing process rather than a process to every call. Only the
   // Claude Code hook pipes its JSON to this command; the other harnesses' probes come in through
-  // `session observe` / `codex-hook` and will tap there. Started here, awaited at the very end: the
+  // `session observe` / `codex-hook` and tap there. Started here, awaited at the very end: the
   // interrupt GET below is the hook's one job and this must never delay or fail it (short stdin
   // budget — the JSON is already in the pipe when the process starts, or it is not coming).
-  const tapped =
-    hookFlag === 'claude-code'
-      ? readHookStdin(750).then((raw) =>
-          tapHook(raw, { binding: findBinding(), dir: process.cwd(), harness: 'claude-code' }),
-        )
-      : Promise.resolve(false);
+  //
+  // The probe's own HookOutcome rides the same post, so the payload is read now and the post goes
+  // out at the end, when `raised` is known. Grok pipes its PreToolUse JSON here too, but with no
+  // `--hook` flag that says so — a bare probe cannot tell a harness pipe from any other stdin, so
+  // Grok's probe is not tapped until its hook line names itself (ADR 445 Consequences, 2026-09-25).
+  const payload: Promise<string> =
+    hookFlag === 'claude-code' ? readHookStdin(750) : Promise.resolve('');
+  let raised = false;
+  let deaf = false;
+  const tap = async (): Promise<void> => {
+    const raw = await payload;
+    if (!raw) return;
+    await tapHook(raw, {
+      binding: findBinding(),
+      dir: process.cwd(),
+      harness: 'claude-code',
+      outcome: { hook: 'interrupt', detail: deaf ? { raised, deaf } : { raised } },
+    });
+  };
   // Spec 2026-09-16 / ADR 408 increment 4: keep `.musterd/drift.json` warm on this cadence, so the
   // adapter's inbox-check surface can REPORT provisioning drift without inspecting the workspace on
   // a seam a busy seat takes many times a minute. Bounded by its own TTL — this is a cheap read
@@ -403,20 +416,28 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
   } catch {
     /* never noise on the interrupt line */
   }
-  if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
+  if (process.env['MUSTERD_NO_NUDGE'] === '1') {
+    await tap();
+    return 0;
+  }
   let seat: string | undefined;
   try {
     // The interrupt probe is hook-installed and rides every tool call — it takes the default (no
     // reclaim) for the same reason `gate check` does.
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
-    if (!explicit || !identity) return 0;
+    if (!explicit || !identity) {
+      await tap();
+      return 0;
+    }
     seat = identity.name;
     // Explicit ternary, not a conditional spread: a spread here would let a mistyped key vanish
     // from typecheck, which is the exact blind spot docs/wiki/conditional-spread-blind-spot.md was
     // written about — and the field it would silently drop is the one this lane exists to record.
     const res = await http.interruptCheck(team, hookFlag ? { rail: hookFlag } : {});
-    if (res.raised && res.line) emit(res.line);
-    await tapped;
+    if (res.raised && res.line) {
+      emit(res.line);
+      raised = true;
+    }
   } catch (err) {
     // Best-effort: the interrupt probe must never fail the tool call it rides on — with ONE thing it
     // owes the seat before it goes quiet. `GET /inbox/interrupt-check` authenticates as a member, and
@@ -465,8 +486,10 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
           `\`musterd claim${seat !== undefined ? ' ' + seat : ''}\` mints a lease that dies with ` +
           `the command, and \`--detach\` writes none.`,
       );
+      deaf = true;
     }
   }
+  await tap();
   return 0;
 }
 

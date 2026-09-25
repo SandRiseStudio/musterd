@@ -407,7 +407,7 @@ src/
     send.ts       // refuses until ready (pending → claim; dormant → join)
     inboxCheck.ts // refuses until ready (pending → claim; dormant → join); folds the tail's ambient acts — teammates' @team status, transitions on lanes the seat does not own — to one line each (ADR 433), reading `lane_board {mine}` only when the slice carries a lane broadcast; appends the ADR 135 build-skew warning, and pushes every warning — skew, wedge, provisioning drift — into ONE `warnings` array (a second structuredContent key is a key unknowing clients drop, #1479); the empty-inbox path carries the same findings as prose, which is its only channel
     huddleRooms.ts // the room an arriving turn came from (ADR 378): folds the timeline with the protocol lens so a turn names its topic and the call that answers it — a FIELD on inbox_check, never a tool (ADR 144 selectability + standing-context cost)
-    status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning
+    status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning and the ADR 445 §4 `traced:` line (client.traceDepth, one memoized /health read shared with daemonBuild)
     members.ts    // works while dormant/pending
     availability.ts // team_availability — set your OWN availability (ADR 044), the MCP twin of `musterd availability`; not a WRITE_TOOL, a muted seat may still say it is away (surface survey #1245 item 6)
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
@@ -417,7 +417,7 @@ src/
     teamMemory.ts // team_insight_save + team_insight_search — findings for the whole team, pull-only retrieval (ADR 327)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)
-    format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135); the ToolWarning union — build_skew, sync_wedge and provisioningDriftOf's provisioning_drift (ADR 408 inc 4), which READS `.musterd/drift.json` from client.workspaceDir (the seat's folder, not process.cwd() — a shared workspace-family entry runs from the family's primary checkout) and never imports @musterd/cli
+    format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135); tracedLine (ADR 445 §4); the ToolWarning union — build_skew, sync_wedge and provisioningDriftOf's provisioning_drift (ADR 408 inc 4), which READS `.musterd/drift.json` from client.workspaceDir (the seat's folder, not process.cwd() — a shared workspace-family entry runs from the family's primary checkout) and never imports @musterd/cli
   bind.ts         // reachability check only (GET /health) — claims no presence
 ```
 

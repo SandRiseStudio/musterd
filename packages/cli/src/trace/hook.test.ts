@@ -1,7 +1,17 @@
 import type { Binding } from '@musterd/protocol';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { HttpClient } from '../client.js';
 import { sessionDigest } from '../session/digest.js';
-import { buildTraceEvent, emitTraceEvents, parseTraceHook, traceTapEnabled } from './hook.js';
+import {
+  buildHookOutcomeEvent,
+  buildTraceEvent,
+  emitTraceEvents,
+  inferTraceHarness,
+  parseTraceHook,
+  tapHook,
+  traceDepth,
+  traceTapEnabled,
+} from './hook.js';
 
 const binding = {
   server: 'http://127.0.0.1:1',
@@ -156,5 +166,129 @@ describe('emitTraceEvents — fail-open and bounded', () => {
   it('MUSTERD_NO_TRACE=1 is the seat’s kill switch', () => {
     expect(traceTapEnabled({})).toBe(true);
     expect(traceTapEnabled({ MUSTERD_NO_TRACE: '1' })).toBe(false);
+  });
+});
+
+describe('the other harnesses (ADR 445 1a tail)', () => {
+  it('names the harness from the payload spelling: Grok camelCase, Cursor conversation_id', () => {
+    expect(inferTraceHarness({ sessionId: 'g', hookEventName: 'PreToolUse' })).toBe('grok');
+    expect(inferTraceHarness({ conversation_id: 'c' })).toBe('cursor');
+    // Claude Code and Codex share a spelling — only the caller can tell them apart.
+    expect(inferTraceHarness({ session_id: 's', hook_event_name: 'PostToolUse' })).toBeUndefined();
+    expect(
+      parseTraceHook(JSON.stringify({ sessionId: 'g', hookEventName: 'PreToolUse' }))!.harness,
+    ).toBe('grok');
+    expect(parseTraceHook(post())).not.toHaveProperty('harness');
+  });
+
+  it("maps Cursor's event names onto the column's spelling and keeps the source name", () => {
+    const cursor = (name: string, extra: Record<string, unknown> = {}) =>
+      parseTraceHook(JSON.stringify({ conversation_id: 'c1', hook_event_name: name, ...extra }));
+    expect(cursor('postToolUse', { tool_name: 'Read' })).toEqual({
+      kind: 'PostToolUse',
+      session_id: 'c1',
+      harness: 'cursor',
+      tool_name: 'Read',
+      outcome: 'ok',
+      detail: { hook_event: 'postToolUse' },
+    });
+    // afterShellExecution carries the command and its output — sizes are all that cross.
+    const shell = cursor('afterShellExecution', { command: 'cat ~/.ssh/id_ed25519', output: 'x' })!;
+    expect(shell.kind).toBe('PostToolUse');
+    expect(shell.detail).toEqual({ hook_event: 'afterShellExecution' });
+    expect(JSON.stringify(shell)).not.toContain('ssh');
+    expect(cursor('afterMCPExecution')!.kind).toBe('PostToolUse');
+    expect(cursor('sessionStart')!.kind).toBe('SessionStart');
+    expect(cursor('beforeSubmitPrompt')!.kind).toBe('UserPromptSubmit');
+    expect(cursor('notAnEvent')).toBeNull();
+  });
+
+  it('builds a HookOutcome joined to the observed call, and bounded like any detail', () => {
+    const observed = buildTraceEvent(binding, parseTraceHook(post())!, 'claude-code')!;
+    const out = buildHookOutcomeEvent(observed, {
+      hook: 'gate',
+      outcome: 'denied',
+      duration_ms: 42,
+      detail: { decision: 'deny' },
+    })!;
+    expect(out).toMatchObject({
+      kind: 'HookOutcome',
+      harness: 'claude-code',
+      session_digest: observed.session_digest,
+      tool_name: 'Bash',
+      tool_use_id: 'toolu_01',
+      duration_ms: 42,
+      outcome: 'denied',
+      detail: { hook: 'gate', exit_code: 0, decision: 'deny' },
+    });
+    // No duration given → the hook process's own life so far, which is what the call paid.
+    expect(buildHookOutcomeEvent(observed, { hook: 'interrupt' })!.duration_ms).toBeGreaterThan(0);
+  });
+});
+
+describe('tapHook — one post per hook process', () => {
+  afterEach(() => vi.restoreAllMocks());
+  const spy = () =>
+    vi.spyOn(HttpClient.prototype, 'postTraceEvents').mockResolvedValue({ accepted: 2 });
+
+  it('posts the observed event and the HookOutcome together', async () => {
+    const posted = spy();
+    expect(
+      await tapHook(post(), {
+        binding,
+        dir: '/tmp',
+        harness: 'codex',
+        env: {},
+        outcome: { hook: 'interrupt', detail: { raised: false } },
+      }),
+    ).toBe(true);
+    expect(posted).toHaveBeenCalledTimes(1);
+    const { events } = posted.mock.calls[0]![1];
+    expect(events.map((e) => [e.kind, e.harness])).toEqual([
+      ['PostToolUse', 'codex'],
+      ['HookOutcome', 'codex'],
+    ]);
+  });
+
+  it("the payload's spelling decides when the caller cannot, then claude-code", async () => {
+    const posted = spy();
+    await tapHook(JSON.stringify({ sessionId: 'g', hookEventName: 'PreToolUse' }), {
+      binding,
+      dir: '/tmp',
+      harness: undefined,
+      env: {},
+    });
+    await tapHook(post(), { binding, dir: '/tmp', env: {} });
+    expect(posted.mock.calls.map((c) => c[1].events[0]!.harness)).toEqual(['grok', 'claude-code']);
+  });
+
+  it('observed:false posts only the outcome; the kill switch posts nothing', async () => {
+    const posted = spy();
+    await tapHook(post(), {
+      binding,
+      dir: '/tmp',
+      env: {},
+      observed: false,
+      outcome: { hook: 'interrupt' },
+    });
+    expect(posted.mock.calls[0]![1].events.map((e) => e.kind)).toEqual(['HookOutcome']);
+    expect(await tapHook(post(), { binding, dir: '/tmp', env: { MUSTERD_NO_TRACE: '1' } })).toBe(
+      false,
+    );
+    expect(posted).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('traceDepth — the `traced:` line (ADR 445 §4)', () => {
+  const health = { trace_schema: 1 };
+  it('is structural only when the tap would actually record', () => {
+    expect(traceDepth(binding, health, {})).toBe('structural');
+    expect(traceDepth(binding, health, { MUSTERD_NO_TRACE: '1' })).toBeNull();
+    expect(traceDepth({ ...binding, seat_credential: undefined }, health, {})).toBeNull();
+    expect(traceDepth({ ...binding, agent_key: undefined }, health, {})).toBeNull();
+    expect(traceDepth(null, health, {})).toBeNull();
+    // A daemon before ADR 445 names no trace store — there is nowhere to post, so nothing is traced.
+    expect(traceDepth(binding, {}, {})).toBeNull();
+    expect(traceDepth(binding, undefined, {})).toBeNull();
   });
 });

@@ -414,7 +414,8 @@ async function observeCommand(parsed: Parsed, deps: SessionCommandDeps): Promise
       2,
     );
   }
-  const payload = parseHookPayload(await readStdin());
+  const raw = await readStdin();
+  const payload = parseHookPayload(raw);
   await observeCursorSession(payload);
   const captureDir = resolveCaptureDir(payload);
   if (parsed.flags['orient'] === true) {
@@ -422,10 +423,27 @@ async function observeCommand(parsed: Parsed, deps: SessionCommandDeps): Promise
     const json = formatCursorOrientation(await emitSessionOrientation(captureDir));
     if (json) process.stdout.write(json + '\n');
   }
+  let raised: boolean | undefined;
   if (parsed.flags['interrupt'] === true) {
     const line = await checkHookInterrupt(captureDir);
+    raised = line !== null;
     const json = formatCursorInterrupt(line);
     if (json) process.stdout.write(json + '\n');
+  }
+  // ADR 445 R1 — Cursor's sessionStart / postToolUse / afterShellExecution / afterMCPExecution all
+  // arrive here; the tap maps Cursor's event names onto the column's spelling itself. After every
+  // line this hook owes stdout, bounded and silent. The postToolUse probe's HookOutcome rides along.
+  if (captureDir) {
+    await tapHook(raw, {
+      binding: findBinding(captureDir, {}),
+      dir: captureDir,
+      harness: 'cursor',
+      // `--orient` is registered on sessionStart only; name it rather than trust a payload field.
+      ...(parsed.flags['orient'] === true ? { kind: 'SessionStart' as const } : {}),
+      ...(raised !== undefined
+        ? { outcome: { hook: 'interrupt' as const, detail: { raised } } }
+        : {}),
+    });
   }
   return 0;
 }

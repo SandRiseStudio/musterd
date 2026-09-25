@@ -539,6 +539,9 @@ export class HttpClient {
     connections?: number;
     /** The commit the daemon's dist was built from (ADR 130/134) — the client-skew reference. */
     build?: string;
+    /** The trace store's file and ladder version (ADR 445 §3) — absent on a daemon before it. */
+    trace_db?: string;
+    trace_schema?: number;
   }> {
     return this.request('GET', '/health');
   }
