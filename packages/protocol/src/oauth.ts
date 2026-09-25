@@ -17,6 +17,20 @@ import { TOKEN_PREFIXES } from './credentials.js';
 /** PKCE S256 is REQUIRED — `plain` and `none` are refused (ADR 446 §3). */
 export const PKCE_METHOD = 'S256' as const;
 
+/**
+ * PKCE entropy (RFC 7636 §4.1, decline 3): the verifier is 43–128 unreserved characters, so a
+ * leaked 90-second code is still uneconomic to redeem by guessing. The S256 challenge is always
+ * exactly 43 base64url characters — anything else is not an S256 challenge at all.
+ */
+const CodeVerifierSchema = z
+  .string()
+  .min(43)
+  .max(128)
+  .regex(/^[A-Za-z0-9\-._~]+$/, 'code_verifier must be RFC 7636 unreserved characters');
+const CodeChallengeSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_-]{43}$/, 'code_challenge must be a PKCE S256 challenge');
+
 /** TTLs, in seconds — the abuse posture the rehearsal tunes, not the code (ADR 446 §5). */
 export const OAUTH_CODE_TTL_S = 90;
 export const OAUTH_ACCESS_TTL_S = 3600;
@@ -62,7 +76,7 @@ export const OAuthAuthorizeQuerySchema = z.object({
   client_id: z.string().min(1),
   redirect_uri: z.string().min(1),
   state: z.string().min(1),
-  code_challenge: z.string().min(1),
+  code_challenge: CodeChallengeSchema,
   code_challenge_method: z.literal(PKCE_METHOD),
   scope: z.string().optional(),
 });
@@ -79,7 +93,7 @@ export const OAuthAuthorizeConfirmSchema = z
     client_id: z.string().min(1),
     redirect_uri: z.string().min(1),
     state: z.string().min(1),
-    code_challenge: z.string().min(1),
+    code_challenge: CodeChallengeSchema,
     code_challenge_method: z.literal(PKCE_METHOD),
     scope: z.string().optional(),
     proof: z.discriminatedUnion('kind', [
@@ -103,7 +117,7 @@ export const OAuthTokenRequestSchema = z.union([
       code: z.string().min(1),
       redirect_uri: z.string().min(1),
       client_id: z.string().min(1),
-      code_verifier: z.string().min(1),
+      code_verifier: CodeVerifierSchema,
     })
     .strict(),
   z

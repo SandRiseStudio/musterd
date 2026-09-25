@@ -51,13 +51,44 @@ export function __resetOAuthBucketsForTest(): void {
   buckets.clear();
 }
 
-function clientIp(req: IncomingMessage): string {
+/**
+ * The team behind a URL slug, without ever echoing the slug (redaction lane 01M3AMYGN5): the
+ * slug is attacker-controlled path input and may itself be credential-shaped (`/mcp/mscr_…`),
+ * so `requireTeam`'s `no team "X"` message would write the secret into the response body.
+ */
+export function requireTeamRedacted(db: Database, slug: string) {
+  try {
+    return requireTeam(db, slug);
+  } catch (err) {
+    if (err instanceof MusterdError && err.code === 'not_found')
+      throw new MusterdError('not_found', 'no such team');
+    throw err;
+  }
+}
+
+/**
+ * The rate-limit key (decline 1): `req.socket.remoteAddress` alone collapses behind the
+ * loopback Cloudflare Tunnel (every attendee arrives as the local `cloudflared` peer, so one
+ * attendee could throttle everyone). With `trustProxy` on — the tunnel-facing posture — the
+ * tunnel-reported client IP (leftmost `X-Forwarded-For`) is the key; without it XFF is
+ * untrusted and ignored, and the socket address stands.
+ */
+function clientIp(ctx: Ctx, req: IncomingMessage): string {
+  if (ctx.config.trustProxy) {
+    const xff = req.headers['x-forwarded-for'];
+    const first = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
+    if (first) return first;
+  }
   return req.socket.remoteAddress ?? 'unknown';
 }
 
-function checkRateLimit(req: IncomingMessage, route: keyof typeof OAUTH_RATE_LIMITS): void {
+function checkRateLimit(
+  ctx: Ctx,
+  req: IncomingMessage,
+  route: keyof typeof OAUTH_RATE_LIMITS,
+): void {
   const now = Date.now();
-  const key = `${clientIp(req)}:${route}`;
+  const key = `${clientIp(ctx, req)}:${route}`;
   const windowStart = now - 60_000;
   const hits = (buckets.get(key) ?? []).filter((t) => t > windowStart);
   if (hits.length >= OAUTH_RATE_LIMITS[route]) {
@@ -121,9 +152,19 @@ function sendTokenError(
   sendOAuthJson(res, status, { error, error_description: description });
 }
 
-async function readBody(req: IncomingMessage): Promise<Buffer> {
+/** OAuth bodies are consent forms and small JSON — 64 KiB is orders of magnitude of headroom. */
+const OAUTH_BODY_MAX_BYTES = 64 * 1024;
+
+async function readBody(req: IncomingMessage, maxBytes = OAUTH_BODY_MAX_BYTES): Promise<Buffer> {
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let total = 0;
+  for await (const chunk of req) {
+    total += (chunk as Buffer).length;
+    // Decline 2: public endpoints must not buffer unbounded input — refuse past the cap rather
+    // than exhaust daemon memory. The socket stays usable (the response ends the exchange).
+    if (total > maxBytes) throw new MusterdError('payload_too_large', 'request body too large');
+    chunks.push(chunk as Buffer);
+  }
   return Buffer.concat(chunks);
 }
 
@@ -309,17 +350,22 @@ export async function handleOAuthRoutes(
   url: URL,
 ): Promise<boolean> {
   // ── discovery ──
+  // Decline 4: every OAuth route — including discovery and registration — refuses non-TLS
+  // except loopback, exactly as the ADR claims. Metadata is public info, but a uniform rule
+  // has no carve-outs to misread, and loopback + tunneled https both pass regardless.
   const prm = path.match(/^\/.well-known\/oauth-protected-resource\/mcp\/([^/]+)$/);
   if (method === 'GET' && prm) {
+    requireTlsPeer(ctx, req, 'OAuth discovery');
     const slug = decodeURIComponent(prm[1]!);
-    requireTeam(ctx.db, slug);
+    requireTeamRedacted(ctx.db, slug);
     sendOAuthJson(res, 200, metadataFor(ctx, req, slug).resource);
     return true;
   }
   const asmTeam = path.match(/^\/.well-known\/oauth-authorization-server\/([^/]+)$/);
   if (method === 'GET' && asmTeam) {
+    requireTlsPeer(ctx, req, 'OAuth discovery');
     const slug = decodeURIComponent(asmTeam[1]!);
-    requireTeam(ctx.db, slug);
+    requireTeamRedacted(ctx.db, slug);
     sendOAuthJson(res, 200, metadataFor(ctx, req, slug).server);
     return true;
   }
@@ -339,8 +385,9 @@ export async function handleOAuthRoutes(
   // RFC 8414 path-inserted discovery: {issuer}/.well-known/oauth-authorization-server.
   const asmInserted = path.match(/^\/oauth\/([^/]+)\/.well-known\/oauth-authorization-server$/);
   if (method === 'GET' && asmInserted) {
+    requireTlsPeer(ctx, req, 'OAuth discovery');
     const slug = decodeURIComponent(asmInserted[1]!);
-    requireTeam(ctx.db, slug);
+    requireTeamRedacted(ctx.db, slug);
     sendOAuthJson(res, 200, metadataFor(ctx, req, slug).server);
     return true;
   }
@@ -350,7 +397,7 @@ export async function handleOAuthRoutes(
   if (!m) return false;
   const slug = decodeURIComponent(m[1]!);
   const rest = m[2] ?? '';
-  const team = requireTeam(ctx.db, slug);
+  const team = requireTeamRedacted(ctx.db, slug);
 
   const parseOrOAuth = <S extends z.ZodTypeAny>(schema: S, raw: unknown): z.infer<S> => {
     const parsed = schema.safeParse(raw);
@@ -367,7 +414,8 @@ export async function handleOAuthRoutes(
 
   // ── POST /oauth/:team/register (RFC 7591) ──
   if (method === 'POST' && rest === '/register') {
-    checkRateLimit(req, 'register');
+    requireTlsPeer(ctx, req, 'client registration');
+    checkRateLimit(ctx, req, 'register');
     const body = parseOrOAuth(
       OAuthClientRegistrationRequestSchema,
       await readTokenRequestBody(req),
@@ -406,7 +454,7 @@ export async function handleOAuthRoutes(
   // ── GET /oauth/:team/authorize — the consent page ──
   if (method === 'GET' && rest === '/authorize') {
     requireTlsPeer(ctx, req, 'authorization');
-    checkRateLimit(req, 'authorize');
+    checkRateLimit(ctx, req, 'authorize');
     const query = parseOrOAuth(
       OAuthAuthorizeQuerySchema,
       Object.fromEntries(url.searchParams.entries()),
@@ -439,7 +487,7 @@ export async function handleOAuthRoutes(
   // ── POST /oauth/:team/authorize — the human proves the seat, the code rides the 302 ──
   if (method === 'POST' && rest === '/authorize') {
     requireTlsPeer(ctx, req, 'authorization');
-    checkRateLimit(req, 'authorize');
+    checkRateLimit(ctx, req, 'authorize');
     const raw = (await readBody(req)).toString('utf8');
     const flat = consentFormBody(raw);
     const body = parseOrOAuth(OAuthAuthorizeConfirmSchema, {
@@ -508,7 +556,7 @@ export async function handleOAuthRoutes(
   // ── POST /oauth/:team/token — code → pair, refresh → rotated pair ──
   if (method === 'POST' && rest === '/token') {
     requireTlsPeer(ctx, req, 'token issuance');
-    checkRateLimit(req, 'token');
+    checkRateLimit(ctx, req, 'token');
     const parsed = OAuthTokenRequestSchema.safeParse(await readTokenRequestBody(req));
     if (!parsed.success) {
       sendTokenError(
@@ -621,7 +669,7 @@ export async function handleOAuthRoutes(
       return true;
     }
     if (method === 'POST') {
-      checkRateLimit(req, 'token');
+      checkRateLimit(ctx, req, 'token');
       const raw = await readTokenRequestBody(req);
       const token =
         typeof (raw as Record<string, unknown>)['token'] === 'string'

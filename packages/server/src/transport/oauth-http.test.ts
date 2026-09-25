@@ -387,6 +387,138 @@ describe('transport posture (ADR 446 §1/§5)', () => {
   });
 });
 
+describe('decline fixes (re-review)', () => {
+  it('oversize bodies are refused 413 before buffering', async () => {
+    const big = 'x'.repeat(70 * 1024);
+    const reg = await postJson('/oauth/dawn/register', {
+      redirect_uris: [REDIRECT],
+      client_name: 'Big',
+      padding: big,
+    });
+    expect(reg.status).toBe(413);
+    expect(reg.json.error.code).toBe('payload_too_large');
+    const token = await postForm('/oauth/dawn/token', {
+      grant_type: 'refresh_token',
+      refresh_token: `msrt_${big}`,
+      client_id: 'cid_x',
+    });
+    expect(token.status).toBe(413);
+  });
+
+  it('short verifiers never reach the store — invalid_request', async () => {
+    const reg = await registerClient();
+    const client_id = reg.json.client_id as string;
+    const authz = await postForm('/oauth/dawn/authorize', {
+      client_id,
+      redirect_uri: REDIRECT,
+      state: 's',
+      code_challenge: CHALLENGE,
+      code_challenge_method: 'S256',
+      member: 'nick',
+      credential: nickCred,
+    });
+    expect(authz.status).toBe(302);
+    const code = new URL(authz.headers.get('location')!).searchParams.get('code')!;
+    const token = await postForm('/oauth/dawn/token', {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT,
+      client_id,
+      code_verifier: 'too-short',
+    });
+    expect(token.status).toBe(400);
+    expect(token.json.error).toBe('invalid_request');
+  });
+
+  it('malformed challenges are refused at the consent legs', async () => {
+    const reg = await registerClient();
+    const client_id = reg.json.client_id as string;
+    const q =
+      `/oauth/dawn/authorize?response_type=code&client_id=${client_id}` +
+      `&redirect_uri=${encodeURIComponent(REDIRECT)}&state=s&code_challenge=short&code_challenge_method=S256`;
+    expect((await get(q)).status).toBe(400);
+    const post = await postForm('/oauth/dawn/authorize', {
+      client_id,
+      redirect_uri: REDIRECT,
+      state: 's',
+      code_challenge: 'short',
+      code_challenge_method: 'S256',
+      member: 'nick',
+      credential: nickCred,
+    });
+    expect(post.status).toBe(400);
+  });
+
+  it('without trustProxy, X-Forwarded-For is untrusted — one shared bucket', async () => {
+    for (let i = 0; i < 5; i++) {
+      const res = await postJson(
+        '/oauth/dawn/register',
+        { redirect_uris: [REDIRECT], client_name: `A${i}` },
+        { 'x-forwarded-for': '198.51.100.7' },
+      );
+      expect(res.status).toBe(201);
+    }
+    // A different XFF does not open a new bucket when trustProxy is off.
+    const res = await postJson(
+      '/oauth/dawn/register',
+      { redirect_uris: [REDIRECT], client_name: 'B' },
+      { 'x-forwarded-for': '203.0.113.9' },
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it('with trustProxy, buckets key off the tunnel-reported client IP', async () => {
+    const proxyServer = createServer({ db: openDb(':memory:'), port: 0, trustProxy: true });
+    const { port } = await proxyServer.listen();
+    const proxyBase = `http://127.0.0.1:${port}`;
+    try {
+      const team = await fetch(proxyBase + '/teams', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ slug: 'dawn', creator: { name: 'nick', kind: 'human' } }),
+      });
+      expect(team.status).toBe(201);
+      const reg = async (name: string, xff: string) => {
+        const res = await fetch(proxyBase + '/oauth/dawn/register', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-forwarded-for': xff,
+            // The tunnel terminates TLS: loopback socket + https proto = the allowed shape.
+            'x-forwarded-proto': 'https',
+          },
+          body: JSON.stringify({ redirect_uris: [REDIRECT], client_name: name }),
+        });
+        return res.status;
+      };
+      for (let i = 0; i < 5; i++) {
+        expect(await reg(`A${i}`, '198.51.100.7')).toBe(201);
+        expect(await reg(`B${i}`, '203.0.113.9')).toBe(201);
+      }
+      // Each reported IP spent only its own bucket.
+      expect(await reg('A5', '198.51.100.7')).toBe(429);
+      expect(await reg('B5', '203.0.113.9')).toBe(429);
+      expect(await reg('C0', '192.0.2.1')).toBe(201);
+    } finally {
+      await proxyServer.close();
+    }
+  });
+
+  it('credential-shaped team slugs are never echoed — /mcp edition', async () => {
+    const secret = `mscr_${'f'.repeat(40)}`;
+    const res = await fetch(`${base}/mcp/${secret}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
+    });
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain(secret);
+    const oauth = await get(`/.well-known/oauth-protected-resource/mcp/${secret}`);
+    expect(oauth.status).toBe(404);
+    expect(oauth.text).not.toContain(secret);
+  });
+});
+
 describe('/mcp/:team — the Done line (ADR 446 §7)', () => {
   it('join → inbox → send works over MCP frames', async () => {
     const { pair } = await signInPair(nickCred);

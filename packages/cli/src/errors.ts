@@ -38,6 +38,8 @@ const CODE_EXIT: Record<ErrorCode, number> = {
   // ADR 446 (remote MCP): the OAuth endpoint's per-IP bucket is empty. Like hub_unreachable (12)
   // this means "retry later" — its own exit so a script can tell "refused" from "come back".
   rate_limited: 14,
+  // ADR 446 decline 2: the request body exceeded the endpoint's byte cap — "send less".
+  payload_too_large: 15,
 };
 
 export function exitForCode(code: ErrorCode): number {

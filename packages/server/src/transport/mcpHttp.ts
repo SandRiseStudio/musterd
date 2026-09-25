@@ -5,7 +5,7 @@ import { ACTS, ActSchema, makeEnvelope, type Act, type Recipient } from '@muster
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import type { Ctx } from '../context.js';
-import { asMusterdError } from '../errors.js';
+import { asMusterdError, MusterdError } from '../errors.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { getCursor } from '../store/cursors.js';
 import { rowsToEnvelopes } from '../store/hydrate.js';
@@ -13,7 +13,7 @@ import { authMember, getMemberByName, touchSeen } from '../store/members.js';
 import { listInbox } from '../store/messages.js';
 import { touchAmbientPresence } from '../store/presence.js';
 import { requireTeam } from '../store/teams.js';
-import { isTlsPeer } from './oauth.js';
+import { isTlsPeer, requireTeamRedacted } from './oauth.js';
 
 /**
  * The remote-MCP rail (ADR 446 §1): the musterd adapter served as Streamable HTTP at
@@ -306,8 +306,15 @@ async function toWebRequest(
   url: URL,
   seat: { team: string; member: string },
 ): Promise<Request> {
+  // Decline 2: the bridged exchange is bounded — MCP frames carry tool args (message bodies),
+  // so the cap is generous (1 MiB), but an unbounded public endpoint is a memory-exhaustion bug.
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let total = 0;
+  for await (const chunk of req) {
+    total += (chunk as Buffer).length;
+    if (total > 1024 * 1024) throw new MusterdError('payload_too_large', 'request body too large');
+    chunks.push(chunk as Buffer);
+  }
   const body = Buffer.concat(chunks);
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) {
@@ -375,7 +382,9 @@ export async function handleMcpRoute(
   const m = path.match(/^\/mcp\/([^/]+)$/);
   if (!m) return false;
   const slug = decodeURIComponent(m[1]!);
-  const team = requireTeam(ctx.db, slug);
+  // Redaction lane 01M3AMYGN5: the slug is attacker-controlled path input and may itself be
+  // credential-shaped — never echo it (requireTeam's `no team "X"` would write it back out).
+  const team = requireTeamRedacted(ctx.db, slug);
   if (!isTlsPeer(ctx, req)) {
     res.writeHead(403, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(

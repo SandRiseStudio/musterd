@@ -148,11 +148,19 @@ apps' setup prompts call it; failing there fails the demo).
   through untouched, never trusted.
 - Rate limits: per-IP buckets on `register` / `authorize` / `token` (5/min register, 10/min authorize,
   20/min token — tune in rehearsal); the refusal is `rate_limited` (429, new protocol code — the
-  next move is retry, and a 403 would say it is final); code-guessing is uneconomic at 256 bits +
-  single-use + TTL.
-- Transport: OAuth + `/mcp` bearer refused over non-TLS except loopback (§1); `Cache-Control: no-store`
+  next move is retry, and a 403 would say it is final). Behind the loopback tunnel every attendee
+  shares the `cloudflared` socket address, so with `trustProxy` on the buckets key off the
+  tunnel-reported client IP (leftmost `X-Forwarded-For`); without it XFF is untrusted and the
+  socket address stands. Code-guessing is uneconomic at 256 bits + single-use + TTL.
+- Transport: OAuth + `/mcp` bearer refused over non-TLS except loopback (§1) — every OAuth route
+  including discovery and registration, no carve-outs; `Cache-Control: no-store`
   + `Pragma: no-cache` on every token/code response; codes and tokens never in URLs except the one
   302 `code` param (the flow both apps require).
+- Bodies are byte-capped before buffering (64 KiB OAuth, 1 MiB `/mcp` frames — tool args carry
+  message bodies); the refusal is `payload_too_large` (413, new protocol code — the next move is
+  "send less"). PKCE inputs carry RFC 7636 entropy at the schema boundary (verifier 43–128
+  unreserved chars, challenge exactly 43 base64url chars), so a leaked code is uneconomic to
+  redeem by guessing even inside its 90 seconds.
 - Audit: `oauth.client_registered / oauth.code_issued / oauth.token_issued / oauth.token_rotated /
   oauth.token_reused_revoked / oauth.revoked` — who (member), which client, when; never the secret.
 
@@ -196,8 +204,8 @@ apps' setup prompts call it; failing there fails the demo).
 
 ## Consequences
 
-- `@musterd/protocol` grows two prefixes + OAuth zod schemas + a `rate_limited` (429) error code
-  (ADR-gated, as required — this ADR is the gate). `@musterd/server` grows one runtime dependency
+- `@musterd/protocol` grows two prefixes + OAuth zod schemas + `rate_limited` (429) and
+  `payload_too_large` (413) error codes (ADR-gated, as required — this ADR is the gate). `@musterd/server` grows one runtime dependency
   (`@modelcontextprotocol/server@2.0.0`, same pin as the adapter), three tables (migration 72),
   six routes + the `/mcp/:team` mount, and six `oauth.*` audit verbs (server-side union, no wire
   change). No CLI/MCP-adapter wire change (stdio path untouched).

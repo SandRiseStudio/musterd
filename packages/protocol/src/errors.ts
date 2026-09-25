@@ -27,6 +27,9 @@ export const ERROR_CODES = [
   // ADR 446 (remote MCP): per-IP rate-limit buckets on the OAuth endpoints. Its own code (429)
   // because the next move IS "retry" — a 403 would tell the client the refusal is final.
   'rate_limited',
+  // ADR 446 decline 2: the OAuth + /mcp request bodies are byte-capped (64 KiB / 1 MiB). Its own
+  // code (413) because the next move is "send less", not "authenticate differently".
+  'payload_too_large',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 export const ErrorCodeSchema = z.enum(ERROR_CODES);
@@ -51,6 +54,7 @@ export const ERROR_HTTP_STATUS: Record<ErrorCode, number> = {
   hub_unreachable: 503,
   bound_elsewhere: 403,
   rate_limited: 429,
+  payload_too_large: 413,
 };
 
 export const ErrorBodySchema = z.object({
