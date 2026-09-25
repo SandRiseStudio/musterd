@@ -119,7 +119,8 @@ content/roadmap.data.ts         // the roadmap SOURCE — ROADMAP.md is generate
 live/
   client.ts                     // observer claim + backfill + WS subscribe (browser port of the CLI watch)
   seedClient.ts                 // lazy Seed HTTP projection; keeps Seed schemas out of eager `/live`
-  useLiveStream.ts              // the React hook: envelopes, roster, liveIds, conn status; drives the chime
+  useLiveStream.ts              // the React hook: envelopes, roster, liveIds, conn status; drives the chime; roster refetch on presence is coalesced
+  coalesce.ts                   // at most one run in flight + one trailing run per gap — the roster refetch's burst guard (viewers × presence frames)
   format.ts                     // act tone/label, laneEvent recovery, roster/colour/status projections
   Stream.tsx                    // the act feed + ACT_GLYPH + typewriter
   RosterPanel.tsx               // posture/offline_reason chip + exception account_status
