@@ -69,6 +69,7 @@ hooks send the daemon is nearly nothing:
 | PreToolUse (`gate check`)   | only enforcement-class calls: lane/action gate decisions; subagent spawns and subagent writes; Bash as a sha256 fingerprint | `audit` `lane.gate`, `action.gate`, `actor.subagent_*`                           |
 | PostToolUse                 | the interrupt probe                                                                                                           | `audit` `interrupt.*`, `musterd.interrupt.check` counter                         |
 | UserPromptSubmit            | nothing — prints the orient nudge                                                                                             | —                                                                                |
+| **ADR 445 R1 tap (Claude Code, since 2026-09-25)** | one structural `TraceEvent` per hook event: harness, session digest, kind, tool name, tool_use_id, agent ids, sizes of the content fields — never the content (falsify: `SELECT kind, count(*) FROM trace_events` in `~/.musterd/trace.db` is empty after a Claude Code session on a seat whose CLI is at or past #1707) <!-- claim: other --> | `trace.db` `trace_events`                                                     |
 
 No hook on any harness forwards tool name, input, output, duration, prompt, response, turn boundary or
 subagent lifecycle as data — `gate check` parses `tool_name` + `tool_input` and discards everything

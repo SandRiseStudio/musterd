@@ -27,7 +27,9 @@ import {
 
 describe('telemetryEnabled (off by default)', () => {
   it('is off with no OTEL env', () => {
-    expect(telemetryEnabled({})).toBe(false);
+    // #1699 made the resolver fall back to the machine config, so an empty env on a dogfood box
+    // (where `telemetry.otlp_endpoint` is set) is not "no config" — point it at nothing.
+    expect(telemetryEnabled({ MUSTERD_CONFIG: '/nonexistent/musterd/config.json' })).toBe(false);
   });
   it('is on when an OTLP endpoint is present', () => {
     expect(telemetryEnabled({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' })).toBe(true);

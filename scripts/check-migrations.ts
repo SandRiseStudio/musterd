@@ -41,7 +41,11 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
-const MIGRATIONS_FILE = join(repoRoot, 'packages', 'server', 'src', 'db', 'migrations.ts');
+/** Every ladder the daemon runs: the coordination store's and the trace store's (ADR 445 §3). */
+const MIGRATION_FILES = [
+  join(repoRoot, 'packages', 'server', 'src', 'db', 'migrations.ts'),
+  join(repoRoot, 'packages', 'server', 'src', 'db', 'traceDb.ts'),
+];
 
 export interface ParsedMigration {
   version: number;
@@ -94,43 +98,54 @@ export function findLadderBreaks(
   return breaks;
 }
 
-// A gate that finds nothing must say so loudly rather than pass: if this file is ever restructured so
+// A gate that finds nothing must say so loudly rather than pass: if a file is ever restructured so
 // the regex stops matching, a silent green is indistinguishable from a healthy ladder — and this gate
-// would then be worse than absent, because the team would trust it.
-const source = readFileSync(MIGRATIONS_FILE, 'utf8');
-const migrations = parseMigrationVersions(source);
-const rel = relative(repoRoot, MIGRATIONS_FILE);
+// would then be worse than absent, because the team would trust it. Each ladder is checked on its
+// own: the two files hold independent versions (ADR 445 §3), so nothing compares across them.
+let failed = false;
+const summary: string[] = [];
+for (const file of MIGRATION_FILES) {
+  const source = readFileSync(file, 'utf8');
+  const migrations = parseMigrationVersions(source);
+  const rel = relative(repoRoot, file);
 
-if (migrations.length === 0) {
-  process.stderr.write(
-    `✗ ${rel} — no \`version: N,\` entries found. Either the file moved or its shape changed; this ` +
-      `gate cannot see the ladder and is therefore not checking anything. Fix the parser before ` +
-      `trusting a green run.\n`,
-  );
-  process.exit(1);
-}
-
-const breaks = findLadderBreaks(migrations);
-for (const { previous, offending, kind } of breaks) {
-  if (kind === 'duplicate') {
+  if (migrations.length === 0) {
     process.stderr.write(
-      `✗ ${rel}:${offending.line} — migration version ${offending.version} is claimed twice ` +
-        `(also at line ${previous.line}).\n` +
-        `  runMigrations skips anything \`<= applied\`, so THE SECOND ONE NEVER RUNS — on a fresh\n` +
-        `  database, silently, while schema_meta still reports ${offending.version}. Renumber it to\n` +
-        `  ${migrations[migrations.length - 1]!.version + 1} or higher.\n`,
+      `✗ ${rel} — no \`version: N,\` entries found. Either the file moved or its shape changed; this ` +
+        `gate cannot see the ladder and is therefore not checking anything. Fix the parser before ` +
+        `trusting a green run.\n`,
     );
-  } else {
-    process.stderr.write(
-      `✗ ${rel}:${offending.line} — migration version ${offending.version} follows ` +
-        `${previous.version} (line ${previous.line}), so the ladder steps DOWN.\n` +
-        `  runMigrations applies in array order and skips anything \`<= applied\`, so this entry\n` +
-        `  never runs on a fresh database. Move it after ${previous.version} or renumber it.\n`,
-    );
+    failed = true;
+    continue;
   }
+
+  const breaks = findLadderBreaks(migrations);
+  for (const { previous, offending, kind } of breaks) {
+    if (kind === 'duplicate') {
+      process.stderr.write(
+        `✗ ${rel}:${offending.line} — migration version ${offending.version} is claimed twice ` +
+          `(also at line ${previous.line}).\n` +
+          `  runMigrations skips anything \`<= applied\`, so THE SECOND ONE NEVER RUNS — on a fresh\n` +
+          `  database, silently, while schema_meta still reports ${offending.version}. Renumber it to\n` +
+          `  ${migrations[migrations.length - 1]!.version + 1} or higher.\n`,
+      );
+    } else {
+      process.stderr.write(
+        `✗ ${rel}:${offending.line} — migration version ${offending.version} follows ` +
+          `${previous.version} (line ${previous.line}), so the ladder steps DOWN.\n` +
+          `  runMigrations applies in array order and skips anything \`<= applied\`, so this entry\n` +
+          `  never runs on a fresh database. Move it after ${previous.version} or renumber it.\n`,
+      );
+    }
+  }
+  if (breaks.length > 0) failed = true;
+  else
+    summary.push(
+      `✓ ${rel}: ${migrations.length} migration(s), v${migrations[0]!.version}…v${migrations[migrations.length - 1]!.version}, strictly ascending`,
+    );
 }
 
-if (breaks.length > 0) {
+if (failed) {
   process.stderr.write(
     `\nMigration versions must increase strictly, in array order. Gaps are fine — only collisions\n` +
       `and downward steps break the ladder. Coordinate the number in-band before you write it; this\n` +
@@ -139,6 +154,4 @@ if (breaks.length > 0) {
   process.exit(1);
 }
 
-process.stdout.write(
-  `✓ ${migrations.length} migration(s), v${migrations[0]!.version}…v${migrations[migrations.length - 1]!.version}, strictly ascending\n`,
-);
+process.stdout.write(summary.join('\n') + '\n');

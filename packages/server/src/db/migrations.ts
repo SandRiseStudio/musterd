@@ -1746,11 +1746,15 @@ function tableExists(db: Database, name: string): boolean {
   return Boolean(row);
 }
 
-/** Apply any migrations with version greater than the stored schema_version, each in a transaction. */
-export function runMigrations(db: Database): number {
+/**
+ * Apply any migrations with version greater than the stored schema_version, each in a transaction.
+ * `ladder` defaults to the coordination store's {@link MIGRATIONS}; `trace.db` (ADR 445 §3) passes
+ * its own — the runner is shared, the ladders and their `schema_meta` rows are not.
+ */
+export function runMigrations(db: Database, ladder: readonly Migration[] = MIGRATIONS): number {
   const have = tableExists(db, 'schema_meta') ? currentVersion(db) : 0;
   let applied = have;
-  for (const m of MIGRATIONS) {
+  for (const m of ladder) {
     if (m.version <= applied) continue;
     const tx = db.transaction(() => {
       m.up(db);

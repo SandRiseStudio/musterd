@@ -49,6 +49,7 @@ import { streamCommand } from './commands/stream.js';
 import { surfaceCommand } from './commands/surface.js';
 import { teamCommand } from './commands/team.js';
 import { toolkitCommand } from './commands/toolkit.js';
+import { traceCommand } from './commands/trace.js';
 import { unbindCommand } from './commands/unbind.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { wakeContextCommand } from './commands/wake-context.js';
@@ -171,7 +172,9 @@ async function instrumentedDispatch(
     (command === 'inbox' && rest.flags['interrupt-check'] === true) ||
     // The PreToolUse gate (ADR 150) rides every tool call like the interrupt probe — an SDK boot would
     // blow its budget and add latency to the loop. Best-effort + fail-open; no telemetry span.
-    command === 'gate';
+    command === 'gate' ||
+    // The trace tap (ADR 445 R1) rides the hooks the gate does not; same budget, same reasoning.
+    command === 'trace';
   if (skip || !telemetryEnabled()) return dispatch(command, rest);
   const telemetry = await startTelemetry({ serviceName: 'musterd-cli' });
   try {
@@ -287,6 +290,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return sessionCommand(rest);
     case 'gate':
       return gateCommand(rest);
+    case 'trace':
+      return traceCommand(rest);
     case 'harness':
       return harnessCommand(rest);
     case 'surface':

@@ -162,6 +162,7 @@ export const SESSIONMSG_HOOK_MARKER = 'musterd-sessionmsg-hook';
 export const SUBAGENT_LEDGER_HOOK_MARKER = 'musterd-subagent-ledger-hook';
 export const SESSION_CAPTURE_HOOK_MARKER = 'musterd-session-capture-hook';
 export const SESSION_END_HOOK_MARKER = 'musterd-session-end-hook';
+export const TRACE_HOOK_MARKER = 'musterd-trace-hook';
 export const STATUSLINE_MARKER = 'musterd-statusline';
 
 /** The user's GLOBAL Claude Code settings (read at session start for all folders). Honors
@@ -379,6 +380,30 @@ function sessionEndHookCommand(): string {
   );
 }
 
+/**
+ * The trace tap (ADR 445 §2 R1) on the events no other musterd hook rides. One command, one
+ * marker, six events: `hook_event_name` in the payload says which. PreToolUse/PostToolUse/
+ * SessionStart/SessionEnd tap from inside the gate, the interrupt probe and the capture hook, so a
+ * tool call still spawns exactly the processes it spawned before this ADR. Silent, best-effort.
+ */
+function traceHookCommand(): string {
+  return (
+    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd trace hook --stdin >/dev/null 2>&1 || true ' +
+    `# ${TRACE_HOOK_MARKER}`
+  );
+}
+
+/** The Claude Code hook events the standalone tap is registered on. */
+export const TRACE_HOOK_EVENTS = [
+  'UserPromptSubmit',
+  'PostToolUseFailure',
+  'Stop',
+  'SubagentStart',
+  'SubagentStop',
+  'PreCompact',
+] as const;
+
 /** True if a hook entry carries the given marker in its command. */
 function isMusterdHookFor(m: ClaudeHookMatcher, marker: string): boolean {
   return m.hooks.some((h) => h.command.includes(marker));
@@ -562,6 +587,18 @@ const LOCAL_HOOKS: readonly LocalHookSpec[] = [
       'will never be marked ended, so the local-session guard leans on transcript staleness alone ' +
       '(ADR 131 §5). Run `musterd init --refresh-hooks` to wire it.',
   },
+  ...TRACE_HOOK_EVENTS.map(
+    (event): LocalHookSpec => ({
+      marker: TRACE_HOOK_MARKER,
+      event,
+      command: traceHookCommand,
+      missing:
+        `the Claude Code ${event} trace-tap hook is missing from .claude/settings.local.json — this ` +
+        "seat's session will have no " +
+        `${event} rows in trace.db, so its coverage eval under-counts (ADR 445 R1). Run ` +
+        '`musterd init --refresh-hooks` to wire it.',
+    }),
+  ),
 ];
 
 /** Remove musterd's hook entry for `event` from the settings file at `path` (exact, non-clobbering). */

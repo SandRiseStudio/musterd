@@ -2,6 +2,7 @@ import { parseCodexHookEvent, type Binding, type CodexHookEvent } from '@musterd
 import type { Parsed } from '../args.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
+import { readHookStdin } from '../hookStdin.js';
 import { findWorkspaceDir } from './helpers.js';
 import { checkHookInterrupt, emitSessionOrientation, pushAttestation } from './session.js';
 import { runSessionStartProbe, type SessionStartProbe } from './sessionProbe.js';
@@ -22,22 +23,7 @@ function command(parsed: Parsed): CodexHookCommand {
   throw new CliError('usage: musterd codex-hook <start|end|post-tool-use> --stdin', 2);
 }
 
-function readStdin(timeoutMs = 3_000): Promise<string> {
-  return new Promise((resolve) => {
-    let data = '';
-    const done = (): void => {
-      clearTimeout(timer);
-      resolve(data);
-    };
-    const timer = setTimeout(done, timeoutMs);
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk: string) => {
-      data += chunk;
-    });
-    process.stdin.on('end', done);
-    process.stdin.on('error', done);
-  });
-}
+const readStdin = readHookStdin;
 
 /** Best-effort Codex hook boundary: malformed or mismatched input is deliberately a no-op. */
 export async function handleCodexHook(

@@ -43,6 +43,9 @@ import {
   EnrollResidencyResponseSchema,
   ResidencyListResponseSchema,
   SessionAttestationResponseSchema,
+  type TraceEventBatch,
+  type TraceIngestResponse,
+  TraceIngestResponseSchema,
   WakeLeasesResponseSchema,
   DoorbellRingsResponseSchema,
   type DoorbellRingsResponse,
@@ -1401,6 +1404,21 @@ export class HttpClient {
    *  seat. The daemon decides + records a shapes-only `lane.gate`/`action.gate` row; returns allow/deny. */
   async gateCheck(slug: string, body: GateCheckRequest): Promise<GateDecision> {
     return (await this.request('POST', `/teams/${slug}/gate`, body)) as GateDecision;
+  }
+
+  /**
+   * The hook tap's ingest (ADR 445 §2 R1) — `POST /teams/:slug/trace/events`, seat credential,
+   * leaseless. Throws on refusal so the emitter can count it; callers go through
+   * `trace/hook.ts`'s `emitTraceEvents`, which bounds and swallows — nothing here is on a tool call's
+   * critical path by design.
+   */
+  async postTraceEvents(slug: string, body: TraceEventBatch): Promise<TraceIngestResponse> {
+    const json = await this.request('POST', `/teams/${slug}/trace/events`, body);
+    const parsed = TraceIngestResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CliError('trace ingest response did not match the protocol schema', 1);
+    }
+    return parsed.data;
   }
 
   /**

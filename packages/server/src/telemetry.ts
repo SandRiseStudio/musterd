@@ -51,6 +51,7 @@ interface Instruments {
   loopLatency: Histogram;
   seenLatency: Histogram;
   agentTokens: Counter;
+  traceIngest: Counter;
   interruptCheck: Counter;
 }
 
@@ -87,6 +88,10 @@ function ix(): Instruments {
     agentTokens: meter.createCounter('musterd.agent.tokens', {
       description:
         'Self-reported harness token usage (meta.usage on any act), by normalized seat id (musterd.member.id, issue #107) / direction / model — musterd.member carries the raw display name (ADR 082 slice 4)',
+    }),
+    traceIngest: meter.createCounter('musterd.trace.ingest', {
+      description:
+        'Trace events accepted from the hook tap (ADR 445 R1), by harness and kind — the count the coverage eval divides by the transcript’s',
     }),
     interruptCheck: meter.createCounter('musterd.interrupt.check', {
       description:
@@ -263,6 +268,11 @@ export function recordTokenUsage(env: Envelope): void {
  * common, free path) or `raised` (an interrupt-class act was surfaced). The `raised` rate over sent
  * urgent acts is the delivery half of the steering-latency headline eval.
  */
+/** Count trace events the daemon stored (ADR 445 §Observability). */
+export function recordTraceIngest(harness: string, kind: string, n: number): void {
+  ix().traceIngest.add(n, { 'musterd.harness': harness, 'musterd.trace.kind': kind });
+}
+
 export function recordInterruptCheck(result: 'silent' | 'raised'): void {
   ix().interruptCheck.add(1, { 'musterd.interrupt.result': result });
 }

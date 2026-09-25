@@ -16,6 +16,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, findWorkspaceSpec, requireUsableBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
+import { readHookStdin } from '../hookStdin.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { dischargedIds, openActionNeeded } from '../render/rows.js';
 import { clock, theme } from '../render/theme.js';
@@ -27,6 +28,7 @@ import {
   localSessionLiveness,
   type LocalSessionLiveness,
 } from '../session/liveness.js';
+import { tapHook } from '../trace/hook.js';
 import { attestedModel, findWorkspaceDir, resolveClaimWorkspace } from './helpers.js';
 import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
 import { runSessionStartProbe, type SessionStartProbe } from './sessionProbe.js';
@@ -97,22 +99,7 @@ export function resolveWakeHarness(env: NodeJS.ProcessEnv): string | undefined {
 }
 
 /** Drain stdin with a hard timeout — a hook wiring mistake (no JSON piped) must not hang a shell. */
-function readStdin(timeoutMs = 3_000): Promise<string> {
-  return new Promise((resolve) => {
-    let data = '';
-    const done = (): void => {
-      clearTimeout(timer);
-      resolve(data);
-    };
-    const timer = setTimeout(done, timeoutMs);
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk: string) => {
-      data += chunk;
-    });
-    process.stdin.on('end', done);
-    process.stdin.on('error', done);
-  });
-}
+const readStdin = readHookStdin;
 
 /** The fields we use from the harness hook payload — parsed leniently, unknown fields ignored. */
 export interface HookPayload {
@@ -189,10 +176,21 @@ async function captureCommand(
       2,
     );
   }
-  const payload = parseHookPayload(await readStdin());
+  const raw = await readStdin();
+  const payload = parseHookPayload(raw);
   const captureDir = resolveCaptureDir(payload);
   if (event === 'start') await runSessionStartProbe(captureDir ?? undefined, deps.probe);
   await captureSession(event, payload);
+  // ADR 445 R1 — the SessionStart / SessionEnd trace events ride the capture hook. After the
+  // durable local write and the attestation, never before them; fire-and-forget like both.
+  if (captureDir) {
+    void tapHook(raw, {
+      binding: findBinding(captureDir, {}),
+      dir: captureDir,
+      harness: payload.harness ?? 'claude-code',
+      kind: event === 'start' ? 'SessionStart' : 'SessionEnd',
+    });
+  }
   if (event === 'start') {
     // The orientation resolves from the SAME anchored dir capture writes to — never bare
     // process.cwd() (miley's #1072 review: the ADR 018 clobber shape, read edition — a mis-cwd'd

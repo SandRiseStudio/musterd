@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { TOKEN_PREFIXES } from '@musterd/protocol';
 import { z } from 'zod';
 
@@ -15,6 +15,9 @@ export interface ResolvedConfig {
   port: number;
   host: string;
   dbPath: string;
+  /** The trace store (ADR 445 §3): `trace.db` beside `dbPath`, or `:memory:` when the coordination
+   *  store is. Override with `MUSTERD_TRACE_DB`; a separate file by decision, never a table in `dbPath`. */
+  traceDbPath: string;
   heartbeatIntervalMs: number;
   presenceTimeoutMs: number;
   /** Agent working→active decay window (presence-honesty §2.1) — generous by design. */
@@ -97,6 +100,13 @@ export const DEFAULT_HOST = '127.0.0.1';
 
 export function defaultDbPath(): string {
   return process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 'musterd.db');
+}
+
+/** `trace.db` in the coordination store's directory (ADR 445 §3); in-memory follows in-memory. */
+export function defaultTraceDbPath(dbPath: string): string {
+  const env = process.env['MUSTERD_TRACE_DB'];
+  if (env) return env;
+  return dbPath === ':memory:' ? ':memory:' : join(dirname(dbPath), 'trace.db');
 }
 
 /** Coalesce a burst of file events (e.g. a multi-file `git checkout`) into one reconcile pass. */
@@ -205,6 +215,8 @@ export interface ConfigOptions {
   port?: number;
   host?: string;
   dbPath?: string;
+  /** The trace store's path (ADR 445 §3). Defaults to `trace.db` beside `dbPath`. */
+  traceDbPath?: string;
   tlsCert?: string;
   tlsKey?: string;
   trustProxy?: boolean;
@@ -230,6 +242,7 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
     port: opts?.port ?? (envPort ? Number(envPort) : DEFAULT_PORT),
     host: opts?.host ?? process.env['MUSTERD_HOST'] ?? DEFAULT_HOST,
     dbPath: opts?.dbPath ?? defaultDbPath(),
+    traceDbPath: opts?.traceDbPath ?? defaultTraceDbPath(opts?.dbPath ?? defaultDbPath()),
     heartbeatIntervalMs: envMs('MUSTERD_HEARTBEAT_INTERVAL_MS', HEARTBEAT_INTERVAL_MS),
     presenceTimeoutMs: envMs('MUSTERD_PRESENCE_TIMEOUT_MS', PRESENCE_TIMEOUT_MS),
     agentIdleMs: envMs('MUSTERD_AGENT_IDLE_MS', AGENT_IDLE_MS),

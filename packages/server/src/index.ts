@@ -11,6 +11,7 @@ import {
 import type { Ctx } from './context.js';
 import { schemaVersion } from './db/migrations.js';
 import { openDb } from './db/open.js';
+import { openTraceDb } from './db/traceDb.js';
 import { startFootprintSampler } from './footprint/sampler.js';
 import { log, redactPath } from './log.js';
 import { startReaper } from './presence/reaper.js';
@@ -41,6 +42,9 @@ export interface ServerOptions {
   webRoot?: string;
   /** Inject a database (e.g. an in-memory one) for tests; bypasses dbPath. */
   db?: Database;
+  /** Inject the trace store (ADR 445 §3) for tests; bypasses traceDbPath. With `db` injected and
+   *  this absent, the trace store opens in memory — a test never writes a real `trace.db`. */
+  traceDb?: Database;
   /** Roster roots to project + watch (ADR 058). Defaults to {@link resolveRosterRoots}; pass an
    * explicit list to keep tests hermetic (no global-config dependency). `[]` disables reconcile. */
   rosterRoots?: string[];
@@ -54,6 +58,8 @@ export interface RunningServer {
   reload: () => void;
   close: () => Promise<void>;
   db: Database;
+  /** The trace store (ADR 445 §3) — exposed so tests can read what a hook posted. */
+  traceDb: Database;
   /** The bound port, available after listen() resolves. */
   readonly port: number;
   /** The resolved database path this daemon serves (diagnostics — which db is live). */
@@ -80,12 +86,23 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   // `wrong_db` alert. In production the two always agreed (`openDb(p)` opens exactly `p`), so the
   // value was accidentally right rather than derived from anything checked.
   config.dbPath = db.name || config.dbPath;
+  // The trace store (ADR 445 §3): its own file, its own ladder, opened beside — never inside — the
+  // coordination store. An injected `db` with no injected `traceDb` gets an in-memory trace store,
+  // so a test that hands us `:memory:` never leaves a `trace.db` on disk.
+  const traceDb = opts.traceDb ?? openTraceDb(opts.db ? ':memory:' : config.traceDbPath);
+  config.traceDbPath = traceDb.name || config.traceDbPath;
   const hub = new Hub();
   // Durable roster roots (ADR 058): explicit list (tests) or the rosterHome registry + env override.
   // An explicit list is fixed (hermetic tests); otherwise `reload()` re-resolves from the registry so
   // a team exported after the daemon started is picked up without a restart.
   const rootsExplicit = opts.rosterRoots !== undefined;
-  const ctx: Ctx = { db, hub, config, rosterRoots: opts.rosterRoots ?? resolveRosterRoots() };
+  const ctx: Ctx = {
+    db,
+    traceDb,
+    hub,
+    config,
+    rosterRoots: opts.rosterRoots ?? resolveRosterRoots(),
+  };
 
   const handler = (
     req: import('node:http').IncomingMessage,
@@ -146,6 +163,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
 
   return {
     db,
+    traceDb,
     get port() {
       return boundPort;
     },
@@ -235,6 +253,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
         wss.close();
         http.close(() => {
           if (!opts.db) db.close();
+          if (!opts.traceDb) traceDb.close();
           resolve();
         });
         // Force-close lingering keep-alive (non-upgraded) sockets so tests exit promptly.
