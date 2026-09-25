@@ -47,8 +47,8 @@ describe('provisionWorkspace', () => {
     execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const ws = provisionWorkspace('June', { cwd: repo, home });
-    expect(ws.dir).toBe(join(home, 'musterd', basename(repo), 'June')); // ~/musterd/<repo>/<member>
+    const ws = provisionWorkspace('June', { cwd: repo, team: 'revive', home });
+    expect(ws.dir).toBe(join(home, 'musterd', 'revive', basename(repo), 'June')); // ~/musterd/<team>/<repo>/<member>
     expect(ws.kind).toBe('worktree');
     expect(ws.branch).toBe('agent/June');
     expect(existsSync(join(ws.dir, '.git'))).toBe(true);
@@ -67,9 +67,9 @@ describe('provisionWorkspace', () => {
     execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const first = provisionWorkspace('June', { cwd: repo, home });
+    const first = provisionWorkspace('June', { cwd: repo, team: 'revive', home });
     made.push(first.dir);
-    const second = provisionWorkspace('June', { cwd: repo, home });
+    const second = provisionWorkspace('June', { cwd: repo, team: 'revive', home });
     expect(second.dir).toBe(first.dir);
     expect(second.created).toBe(false);
   });
@@ -158,7 +158,7 @@ describe('provisionWorkspace', () => {
     execFileSync('git', ['config', 'user.name', 't'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const first = provisionWorkspace('June', { cwd: repo, home });
+    const first = provisionWorkspace('June', { cwd: repo, team: 'revive', home });
     made.push(first.dir);
     execFileSync('git', ['config', '--worktree', '--unset', 'user.name'], { cwd: first.dir });
     execFileSync('git', ['config', '--worktree', '--unset', 'user.email'], { cwd: first.dir });
@@ -180,8 +180,8 @@ describe('provisionWorkspace', () => {
     execFileSync('git', ['config', 'user.name', 'Human'], { cwd: repo });
     execFileSync('git', ['commit', '--allow-empty', '-qm', 'init'], { cwd: repo });
 
-    const ws = provisionWorkspace('grokbot', { cwd: repo, team: 'oldteam' });
-    made.push(ws.dir);
+    const home = tmp('mwd-home-');
+    const ws = provisionWorkspace('grokbot', { cwd: repo, team: 'oldteam', home });
     const cfg = (key: string) =>
       execFileSync('git', ['config', key], { cwd: ws.dir, encoding: 'utf8' }).trim();
     expect(cfg('user.email')).toBe('grokbot@oldteam.musterd');
@@ -196,32 +196,55 @@ describe('provisionWorkspace', () => {
   });
 });
 
-describe('memberWorkspaceDir — ~/musterd/<repo>/<member> (reach spec §6, ADR 442)', () => {
+describe('memberWorkspaceDir — ~/musterd/<team>/<repo>/<member> (ADR 447)', () => {
   const home = '/Users/nick';
-  it('a checkout that is itself a member Workspace keeps its repo group', () => {
+  it('a checkout that is itself a member Workspace of the same team keeps its repo group', () => {
     expect(
-      memberWorkspaceDir('/Users/nick/musterd/agents/nick', 'June', home, 'x/musterd.git'),
-    ).toBe('/Users/nick/musterd/agents/June');
-    expect(memberWorkspaceDir('/Users/nick/musterd/agents/nick/packages/cli', 'June', home)).toBe(
-      '/Users/nick/musterd/agents/June',
-    );
+      memberWorkspaceDir(
+        '/Users/nick/musterd/revive/agents/nick',
+        'June',
+        'revive',
+        home,
+        'x/musterd.git',
+      ),
+    ).toBe('/Users/nick/musterd/revive/agents/June');
+    expect(
+      memberWorkspaceDir(
+        '/Users/nick/musterd/revive/agents/nick/packages/cli',
+        'June',
+        'revive',
+        home,
+      ),
+    ).toBe('/Users/nick/musterd/revive/agents/June');
+  });
+  it('another team gets its own tree of the same repo — the group is not inherited across teams', () => {
+    expect(
+      memberWorkspaceDir(
+        '/Users/nick/musterd/revive/agents/nick',
+        'June',
+        'other',
+        home,
+        'x/musterd.git',
+      ),
+    ).toBe('/Users/nick/musterd/other/musterd/June');
   });
   it('otherwise the remote names the repo group — never a sibling of the checkout', () => {
     expect(
       memberWorkspaceDir(
         '/Users/nick/.musterd/runtime',
         'June',
+        'revive',
         home,
         'git@github.com:Org/musterd.git',
       ),
-    ).toBe('/Users/nick/musterd/musterd/June');
-    expect(memberWorkspaceDir('/tmp/x', 'June', home, 'https://github.com/Org/site/')).toBe(
-      '/Users/nick/musterd/site/June',
-    );
+    ).toBe('/Users/nick/musterd/revive/musterd/June');
+    expect(
+      memberWorkspaceDir('/tmp/x', 'June', 'revive', home, 'https://github.com/Org/site/'),
+    ).toBe('/Users/nick/musterd/revive/site/June');
   });
   it('with no remote, the checkout basename names the group', () => {
-    expect(memberWorkspaceDir('/Users/nick/proj', 'June', home, null)).toBe(
-      '/Users/nick/musterd/proj/June',
+    expect(memberWorkspaceDir('/Users/nick/proj', 'June', 'revive', home, null)).toBe(
+      '/Users/nick/musterd/revive/proj/June',
     );
   });
   it('legacy sibling worktrees are reused by provisionWorkspace, not re-provisioned', () => {
@@ -236,7 +259,7 @@ describe('memberWorkspaceDir — ~/musterd/<repo>/<member> (reach spec §6, ADR 
       cwd: repo,
     });
     made.push(legacy);
-    const ws = provisionWorkspace('June', { cwd: repo, home });
+    const ws = provisionWorkspace('June', { cwd: repo, team: 'revive', home });
     expect(realpathSync(ws.dir)).toBe(realpathSync(legacy));
     expect(ws.created).toBe(false);
   });

@@ -117,7 +117,7 @@ describe('human command', () => {
     expect(readConfig().identities.dawn.key).toBe(first.credential);
   });
 
-  it('refuses to write a home that already belongs to another team', async () => {
+  it('refuses to write a floor that already belongs to another team', async () => {
     mkdirSync(join(home, '.musterd'), { recursive: true });
     writeFileSync(
       join(home, '.musterd', 'binding.json'),
@@ -131,7 +131,7 @@ describe('human command', () => {
     );
 
     await expect(run(['lin', '--team', 'dawn', '--home', home])).rejects.toThrow(
-      /already the team home for "dusk"/,
+      /already the floor of "dusk"/,
     );
     // And it left the other team's floor exactly as it found it.
     expect(readHomeBinding().agent_key).toBe('mscr_someone_elses');
@@ -270,9 +270,18 @@ describe('human command', () => {
     await expect(run(['lin', '--home', home])).rejects.toThrow(/no team — pass --team <slug>/);
   });
 
-  it('defaults the home under ~/musterd/<team>, not the platform dotdir', () => {
-    // The home is a place a person opens, so it is visible on purpose — see install-topology §4.
+  it('keeps the team root under ~/musterd/<team>, not the platform dotdir', () => {
+    // The root is a place a person opens, so it is visible on purpose — see install-topology §4.
     expect(defaultTeamHome('dawn').endsWith(join('musterd', 'dawn'))).toBe(true);
     expect(defaultTeamHome('dawn')).not.toContain(join('.musterd'));
+  });
+
+  it('has no default floor outside a repo — the team root is a roof, never the floor (ADR 447)', async () => {
+    // cwd is the fixture dir (no git); no --home and no recorded floor: the person gets told where
+    // one goes instead of a binding at ~/musterd/dawn, which every member worktree would sit under.
+    await expect(run(['lin', '--team', 'dawn'])).rejects.toThrow(
+      /member worktree, ~\/musterd\/dawn\/<repo>\/lin/,
+    );
+    expect(readConfig().teamHome ?? {}).toEqual({});
   });
 });

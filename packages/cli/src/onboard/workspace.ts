@@ -36,21 +36,34 @@ export interface WorkspaceOpts {
   cwd?: string;
   /** Team slug — used for the seat's synthetic git-identity email domain (ADR 109). */
   team?: string;
-  /** The `~` the `~/musterd/<repo>/<member>` layout hangs off; defaults to `os.homedir()` (tests). */
+  /** The `~` the `~/musterd/<team>/<repo>/<member>` layout hangs off; defaults to `os.homedir()` (tests). */
   home?: string;
+  /** The worktree's branch; defaults to `agent/<name>`. */
+  branch?: string;
+  /**
+   * Write the seat's synthetic git identity (ADR 109). Default true; a human's Workspace keeps the
+   * person's own git identity — {@link setSeatGitIdentity} is for agent seats only.
+   */
+  gitIdentity?: boolean;
 }
 
 /**
- * Where a member's Workspace lives (reach-and-boundaries spec §6, ADR 442): `~/musterd/<repo>/<member>`.
- * Grouped by repo, not by member kind — humans and agents alike — and never a sibling of the checkout
- * it was provisioned from, because that checkout may be the unbound runtime (`~/.musterd/runtime`)
- * whose parent must hold no Workspace. `<repo>` is, in order: the segment this checkout already sits
- * under when it is itself a member Workspace (`~/musterd/agents/nick` → `agents`, so a repo keeps one
- * group however its remote is spelled); else the remote's repo name; else the checkout's basename.
+ * Where a member's Workspace lives (ADR 447, superseding the ADR 442 layout note):
+ * `~/musterd/<team>/<repo>/<member>`. Team outermost, because a member name means one thing only on
+ * its team — two teams can share a repo and a name (`revive/agents/dolly`, `other/agents/dolly`)
+ * without colliding — and because a team spans repos more often than a repo spans teams. Grouped by
+ * repo beneath that, not by member kind (humans and agents alike), and never a sibling of the
+ * checkout it was provisioned from, because that checkout may be the unbound runtime
+ * (`~/.musterd/runtime`) whose parent must hold no Workspace.
+ *
+ * `<repo>` is, in order: the group this checkout already sits in when it is itself a member
+ * Workspace of the same team (`~/musterd/revive/agents/nick` → `agents`, so a repo keeps one group
+ * however its remote is spelled); else the remote's repo name; else the checkout's basename.
  */
 export function memberWorkspaceDir(
   top: string,
   name: string,
+  team: string,
   home: string = homedir(),
   remote: string | null = null,
 ): string {
@@ -60,10 +73,10 @@ export function memberWorkspaceDir(
     : '';
   const segments = rel.split('/');
   const repo =
-    segments.length >= 2 && segments[0]
-      ? segments[0]
+    segments.length >= 3 && segments[0] === team && segments[1]
+      ? segments[1]
       : (remoteRepoName(remote) ?? basename(resolvePath(top)));
-  return join(roof, repo, name);
+  return join(roof, team, repo, name);
 }
 
 /** `git@github.com:Org/musterd.git` / `https://…/Org/musterd` → `musterd`; null when unparseable. */
@@ -117,6 +130,9 @@ export function setSeatGitIdentity(name: string, dir: string, team?: string): vo
  */
 export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Workspace {
   const cwd = opts.cwd ?? process.cwd();
+  const identity = (dir: string): void => {
+    if (opts.gitIdentity !== false) setSeatGitIdentity(name, dir, opts.team);
+  };
 
   /*
    * `--here` and `--path` used to return before writing any identity, and those are exactly the paths
@@ -126,7 +142,7 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
    * which is how two live seats ended up with zero Co-authored-by trailers across dozens of merges.
    */
   if (opts.here) {
-    setSeatGitIdentity(name, cwd, opts.team);
+    identity(cwd);
     return { dir: cwd, kind: 'here', created: false };
   }
 
@@ -134,7 +150,7 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
     const dir = isAbsolute(opts.path) ? opts.path : resolvePath(cwd, opts.path);
     const created = !existsSync(dir);
     if (created) mkdirSync(dir, { recursive: true });
-    setSeatGitIdentity(name, dir, opts.team);
+    identity(dir);
     return { dir, kind: 'folder', created };
   }
 
@@ -142,15 +158,15 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
   if (top) {
     // Pre-layout seats (ADR 065) were siblings of the checkout: `<repo>-<name>`. One that already
     // exists is that seat's Workspace — reuse it (the identity repair below) rather than provision a
-    // second; the layout move itself is the reach-spec lane 3 migration, not this command.
+    // second; moving it onto the layout is `scripts/layout/migrate.ts`, not this command.
     const legacy = join(dirname(top), `${basename(top)}-${name}`);
     const dir = existsSync(legacy)
       ? legacy
-      : memberWorkspaceDir(top, name, opts.home, originUrl(top));
-    const branch = `agent/${name}`;
+      : memberWorkspaceDir(top, name, opts.team ?? 'seats', opts.home, originUrl(top));
+    const branch = opts.branch ?? `agent/${name}`;
     if (existsSync(dir)) {
       // Reuse path repairs identity too, so pre-109 worktrees pick it up on re-run.
-      setSeatGitIdentity(name, dir, opts.team);
+      identity(dir);
       return { dir, kind: 'worktree', branch, created: false };
     }
     mkdirSync(dirname(dir), { recursive: true });
@@ -161,7 +177,7 @@ export function provisionWorkspace(name: string, opts: WorkspaceOpts = {}): Work
       // Branch already exists (e.g. a prior run): attach a worktree to it.
       git(['worktree', 'add', dir, branch], top);
     }
-    setSeatGitIdentity(name, dir, opts.team);
+    identity(dir);
     return { dir, kind: 'worktree', branch, created: true };
   }
 
