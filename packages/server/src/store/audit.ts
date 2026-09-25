@@ -77,6 +77,11 @@ export type AuditAction =
   | 'governed.launch.revoke'
   | 'governed.request.allow'
   | 'governed.request.deny'
+  // ADR 445 §2 R2: a transcript-tail parse failure downgraded a session to structural-only. The
+  // tail posts one `unknown` trace event with `detail.downgraded`; the daemon writes this row when
+  // it ingests it, so the downgrade is on the coordination ledger, not only in `trace.db`.
+  // target = the seat whose session downgraded; detail = { harness, session_digest, reason }.
+  | 'trace.downgraded'
   | 'request.decide'
   | 'request.expired'
   // ADR 088: an interrupt-class act was surfaced to a busy agent at a tool boundary (delivery, not
@@ -625,6 +630,7 @@ export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject> = {
   'governed.launch.revoke': 'actor',
   'governed.request.allow': 'actor',
   'governed.request.deny': 'actor',
+  'trace.downgraded': 'actor',
 };
 
 /** The actions whose acting seat is in `target`, and those where no seat acted. */

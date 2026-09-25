@@ -712,6 +712,18 @@ export const CATALOG: readonly CommandEntry[] = [
     summary: 'read the governance audit log (admin-only)',
     group: 'insight',
   },
+  {
+    name: 'trace',
+    signature: 'show [<session-id | digest>] [--json]',
+    summary: 'render one captured session end to end — hooks, reasoning, usage (ADR 445)',
+    group: 'insight',
+    detail:
+      'Rail R1 hook events and rail R2 transcript records for one session, interleaved in daemon ' +
+      'sequence order. With no argument, this workspace’s captured session; a raw harness session ' +
+      'id is digested locally and never crosses the wire. A seat reads its own sessions; an admin ' +
+      'reads any. (`trace hook` is hook plumbing, wired by `musterd init` — not for hands.)',
+    examples: ['musterd trace show', 'musterd trace show 42c955f9-d273-4df0-97f9-680155d80d62'],
+  },
 
   // ── Inbox & presence ───────────────────────────────────────────────────────────────────────
   {

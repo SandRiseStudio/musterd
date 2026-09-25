@@ -29,6 +29,7 @@ import {
   type LocalSessionLiveness,
 } from '../session/liveness.js';
 import { tapHook } from '../trace/hook.js';
+import { tailTranscript } from '../trace/tail.js';
 import { attestedModel, findWorkspaceDir, resolveClaimWorkspace } from './helpers.js';
 import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
 import { runSessionStartProbe, type SessionStartProbe } from './sessionProbe.js';
@@ -184,12 +185,26 @@ async function captureCommand(
   // ADR 445 R1 — the SessionStart / SessionEnd trace events ride the capture hook. After the
   // durable local write and the attestation, never before them; fire-and-forget like both.
   if (captureDir) {
+    const binding = findBinding(captureDir, {});
     void tapHook(raw, {
-      binding: findBinding(captureDir, {}),
+      binding,
       dir: captureDir,
       harness: payload.harness ?? 'claude-code',
       kind: event === 'start' ? 'SessionStart' : 'SessionEnd',
     });
+    // ADR 445 R2 (increment 2) — SessionEnd is the transcript tail's last chance at this session:
+    // whatever the per-turn Stop reads left behind (a final partial turn, a session that never
+    // fired Stop) is picked up here. Awaited, because a hook process that exits kills its posts;
+    // the tail is bounded and fail-open, so the wait is what the gate costs, not a new risk.
+    if (event === 'end' && payload.session_id && payload.transcript_path) {
+      await tailTranscript({
+        binding,
+        dir: captureDir,
+        harness: payload.harness ?? 'claude-code',
+        sessionId: payload.session_id,
+        transcriptPath: payload.transcript_path,
+      });
+    }
   }
   if (event === 'start') {
     // The orientation resolves from the SAME anchored dir capture writes to — never bare

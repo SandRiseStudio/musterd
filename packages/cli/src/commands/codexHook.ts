@@ -4,6 +4,7 @@ import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { readHookStdin } from '../hookStdin.js';
 import { tapHook } from '../trace/hook.js';
+import { tailTranscript } from '../trace/tail.js';
 import { findWorkspaceDir } from './helpers.js';
 import { checkHookInterrupt, emitSessionOrientation, pushAttestation } from './session.js';
 import { runSessionStartProbe, type SessionStartProbe } from './sessionProbe.js';
@@ -15,6 +16,7 @@ export type CodexHookDeps = {
   interrupt?: (dir: string | null) => Promise<string | null> | string | null;
   probe?: SessionStartProbe;
   tap?: typeof tapHook;
+  tail?: typeof tailTranscript;
 };
 
 type CodexHookCommand = 'start' | 'end' | 'post-tool-use';
@@ -49,6 +51,7 @@ export async function handleCodexHook(
   if (event.event === 'end') {
     await (deps.end ?? captureEnd)(event);
     await tapLocal(tap, raw, event.cwd, 'SessionEnd');
+    await tailCodex(deps, event.cwd, event.session_id, event.transcript_path);
     return null;
   }
   await (deps.observe ?? observeModel)(event);
@@ -67,7 +70,37 @@ export async function handleCodexHook(
     kind: 'PostToolUse',
     outcome: { hook: 'interrupt', detail: { raised: line !== null } },
   });
+  // ADR 445 R2 (increment 2) — Codex has no Stop hook, so the per-call hook is the turn-boundary
+  // read: the rollout path was captured on the binding at SessionStart, and the delta since the
+  // last read is what this call appended. Bounded and fail-open like the tap above.
+  await tailCodex(deps, event.cwd, event.session_id, undefined);
   return formatCodexInterrupt(line);
+}
+
+/** The rail R2 delta read for a Codex session: the hook's own `transcript_path` when the event
+ *  carries one (SessionEnd), else the one the SessionStart capture put on the binding. */
+async function tailCodex(
+  deps: CodexHookDeps,
+  cwd: string,
+  sessionId: string,
+  transcriptPath: string | undefined,
+): Promise<void> {
+  const local = localBinding(cwd);
+  if (!local) return;
+  const session = local.binding.session;
+  const path =
+    transcriptPath ??
+    (session?.harness === 'codex' && session.id === sessionId
+      ? session.transcript_path
+      : undefined);
+  if (!path) return;
+  await (deps.tail ?? tailTranscript)({
+    binding: local.binding,
+    dir: local.dir,
+    harness: 'codex',
+    sessionId,
+    transcriptPath: path,
+  });
 }
 
 async function tapLocal(

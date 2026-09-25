@@ -265,6 +265,31 @@ ADR 184's publication gate; a spans backend.
   on the dogfood box, after `musterd team policy --trace-content on` on `revive`: rows with non-null
   `content` appear from the second hook of a session, and
   `SELECT count(*) FROM trace_events WHERE content LIKE '%mskey\_%' ESCAPE '\'` returns 0.
+- **2026-09-25 — increment 2 landed** (lane `01M3D6H2C0652SDJBVFH1NRBRM`). Rail R2 for Claude Code
+  and Codex. The protocol gains the four transcript kinds (`reasoning`, `assistant_text`, `usage`,
+  `unknown` — lowercase, so the two rails stay apart in one column) and a `reasoning` content field.
+  Decided in the build: **the tail is the hook processes that already exist** — Claude Code's `Stop`
+  (per turn) and `SessionEnd` capture, Codex's `post-tool-use` (its rollout path rides the binding
+  from SessionStart) and `end` — reading the transcript's delta from an offset cursor in
+  `.musterd/trace-tail.json`; no long-lived tailer, and the per-turn cost is one bounded file read
+  plus the same fire-and-forget POST the tap already pays. Parsers are version-stamped
+  (`claude-code@1`, `codex@1`) and grouped to the harness's real shape: Claude splits one API
+  message across jsonl lines (grouped by `message.id` — one `usage` per message, joined to R1 by the
+  message's first `tool_use` id), Codex writes reasoning and its tool call as separate items (a
+  reasoning item binds to the NEXT `call_id`; `token_usage_record` is the usage source and
+  `token_count` a recognised skip, or every turn would count twice). Reasoning is largely encrypted
+  at rest in both harnesses — what R2 stores is the summary/plaintext the harness kept, sizes
+  either way. A parse failure or truncated file downgrades the session (§2): cursor flag, one
+  `unknown {downgraded}` event, and a `trace.downgraded` audit row written by the ingest route.
+  `musterd trace show <session|digest>` renders a session end to end over the new
+  `GET /teams/:slug/trace/sessions/:digest` (ADR 128 scoping: own seat or admin; anything else
+  reads empty, indistinguishable from absent). R2 content passes the same three gates as R1's
+  (policy `on`, loopback daemon, scrub-then-cut). Also fixed here: `.musterd/trace-policy.json` and
+  the new tail cursor are gitignored — the policy cache had been dirtying every traced seat's
+  Workspace and stamping `-dirty` builds (izzo's finding). Falsifier on the dogfood box, once
+  autorefresh has run and one turn has ended: `SELECT kind, count(*) FROM trace_events WHERE kind IN
+  ('reasoning','assistant_text','usage') GROUP BY 1` is non-empty, and `musterd trace show` on this
+  session interleaves both rails.
 - Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
   backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a

@@ -40,6 +40,7 @@ import {
   WakeContextRequestSchema,
   WakeContextResponseSchema,
   ToolTelemetryReportSchema,
+  SessionDigestSchema,
   TraceEventBatchSchema,
   OpenLaneSchema,
   UpdateLaneSchema,
@@ -344,7 +345,7 @@ import {
   applyPolicyChange,
 } from '../store/teams.js';
 import { applyToolCalls, recordSurfaceRender } from '../store/toolCalls.js';
-import { ingestTraceEvents } from '../store/trace.js';
+import { ingestTraceEvents, listSessionTrace } from '../store/trace.js';
 import {
   applyTrust,
   arbitrateClaim,
@@ -433,6 +434,18 @@ function sendTrustRefusal(res: ServerResponse, err: TrustRefusedError): void {
     error: { code: err.code, message: err.message },
     ...(err.nodeId ? { node_id: err.nodeId, node_label: err.nodeLabel ?? '' } : {}),
   });
+}
+
+/** A stored JSON-text column (trace `detail` / `content`) back to an object for the wire; a null
+ *  or unparseable column is null — the reader renders history, it never refuses a row. */
+function parseStoredJson(text: string | null): Record<string, unknown> | null {
+  if (text === null) return null;
+  try {
+    const json: unknown = JSON.parse(text);
+    return typeof json === 'object' && json !== null ? (json as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -4918,6 +4931,23 @@ export async function handleHttp(
         const { accepted } = ingestTraceEvents(ctx.traceDb, team.id, member.name, body.events, {
           writeContent: contentMode === 'on',
         });
+        // ADR 445 §2 R2: a tail that hit a parse failure marks the session structural-only and says
+        // so with one `unknown` event carrying `detail.downgraded` — the daemon puts that on the
+        // coordination ledger, where the coverage eval and a human will actually look for it.
+        for (const e of body.events) {
+          if (e.kind !== 'unknown' || e.detail?.['downgraded'] !== true) continue;
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'trace.downgraded',
+            target: member.name,
+            result: 'allow',
+            detail: {
+              harness: e.harness,
+              session_digest: e.session_digest,
+              reason: e.detail?.['reason'] ?? null,
+            },
+          });
+        }
         const byKey = new Map<string, number>();
         for (const e of body.events) {
           const k = `${e.harness}\u0000${e.kind}`;
@@ -4928,6 +4958,42 @@ export async function handleHttp(
           recordTraceIngest(harness, kind, n);
         }
         return sendJson(res, 202, { accepted, content: contentMode });
+      }
+
+      // One session's trace, end to end (ADR 445 increment 2 — the read behind `musterd trace
+      // show`). ADR 128 recipient scoping applied to a seat's own trace: a seat reads the sessions
+      // IT produced; an admin reads any seat's. Rows another seat produced are filtered, not
+      // refused, so "not yours" and "not there" are the same empty answer — the route is not an
+      // oracle for which session digests exist.
+      if (method === 'GET' && rest.startsWith('/trace/sessions/')) {
+        const { team, member } = authTouch(ctx, slug, req);
+        const digest = parseOrBadRequest(
+          SessionDigestSchema,
+          decodeURIComponent(rest.slice('/trace/sessions/'.length)),
+        );
+        const isAdmin = resolveCapabilities(member).is_admin;
+        const rows = listSessionTrace(ctx.traceDb, team.id, digest).filter(
+          (r) => isAdmin || r.seat === member.name,
+        );
+        const events = rows.map((r) => ({
+          seq: r.seq,
+          ts: r.ts,
+          received_at: r.received_at,
+          seat: r.seat,
+          harness: r.harness,
+          kind: r.kind,
+          tool_name: r.tool_name,
+          tool_use_id: r.tool_use_id,
+          agent_id: r.agent_id,
+          parent_agent_id: r.parent_agent_id,
+          duration_ms: r.duration_ms,
+          outcome: r.outcome,
+          detail: parseStoredJson(r.detail),
+          content: parseStoredJson(r.content),
+          redactions: r.redactions,
+          truncated: r.truncated === 1,
+        }));
+        return sendJson(res, 200, { events });
       }
 
       // Declared Goals (ADR 048's general-team seam, resolved by ADR 084) — a Goal is an ordinary

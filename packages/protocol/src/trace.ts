@@ -35,6 +35,14 @@ export const TRACE_EVENT_KINDS = [
   'PreCompact',
   'Notification',
   'HookOutcome',
+  // Rail R2, the transcript tail (ADR 445 §2, increment 2) — lowercase on purpose: these are
+  // transcript records the tail parsed, not hook events a harness fired, and the spelling is what
+  // keeps the two rails apart in one column. `unknown` is the tolerance contract: a record the
+  // parser does not recognise is emitted with its size, never dropped silently.
+  'reasoning',
+  'assistant_text',
+  'usage',
+  'unknown',
 ] as const;
 export const TraceEventKindSchema = z.enum(TRACE_EVENT_KINDS);
 export type TraceEventKind = z.infer<typeof TraceEventKindSchema>;
@@ -77,6 +85,7 @@ export const TRACE_CONTENT_FIELDS = [
   'tool_response',
   'error',
   'assistant',
+  'reasoning',
 ] as const;
 export type TraceContentField = (typeof TRACE_CONTENT_FIELDS)[number];
 export const TraceContentSchema = z
@@ -85,8 +94,12 @@ export const TraceContentSchema = z
     tool_input: z.string().optional(),
     tool_response: z.string().optional(),
     error: z.string().optional(),
-    /** Claude Code's `last_assistant_message` on Stop / SubagentStop. */
+    /** Claude Code's `last_assistant_message` on Stop / SubagentStop; a transcript `assistant_text`
+     *  record's text on rail R2. */
     assistant: z.string().optional(),
+    /** Rail R2 only (increment 2): the text of a `reasoning` transcript record — Claude Code's
+     *  `thinking` blocks, Codex's reasoning summaries. Hooks never carry this field. */
+    reasoning: z.string().optional(),
     redactions: z.number().int().min(0),
     truncated: z.boolean(),
   })
@@ -115,6 +128,13 @@ export type TracePolicy = z.infer<typeof TracePolicySchema>;
  * beside the binding. Written by the CLI's tap, read by the tap and by both `traced:` lines.
  */
 export const TRACE_POLICY_FILE = 'trace-policy.json';
+
+/**
+ * Where the transcript tail (rail R2, increment 2) keeps its per-session read cursor —
+ * `.musterd/<this>`, beside the binding. One JSON object, sessions keyed by digest; machine-local
+ * and disposable, never committed (it names transcript paths on this machine).
+ */
+export const TRACE_TAIL_FILE = 'trace-tail.json';
 
 /**
  * One structural trace event. `seq` is NOT on the wire: the daemon assigns the monotonic sequence
@@ -163,3 +183,34 @@ export const TraceIngestResponseSchema = z.object({
   content: z.enum(TRACE_CONTENT_MODES).optional(),
 });
 export type TraceIngestResponse = z.infer<typeof TraceIngestResponseSchema>;
+
+/**
+ * One stored row of a session's trace, as `GET /teams/:slug/trace/sessions/:digest` returns it
+ * (increment 2, the read behind `musterd trace show`). Deliberately looser than
+ * {@link TraceEventSchema}: rows were written by whatever tap and daemon existed at the time, and a
+ * reader renders history — it must not refuse a row an older (or newer) writer stored. `content` is
+ * the stored fields object; present only for the caller ADR 128 scopes it to.
+ */
+export const TraceSessionEventSchema = z.object({
+  seq: z.number().int().min(0),
+  ts: z.number().int().min(0),
+  received_at: z.number().int().min(0),
+  seat: z.string(),
+  harness: z.string(),
+  kind: z.string(),
+  tool_name: z.string().nullish(),
+  tool_use_id: z.string().nullish(),
+  agent_id: z.string().nullish(),
+  parent_agent_id: z.string().nullish(),
+  duration_ms: z.number().nullish(),
+  outcome: z.string().nullish(),
+  detail: z.record(z.string(), z.unknown()).nullish(),
+  content: z.record(z.string(), z.unknown()).nullish(),
+  redactions: z.number().nullish(),
+  truncated: z.boolean(),
+});
+export type TraceSessionEvent = z.infer<typeof TraceSessionEventSchema>;
+export const TraceSessionResponseSchema = z.object({
+  events: z.array(TraceSessionEventSchema),
+});
+export type TraceSessionResponse = z.infer<typeof TraceSessionResponseSchema>;

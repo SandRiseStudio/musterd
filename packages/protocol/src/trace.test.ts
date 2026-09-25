@@ -33,8 +33,24 @@ describe('TraceEvent (ADR 445 R1, structural)', () => {
         'SubagentStop',
         'PreCompact',
         'HookOutcome',
+        // Rail R2 (increment 2): transcript records, lowercase to keep the rails apart.
+        'reasoning',
+        'assistant_text',
+        'usage',
+        'unknown',
       ]),
     );
+  });
+
+  it('accepts an R2 event with a reasoning content part (increment 2)', () => {
+    const event = {
+      ...minimal,
+      kind: 'reasoning',
+      tool_use_id: 'toolu_01ABC',
+      detail: { parser: 'claude-code@1', reasoning_bytes: 42 },
+      content: { reasoning: 'weigh the options', redactions: 0, truncated: false },
+    };
+    expect(TraceEventSchema.parse(event)).toEqual(event);
   });
 
   it('carries the structural columns and nothing else — no content field exists in 1a', () => {
