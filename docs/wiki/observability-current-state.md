@@ -51,8 +51,9 @@ FIXED 2026-09-24 by #1699: `@musterd/telemetry` now falls back to `~/.musterd/co
 `telemetry.otlp_endpoint` (env still wins; ADR 286's registration env untouched). Measured after the
 daemon checkout auto-refreshed to it: `musterd.cli.command` spans 2 → 5 across three CLI runs. Trap
 met on the way — the pre-#1699 CLI on PATH erased the new key on its next config write, because
-`readConfigFromDisk` whitelists keys; a new config key is only stable once every CLI touching the
-machine config knows it (2026-09-24; falsify: add an unknown top-level key under `MUSTERD_CONFIG`, run `musterd status` from a build that predates it, re-read the file). <!-- claim: other -->
+`readConfigFromDisk` whitelists keys; ~~a new config key is only stable once every CLI touching the
+machine config knows it (2026-09-24; falsify: add an unknown top-level key under `MUSTERD_CONFIG`, run `musterd status` from a build that predates it, re-read the file).~~ <!-- claim: other -->
+FIXED 2026-09-25: `saveConfig` now writes unknown top-level keys through from disk on every path, so a build that cannot read a key no longer deletes it (2026-09-25; falsify: add an unknown top-level key under `MUSTERD_CONFIG`, run a config write from this build, re-read the file — the key is gone). <!-- claim: other -->
 
 ## What is captured about a seat's harness session
 
