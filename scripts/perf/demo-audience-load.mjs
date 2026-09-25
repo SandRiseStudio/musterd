@@ -17,7 +17,8 @@
  *     (each lane act fans out as a /report refetch on every viewer), and the CLI hook re-claim churn.
  *   - VIEWERS (/live on the same phones): the page's real behaviour from packages/web/src/live —
  *     initial roster + history + report, a WS `team-all` subscription, then a roster refetch on EVERY
- *     presence frame and a /report refetch on every lane act. That fan-out is O(viewers × events).
+ *     presence frame (coalesced to one per second since 2026-09-25; ROSTER=every models the old page)
+ *     and a /report refetch on every lane act. That fan-out is O(viewers × events).
  *
  * The daemon runs in a CHILD process so the client load does not share its event loop; the child
  * reports its own event-loop delay (perf_hooks) and CPU. A `/health` prober runs throughout.
@@ -25,6 +26,7 @@
  *   node scripts/perf/demo-audience-load.mjs
  *   HUMANS=50 AGENTS=50 VIEWERS=50 DURATION=90 RAMP=30 node scripts/perf/demo-audience-load.mjs
  *   DB_COPY=/path/to/copy-of-musterd.db TEAM=revive node scripts/perf/demo-audience-load.mjs
+ *   ROSTER=every node scripts/perf/demo-audience-load.mjs   # the /live roster rule before 2026-09-25
  *   DAEMON_CPUS=0 taskset -c 1-7 node scripts/perf/demo-audience-load.mjs   # Linux: isolate the daemon
  *
  * Do not run it at audience scale on a laptop: the client side alone saturates one. It runs on a
@@ -128,6 +130,9 @@ async function drive() {
   const DURATION = env('DURATION', 60) * 1000;
   const RAMP = env('RAMP', 20) * 1000;
   const BUDGET_MS = env('BUDGET_MS', 1000);
+  /** `coalesced` (the page since 2026-09-25) or `every` (a roster fetch per presence frame, before). */
+  const ROSTER = process.env.ROSTER ?? 'coalesced';
+  const ROSTER_GAP_MS = env('ROSTER_GAP_MS', 1000);
 
   // DAEMON_CPUS (Linux) pins the daemon to those cores with taskset, so the audience cannot steal its
   // CPU — run the driver itself under `taskset -c <the other cores>` for the same reason. Without it
@@ -285,6 +290,34 @@ async function drive() {
         req('GET /messages (viewer)', `${T}/messages?limit=200`, { headers }),
         req('GET /report (viewer)', `${T}/report`, { headers }),
       ]);
+      // The page's roster rule (packages/web/src/live/coalesce.ts): the first presence frame fetches
+      // at once; frames during that fetch or within ROSTER_GAP_MS of its start fold into one more.
+      let inFlight = false;
+      let pending = false;
+      let timer = null;
+      let lastStart = -Infinity;
+      const startFetch = () => {
+        timer = null;
+        if (stopping) return;
+        pending = false;
+        inFlight = true;
+        lastStart = Date.now();
+        req('GET /teams/:slug (viewer)', T, { headers }).finally(() => {
+          inFlight = false;
+          if (pending) schedule();
+        });
+      };
+      const schedule = () => {
+        if (timer) return;
+        timer = setTimeout(startFetch, Math.max(0, lastStart + ROSTER_GAP_MS - Date.now()));
+        timers.add(timer);
+      };
+      const rosterRefetch = () => {
+        if (inFlight || timer || Date.now() - lastStart < ROSTER_GAP_MS) {
+          pending = true;
+          if (!inFlight) schedule();
+        } else startFetch();
+      };
       const ws = new WebSocket(`ws://127.0.0.1:${ready.port}/ws`);
       sockets.push(ws);
       let hb;
@@ -313,7 +346,8 @@ async function drive() {
           hb = setInterval(() => ws.send(JSON.stringify({ type: 'heartbeat' })), 15_000);
         } else if (f.type === 'presence' && !stopping) {
           presenceFrames++;
-          void req('GET /teams/:slug (viewer)', T, { headers });
+          if (ROSTER === 'every') void req('GET /teams/:slug (viewer)', T, { headers });
+          else rosterRefetch();
         } else if (f.type === 'deliver' && !stopping) {
           const meta = f.envelope?.meta ?? {};
           if (Object.keys(meta).some((k) => k.startsWith('lane_'))) {
@@ -362,7 +396,7 @@ async function drive() {
   const cpuPct = ((stats.cpu.user + stats.cpu.system) / 1e3 / stats.wallMs) * 100;
   console.log(
     `humans=${ready.humans.length} agents=${ready.agents.length} viewers=${VIEWERS} ` +
-      `daemon_cpus=${process.env.DAEMON_CPUS ?? 'shared'} ` +
+      `daemon_cpus=${process.env.DAEMON_CPUS ?? 'shared'} roster=${ROSTER} ` +
       `duration=${DURATION / 1000}s ramp=${RAMP / 1000}s db=${process.env.DB_COPY ? 'copy' : 'synthetic'}`,
   );
   console.log(
