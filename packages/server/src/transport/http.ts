@@ -111,7 +111,7 @@ import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, SessionLeaseRefused, asMusterdError } from '../errors.js';
 import { reapOrphans } from '../footprint/reap.js';
-import { log } from '../log.js';
+import { log, redactPath } from '../log.js';
 import { saveNodeEnrollment } from '../node/state.js';
 import { flushHeldRings } from '../notify/doorbell.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
@@ -6670,7 +6670,7 @@ export async function handleHttp(
       return serveStatic(req, ctx.config.webRoot, path, res);
     }
 
-    throw new MusterdError('not_found', `no route for ${method} ${path}`);
+    throw new MusterdError('not_found', `no route for ${method} ${redactPath(path)}`);
   } catch (err) {
     sendError(res, err);
   }
