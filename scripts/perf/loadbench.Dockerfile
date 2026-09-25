@@ -27,6 +27,6 @@ COPY . .
 
 RUN corepack enable \
   && pnpm install --frozen-lockfile \
-  && pnpm --filter @musterd/protocol --filter @musterd/server build
+  && pnpm --filter "@musterd/server..." build
 
 CMD ["sleep", "infinity"]
