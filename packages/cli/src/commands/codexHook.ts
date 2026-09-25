@@ -3,6 +3,7 @@ import type { Parsed } from '../args.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { readHookStdin } from '../hookStdin.js';
+import { tapHook } from '../trace/hook.js';
 import { findWorkspaceDir } from './helpers.js';
 import { checkHookInterrupt, emitSessionOrientation, pushAttestation } from './session.js';
 import { runSessionStartProbe, type SessionStartProbe } from './sessionProbe.js';
@@ -13,6 +14,7 @@ export type CodexHookDeps = {
   observe?: (event: Extract<CodexHookEvent, { event: 'post-tool-use' }>) => Promise<void> | void;
   interrupt?: (dir: string | null) => Promise<string | null> | string | null;
   probe?: SessionStartProbe;
+  tap?: typeof tapHook;
 };
 
 type CodexHookCommand = 'start' | 'end' | 'post-tool-use';
@@ -34,24 +36,49 @@ export async function handleCodexHook(
   const expected = command(parsed);
   const event = parseCodexHookEvent(raw, expected);
   if (!event) return null;
+  // ADR 445 R1 — Codex shares Claude Code's payload spelling, so the harness is named here, never
+  // inferred. Each tap comes after the hook's own job and is bounded and silent like every other.
+  const tap = deps.tap ?? tapHook;
   if (event.event === 'start') {
     const workspace = localBinding(event.cwd)?.dir ?? event.cwd;
     await runSessionStartProbe(workspace, deps.probe);
     await (deps.start ?? captureStart)(event);
+    await tapLocal(tap, raw, event.cwd, 'SessionStart');
     return null;
   }
   if (event.event === 'end') {
     await (deps.end ?? captureEnd)(event);
+    await tapLocal(tap, raw, event.cwd, 'SessionEnd');
     return null;
   }
   await (deps.observe ?? observeModel)(event);
   const local = localBinding(event.cwd);
   if (!local) return null;
+  let line: string | null = null;
   try {
-    return formatCodexInterrupt(await (deps.interrupt ?? checkHookInterrupt)(local.dir));
+    line = await (deps.interrupt ?? checkHookInterrupt)(local.dir);
   } catch {
-    return null;
+    line = null;
   }
+  await tap(raw, {
+    binding: local.binding,
+    dir: local.dir,
+    harness: 'codex',
+    kind: 'PostToolUse',
+    outcome: { hook: 'interrupt', detail: { raised: line !== null } },
+  });
+  return formatCodexInterrupt(line);
+}
+
+async function tapLocal(
+  tap: typeof tapHook,
+  raw: string,
+  cwd: string,
+  kind: 'SessionStart' | 'SessionEnd',
+): Promise<void> {
+  const local = localBinding(cwd);
+  if (!local) return;
+  await tap(raw, { binding: local.binding, dir: local.dir, harness: 'codex', kind });
 }
 
 export async function codexHookCommand(parsed: Parsed): Promise<number> {

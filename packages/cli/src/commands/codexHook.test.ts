@@ -82,6 +82,50 @@ describe('Codex hook local evidence', () => {
 
   afterEach(() => rmSync(workspace, { recursive: true, force: true }));
 
+  it('taps each Codex event as codex — named by the caller, never inferred (ADR 445 1a tail)', async () => {
+    const tap = vi.fn().mockResolvedValue(true);
+    await handleCodexHook(
+      parseArgs(['start', '--stdin']),
+      event({ cwd: workspace, session_id: 'first' }),
+      { start: () => undefined, tap },
+    );
+    await handleCodexHook(
+      parseArgs(['post-tool-use', '--stdin']),
+      event({ cwd: workspace, session_id: 'first', hook_event_name: 'PostToolUse', model: 'm' }),
+      { interrupt: () => 'Ada: stop', tap },
+    );
+    await handleCodexHook(
+      parseArgs(['end', '--stdin']),
+      event({ cwd: workspace, session_id: 'first', hook_event_name: 'SessionEnd' }),
+      { end: () => undefined, tap },
+    );
+    const calls = tap.mock.calls.map(
+      (c) => c[1] as { harness: string; kind: string; dir: string; outcome?: unknown },
+    );
+    expect(calls.map((c) => [c.kind, c.harness])).toEqual([
+      ['SessionStart', 'codex'],
+      ['PostToolUse', 'codex'],
+      ['SessionEnd', 'codex'],
+    ]);
+    expect(calls.every((c) => c.dir === workspace)).toBe(true);
+    expect(calls[1]!.outcome).toEqual({ hook: 'interrupt', detail: { raised: true } });
+  });
+
+  it('an unbound folder taps nothing', async () => {
+    const tap = vi.fn();
+    const bare = mkdtempSync(join(tmpdir(), 'musterd-codex-bare-'));
+    try {
+      await handleCodexHook(
+        parseArgs(['end', '--stdin']),
+        event({ cwd: bare, hook_event_name: 'SessionEnd' }),
+        { end: () => undefined, tap },
+      );
+      expect(tap).not.toHaveBeenCalled();
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+
   it('captures and closes only the matching Codex session, then stores direct model evidence', async () => {
     await handleCodexHook(
       parseArgs(['start', '--stdin']),

@@ -1062,6 +1062,37 @@ describe('build skew warning (ADR 135)', () => {
   });
 });
 
+describe('traced line (ADR 445 §4)', () => {
+  const rosterOk = (async () => ({
+    members: [member({ name: 'Ada', presence: 'online' })],
+  })) as any;
+
+  it('team_status says `traced: structural` when the tap would record', async () => {
+    const handler = capture(registerStatus, {
+      roster: rosterOk,
+      traceDepth: (async () => 'structural') as any,
+    });
+    expect(text(await handler({}))).toContain('traced: structural');
+  });
+
+  it('says nothing when untraced, and a failing probe never fails the read', async () => {
+    const off = capture(registerStatus, {
+      roster: rosterOk,
+      traceDepth: (async () => null) as any,
+    });
+    expect(text(await off({}))).not.toContain('traced');
+    const broken = capture(registerStatus, {
+      roster: rosterOk,
+      traceDepth: (async () => {
+        throw new Error('boom');
+      }) as any,
+    });
+    const out = text(await broken({}));
+    expect(out).toContain('Ada');
+    expect(out).not.toContain('traced');
+  });
+});
+
 describe('team_status handler', () => {
   it('renders online (with surface) and offline members', async () => {
     const handler = capture(registerStatus, {

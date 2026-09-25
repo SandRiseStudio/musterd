@@ -1,5 +1,6 @@
 import { deriveHuddles, describeSyncWedge } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
+import { findBinding } from '../config.js';
 import { huddleMarks, TIMELINE_WINDOW } from '../render/huddles.js';
 import {
   renderMachineLine,
@@ -8,6 +9,7 @@ import {
   renderStatusHeader,
 } from '../render/rows.js';
 import { theme } from '../render/theme.js';
+import { traceDepth } from '../trace/hook.js';
 import { cliBuild } from '../version.js';
 import { pendingActionSummary, resolveRead } from './helpers.js';
 import { renderMemoryLine } from './memory.js';
@@ -78,5 +80,9 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   // daemon, an unbound folder, or a non-darwin host all read as null and render as absence.
   const machineLine = renderMachineLine(await http.footprint(team).catch(() => null));
   if (machineLine) process.stdout.write('\n' + machineLine + '\n');
+  // ADR 445 §4: a seat can see that it is being traced, and how deep. Printed only when the tap would
+  // actually record — absence is the honest rendering of "not traced", never a `traced: off` line.
+  const depth = explicit && identity ? traceDepth(findBinding(), health) : null;
+  if (depth) process.stdout.write('\n' + theme.meta(`traced: ${depth}`) + '\n');
   return 0;
 }

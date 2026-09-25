@@ -7,6 +7,7 @@ import {
   formatRoster,
   syncWedgeWarning,
   textResult,
+  tracedLine,
 } from './format.js';
 
 const DESCRIPTION =
@@ -26,7 +27,8 @@ export function registerStatus(server: McpServer, client: MusterdClient): void {
         evictionNotice(client.lastJoinError) +
           formatRoster(members, client.member) +
           syncWedgeWarning(roster) +
-          (await buildSkewWarning(client)),
+          (await buildSkewWarning(client)) +
+          (await tracedLine(client)),
       );
     } catch (err) {
       return errorResult(err);

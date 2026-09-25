@@ -548,6 +548,21 @@ export async function syncWedgeOfClient(client: {
  * (an unstamped client or unreachable daemon must not cry wolf). Pure inequality, and the wording is
  * "differs", never "behind" — a feature-branch build is legitimately ahead of the daemon.
  */
+/**
+ * ADR 445 §4 — the `traced:` line: a seat can see that it is being traced and how deep. Empty when
+ * the tap would record nothing, and on any failure (a status read never fails over its footer).
+ */
+export async function tracedLine(client: {
+  traceDepth?: () => Promise<'structural' | null>;
+}): Promise<string> {
+  try {
+    const depth = await client.traceDepth?.();
+    return depth ? `\ntraced: ${depth}` : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function buildSkewWarning(client: {
   build: string | undefined;
   daemonBuild: () => Promise<string | undefined>;
