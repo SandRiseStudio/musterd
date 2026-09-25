@@ -69,6 +69,58 @@ describe('telemetry.otlp_endpoint (ADR 445 R3)', () => {
   });
 });
 
+describe("unknown top-level keys (a newer build's config survives an older one)", () => {
+  let dir: string;
+  let path: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-cfg-unknown-'));
+    path = join(dir, 'config.json');
+    process.env['MUSTERD_CONFIG'] = path;
+  });
+  afterEach(() => delete process.env['MUSTERD_CONFIG']);
+
+  const readRaw = () => JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+
+  it('a key this build does not know survives load → mutate → save', () => {
+    writeFileSync(path, JSON.stringify({ server: 'http://x:1', future: { a: 1 } }));
+    const c = loadConfig();
+    c.teamHome['revive'] = '/somewhere';
+    saveConfig(c);
+    expect(readRaw()['future']).toEqual({ a: 1 });
+    expect(readRaw()['teamHome']).toEqual({ revive: '/somewhere' });
+  });
+
+  it('takes the opaque key from disk at save time, not from the load snapshot', () => {
+    writeFileSync(path, JSON.stringify({ server: 'http://x:1', future: 1 }));
+    const c = loadConfig();
+    writeFileSync(path, JSON.stringify({ server: 'http://x:1', future: 2, later: true }));
+    saveConfig(c);
+    expect(readRaw()['future']).toBe(2);
+    expect(readRaw()['later']).toBe(true);
+  });
+
+  it('a Config built from scratch (no load snapshot) still carries them', () => {
+    writeFileSync(path, JSON.stringify({ server: 'http://x:1', future: 1 }));
+    const fresh: Config = {
+      server: 'http://y:2',
+      identities: {},
+      knownIdentities: [],
+      bindings: {},
+      agentKeys: {},
+      rosterHome: {},
+      teamHome: {},
+    };
+    saveConfig(fresh);
+    expect(readRaw()['server']).toBe('http://y:2');
+    expect(readRaw()['future']).toBe(1);
+  });
+
+  it('does not leak unknown keys onto the loaded Config object', () => {
+    writeFileSync(path, JSON.stringify({ server: 'http://x:1', future: 1 }));
+    expect('future' in loadConfig()).toBe(false);
+  });
+});
+
 describe('binding registry (ADR 020)', () => {
   let dir: string;
   let configPath: string;

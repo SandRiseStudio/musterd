@@ -777,6 +777,43 @@ function readConfigFromDisk(): Config {
   }
 }
 
+/**
+ * Every top-level key this build reads or writes. `Record<keyof Config, true>` makes the list fail
+ * typecheck the moment a field is added to {@link Config} without being named here, because
+ * {@link unknownKeysOnDisk} treats anything outside it as opaque — and an opaque key is always taken
+ * from disk at save time, which would silently discard this build's own edits to a forgotten field.
+ */
+const KNOWN_CONFIG_KEYS: Record<keyof Config, true> = {
+  server: true,
+  current: true,
+  identities: true,
+  knownIdentities: true,
+  bindings: true,
+  agentKeys: true,
+  rosterHome: true,
+  teamHome: true,
+  telemetry: true,
+};
+
+/**
+ * The top-level keys in the config file that this build does not know. A newer CLI on the same
+ * machine may own them (ADR 445 R3's `telemetry` was erased this way on 2026-09-24 by the pre-#1699
+ * build still on PATH: {@link readConfigFromDisk} whitelists, so load → mutate → save dropped it).
+ * A build that cannot read a key has no standing to delete it, so {@link saveConfig} writes these
+ * through verbatim, re-read from disk under the lock — never from the load snapshot, since this
+ * process cannot have changed them and the process that owns them may have.
+ */
+function unknownKeysOnDisk(): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(readFileSync(configPath(), 'utf8')) as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([k]) => !Object.hasOwn(KNOWN_CONFIG_KEYS, k)),
+    );
+  } catch {
+    return {};
+  }
+}
+
 export function loadConfig(): Config {
   const config = readConfigFromDisk();
   loadedSnapshots.set(config, structuredClone(config));
@@ -988,13 +1025,14 @@ function writeConfigAtomic(config: Config): void {
  * Persist the global config. Callers that {@link loadConfig}'d, mutated, and save the same object
  * 3-way-merge with disk under an exclusive lock so concurrent CLI processes cannot drop each
  * other's identities, bindings, or vault entries (ADR 255). A Config built from scratch (reset)
- * has no load snapshot and replaces the file.
+ * has no load snapshot and replaces the file — except for top-level keys this build does not know,
+ * which pass through from disk on every path ({@link unknownKeysOnDisk}).
  */
 export function saveConfig(config: Config): void {
   withConfigLock(() => {
     const base = loadedSnapshots.get(config);
     const merged = base ? threeWayMerge(base, config, readConfigFromDisk()) : config;
-    writeConfigAtomic(merged);
+    writeConfigAtomic({ ...unknownKeysOnDisk(), ...merged });
     loadedSnapshots.set(config, structuredClone(merged));
   });
 }
