@@ -76,6 +76,7 @@ export const KNOWN_WHOLE_CONTEXT: readonly string[] = [
   'deploy/cloud-seat/Dockerfile',
   'scripts/broadcast/hosted.Dockerfile',
   'scripts/perf/broadcast-bench.Dockerfile',
+  'scripts/perf/loadbench.Dockerfile',
 ];
 
 /** Rule A — every hazard path is excluded. Returns the ones that would enter the context. */
