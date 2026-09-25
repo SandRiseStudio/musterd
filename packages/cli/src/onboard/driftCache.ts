@@ -45,6 +45,11 @@ export interface RefreshDriftDeps {
   inspect: (cwd: string) => { guidance: string[]; hooks: string[]; permissions: string[] };
   /** Whether this folder carries the self-heal tombstone. */
   declined: (cwd: string) => boolean;
+  /**
+   * Re-inspect even a fresh cache. For callers that just CHANGED the folder — a repair — whose
+   * result the TTL would otherwise hide: the inbox kept warning about drift the repair had cleared.
+   */
+  force?: boolean;
 }
 
 /**
@@ -59,7 +64,7 @@ export interface RefreshDriftDeps {
  */
 export function refreshDriftCache(cwd: string, deps: RefreshDriftDeps): DriftCache {
   const cached = readDriftCache(cwd);
-  if (cached && isFresh(cached, deps)) return cached;
+  if (cached && !deps.force && isFresh(cached, deps)) return cached;
 
   const found = deps.inspect(cwd);
   const next: DriftCache = {

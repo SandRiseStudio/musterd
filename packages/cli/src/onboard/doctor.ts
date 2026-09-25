@@ -1332,7 +1332,7 @@ export async function runSessionProbe(deps?: {
   /** The audit-row post; best-effort, a rejection is swallowed here. */
   postRepair?: (body: WorkspaceRepairBody) => Promise<void>;
   /** The drift-cache write (ADR 408 inc 4); injectable so its ORDER against the repair is testable. */
-  refreshDrift?: (cwd: string, daemonBuild: string | undefined) => void;
+  refreshDrift?: (cwd: string, daemonBuild: string | undefined, opts?: { force?: boolean }) => void;
 }): Promise<number> {
   const ref = deps?.cliRef !== undefined ? deps.cliRef : cliBuild();
   // Learned once and used twice: it decides build skew below, and it keys the drift cache after the
@@ -1386,7 +1386,9 @@ export async function runSessionProbe(deps?: {
     // failure class as #1479, a correct fix reported as failing, arriving through the surface built
     // to prevent it. The repair is the whole point of running first; the report must follow it.
     try {
-      (deps?.refreshDrift ?? refreshWorkspaceDrift)(cwd, daemonRef);
+      // FORCED: the heal above may have just changed the folder, and a cache still inside its TTL
+      // would otherwise keep reporting what the heal repaired.
+      (deps?.refreshDrift ?? refreshWorkspaceDrift)(cwd, daemonRef, { force: true });
     } catch {
       // A cache write is evidence, not a reason to fail a harness session.
     }
@@ -1399,12 +1401,17 @@ export async function runSessionProbe(deps?: {
  * halves — the inspection and, through `selfHeal.js`, the tombstone surface — while `driftCache.ts`
  * itself stays a leaf. Callers that only want the cache warmed call this and nothing else.
  */
-export function refreshWorkspaceDrift(cwd: string, daemonBuild: string | undefined): void {
+export function refreshWorkspaceDrift(
+  cwd: string,
+  daemonBuild: string | undefined,
+  opts: { force?: boolean } = {},
+): void {
   const deps: RefreshDriftDeps = {
     daemonBuild,
     now: Date.now(),
     inspect: inspectArtifactDrift,
     declined: (c) => isDeclined(c, SELF_HEAL_SURFACE),
+    ...(opts.force ? { force: true } : {}),
   };
   refreshDriftCache(cwd, deps);
 }

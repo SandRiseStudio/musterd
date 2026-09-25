@@ -63,6 +63,8 @@ The workspace is coherent and the cache says `guidance: 1`. Every inbox check fo
 
 The cache holds what REMAINS after the repair, never what was found before it (2026-09-16). Falsify: hand-edit one guidance stamp back a version, run the probe, and read `.musterd/drift.json` — a non-zero count on a workspace `init --check` calls coherent means the write has drifted back ahead of the repair again. <!-- claim: defect -->
 
+Order alone was not enough (2026-09-25, dolly). The write after the repair went through `refreshDriftCache`, which returns a cache still inside its TTL without looking again, so a seat whose cache was a few minutes old kept the pre-repair count anyway. The manual repairs never wrote the cache at all: `musterd init --refresh-hooks` repaired 6 hooks on dolly, and the inbox went on warning "behind on 6 hooks — run `musterd init --refresh-hooks`" until the TTL ran out. Every caller that has just changed the folder now passes `force` — the session-start heal and `init --refresh-{hooks,guidance,permissions}`. Falsify: run `musterd init --refresh-hooks` in a drifted seat and read `.musterd/drift.json` straight after — a non-zero `hooks` count, or an `inspected_at` from before the run, means a repair's result is being hidden by the TTL again. <!-- claim: defect -->
+
 ## The drift the session start cannot fix is the one increment 4 exists for (same arm)
 
 The permission floor never self-heals (decision 2), so it is exactly what has to survive into the cache. Measured by removing one `mcp__musterd` entry from this seat's `.claude/settings.local.json` and running the probe:
