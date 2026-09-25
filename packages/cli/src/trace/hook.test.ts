@@ -1,16 +1,23 @@
-import type { Binding } from '@musterd/protocol';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { type Binding, TRACE_CONTENT_MAX_BYTES, TRACE_POLICY_FILE } from '@musterd/protocol';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HttpClient } from '../client.js';
 import { sessionDigest } from '../session/digest.js';
 import {
   buildHookOutcomeEvent,
   buildTraceEvent,
   emitTraceEvents,
+  extractTraceContent,
   inferTraceHarness,
   parseTraceHook,
+  readTraceContentMode,
   tapHook,
+  traceContentEnabled,
   traceDepth,
   traceTapEnabled,
+  writeTraceContentMode,
 } from './hook.js';
 
 const binding = {
@@ -290,5 +297,122 @@ describe('traceDepth — the `traced:` line (ADR 445 §4)', () => {
     // A daemon before ADR 445 names no trace store — there is nowhere to post, so nothing is traced.
     expect(traceDepth(binding, {}, {})).toBeNull();
     expect(traceDepth(binding, undefined, {})).toBeNull();
+  });
+});
+
+describe('increment 1b — the content part', () => {
+  const secret = 'mskey_Zq7xK2mNvB9pLw4R';
+  const payload = post({
+    tool_input: { command: `cat .musterd/binding.json` },
+    tool_response: { stdout: `{"agent_key":"${secret}"}` },
+  });
+
+  it('is extracted only when asked, scrubbed before it leaves the process', () => {
+    expect(parseTraceHook(payload)).not.toHaveProperty('content');
+    const c = parseTraceHook(payload, undefined, { content: true })!.content!;
+    expect(c.tool_input).toBe('{"command":"cat .musterd/binding.json"}');
+    expect(c.tool_response).toContain('<redacted:agent_key>');
+    expect(JSON.stringify(c)).not.toContain(secret);
+    expect(c).toMatchObject({ redactions: 1, truncated: false });
+  });
+
+  it('reads Cursor shell events and Claude Code prompts / assistant messages', () => {
+    expect(extractTraceContent({ command: 'ls', output: 'a\nb', conversation_id: 'c' })).toEqual({
+      tool_input: 'ls',
+      tool_response: 'a\nb',
+      redactions: 0,
+      truncated: false,
+    });
+    expect(extractTraceContent({ prompt: 'hi', last_assistant_message: 'done' })).toEqual({
+      prompt: 'hi',
+      assistant: 'done',
+      redactions: 0,
+      truncated: false,
+    });
+    expect(extractTraceContent({ session_id: 's' })).toBeUndefined();
+  });
+
+  it('bounds the whole part to 256 KiB, scrubbing before the cut', () => {
+    // A secret right at the bound: scrubbed whole first, so the cut can never leave a fragment.
+    const big = 'x'.repeat(TRACE_CONTENT_MAX_BYTES - 10) + secret + 'y'.repeat(1000);
+    const c = extractTraceContent({ tool_response: big, error: 'boom' })!;
+    const total = Buffer.byteLength(c.tool_response!, 'utf8') + Buffer.byteLength(c.error ?? '');
+    expect(total).toBeLessThanOrEqual(TRACE_CONTENT_MAX_BYTES);
+    expect(c.truncated).toBe(true);
+    expect(c.redactions).toBe(1);
+    expect(c.tool_response).not.toContain('mskey_Zq7');
+    // A 5 MB response is pre-cut, not regex-scanned whole.
+    const huge = extractTraceContent({ tool_response: 'z'.repeat(5_000_000) })!;
+    expect(Buffer.byteLength(huge.tool_response!)).toBe(TRACE_CONTENT_MAX_BYTES);
+  });
+
+  it('never leaves half a UTF-8 character at the cut', () => {
+    const c = extractTraceContent({ tool_response: '€'.repeat(TRACE_CONTENT_MAX_BYTES) })!;
+    expect(c.tool_response!.endsWith('€')).toBe(true);
+    expect(c.tool_response).not.toContain('�');
+  });
+});
+
+describe('the content mode cache and its gates', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-trace-mode-'));
+    mkdirSync(join(dir, '.musterd'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('reads off until a daemon said on; an unreadable file is off', () => {
+    expect(readTraceContentMode(dir)).toBe('off');
+    writeTraceContentMode(dir, 'on');
+    expect(readTraceContentMode(dir)).toBe('on');
+    writeFileSync(join(dir, '.musterd', TRACE_POLICY_FILE), '{not json');
+    expect(readTraceContentMode(dir)).toBe('off');
+  });
+
+  it('sends content only when the cache says on AND the daemon is loopback', () => {
+    writeTraceContentMode(dir, 'on');
+    expect(traceContentEnabled({ server: 'http://localhost:4849' }, dir)).toBe(true);
+    expect(traceContentEnabled({ server: 'http://127.0.0.1:4849' }, dir)).toBe(true);
+    expect(traceContentEnabled({ server: 'http://[::1]:4849' }, dir)).toBe(true);
+    expect(traceContentEnabled({ server: 'https://musterd.example.com' }, dir)).toBe(false);
+    expect(traceContentEnabled({ server: 'http://100.64.1.2:4849' }, dir)).toBe(false);
+    writeTraceContentMode(dir, 'off');
+    expect(traceContentEnabled({ server: 'http://localhost:4849' }, dir)).toBe(false);
+  });
+
+  it('tapHook learns the mode from the reply, and sends content from the next hook on', async () => {
+    const local = { ...binding, server: 'http://127.0.0.1:4849' } as Binding;
+    const posted = vi
+      .spyOn(HttpClient.prototype, 'postTraceEvents')
+      .mockResolvedValue({ accepted: 1, content: 'on' });
+    const raw = post({ tool_response: { stdout: 'hello' } });
+    await tapHook(raw, { binding: local, dir, env: {} });
+    expect(posted.mock.calls[0]![1].events[0]).not.toHaveProperty('content');
+    expect(readTraceContentMode(dir)).toBe('on');
+    await tapHook(raw, {
+      binding: local,
+      dir,
+      env: {},
+      outcome: { hook: 'interrupt' },
+    });
+    const [observed, outcome] = posted.mock.calls[1]![1].events;
+    expect(observed!.content).toMatchObject({ tool_response: '{"stdout":"hello"}' });
+    expect(outcome).not.toHaveProperty('content'); // a HookOutcome never carries content
+    // A pre-1b daemon omits the mode: that reads as off, and the next hook sends none.
+    posted.mockResolvedValue({ accepted: 1 });
+    await tapHook(raw, { binding: local, dir, env: {} });
+    expect(readTraceContentMode(dir)).toBe('off');
+  });
+
+  it('traceDepth says structural+content only where the hooks would send it', () => {
+    const local = { ...binding, server: 'http://localhost:4849' } as Binding;
+    expect(traceDepth(local, { trace_schema: 1 }, {}, dir)).toBe('structural');
+    writeTraceContentMode(dir, 'on');
+    expect(traceDepth(local, { trace_schema: 1 }, {}, dir)).toBe('structural+content');
+    expect(traceDepth(local, { trace_schema: 1 }, {})).toBe('structural');
+    expect(traceDepth(local, { trace_schema: 1 }, { MUSTERD_NO_TRACE: '1' }, dir)).toBeNull();
   });
 });

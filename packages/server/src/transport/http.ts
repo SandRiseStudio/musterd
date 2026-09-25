@@ -4893,16 +4893,22 @@ export async function handleHttp(
       // leaseless window), and a lease would prove nothing the credential hash does not: the rows
       // are the seat's own record of its own session. Presence-neutral by contract (a hook rides
       // every tool call and must never flip the roster), so no `authTouch`. The seat is the caller —
-      // the body has no field for it. Structural only: `TraceEventSchema` has no content part, so a
-      // hook that sends one meets a schema that strips it before anything is stored. 202, counts
-      // only — the tap is fire-and-forget and nothing downstream reads more.
+      // the body has no field for it. Structural always; a
+      // hook's content part is stored only under the team's `trace.content` policy (1b). 202, counts
+      // and the content mode — the tap is fire-and-forget and nothing downstream reads more.
       if (method === 'POST' && rest === '/trace/events') {
         const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req), undefined, {
           leaseless: true,
         });
         assertSeatCanRead(member);
         const body = parseOrBadRequest(TraceEventBatchSchema, await readJson(req));
-        const { accepted } = ingestTraceEvents(ctx.traceDb, team.id, member.name, body.events);
+        // Increment 1b: the team's `trace.content` decides whether a content part is stored or
+        // dropped, and the mode rides back on the response — that echo is how a tap learns the
+        // policy without a second round trip (it sends content from its NEXT hook on).
+        const contentMode = getPolicy(ctx.db, team.id).trace.content;
+        const { accepted } = ingestTraceEvents(ctx.traceDb, team.id, member.name, body.events, {
+          writeContent: contentMode === 'on',
+        });
         const byKey = new Map<string, number>();
         for (const e of body.events) {
           const k = `${e.harness}\u0000${e.kind}`;
@@ -4912,7 +4918,7 @@ export async function handleHttp(
           const [harness, kind] = k.split('\u0000') as [string, string];
           recordTraceIngest(harness, kind, n);
         }
-        return sendJson(res, 202, { accepted });
+        return sendJson(res, 202, { accepted, content: contentMode });
       }
 
       // Declared Goals (ADR 048's general-team seam, resolved by ADR 084) — a Goal is an ordinary

@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { TRACE_POLICY_FILE } from '@musterd/protocol';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MusterdClient } from './client.js';
 
 /*
@@ -46,5 +50,36 @@ describe('MusterdClient.traceDepth', () => {
   it('is null when the daemon is unreachable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')));
     expect(await client().traceDepth({})).toBeNull();
+  });
+});
+
+describe('MusterdClient.traceDepth — content (increment 1b)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-mcp-trace-'));
+    mkdirSync(join(dir, '.musterd'));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => health({ trace_schema: 1 })),
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const inDir = (over: Record<string, unknown> = {}) => {
+    const c = client({ server: 'http://localhost:4849', ...over });
+    vi.spyOn(c, 'workspaceDir', 'get').mockReturnValue(dir);
+    return c;
+  };
+
+  it('says structural+content when the tap cached `on` and the daemon is local', async () => {
+    expect(await inDir().traceDepth({})).toBe('structural');
+    writeFileSync(join(dir, '.musterd', TRACE_POLICY_FILE), JSON.stringify({ content: 'on' }));
+    expect(await inDir().traceDepth({})).toBe('structural+content');
+    // A remote daemon never gets content, whatever the cache says.
+    expect(await inDir({ server: 'https://musterd.example.com' }).traceDepth({})).toBe(
+      'structural',
+    );
   });
 });

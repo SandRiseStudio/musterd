@@ -1,15 +1,42 @@
-import type { TraceEvent } from '@musterd/protocol';
+import {
+  scrubCredentials,
+  TRACE_CONTENT_FIELDS,
+  type TraceContent,
+  type TraceEvent,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { monotonicFactory } from 'ulid';
 
 const ulid = monotonicFactory();
 
 /**
- * The trace store's writer (ADR 445 §3, increment 1a). Structural columns only: this function has
- * no parameter through which a tool input, response, prompt or transcript could arrive — the
- * `content` column exists in the DDL and is never named here. Increment 1b adds a second writer
- * behind the credential scrub; this one stays the structural default that runs whether or not a
- * team turned content on.
+ * The daemon's pass of the credential scrub (ADR 445 §3) over a content part the hook already
+ * scrubbed. The hook's pass is the one that matters — this is the net under an older or foreign tap
+ * that sent content unscrubbed. Returns what goes in the `content` column (the fields only, as JSON)
+ * and the row's total redaction count (the hook's plus any this pass found).
+ */
+export function scrubStoredContent(content: TraceContent): {
+  json: string;
+  redactions: number;
+  truncated: boolean;
+} {
+  const fields: Partial<Record<(typeof TRACE_CONTENT_FIELDS)[number], string>> = {};
+  let redactions = content.redactions;
+  for (const f of TRACE_CONTENT_FIELDS) {
+    const v = content[f];
+    if (v === undefined) continue;
+    const r = scrubCredentials(v);
+    fields[f] = r.text;
+    redactions += r.redactions;
+  }
+  return { json: JSON.stringify(fields), redactions, truncated: content.truncated };
+}
+
+/**
+ * The trace store's writer (ADR 445 §3). Structural columns always. The content column only when
+ * the caller passes `writeContent` — the route decides that from the team's `trace.content` policy,
+ * and with it off a content part that arrived anyway is dropped here, never stored. Content goes
+ * through {@link scrubStoredContent} on its way in, whatever the hook already did.
  *
  * `seq` is assigned here, per (team, session): a hook is a one-shot process with no counter to
  * share, so the daemon is the only place a monotonic sequence can be minted without a lock file
@@ -21,17 +48,20 @@ export function ingestTraceEvents(
   teamId: string,
   seat: string,
   events: readonly TraceEvent[],
-): { accepted: number } {
+  opts: { writeContent?: boolean } = {},
+): { accepted: number; content: number } {
   const nextSeq = traceDb.prepare<[string, string], { next: number }>(
     'SELECT COALESCE(MAX(seq), -1) + 1 AS next FROM trace_events WHERE team_id = ? AND session_digest = ?',
   );
   const insert = traceDb.prepare(`
     INSERT INTO trace_events (
       id, team_id, seat, session_digest, seq, ts, received_at, harness, kind,
-      tool_name, tool_use_id, agent_id, parent_agent_id, duration_ms, outcome, detail
+      tool_name, tool_use_id, agent_id, parent_agent_id, duration_ms, outcome, detail,
+      content, redactions, truncated
     ) VALUES (
       @id, @team_id, @seat, @session_digest, @seq, @ts, @received_at, @harness, @kind,
-      @tool_name, @tool_use_id, @agent_id, @parent_agent_id, @duration_ms, @outcome, @detail
+      @tool_name, @tool_use_id, @agent_id, @parent_agent_id, @duration_ms, @outcome, @detail,
+      @content, @redactions, @truncated
     )
   `);
   const now = Date.now();
@@ -40,10 +70,13 @@ export function ingestTraceEvents(
     // session, and a per-row MAX would re-scan the index for every event.
     const cursors = new Map<string, number>();
     let accepted = 0;
+    let withContent = 0;
     for (const e of batch) {
       let seq = cursors.get(e.session_digest);
       if (seq === undefined) seq = nextSeq.get(teamId, e.session_digest)!.next;
       cursors.set(e.session_digest, seq + 1);
+      const stored = opts.writeContent && e.content ? scrubStoredContent(e.content) : undefined;
+      if (stored) withContent++;
       insert.run({
         id: ulid(),
         team_id: teamId,
@@ -61,12 +94,15 @@ export function ingestTraceEvents(
         duration_ms: e.duration_ms ?? null,
         outcome: e.outcome ?? null,
         detail: e.detail === undefined ? null : JSON.stringify(e.detail),
+        content: stored?.json ?? null,
+        redactions: stored?.redactions ?? null,
+        truncated: stored?.truncated ? 1 : 0,
       });
       accepted++;
     }
-    return accepted;
+    return { accepted, content: withContent };
   });
-  return { accepted: run(events) };
+  return run(events);
 }
 
 export interface TraceEventRow {

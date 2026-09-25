@@ -59,6 +59,30 @@ describe('team policy command', () => {
     expect(res.out).toContain('dispatch loop: off');
   });
 
+  it('--trace-content turns the content column on and off, and the view says which (ADR 445 §3)', async () => {
+    expect((await capture(() => teamCommand(parseArgs(['policy'])))).out).toContain(
+      'trace content: off',
+    );
+    const on = await capture(() => teamCommand(parseArgs(['policy', '--trace-content', 'on'])));
+    expect(on.code).toBe(0);
+    expect(on.out).toContain('trace content on');
+    expect((await capture(() => teamCommand(parseArgs(['policy'])))).out).toContain(
+      'trace content: on',
+    );
+    const json = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
+    );
+    expect(json.trace).toEqual({ content: 'on' });
+    expect(json.stored.trace).toEqual({ content: 'on' });
+    await capture(() => teamCommand(parseArgs(['policy', '--trace-content', 'off'])));
+    expect((await capture(() => teamCommand(parseArgs(['policy'])))).out).toContain(
+      'trace content: off',
+    );
+    await expect(teamCommand(parseArgs(['policy', '--trace-content', 'maybe']))).rejects.toThrow(
+      '--trace-content <on|off>',
+    );
+  });
+
   it('team add gives an agent its own seat-scoped bootstrap credential', async () => {
     const added = JSON.parse(
       (await capture(() => teamCommand(parseArgs(['add', 'Lin', '--kind', 'agent', '--json']))))

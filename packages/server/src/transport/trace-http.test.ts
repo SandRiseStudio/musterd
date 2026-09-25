@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
-import { getTeamBySlug } from '../store/teams.js';
+import { getTeamBySlug, setPolicy } from '../store/teams.js';
 import { countTraceEvents, listSessionTrace } from '../store/trace.js';
 import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
@@ -68,7 +68,7 @@ describe('POST /teams/:slug/trace/events', () => {
       },
     );
     expect(r.status).toBe(202);
-    expect(r.json).toEqual({ accepted: 2 });
+    expect(r.json).toEqual({ accepted: 2, content: 'off' });
     const rows = listSessionTrace(server.traceDb, teamId(), 'abcdef012345');
     expect(rows.map((x) => [x.seq, x.kind, x.seat])).toEqual([
       [0, 'PostToolUse', 'Ada'],
@@ -116,6 +116,72 @@ describe('POST /teams/:slug/trace/events', () => {
     expect(bad.status).toBe(400);
     expect(listSessionTrace(server.traceDb, teamId(), 'ffffffff0000')).toHaveLength(0);
     expect((await post('/teams/dawn/trace/events', { events: [] }, headers)).status).toBe(400);
+  });
+
+  describe('the content part (increment 1b)', () => {
+    const headers = () => ({ authorization: `Bearer ${auth.key}`, 'x-musterd-seat': 'Ada' });
+    const content = (over: Record<string, unknown> = {}) => ({
+      tool_input: '{"command":"cat .musterd/binding.json"}',
+      tool_response: '{"stdout":"ok"}',
+      redactions: 0,
+      truncated: false,
+      ...over,
+    });
+
+    it('is dropped, never stored, while the team policy is off (the default) — and the reply says off', async () => {
+      const r = await post(
+        '/teams/dawn/trace/events',
+        { events: [ev({ content: content() })] },
+        headers(),
+      );
+      expect(r.json).toEqual({ accepted: 1, content: 'off' });
+      const row = listSessionTrace(server.traceDb, teamId(), 'abcdef012345')[0]!;
+      expect(row.content).toBeNull();
+      expect(row.redactions).toBeNull();
+    });
+
+    it('is stored under trace.content=on, re-scrubbed on the way in, with the counts on the row', async () => {
+      setPolicy(server.db, teamId(), { trace: { content: 'on' } });
+      const leaked = 'mskey_Zq7xK2mNvB9pLw4R';
+      const r = await post(
+        '/teams/dawn/trace/events',
+        {
+          events: [
+            // An older / foreign tap that sent content unscrubbed: the daemon's pass catches it.
+            ev({
+              content: content({
+                tool_response: `{"stdout":"${leaked}"}`,
+                redactions: 2,
+                truncated: true,
+              }),
+            }),
+            ev({ kind: 'PreToolUse', tool_use_id: 'toolu_2' }),
+          ],
+        },
+        headers(),
+      );
+      expect(r.json).toEqual({ accepted: 2, content: 'on' });
+      const [withContent, structural] = listSessionTrace(server.traceDb, teamId(), 'abcdef012345');
+      expect(JSON.parse(withContent!.content!)).toEqual({
+        tool_input: '{"command":"cat .musterd/binding.json"}',
+        tool_response: '{"stdout":"<redacted:agent_key>"}',
+      });
+      expect(withContent!.content).not.toContain(leaked);
+      expect(withContent!.redactions).toBe(3); // the hook's 2 + the daemon's 1
+      expect(withContent!.truncated).toBe(1);
+      expect(structural!.content).toBeNull();
+    });
+
+    it('refuses a content part over the bound as a 400 — no partial write', async () => {
+      setPolicy(server.db, teamId(), { trace: { content: 'on' } });
+      const r = await post(
+        '/teams/dawn/trace/events',
+        { events: [ev({ content: content({ tool_response: 'x'.repeat(262_145) }) })] },
+        headers(),
+      );
+      expect(r.status).toBe(400);
+      expect(listSessionTrace(server.traceDb, teamId(), 'abcdef012345')).toHaveLength(0);
+    });
   });
 
   it('refuses a body that names another seat, an unauthenticated post, and a bootstrap key', async () => {

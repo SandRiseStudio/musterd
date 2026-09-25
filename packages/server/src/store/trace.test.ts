@@ -27,12 +27,20 @@ describe('trace.db (ADR 445 §3)', () => {
     expect(tables).not.toContain('teams'); // no coordination table is created in this file
   });
 
-  it('assigns a monotonic seq per (team, session) across batches and never writes content', () => {
+  it('assigns a monotonic seq per (team, session) across batches; writes no content unless asked', () => {
     const db = openTraceDb(':memory:');
     expect(ingestTraceEvents(db, 't1', 'ryder', [ev(), ev({ kind: 'PreToolUse' })])).toEqual({
       accepted: 2,
+      content: 0,
     });
-    expect(ingestTraceEvents(db, 't1', 'ryder', [ev({ kind: 'Stop' })])).toEqual({ accepted: 1 });
+    const withPart = {
+      content: { tool_input: 'x', redactions: 0, truncated: false },
+    } as unknown as Record<string, unknown>;
+    // A content part with writeContent unset (the team policy off) is dropped, not stored.
+    expect(ingestTraceEvents(db, 't1', 'ryder', [ev({ kind: 'Stop', ...withPart })])).toEqual({
+      accepted: 1,
+      content: 0,
+    });
     // a different session on the same team starts its own sequence
     ingestTraceEvents(db, 't1', 'ryder', [ev({ session_digest: 'ffffffff0000' })]);
     // a different team with the same digest is a different sequence too

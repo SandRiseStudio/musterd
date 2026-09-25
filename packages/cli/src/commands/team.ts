@@ -221,7 +221,7 @@ async function teamBootstrap(parsed: Parsed): Promise<number> {
  * `musterd team policy [--reseat-known-agents on|off] [--ask-fallback-to-nonadmin on|off]
  * [--review-loop on|off] [--dispatch-loop on|off] [--sweep-loop on|off]
  * [--ask-slack-webhook <url|off>] [--stakes-default <surface>=<low|normal|high>|off]
- * [--guardian-tier <class>=<observe|alert|auto>|off]` — show or set the
+ * [--guardian-tier <class>=<observe|alert|auto>|off] [--trace-content on|off]` — show or set the
  * team governance policy (admin-only, audited `policy.change`). ADR 146: `--reseat-known-agents on`
  * opts the team into dogfood-mode re-seat — an already-held agent seat re-occupies without an admin
  * decision. ADR 147: `--ask-fallback-to-nonadmin on` lets an admin-unanswered ask fall back to
@@ -233,7 +233,9 @@ async function teamBootstrap(parsed: Parsed): Promise<number> {
  * `--seeds-relay <url> --seeds-token <token>` points the seeds ingest loop at the capture relay
  * (`--seeds-relay off` clears both); the token is a secret and never displayed. ADR 244:
  * `--stakes-default <surface>=<low|normal|high>` upserts a default-stakes rule (same surface
- * replaces in place; a new surface appends); `--stakes-default off` clears the list. Reads → merges the named
+ * replaces in place; a new surface appends); `--stakes-default off` clears the list. ADR 445 §3:
+ * `--trace-content on` keeps what each seat's hooks saw (credential-scrubbed) in trace.db's content
+ * column; structural rows are recorded either way. Reads → merges the named
  * knob(s) → POSTs the policy (the residency-policy read-merge-write pattern), so setting one knob
  * never clobbers the wake-policy defaults.
  */
@@ -329,6 +331,13 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     merged.incident = { ...merged.incident, wake_on_resolve: wakeOnResolve };
     changed = true;
   }
+  // ADR 445 §3: whether the trace store's content column is written. Structural rows are recorded
+  // either way; this decides only whether what a hook SAW (scrubbed) is kept too.
+  const traceContent = onOff(parsed.flags['trace-content'], '--trace-content');
+  if (traceContent !== undefined) {
+    merged.trace = { ...merged.trace, content: traceContent ? 'on' : 'off' };
+    changed = true;
+  }
   // ADR 149: the ask stream's Slack delivery — a webhook URL, or `off` to clear it (delete the key so
   // the daemon's "unset = no outbound call ever" default is restored, not stored as an empty string).
   const webhook = flagStr(parsed.flags, 'ask-slack-webhook');
@@ -397,6 +406,14 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
       process.stdout.write(
         hint(
           'a lane nobody accepts is now closed by the daemon after the grace, recorded review_swept and never verified',
+        ) + '\n',
+      );
+    if (traceContent !== undefined)
+      process.stdout.write(
+        hint(
+          updated.trace.content === 'on'
+            ? "trace content on — each seat's hooks keep what they saw, credential-scrubbed, in this machine's trace.db (from the next hook on)"
+            : 'trace content off — trace.db records structure only; content already stored is kept',
         ) + '\n',
       );
     if (webhook !== undefined)
@@ -477,6 +494,9 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   }
   process.stdout.write(
     `  allow pre-issued grants: ${current.allow_pre_issued_grants ? 'on' : 'off'}${inherited(stored, 'allow_pre_issued_grants')}\n`,
+  );
+  process.stdout.write(
+    `  trace content: ${current.trace.content === 'on' ? theme.accent('on') : 'off'}${inherited(stored.trace, 'content')}\n`,
   );
   // ADR 149: the webhook URL is a secret — show only that it's set, and where it points (host).
   process.stdout.write(

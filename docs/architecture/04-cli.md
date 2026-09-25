@@ -36,7 +36,7 @@ src/
   infra-gate.ts       // warn-only infra-touch check: asks the daemon whether the acting seat holds `platform`; every failure mode is silence, never a block (ADR 227 inc 2)
   hookStdin.ts        // readHookStdin(timeoutMs): the one bounded stdin drain every harness hook uses (gate, capture, codex-hook, trace tap) — a wiring mistake must never hang a tool call (ADR 247: one transform, one home)
   trace/              // ADR 445 R1 — the hook tap, client half
-    hook.ts           // parseTraceHook (names/ids/sizes out of a hook payload — never tool_input/tool_response/prompt/error/transcript_path/cwd) + buildTraceEvent (sessionDigest, never the raw id) + emitTraceEvents (raced against TRACE_POST_BUDGET_MS, swallows everything) + tapHook (the one-call form each hook site uses; harness = caller's word → payload spelling (inferTraceHarness: Grok camelCase, Cursor conversation_id) → claude-code; Cursor event names mapped onto the column's; an optional HookOutcome rides the same post) + traceDepth (the `traced: structural` line `musterd status` prints, ADR 445 §4); MUSTERD_NO_TRACE=1 is the seat's kill switch
+    hook.ts           // parseTraceHook (names/ids/sizes out of a hook payload — never tool_input/tool_response/prompt/error/transcript_path/cwd) + buildTraceEvent (sessionDigest, never the raw id) + emitTraceEvents (raced against TRACE_POST_BUDGET_MS, swallows everything) + tapHook (the one-call form each hook site uses; harness = caller's word → payload spelling (inferTraceHarness: Grok camelCase, Cursor conversation_id) → claude-code; Cursor event names mapped onto the column's; an optional HookOutcome rides the same post) + traceDepth (the `traced: structural[+content]` line `musterd status` prints, ADR 445 §4) + extractTraceContent (1b: scrubToText per field, then one shared 256 KiB budget, cut on a UTF-8 boundary; pre-cut at 2× so a huge response is not regex-scanned whole) + read/writeTraceContentMode (.musterd/trace-policy.json, learned from the ingest reply) + traceContentEnabled (mode on AND loopback daemon); MUSTERD_NO_TRACE=1 is the seat's kill switch
   workingTree.ts      // session-start marker + the advisory a stage-shaped `git add -A` earns for paths that PREDATE this session; local-only, warn-never-deny (ADR 239 verdict)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
@@ -75,7 +75,7 @@ src/
     os.ts             // OS push notification (macOS/Linux/Windows); osNotifyDelivered resolves whether the notifier took it
     select.ts         // pick which away human to nudge
   host/               // the `musterd host` wake actuator — harness residency's per-machine hand (ADR 131 inc 3)
-    registry.ts       // machine-local seat → workspace/harness registry (~/.musterd/host-registry.json); written by `residency on`, never by the daemon
+    registry.ts       // machine-local seat → workspace/harness registry (~/.musterd/host-registry.json); written by `residency on`, never by the daemon; canonicalServer + isLoopbackServer (the trace tap sends content only to a loopback daemon)
     backend.ts        // ActuatorBackend seam: spawn-or-invoke + roster-derived verify + WakeOutcome; native row must stay expressible (ADR 131 §7)
     loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); host_key auth (ADR 395, fallback agent_key) read through workspace bindings; one wake span per actuation; wake-progress after spawn (not on deferred); two local guards before any spawn — a transcript being written (`local-session-live`) and, as the ADR 444 backstop, an attended session open but idle (`attended-session-open`); at settle it stamps each capture the backend claims ended (ADR 436 clause 4) before the supplementary cost report, which never carries the claim
     doorbell.ts       // the doorbell's `os` sink, host half (ADR 443 §3): pollDoorbellOnce claims the rings queued for each (server, team, host label) group with the same key as the wake poll, raises one OS banner per ring from record fields only (doorbellBanner → osNotifyDelivered, argv not script), reports doorbell.surfaced with ok from the notifier's exit; `host` runs it beside the wake poll, never awaited ahead of it; a quiet tick logs nothing
@@ -401,13 +401,16 @@ Admin lifecycle for least-privilege harness bootstrap credentials. `mint` requir
 
 The one-time **db→file migration** for a team's durable roster (ADR 058 / migration-bootstrap.md). Run in the folder that should own the roster: reads the live roster, writes canonical `.musterd/team.toml` + one `seats/<name>.toml` per member (identity only — **no token touches a file**), runs the format-layer parity self-check, and records `rosterHome[slug]` in the global config (the per-team cutover signal — the daemon then treats this team as file-backed). Token-preserving by construction: the next reconcile is a match-by-name no-op, so live sessions keep their tokens. Refuses if `team.toml` already exists. Output: `✓ exported "<slug>" roster → .musterd/ (N seats)`.
 
-### `musterd team policy [--review-loop on|off] [--dispatch-loop on|off] [--stakes-default <surface>=<low|normal|high>|off]`
+### `musterd team policy [--review-loop on|off] [--dispatch-loop on|off] [--stakes-default <surface>=<low|normal|high>|off] [--trace-content on|off]`
 
 Shows or updates the Team's admin-only governance policy. `--review-loop on` arms ADR 191's review
 work-order loop; `--dispatch-loop on` arms ADR 199's dispatch work-order loop; `off` restores each
 default. `--stakes-default <surface>=<low|normal|high>` upserts an ADR 244 default-stakes rule (the
 same surface replaces in place; a new surface appends; first match still wins); `--stakes-default off`
-clears the list so every lane opens at the worker's declaration again. The command reads the sparse
+clears the list so every lane opens at the worker's declaration again. `--trace-content on|off` sets
+ADR 445 §3's `trace.content` (default `off`): whether trace.db's content column is written. Structural
+rows are recorded either way; a seat's hooks learn the change from the daemon's next ingest reply and
+send content from the hook after. The command reads the sparse
 stored policy, updates only the named knob, then writes it back, so it never clobbers another policy
 setting or the sibling loop. The human-readable view shows whether each setting is explicit or
 inherited; `--json` includes effective `loops` / `stakes_defaults` plus the sparse `stored` policy.

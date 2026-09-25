@@ -6,6 +6,7 @@ import { IncidentPolicySchema } from './incident.js';
 import { StakesDefaultSchema } from './lanes.js';
 import { LoopsPolicySchema } from './loops.js';
 import { ResidencyPolicyOverrideSchema, ResidencyPolicySchema } from './residency.js';
+import { TracePolicySchema } from './trace.js';
 
 /**
  * Credential + team-policy contracts (SPEC A.2/A.6, ADR 069 P3 / ADR 076). Secrets are minted with a
@@ -165,6 +166,11 @@ export const PolicySchema = z.object({
    * the reasons on `IncidentPolicySchema`.
    */
   incident: IncidentPolicySchema.default({}),
+  /**
+   * Agent-trace capture (ADR 445 §3). `content` (default `off`) decides whether the trace store's
+   * content column is written at all; structural rows are recorded either way. Not a secret.
+   */
+  trace: TracePolicySchema.default({}),
 });
 export type Policy = z.infer<typeof PolicySchema>;
 
@@ -185,6 +191,7 @@ export const PolicyOverrideSchema = PolicySchema.partial().extend({
   loops: LoopsPolicySchema.partial().optional(),
   incident: IncidentPolicySchema.partial().optional(),
   doorbell: DoorbellPolicySchema.partial().optional(),
+  trace: TracePolicySchema.partial().optional(),
 });
 export type PolicyOverride = z.infer<typeof PolicyOverrideSchema>;
 
@@ -204,6 +211,7 @@ const POLICY_SUB_SCHEMAS = {
   loops: LoopsPolicySchema,
   incident: IncidentPolicySchema,
   doorbell: DoorbellPolicySchema,
+  trace: TracePolicySchema,
 } as const;
 
 /** Strip the keys of one sub-object that equal their current schema default; undefined if none survive. */

@@ -553,7 +553,7 @@ export async function syncWedgeOfClient(client: {
  * the tap would record nothing, and on any failure (a status read never fails over its footer).
  */
 export async function tracedLine(client: {
-  traceDepth?: () => Promise<'structural' | null>;
+  traceDepth?: () => Promise<'structural' | 'structural+content' | null>;
 }): Promise<string> {
   try {
     const depth = await client.traceDepth?.();
