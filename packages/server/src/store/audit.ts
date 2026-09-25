@@ -17,6 +17,8 @@ export type AuditAction =
   | 'send.denied'
   | 'member.reclaim'
   | 'member.remove'
+  // ADR 449: a sponsor's revocation disabling a sponsored member (one row per affected member).
+  | 'member.revoked_cascade'
   | 'observe.denied'
   // P3.1 (ADR 076): admin governance ops.
   | 'grant.issue'
@@ -499,6 +501,7 @@ export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject> = {
   'send.denied': 'actor',
   'member.reclaim': 'actor',
   'member.remove': 'actor',
+  'member.revoked_cascade': 'actor',
   'observe.denied': 'actor',
   'infra.touch.warned': 'actor',
   'grant.issue': 'actor',

@@ -46,6 +46,8 @@ export interface MemberRow {
   slack_user_id: string | null;
   /** The member's colour as an HSL hue 0–359 (ADR 374); NULL ⇒ unassigned, renderers hash the name. */
   hue: number | null;
+  /** ADR 449: the member who minted this one (event sponsorship). NULL ⇒ admin/local-peer mint. */
+  sponsored_by: string | null;
   token_hash: string | null;
   /** Held-since (ADR 058): set on first authenticated touch, cleared on rotation/reclaim. Null ⇒
    * declared-but-unheld (a stray `claim` may rotate it); non-null ⇒ held, only adoptable. */
@@ -239,6 +241,7 @@ export function toMember(row: MemberRow, teamSlug: string): Member {
     working_hours: parseWorkingHours(row.working_hours),
     slack_user_id: row.slack_user_id ?? null,
     hue: row.hue ?? null,
+    sponsored_by: row.sponsored_by ?? null,
     account_status: resolveAccountStatus(row),
     capabilities: resolveCapabilities(row),
     created_at: row.created_at,

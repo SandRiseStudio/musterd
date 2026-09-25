@@ -177,6 +177,8 @@ export interface AddMemberInput {
    * one hand-edited seat file would wedge every seat on the roster (lane 01M2P43WQ7).
    */
   hueDeclared?: boolean;
+  /** ADR 449: the member minting this one. Omitted ⇒ admin/local-peer mint. */
+  sponsoredBy?: string | null;
   /** Provision a read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. */
   observer?: boolean;
   /** Observer grade (ADR 136): `'public'` sees only team/broadcast traffic — what a shared watch-link
@@ -247,6 +249,7 @@ export function addMember(
     working_hours: input.workingHours ? JSON.stringify(input.workingHours) : null,
     slack_user_id: input.slackUserId ?? null,
     hue,
+    sponsored_by: input.sponsoredBy ?? null,
     token_hash: hashToken(token),
     // A freshly minted seat is *declared*, not yet *held* — bound_at is stamped on first auth touch
     // (ADR 058). The INSERT omits the column, so it defaults to NULL; kept here for the typed row.
@@ -267,9 +270,9 @@ export function addMember(
   };
   db.prepare(
     `INSERT INTO members
-       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, working_hours, slack_user_id, hue, token_hash, observer, observer_scope, account_status, capabilities, left_at, created_at, updated_at)
+       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, working_hours, slack_user_id, hue, sponsored_by, token_hash, observer, observer_scope, account_status, capabilities, left_at, created_at, updated_at)
      VALUES
-       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @working_hours, @slack_user_id, @hue, @token_hash, @observer, @observer_scope, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
+       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @working_hours, @slack_user_id, @hue, @sponsored_by, @token_hash, @observer, @observer_scope, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
   ).run(row);
   return { row, token, ...(sharedWith !== null ? { hue_shared_with: sharedWith } : {}) };
 }
@@ -496,6 +499,16 @@ export function authMember(
   const accountStatus = resolveAccountStatus(member);
   if (accountStatus === 'disabled' || accountStatus === 'banned' || accountStatus === 'archived') {
     throw new MusterdError('forbidden', `seat "${member.name}" is ${accountStatus}`);
+  }
+  // ADR 449 §2: a lifecycle that declared an end now has one, on every credential kind. The clock
+  // is compared at use — no sweeper, no grace beyond skew. A member with no `until` lifecycle is
+  // untouched; expiry is an ordinary per-member setting, not an event concept.
+  if (
+    member.lifecycle === 'until' &&
+    member.lifecycle_until !== null &&
+    member.lifecycle_until < Date.now()
+  ) {
+    throw new MusterdError('forbidden', `seat "${member.name}" — membership expired`);
   }
   return { team, member };
 }
@@ -760,6 +773,43 @@ export function setMemberGovernance(
   db.prepare(
     'UPDATE members SET account_status = ?, capabilities = ?, roles = ?, updated_at = ? WHERE id = ?',
   ).run(accountStatus, capabilities, JSON.stringify(roles), Date.now(), id);
+}
+
+/**
+ * ADR 449 §3: revoking a member takes every live member whose `sponsored_by` chain reaches them.
+ * Sets `account_status = 'disabled'` (the existing refusal the auth paths already honour) without
+ * touching capabilities — governance stays reconcile's word elsewhere. Returns the affected rows
+ * (the caller audits each, naming the root). Expiry needs no cascade: sponsored members carry
+ * their own `lifecycle_until`.
+ */
+export function cascadeSponsoredRevocation(
+  db: Database,
+  teamId: string,
+  rootMemberId: string,
+): MemberRow[] {
+  const affected: MemberRow[] = [];
+  const queue = [rootMemberId];
+  const seen = new Set<string>(queue);
+  while (queue.length > 0) {
+    const sponsor = queue.shift()!;
+    const children = db
+      .prepare<
+        [string, string],
+        MemberRow
+      >('SELECT * FROM members WHERE team_id = ? AND sponsored_by = ? AND left_at IS NULL')
+      .all(teamId, sponsor);
+    for (const child of children) {
+      if (seen.has(child.id)) continue;
+      seen.add(child.id);
+      queue.push(child.id);
+      db.prepare("UPDATE members SET account_status = 'disabled', updated_at = ? WHERE id = ?").run(
+        Date.now(),
+        child.id,
+      );
+      affected.push(child);
+    }
+  }
+  return affected;
 }
 
 /**

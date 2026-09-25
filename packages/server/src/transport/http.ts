@@ -215,6 +215,7 @@ import {
   newSecret,
   rotateToken,
   setAvailability,
+  cascadeSponsoredRevocation,
   setMemberGovernance,
   setMemberHue,
   teamHasAdmin,
@@ -6763,6 +6764,27 @@ export async function handleHttp(
         if (!target || target.left_at !== null)
           throw new MusterdError('not_found', `no member "${targetName}" in ${slug}`);
         leaveMember(ctx.db, target.id);
+        // ADR 449 §3: authority must not outlive the authorizer — removal disables every live
+        // member the target sponsored, transitively, with one audit row each naming the root.
+        for (const revoked of cascadeSponsoredRevocation(ctx.db, team.id, target.id)) {
+          for (const old of ctx.hub.connsForMember(revoked.id)) {
+            old.send({
+              type: 'error',
+              code: 'superseded',
+              message: `your session as "${revoked.name}" was disabled: sponsor "${target.name}" was removed`,
+            });
+            old.close?.();
+            ctx.hub.remove(old.connId);
+          }
+          clearMemberPresence(ctx.db, revoked.id);
+          appendAudit(ctx.db, team.id, {
+            actor: caller.name,
+            action: 'member.revoked_cascade',
+            target: revoked.name,
+            result: 'allow',
+            detail: { root: target.name },
+          });
+        }
         // Free the seat immediately: drop any live session (same mechanism as reclaim) so removal
         // doesn't leave a zombie presence holding a name that's no longer on the roster.
         for (const old of ctx.hub.connsForMember(target.id)) {

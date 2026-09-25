@@ -639,7 +639,8 @@ export const MIGRATIONS: Migration[] = [
           roles TEXT,
           slack_user_id TEXT,
           hue INTEGER,
-          doorbell_prefs TEXT
+          doorbell_prefs TEXT,
+          sponsored_by TEXT
         );
         INSERT INTO members_new (${colList}) SELECT ${colList} FROM members;
         DROP TABLE members;
@@ -1770,6 +1771,18 @@ export const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_oauth_tokens_member ON oauth_tokens(team_id, member_id, revoked_at);
         CREATE INDEX IF NOT EXISTS idx_oauth_tokens_chain ON oauth_tokens(chain_id);
       `);
+    },
+  },
+  {
+    // ADR 449 (member expiry + sponsorship): `sponsored_by` records which member minted this one
+    // (NULL ⇒ admin/local-peer mint, the pre-449 world, unchanged). Expiry needs no new column —
+    // it is the existing lifecycle 'until' + lifecycle_until pair, enforced at auth from v73 on.
+    version: 73,
+    up: (db) => {
+      // Guarded for rewind-and-replay (the v50 containment test replays the whole chain).
+      const memberCols = db.prepare("SELECT name FROM pragma_table_info('members')").pluck().all();
+      if (!memberCols.includes('sponsored_by'))
+        db.exec('ALTER TABLE members ADD COLUMN sponsored_by TEXT REFERENCES members(id)');
     },
   },
 ];
