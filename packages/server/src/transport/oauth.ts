@@ -67,20 +67,27 @@ export function requireTeamRedacted(db: Database, slug: string) {
 }
 
 /**
- * The rate-limit key (decline 1): `req.socket.remoteAddress` alone collapses behind the
+ * The rate-limit key (declines 1–2): `req.socket.remoteAddress` alone collapses behind the
  * loopback Cloudflare Tunnel (every attendee arrives as the local `cloudflared` peer, so one
- * attendee could throttle everyone). With `trustProxy` on — the tunnel-facing posture — the
- * tunnel-reported client IP (leftmost `X-Forwarded-For`) is the key; without it XFF is
- * untrusted and ignored, and the socket address stands.
+ * attendee could throttle everyone) — but the naive fix, leftmost `X-Forwarded-For`, is
+ * caller-controlled (Cloudflare preserves an incoming XFF and appends, so the leftmost value
+ * stays spoofable and rotating it bypasses per-client limits).
+ *
+ * With `trustProxy` on — the tunnel-facing posture — the key is `CF-Connecting-IP`, which the
+ * Cloudflare edge writes (clients cannot forge it; explicit assumption: no Worker in front
+ * rewriting it). XFF is never trusted. Without trustProxy the socket address stands.
  */
 function clientIp(ctx: Ctx, req: IncomingMessage): string {
   if (ctx.config.trustProxy) {
-    const xff = req.headers['x-forwarded-for'];
-    const first = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
-    if (first) return first;
+    const ccip = req.headers['cf-connecting-ip'];
+    const ip = (Array.isArray(ccip) ? ccip[0] : ccip)?.trim();
+    if (ip) return ip;
   }
   return req.socket.remoteAddress ?? 'unknown';
 }
+
+/** Hard bound on bucket cardinality — distinct IPs are unbounded (botnet), memory is not. */
+const OAUTH_BUCKET_MAX_KEYS = 10_000;
 
 function checkRateLimit(
   ctx: Ctx,
@@ -96,11 +103,23 @@ function checkRateLimit(
   }
   hits.push(now);
   buckets.set(key, hits);
-  if (buckets.size > 2000) {
+  // Expiry sweep first; if still over the cap, evict oldest-inserted (Map order) — a full map
+  // must shed load, never grow, and never punish the keys it keeps.
+  if (buckets.size > OAUTH_BUCKET_MAX_KEYS) {
     for (const [k, v] of buckets) {
       if (v.every((t) => t <= windowStart)) buckets.delete(k);
+      if (buckets.size <= OAUTH_BUCKET_MAX_KEYS) break;
+    }
+    for (const k of buckets.keys()) {
+      if (buckets.size <= OAUTH_BUCKET_MAX_KEYS) break;
+      buckets.delete(k);
     }
   }
+}
+
+/** Test seam: current bucket cardinality (churn bound). */
+export function __oauthBucketSizeForTest(): number {
+  return buckets.size;
 }
 
 /** TLS opinion (ADR 446 §1): loopback is plaintext-safe; anything else must arrive via https. */

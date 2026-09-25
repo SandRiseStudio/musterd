@@ -149,9 +149,12 @@ apps' setup prompts call it; failing there fails the demo).
 - Rate limits: per-IP buckets on `register` / `authorize` / `token` (5/min register, 10/min authorize,
   20/min token — tune in rehearsal); the refusal is `rate_limited` (429, new protocol code — the
   next move is retry, and a 403 would say it is final). Behind the loopback tunnel every attendee
-  shares the `cloudflared` socket address, so with `trustProxy` on the buckets key off the
-  tunnel-reported client IP (leftmost `X-Forwarded-For`); without it XFF is untrusted and the
-  socket address stands. Code-guessing is uneconomic at 256 bits + single-use + TTL.
+  shares the `cloudflared` socket address, so with `trustProxy` on the buckets key off
+  `CF-Connecting-IP` (edge-written, unspoofable; explicit assumption: no Worker in front
+  rewriting it) — `X-Forwarded-For` is never trusted, leftmost included, because Cloudflare
+  preserves an incoming XFF and a caller can rotate it past per-client limits. Without
+  trustProxy the socket address stands. Cardinality is hard-capped (10k keys, expiry-swept then
+  oldest-evicted) because distinct IPs are unbounded and memory is not.
 - Transport: OAuth + `/mcp` bearer refused over non-TLS except loopback (§1) — every OAuth route
   including discovery and registration, no carve-outs; `Cache-Control: no-store`
   + `Pragma: no-cache` on every token/code response; codes and tokens never in URLs except the one

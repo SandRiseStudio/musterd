@@ -4,7 +4,7 @@ import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { resetMcpHandlersForTest } from './mcpHttp.js';
-import { __resetOAuthBucketsForTest, isTlsPeer } from './oauth.js';
+import { __oauthBucketSizeForTest, __resetOAuthBucketsForTest, isTlsPeer } from './oauth.js';
 
 /**
  * The remote-MCP rail over HTTP (ADR 446) — the daemon as a minimal OAuth 2.1 server plus the
@@ -467,7 +467,7 @@ describe('decline fixes (re-review)', () => {
     expect(res.status).toBe(429);
   });
 
-  it('with trustProxy, buckets key off the tunnel-reported client IP', async () => {
+  it('with trustProxy, buckets key off CF-Connecting-IP — XFF is untrusted', async () => {
     const proxyServer = createServer({ db: openDb(':memory:'), port: 0, trustProxy: true });
     const { port } = await proxyServer.listen();
     const proxyBase = `http://127.0.0.1:${port}`;
@@ -478,27 +478,46 @@ describe('decline fixes (re-review)', () => {
         body: JSON.stringify({ slug: 'dawn', creator: { name: 'nick', kind: 'human' } }),
       });
       expect(team.status).toBe(201);
-      const reg = async (name: string, xff: string) => {
+      const reg = async (name: string, headers: Record<string, string>) => {
         const res = await fetch(proxyBase + '/oauth/dawn/register', {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            'x-forwarded-for': xff,
             // The tunnel terminates TLS: loopback socket + https proto = the allowed shape.
             'x-forwarded-proto': 'https',
+            ...headers,
           },
           body: JSON.stringify({ redirect_uris: [REDIRECT], client_name: name }),
         });
         return res.status;
       };
+      const ccip = (ip: string) => ({ 'cf-connecting-ip': ip });
       for (let i = 0; i < 5; i++) {
-        expect(await reg(`A${i}`, '198.51.100.7')).toBe(201);
-        expect(await reg(`B${i}`, '203.0.113.9')).toBe(201);
+        expect(await reg(`A${i}`, ccip('198.51.100.7'))).toBe(201);
+        expect(await reg(`B${i}`, ccip('203.0.113.9'))).toBe(201);
       }
-      // Each reported IP spent only its own bucket.
-      expect(await reg('A5', '198.51.100.7')).toBe(429);
-      expect(await reg('B5', '203.0.113.9')).toBe(429);
-      expect(await reg('C0', '192.0.2.1')).toBe(201);
+      // Each edge-reported IP spent only its own bucket.
+      expect(await reg('A5', ccip('198.51.100.7'))).toBe(429);
+      expect(await reg('B5', ccip('203.0.113.9'))).toBe(429);
+      expect(await reg('C0', ccip('192.0.2.1'))).toBe(201);
+
+      // Spoofed XFF rotates under a fixed CF-IP: no new buckets open (XFF ignored).
+      __resetOAuthBucketsForTest();
+      for (let i = 0; i < 5; i++) {
+        expect(
+          await reg(`S${i}`, { ...ccip('198.51.100.7'), 'x-forwarded-for': `10.9.9.${i}` }),
+        ).toBe(201);
+      }
+      expect(await reg('S5', { ...ccip('198.51.100.7'), 'x-forwarded-for': '10.9.9.99' })).toBe(
+        429,
+      );
+
+      // Churn: 100 distinct visitor IPs each succeed once; cardinality tracks keys, nothing more.
+      __resetOAuthBucketsForTest();
+      for (let i = 0; i < 100; i++) {
+        expect(await reg(`C${i}`, ccip(`192.0.2.${i % 250}`))).toBe(201);
+      }
+      expect(__oauthBucketSizeForTest()).toBeLessThanOrEqual(100);
     } finally {
       await proxyServer.close();
     }
