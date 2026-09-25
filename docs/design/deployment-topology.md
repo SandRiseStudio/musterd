@@ -47,6 +47,12 @@ This keeps the whole existing model intact: single-active per seat, the message 
 
 **Topology B is the pragmatic first answer** and the one to document for users immediately: an overlay network (Tailscale et al.) gives every member a stable address and mutually-authenticated, encrypted transport across NATs *without musterd implementing any of it*. We get cross-network teams by **standing on the overlay**, and only later build C for users who won't run an overlay. This mirrors Principle 4 (protocol over framework): don't reinvent WireGuard.
 
+For the public phone-MCP demo, the separately governed Cloudflare Tunnel route is a disposable,
+exact-path variant of Topology B; it does not change the private-overlay recommendation for ordinary
+cross-network Teams. Its loopback trust boundary and operator procedure are recorded in
+[ADR 448](../decisions/448-public-demo-tunnel-route.md) and the
+[public-demo runbook](../operations/public-demo-tunnel.md).
+
 **Topology A** is for operators who already have a reachable host; it's the minimal *musterd-side* change (§5) and the substrate Topology C is built on.
 
 **Topology C** is the eventual frictionless path — but it is a hosted product with its own threat model, ops burden, and cost. It is named here so we don't design A/B into a corner, not scheduled.
