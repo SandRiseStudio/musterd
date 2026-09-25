@@ -151,3 +151,35 @@ question, because a laptop running the presentation cannot give the daemon a qui
 lane's note to the public-route lane (`01M3AKNAW6`).
 
 Falsify the fix: rerun N=50 with `ROSTER=every` on the same box and find p95 under 1 s.
+
+## 2026-09-25 — the human rail moves to the released OAuth + `/mcp` path (harness change, numbers pending)
+
+The table above modelled humans as the plain REST routes their tools call, because the remote
+`/mcp` endpoint had not landed. It has now (ADR 446, #1694: Streamable HTTP at `/mcp/:team`,
+per-seat OAuth), and the review hold on this lane is exactly that gap: benchmark evidence must
+exercise the released path, not a model of it.
+
+`demo-audience-load.mjs` now drives humans over the released rail by default (`HUMAN_RAIL=mcp`):
+the OAuth leg on arrival — dynamic client registration → authorize (PKCE) → token, the phone's
+sign-in, so the arrival burst now carries the OAuth write path — then MCP `tools/call` frames
+(`team_inbox_check` / `team_send` / `team_join`) with the `msat_` bearer per call. The child
+daemon runs `trustProxy` (the demo posture), and each loopback human presents what the Cloudflare
+edge would: `x-forwarded-proto: https` and a distinct `cf-connecting-ip`, which is also the OAuth
+rate-limit key — so the per-IP buckets behave as they would for a room of real phones.
+`HUMAN_RAIL=rest` keeps the modelled shape for A/B against the table above.
+
+The tunnel leg is `REMOTE_URL=https://<hostname>`: humans go loopback → cloudflared → the
+Cloudflare edge → back while agents/viewers stay loopback (the demo tunnel's ingress only exposes
+`/mcp` and OAuth paths — `docs/operations/public-demo-tunnel.md`). The loadbench image now carries
+`cloudflared`; the run recipe is in `loadbench.fly.toml`. Caveat recorded there: through a real
+tunnel the edge collapses every driven human onto the box's one IP, so tunnel runs measure
+steady-state tool-call latency (arrivals stretched under the per-IP OAuth limits), and the
+arrival burst is read from loopback runs, where the per-attendee rate key is faithful.
+
+**Numbers pending.** This session validated the harness plumbing at tiny N on the `rest` rail
+(laptop-safe: 2/2/2, 8 s) and could not run the `mcp` rail or audience scale locally (the
+worktree predates #1694's `@modelcontextprotocol/server` dependency, and toolchain/Fly commands
+were approval-gated). The next loadbench run must record, per the lane's Done line: N=50 loopback
+`HUMAN_RAIL=mcp` vs the N=50 `rest` row above (the released rail's daemon cost, including the
+OAuth arrival burst), and the `REMOTE_URL` steady-state tunnel numbers (p50/p95/p99, CPU,
+loop delay) — then restate the go/no-go ceiling if the released rail moves it.

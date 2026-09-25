@@ -10,8 +10,14 @@
  *
  * WHAT IT MODELS. Three populations, each on its own timers with jitter, all concurrent:
  *
- *   - HUMANS (phones, remote MCP): no WS and no claim — a bearer per tool call (ADR 446 §5
- *     "remote-bearer mode"). Every ~20s one tool: inbox check, send, roster, or the lane board.
+ *   - HUMANS (phones, remote MCP): the RELEASED rail (ADR 446, merged #1694) — the OAuth leg on
+ *     arrival (dynamic client registration → authorize → token, PKCE), then MCP `tools/call`
+ *     frames over Streamable HTTP at /mcp/:team, a bearer per call, no WS and no claim. Every
+ *     ~20s one tool: team_inbox_check, team_send, or a fuller inbox read. Loopback runs present
+ *     what the Cloudflare edge would (`x-forwarded-proto: https`, a distinct `cf-connecting-ip`
+ *     per attendee) against a trustProxy daemon — the tunnel posture, including the per-IP OAuth
+ *     rate buckets. HUMAN_RAIL=rest keeps the pre-446 modeled shape (plain REST with a pre-minted
+ *     credential) for A/B against the 2026-09-25 baseline.
  *   - AGENTS (an attendee's harness): claims once, then the hook rail — interrupt-check at every tool
  *     boundary (~3s), an inbox read every ~30s, a status_update every ~90s, a lane opened every ~5 min
  *     (each lane act fans out as a /report refetch on every viewer), and the CLI hook re-claim churn.
@@ -27,6 +33,13 @@
  *   HUMANS=50 AGENTS=50 VIEWERS=50 DURATION=90 RAMP=30 node scripts/perf/demo-audience-load.mjs
  *   DB_COPY=/path/to/copy-of-musterd.db TEAM=revive node scripts/perf/demo-audience-load.mjs
  *   ROSTER=every node scripts/perf/demo-audience-load.mjs   # the /live roster rule before 2026-09-25
+ *   HUMAN_RAIL=rest node scripts/perf/demo-audience-load.mjs   # the pre-ADR-446 modeled human shape
+ *   PORT=4851 REMOTE_URL=https://bench.example.org node scripts/perf/demo-audience-load.mjs
+ *     # the tunnel leg: cloudflared on this box points at 127.0.0.1:4851; HUMANS go the long way
+ *     # (OAuth + /mcp through the edge) while agents/viewers stay loopback. Through a real tunnel
+ *     # the edge overwrites cf-connecting-ip, so every human shares the driver's ONE address —
+ *     # stretch RAMP so arrivals stay under the per-IP OAuth limits (register 5/min: RAMP ≥ 12s
+ *     # per human), and read the arrival-burst numbers from a loopback run instead.
  *   DAEMON_CPUS=0 taskset -c 1-7 node scripts/perf/demo-audience-load.mjs   # Linux: isolate the daemon
  *
  * Do not run it at audience scale on a laptop: the client side alone saturates one. It runs on a
@@ -94,7 +107,16 @@ async function serve() {
     agents.push({ name: m.name, token: mintAgentSeatCredential(db, m.id).seat_credential });
   }
 
-  const server = createServer({ db, port: 0, host: '127.0.0.1', rosterRoots: [] });
+  // trustProxy is the demo daemon's posture (`--insecure-trust-proxy`, the tunnel runbook §3):
+  // the TLS check and the OAuth rate-limit key read the forwarded headers, which is exactly what
+  // the human rail presents. PORT pins the bind for a cloudflared origin (REMOTE_URL runs).
+  const server = createServer({
+    db,
+    port: env('PORT', 0),
+    host: '127.0.0.1',
+    rosterRoots: [],
+    trustProxy: (process.env.HUMAN_RAIL ?? 'mcp') === 'mcp',
+  });
   const { port } = await server.listen();
   const eld = monitorEventLoopDelay({ resolution: 10 });
 
@@ -125,6 +147,7 @@ async function serve() {
 async function drive() {
   const { WebSocket } = await import('../../packages/server/node_modules/ws/wrapper.mjs');
   const { makeEnvelope, PROTOCOL_VERSION } = await import('@musterd/protocol');
+  const { createHash, randomBytes } = await import('node:crypto');
 
   const VIEWERS = env('VIEWERS', 50);
   const DURATION = env('DURATION', 60) * 1000;
@@ -133,6 +156,10 @@ async function drive() {
   /** `coalesced` (the page since 2026-09-25) or `every` (a roster fetch per presence frame, before). */
   const ROSTER = process.env.ROSTER ?? 'coalesced';
   const ROSTER_GAP_MS = env('ROSTER_GAP_MS', 1000);
+  /** `mcp` (the released ADR 446 rail) or `rest` (the pre-446 modeled shape, for A/B). */
+  const HUMAN_RAIL = process.env.HUMAN_RAIL ?? 'mcp';
+  /** Public origin for the human rail only (the tunnel leg); agents/viewers stay loopback. */
+  const REMOTE_URL = process.env.REMOTE_URL?.replace(/\/$/, '') ?? null;
 
   // DAEMON_CPUS (Linux) pins the daemon to those cores with taskset, so the audience cannot steal its
   // CPU — run the driver itself under `taskset -c <the other cores>` for the same reason. Without it
@@ -167,31 +194,51 @@ async function drive() {
   const samples = new Map();
   let errors = 0;
   const errorsByRoute = new Map();
-  const req = async (label, path, init = {}) => {
+  const fail = (label, what) => {
+    errors++;
+    errorsByRoute.set(`${label} ${what}`, (errorsByRoute.get(`${label} ${what}`) ?? 0) + 1);
+  };
+  /** One timed exchange; the raw response survives for callers that need headers (OAuth 302). */
+  const timed = async (label, url, init = {}) => {
     const t0 = performance.now();
     try {
-      const r = await fetch(base + path, init);
+      const r = await fetch(url, init);
       const body = await r.arrayBuffer();
       const ms = performance.now() - t0;
       if (!samples.has(label)) samples.set(label, { ms: [], bytes: 0 });
       const s = samples.get(label);
       s.ms.push(ms);
       s.bytes = Math.max(s.bytes, body.byteLength);
-      if (!r.ok) {
-        errors++;
-        errorsByRoute.set(
-          `${label} ${r.status}`,
-          (errorsByRoute.get(`${label} ${r.status}`) ?? 0) + 1,
-        );
+      if (r.status >= 400) {
+        fail(label, r.status);
         return null;
       }
-      return body.byteLength ? JSON.parse(Buffer.from(body).toString('utf8')) : null;
+      return { res: r, body: Buffer.from(body) };
     } catch {
-      errors++;
-      errorsByRoute.set(`${label} net`, (errorsByRoute.get(`${label} net`) ?? 0) + 1);
+      fail(label, 'net');
       return null;
     }
   };
+  /** JSON body, or the data frames of an SSE body (how Streamable HTTP answers a POST). */
+  const parseBody = (label, out) => {
+    if (!out || out.body.byteLength === 0) return null;
+    try {
+      const ctype = out.res.headers.get('content-type') ?? '';
+      const text = out.body.toString('utf8');
+      if (!ctype.includes('text/event-stream')) return JSON.parse(text);
+      const data = text
+        .split('\n')
+        .filter((l) => l.startsWith('data:'))
+        .map((l) => l.slice(5).trim())
+        .join('\n');
+      return data ? JSON.parse(data) : null;
+    } catch {
+      fail(label, 'parse');
+      return null;
+    }
+  };
+  const req = async (label, path, init = {}, origin = base) =>
+    parseBody(label, await timed(label, origin + path, init));
 
   let stopping = false;
   const timers = new Set();
@@ -219,24 +266,129 @@ async function drive() {
       ts: Date.now(),
     });
 
-  // Humans: bearer-only tool calls (remote MCP). The credential self-identifies the member.
-  ready.humans.forEach((h, i) =>
-    arrive(i, ready.humans.length, () => {
-      const headers = { authorization: `Bearer ${h.token}`, 'content-type': 'application/json' };
-      every(20_000, async () => {
-        const r = Math.random();
-        if (r < 0.5) await req('GET /inbox (human)', `${T}/inbox?unread=1`, { headers });
-        else if (r < 0.7)
-          await req('POST /messages (human)', `${T}/messages`, {
+  // Humans on the released rail (ADR 446): the OAuth leg on arrival, then MCP tools/call frames.
+  // The edge headers are what cloudflared + Cloudflare present to a trustProxy daemon; through a
+  // REMOTE_URL tunnel the edge overwrites them, so they are only load-bearing on loopback.
+  const humanOrigin = REMOTE_URL ?? base;
+  const REDIRECT = 'https://app.example/cb';
+  const signIn = async (h, edge) => {
+    const form = (o) => new URLSearchParams(o).toString();
+    const verifier = randomBytes(32).toString('base64url');
+    const reg = await req(
+      'POST /oauth/register (human)',
+      `/oauth/${ready.team}/register`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...edge },
+        body: JSON.stringify({ redirect_uris: [REDIRECT], client_name: 'bench phone' }),
+      },
+      humanOrigin,
+    );
+    if (!reg?.client_id) return null;
+    const authz = await timed(
+      'POST /oauth/authorize (human)',
+      `${humanOrigin}/oauth/${ready.team}/authorize`,
+      {
+        method: 'POST',
+        redirect: 'manual',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', ...edge },
+        body: form({
+          client_id: reg.client_id,
+          redirect_uri: REDIRECT,
+          state: 's',
+          code_challenge: createHash('sha256').update(verifier).digest('base64url'),
+          code_challenge_method: 'S256',
+          member: h.name,
+          credential: h.token,
+        }),
+      },
+    );
+    const location = authz?.res.headers.get('location');
+    const code = location ? new URL(location).searchParams.get('code') : null;
+    if (!code) {
+      if (authz) fail('POST /oauth/authorize (human)', 'no-code');
+      return null;
+    }
+    const tok = await req(
+      'POST /oauth/token (human)',
+      `/oauth/${ready.team}/token`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', ...edge },
+        body: form({
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: REDIRECT,
+          client_id: reg.client_id,
+          code_verifier: verifier,
+        }),
+      },
+      humanOrigin,
+    );
+    return tok?.access_token ?? null;
+  };
+  let rpcSeq = 0;
+  if (HUMAN_RAIL === 'mcp')
+    ready.humans.forEach((h, i) =>
+      arrive(i, ready.humans.length, async () => {
+        const edge = {
+          'x-forwarded-proto': 'https',
+          'cf-connecting-ip': `198.51.100.${(i % 200) + 1}`,
+        };
+        const bearer = await signIn(h, edge);
+        if (!bearer) return;
+        let session = null;
+        const rpc = async (label, method, params) => {
+          const out = await timed(label, `${humanOrigin}/mcp/${ready.team}`, {
             method: 'POST',
-            headers,
-            body: JSON.stringify({ envelope: envelope(h.name, 'message') }),
+            headers: {
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              authorization: `Bearer ${bearer}`,
+              ...(session ? { 'mcp-session-id': session } : {}),
+              ...edge,
+            },
+            body: JSON.stringify({ jsonrpc: '2.0', id: `aud-${rpcSeq++}`, method, params }),
           });
-        else if (r < 0.9) await req('GET /teams/:slug (human)', T, { headers });
-        else await req('GET /lanes (human)', `${T}/lanes`, { headers });
-      });
-    }),
-  );
+          if (out) session = out.res.headers.get('mcp-session-id') ?? session;
+          return parseBody(label, out);
+        };
+        const call = (label, name, args) => rpc(label, 'tools/call', { name, arguments: args });
+        await rpc('POST /mcp initialize (human)', 'initialize', {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'bench-phone', version: '0' },
+        });
+        await call('POST /mcp team_join (human)', 'team_join', {});
+        every(20_000, async () => {
+          const r = Math.random();
+          if (r < 0.55)
+            await call('POST /mcp inbox (human)', 'team_inbox_check', { unread_only: true });
+          else if (r < 0.8)
+            await call('POST /mcp send (human)', 'team_send', { act: 'message', body: 'bench' });
+          else await call('POST /mcp inbox-full (human)', 'team_inbox_check', { limit: 50 });
+        });
+      }),
+    );
+  // The pre-446 modeled shape (HUMAN_RAIL=rest): plain REST with the pre-minted credential.
+  else
+    ready.humans.forEach((h, i) =>
+      arrive(i, ready.humans.length, () => {
+        const headers = { authorization: `Bearer ${h.token}`, 'content-type': 'application/json' };
+        every(20_000, async () => {
+          const r = Math.random();
+          if (r < 0.5) await req('GET /inbox (human)', `${T}/inbox?unread=1`, { headers });
+          else if (r < 0.7)
+            await req('POST /messages (human)', `${T}/messages`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({ envelope: envelope(h.name, 'message') }),
+            });
+          else if (r < 0.9) await req('GET /teams/:slug (human)', T, { headers });
+          else await req('GET /lanes (human)', `${T}/lanes`, { headers });
+        });
+      }),
+    );
 
   // Agents: claim, then the hook rail.
   ready.agents.forEach((a, i) =>
@@ -397,6 +549,7 @@ async function drive() {
   console.log(
     `humans=${ready.humans.length} agents=${ready.agents.length} viewers=${VIEWERS} ` +
       `daemon_cpus=${process.env.DAEMON_CPUS ?? 'shared'} roster=${ROSTER} ` +
+      `human_rail=${HUMAN_RAIL} human_origin=${REMOTE_URL ? 'tunnel' : 'loopback'} ` +
       `duration=${DURATION / 1000}s ramp=${RAMP / 1000}s db=${process.env.DB_COPY ? 'copy' : 'synthetic'}`,
   );
   console.log(
