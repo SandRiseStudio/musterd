@@ -114,6 +114,14 @@ describe('the gate, end to end against the real tree', () => {
     // Not merely exit 0: a gate that found nothing must not look identical to a gate that verified
     // something. The line names the count and the range it walked.
     const out = run();
-    expect(out).toMatch(/^✓ \d+ migration\(s\), v\d+…v\d+, strictly ascending$/m);
+    // Two ladders since ADR 445 §3 (the coordination store's and trace.db's), each named with its
+    // own count and range — one summary line per file, so a file that vanished from the list would
+    // vanish from the output too.
+    expect(out).toMatch(
+      /^✓ packages\/server\/src\/db\/migrations\.ts: \d+ migration\(s\), v\d+…v\d+, strictly ascending$/m,
+    );
+    expect(out).toMatch(
+      /^✓ packages\/server\/src\/db\/traceDb\.ts: \d+ migration\(s\), v\d+…v\d+, strictly ascending$/m,
+    );
   });
 });
