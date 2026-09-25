@@ -9,11 +9,14 @@ import {
   type LiveConfig,
 } from './client';
 import { ensureBuildSync } from './buildSync';
+import { coalesce } from './coalesce';
 import { firehoseSound } from './sound';
 import { capNewest } from './window';
 
 /** Consecutive roster-refetch failures before the roster admits it is frozen. */
 const ROSTER_STALE_AFTER = 3;
+/** At most one roster refetch per second per viewer, however many presence frames arrive. */
+const ROSTER_REFETCH_GAP_MS = 1000;
 
 export interface LiveStreamHooks {
   /** Fired when the observer credential is stale/invalid (a 401 backfill or a WS `refused`) — the route
@@ -149,25 +152,8 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
         setError(e instanceof Error ? e.message : String(e));
       });
 
-    const client = new LiveClient(cfg, {
-      onEnvelope: (e) => {
-        if (!alive) return;
-        // Mark live-arrived before adding (same render tick) so the row mounts knowing to type out.
-        setLiveIds((prev) => (prev.has(e.id) ? prev : new Set(prev).add(e.id)));
-        // Sound the arrival — but only for genuinely-now messages (a reconnect can replay recent
-        // history over the socket), and once per id. The engine itself no-ops when muted, and the
-        // façade drops cues while the tab is hidden (broadcast excepted) — see firehoseSound.chime.
-        if (!chimedRef.current.has(e.id) && Date.now() - e.ts < 30_000) {
-          chimedRef.current.add(e.id);
-          firehoseSound.chime(e.act);
-        }
-        add([e]);
-      },
-      // Refetch the authoritative roster on any presence change — this carries presence/activity AND
-      // places a node for a member who joined mid-session (a brand-new sender otherwise shows in the
-      // stream but has no constellation node). Cheap at localhost scale; debounce if it ever isn't.
-      onPresence: () => {
-        if (!alive) return;
+    const rosterRefetch = coalesce(
+      () =>
         fetchRoster(cfg)
           .then((r) => {
             if (!alive) return;
@@ -186,7 +172,30 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
             if (!alive) return;
             rosterFailsRef.current += 1;
             if (rosterFailsRef.current >= ROSTER_STALE_AFTER) setRosterStale(true);
-          });
+          }),
+      ROSTER_REFETCH_GAP_MS,
+    );
+
+    const client = new LiveClient(cfg, {
+      onEnvelope: (e) => {
+        if (!alive) return;
+        // Mark live-arrived before adding (same render tick) so the row mounts knowing to type out.
+        setLiveIds((prev) => (prev.has(e.id) ? prev : new Set(prev).add(e.id)));
+        // Sound the arrival — but only for genuinely-now messages (a reconnect can replay recent
+        // history over the socket), and once per id. The engine itself no-ops when muted, and the
+        // façade drops cues while the tab is hidden (broadcast excepted) — see firehoseSound.chime.
+        if (!chimedRef.current.has(e.id) && Date.now() - e.ts < 30_000) {
+          chimedRef.current.add(e.id);
+          firehoseSound.chime(e.act);
+        }
+        add([e]);
+      },
+      // Refetch the authoritative roster on any presence change — this carries presence/activity AND
+      // places a node for a member who joined mid-session (a brand-new sender otherwise shows in the
+      // stream but has no constellation node). Coalesced: every viewer receives every frame, so a
+      // room joining at once was viewers × frames full-roster fetches (coalesce.ts has the numbers).
+      onPresence: () => {
+        if (alive) rosterRefetch.trigger();
       },
       onStatus: (s) => alive && setStatus(s),
       onError: (msg) => alive && setError(msg),
@@ -196,6 +205,7 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
 
     return () => {
       alive = false;
+      rosterRefetch.cancel();
       client.close();
     };
   }, [team, as, token]);

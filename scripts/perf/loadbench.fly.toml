@@ -1,0 +1,21 @@
+# The demo-audience load bench — deployed by hand, destroyed after the numbers are taken:
+#
+#   fly apps create musterd-loadbench
+#   fly deploy -c scripts/perf/loadbench.fly.toml --remote-only
+#   fly ssh console -a musterd-loadbench
+#   cd /app && DAEMON_CPUS=0 taskset -c 1-7 node scripts/perf/demo-audience-load.mjs
+#   fly apps destroy musterd-loadbench
+#
+# No services: nothing listens for the outside world. The box exists to be ssh'd into, so auto_stop
+# is irrelevant and restart is never — its lifetime is the session's.
+app = "musterd-loadbench"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "loadbench.Dockerfile"
+
+[[vm]]
+  size = "performance-8x"
+
+[[restart]]
+  policy = "never"

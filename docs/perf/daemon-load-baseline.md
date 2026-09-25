@@ -99,3 +99,55 @@ What is left of the 210 ms is not SQLite: `rowToLane` over 1218 rows (JSON-parsi
 the list, or drop `detail` from it (the CLI and /board read it) — and it is where the next 150 ms
 are. One more read of the table remains on the path (8 ms), from a helper that was not traced to
 its caller; not worth chasing at that size.
+
+## 2026-09-25 — demo audience, concurrent: the /live roster fan-out, and a ceiling of ~75 (lane 01M3D4069F)
+
+The Oct 7 demo (goal `demo`) puts the audience on the team: attendees sign in as human members
+over OAuth remote MCP from phones, may add an agent seat, and watch `/live`. `health-under-burst`
+is sequential, so it cannot say what a room does to the daemon; the new instrument is
+`scripts/perf/demo-audience-load.mjs`. It drives three concurrent populations (humans with
+bearer-only tool calls every ~20 s, agents on the hook rail, `/live` viewers modelled on
+`packages/web/src/live` — backfill, WS `team-all`, a roster refetch per presence frame, a `/report`
+refetch per lane act), and it runs the daemon in a child process that reports its own event-loop
+delay and CPU. Synthetic board: 1200 lanes with 1.8 KB `detail` each (`GET /lanes` 2.5 MB, as on
+revive).
+
+**Not on a laptop.** The first run was on the presenter-class laptop (M3, 8 GB, 8 cores, with the
+live daemon and a dozen seats running). The load average reached 105. The daemon used 29 % CPU yet
+stalled 7 s: it was starved by the machine, not saturated by its work, so that run measures nothing.
+Every number below is from a throwaway Fly `performance-8x` (`scripts/perf/loadbench.fly.toml`,
+sjc), with the daemon pinned to core 0 (`DAEMON_CPUS=0`) and the audience on cores 1-7. One core is
+the budget, because Node serves the daemon on one thread. Each run is 120 s with arrivals ramped
+over 30 s. The server was built from main at a02c2eb (#1711). The remote `/mcp` endpoint (ADR 446) has not
+landed, so humans are modelled as the HTTP routes their tools call.
+
+| N humans = agents = viewers | viewer roster rule | req/s | daemon CPU | loop p99 | all p95 | roster (viewer) p95 | roster body |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 10 | every frame | 5.3 | 5 % | 15 ms | 61 ms | 70 ms | 19 KB |
+| 25 | every frame | 20.5 | 14 % | 26 ms | 178 ms | 209 ms | 47 KB |
+| 50 | every frame | 53.8 | 44 % | 122 ms | **7564 ms** | 7896 ms | 94 KB |
+| 50 | coalesced | 32.6 | 27 % | 41 ms | **349 ms** | 412 ms | 94 KB |
+| 75 | coalesced | 57.3 | 54 % | 172 ms | 801 ms | 884 ms | 140 KB |
+| 100 | coalesced | 73.0 | 80 % | 500 ms | 1838 ms | 4948 ms | 186 KB |
+
+**The bottleneck was the viewers, not the seats.** Every `/live` page refetched the full roster
+(`GET /teams/:slug`) on every presence frame, and every viewer receives every frame. The cost was
+viewers × presence events: at N=50 that was 4116 frames, 4166 roster fetches of 94 KB in two
+minutes, and 64 % of all requests. It grows with the square of the room. The seats' own traffic
+(interrupt-check, inbox, sends) stayed in single-digit milliseconds at p50 throughout.
+
+**The fix** (`packages/web/src/live/coalesce.ts`): the first presence frame still refetches at
+once, and frames arriving during that fetch, or within 1 s of its start, fold into one trailing
+fetch. At N=50 roster fetches fall from 4166 to 1606 and p95 from 7.6 s to 349 ms. It is a
+web-only change, so it reaches `/live` through the build-publisher without a daemon restart.
+
+**Go/no-go for Rehearsal A: about 75 of each** (75 humans, 75 agents, 75 viewers) on one
+dedicated performance core, with p95 under 1 s. At 100 of each, p95 is 1.8 s. The roster is still
+the top cost there (186 KB per fetch, and the body grows with the room). The next levers, in
+order: (1) apply presence frames to the roster in place and refetch only for a member the page has
+not seen, which removes the fan-out rather than rate-limiting it; (2) a short server-side memo of
+the roster response; (3) the 2.5 MB `/lanes` body (p95 1 s at N=100). The demo host is a separate
+question, because a laptop running the presentation cannot give the daemon a quiet core — see the
+lane's note to the public-route lane (`01M3AKNAW6`).
+
+Falsify the fix: rerun N=50 with `ROSTER=every` on the same box and find p95 under 1 s.
