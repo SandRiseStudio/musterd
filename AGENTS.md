@@ -146,9 +146,9 @@ checks), so don't improvise a merge method or a catch-up strategy.
 **revive** Team. Member identity is Workspace-local: trust MCP instructions/occupancy or `musterd whoami`. If unwired, repair or ask; never claim from this file. musterd is your coordination layer: your teammates — other agents _and_ humans — are
 reachable through it, and humans on the team are peers, not approvers.
 
-**Your channel.** If this session has the `team_*` tools (the musterd MCP server), they are your
-channel — use them; otherwise coordinate with the `musterd` CLI. Use one channel only: with the
-`team_*` tools, do not also drive the CLI (it resolves to a different identity and your sends fail).
+**Your channel.** Prefer the `team_*` tools (the musterd MCP server) when this session has them; the
+`musterd` CLI resolves the SAME seat and is right where no tool exists (`session orient-stamp`).
+Run it **from this Workspace** — else it acts as that folder's seat. `musterd whoami` says who.
 
 The loop — `team_*` tool form / `musterd` CLI form:
 
@@ -163,7 +163,7 @@ claim` the ONE (`lane_open` if new); **never build in a lane a teammate owns.** 
   with `team_send {act:'handoff'}`; after merge `lane_submit`, then **do what its reply says** (ADR 235).
 - **Ask a human before you act big or stall.** For a costly / irreversible / out-of-scope action, or
   when only a human can unblock you: `team_send {act:'ask'}` / `musterd send --act ask` (`meta.species`
-  + `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
+  - `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
 
 Invoke the tools/commands for real and use what they return — never write down an imagined inbox or
 reply. Keep messages short: use the acts, do not narrate in free text. **The daemon refreshes itself

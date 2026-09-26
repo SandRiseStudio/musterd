@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 30;
+export const GUIDANCE_CONTENT_VERSION = 31;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -133,7 +133,7 @@ export function renderSkillBody(opts: { team: string }): string {
     'roster so teammates can see and reach you; confirm with `musterd whoami` (the seat this folder',
     'resolves to) and `musterd status` (who else is around).',
     '',
-    '- **Claim with the team agent key.** Set `MUSTERD_AGENT_KEY` or pass `--key mskey_…`. This binds the',
+    '- **Claim with the team agent key** (local seats). Set `MUSTERD_AGENT_KEY` or pass `--key mskey_…`. This binds the',
     '  folder with no global-identity clobber. If no grant was pre-issued the claim opens a request and',
     '  **waits for an admin to approve** — that is expected, not a failure.',
     "- **Adopt an existing seat** (take over a teammate's named seat) with `musterd claim <name> --token",
@@ -145,12 +145,21 @@ export function renderSkillBody(opts: { team: string }): string {
     '- **Approve requests you own** (admin): `musterd requests` lists pending claims; decide with the',
     '  request-decide flow (see `musterd help`).',
     '',
-    '**Where each kind of teammate stands.** `musterd agent <name>` mints an agent seat and stands it in',
-    'an isolated git worktree, because an agent writes code. `musterd human <name>` stands a person in the',
-    '**team home** (`~/musterd/<team>`), because what a human needs is somewhere their identity resolves —',
-    '`musterd board`, `musterd inbox --watch` and `musterd send` are simply them there, with no `--as` and',
-    'nothing pasted. The pair is one model, not two commands: **agents stand in worktrees, the human stands',
-    'in the team home.** If a human on your team has no floor to act from, `musterd human` is the fix.',
+    '**Where each kind of teammate stands.** Everyone stands in a member Workspace,',
+    '`~/musterd/<team>/<repo>/<name>` (ADR 447). `musterd agent <name>` mints an agent seat in its own git',
+    'worktree. `musterd human <name>` does the same for a person — a worktree on `human/<name>` when run',
+    'inside the project checkout, or `--home <dir>` outside one — so `musterd board`, `musterd inbox',
+    "--watch` and `musterd send` are simply them there, with no `--as` and nothing pasted. `~/musterd/<team>`",
+    'itself is a roof, never a floor: nothing binds there. If a human on your team has no floor to act',
+    'from, `musterd human` is the fix.',
+    '',
+    '**Remote members (OAuth, ADR 446).** A client connected to `https://<host>/mcp/<team>` is signed in',
+    'as its member; `team_join` is a no-op success there. New people are admitted by an admin-minted',
+    'invite — `musterd team invite create [--member-until <when>]` prints a room code and a link value',
+    'once (ADR 450); the person types or pastes it into the sign-in page. A human member can mint up to',
+    'three agents they sponsor with `team_agent_create` (ADR 449 §3): the reply carries no secret, only a',
+    'one-time connect link, `/join/<team>#n=<nonce>` (ADR 452). A sponsored agent can never outlive its',
+    'sponsor, and revoking the sponsor revokes it.',
     '',
     '## Owning work in a lane — claim before you build',
     '',
