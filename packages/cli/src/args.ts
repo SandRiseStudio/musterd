@@ -8,6 +8,14 @@ export interface Parsed {
   metaPairs: string[];
 }
 
+/**
+ * Flags whose value is itself a flag string. Every other flag refuses a value that starts with
+ * `--`, so a missing value cannot swallow the next flag. `--args` exists only to carry those
+ * strings (`musterd stream start --args "--duration 600"`), so it takes the next token anyway
+ * and refuses to run without one.
+ */
+const DASH_VALUED_FLAGS = new Set(['args']);
+
 const BOOLEAN_FLAGS = new Set([
   'watch',
   'wait',
@@ -57,6 +65,15 @@ export function parseArgs(argv: string[]): Parsed {
       const name = arg.slice(2);
       if (BOOLEAN_FLAGS.has(name)) {
         flags[name] = true;
+        continue;
+      }
+      if (DASH_VALUED_FLAGS.has(name)) {
+        const next = argv[i + 1];
+        if (next === undefined) {
+          throw new CliError(`--${name} needs a value — quote it when it starts with --`, 2);
+        }
+        i++;
+        flags[name] = next;
         continue;
       }
       const next = argv[i + 1];
