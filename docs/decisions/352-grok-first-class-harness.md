@@ -102,6 +102,8 @@ If project `.grok/config.toml` has no `[ui.status_line]`, write `type = "command
 
 `.gitignore` `.grok/config.toml` (machine launch paths). User projects commit the hooks file and guidance shells. This product repo commits the hooks file (portable `musterd` PATH commands) and gitignores the shells (they stamp the local team name, same class as `.claude/`).
 
+> **Amended 2026-09-26.** This product repo no longer commits `.grok/hooks/musterd.json`. [ADR 454](454-untrack-grok-hooks.md) reverses that one clause. User projects are unchanged.
+
 ## Consequences
 
 - **Every resumable seat rebuilds.** Epoch 17. Announce; do not `service refresh` to see a UI change.
@@ -111,6 +113,7 @@ If project `.grok/config.toml` has no `[ui.status_line]`, write `type = "command
 - Stdio MCP does not respawn on a list refresh (measured 2026-09-02: PID started before the rebuild kept attesting the old stamp). Activation copy names disable+enable or a session restart.
 - Architecture trees, SPEC, wiki matrix, and harness-residency table update in the same commits that land the files (`arch-trees:check`, hard rule 3).
 - This product repo gitignores `.grok/skills/` and `.grok/commands/` because `writeGuidance` stamps the dogfood team name into them. User projects follow §9 and commit those shells.
+- **2026-09-26 — the committed hooks file.** The epoch tag inside `.grok/hooks/musterd.json` (`# musterd-grok-* eN`) changes on every `FEATURE_EPOCH` bump, so the committed copy dirtied every seat workspace and stamped builds `-dirty`. [ADR 454](454-untrack-grok-hooks.md) untracks it. §9's sentence stays; the product-repo clause is what 454 reverses.
 - **2026-09-03 — interrupt injection.** Decision 8's PostToolUse wiring ran the ADR 088 probe and discarded the line; Grok 1.0.13 also ignores PostToolUse stdout and additionalContext JSON. Measured with canary hooks: PreToolUse additionalContext and Stop `decision:block` reach the model; PostToolUse does not. [ADR 370](370-grok-interrupt-injection.md) is the replacement. Decision 8 is marked, not rewritten.
 
 ## Observability & Evaluation
