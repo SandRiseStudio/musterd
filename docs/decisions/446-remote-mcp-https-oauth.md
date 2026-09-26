@@ -101,7 +101,9 @@ Per team, all under the daemon (no third-party IdP — the team IS the identity 
 
 - `GET /.well-known/oauth-protected-resource/mcp/:team` — resource metadata: this resource, the
   authorization-server issuer, bearer schemes, `msat_` audience note.
-- `GET /.well-known/oauth-authorization-server` (+ per-team variant) — issuer, `authorization_endpoint`,
+- `GET /.well-known/oauth-authorization-server/oauth/:team` (RFC 8414 path insertion for the
+  `/oauth/:team` issuer; the two OpenID forms and the path-appended form answer too — see the
+  2026-09-26 Consequences note) — issuer, `authorization_endpoint`,
   `token_endpoint`, `registration_endpoint`, `code_challenge_methods_supported: ["S256"]`,
   `grant_types_supported: ["authorization_code", "refresh_token"]`.
 - `POST /oauth/:team/register` — RFC 7591 dynamic client registration. Stores `client_id`
@@ -208,6 +210,15 @@ apps' setup prompts call it; failing there fails the demo).
   tokens are expirable, seat-and-client-scoped, and revocable without re-credentialing the human.
 
 ## Consequences
+
+- 2026-09-26 (Rehearsal A, lane 01M3FDG1MD): the daemon had served authorization-server metadata
+  only at `/.well-known/oauth-authorization-server/:team` and the path-appended
+  `/oauth/:team/.well-known/oauth-authorization-server`. Neither is what an MCP client fetches
+  for issuer `/oauth/:team`: RFC 8414 path insertion is
+  `/.well-known/oauth-authorization-server/oauth/:team`, and the MCP auth spec's fallbacks are the
+  two `openid-configuration` forms. All three 404'd, so the Claude iOS app reported "could not
+  start sign in" before the sign-in page ever loaded; the load bench never saw it because the
+  harness read the metadata URL directly. Fixed by serving all four forms; the old paths stay.
 
 - `@musterd/protocol` grows two prefixes + OAuth zod schemas + `rate_limited` (429) and
   `payload_too_large` (413) error codes (ADR-gated, as required — this ADR is the gate). `@musterd/server` grows one runtime dependency
