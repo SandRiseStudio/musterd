@@ -66,9 +66,13 @@ coverage/
 .grok/config.toml
 # Grok CLI provisioned guidance shells (ADR 085) — team-stamped, same class as `.claude/`.
 # User projects commit these (ADR 352 §9); this product repo cannot (they carry the dogfood
-# team name). The hooks file is portable (`musterd` on PATH) and IS committed.
+# team name).
 .grok/skills/
 .grok/commands/
+# Rewritten by `musterd init --refresh-hooks` on every FEATURE_EPOCH bump (the
+# `# musterd-grok-* eN` tag). Committing it dirtied every seat workspace (ADR 454).
+# Same class as `.cursor/hooks.json`.
+.grok/hooks/musterd.json
 
 # musterd-provisioned Cursor guidance (ADR 085) — the skill rule + slash commands `musterd init` writes
 # for Cursor, the counterpart to the `.claude/` skill/commands above. Surgical (only musterd's stamped
