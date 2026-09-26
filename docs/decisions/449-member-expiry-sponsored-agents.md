@@ -1,8 +1,8 @@
 # 449 — Member expiry is a regular setting, and members can create agents
 
-- Status: proposed — 2026-09-25 (reshaped same day: nick's steers 01M3D5R783 and 01M3D66PSZ
-  removed the event concept before this was ever accepted; the original event-scoped draft never
-  landed anywhere but this branch)
+- Status: accepted — 2026-09-25, by nick in session (reshaped the same day before acceptance:
+  nick's steers 01M3D5R783 and 01M3D66PSZ removed the event concept; the original event-scoped
+  draft never landed anywhere but this branch)
 - Date: 2026-09-25
 - Lane: `01M3AMYC18DQ5ZXK4T570D60Q9` (goal `demo`)
 - Builds on: [ADR 446](446-remote-mcp-https-oauth.md) (remote MCP over HTTPS + OAuth — the rail a
