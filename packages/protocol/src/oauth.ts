@@ -86,6 +86,8 @@ export const OAuthAuthorizeQuerySchema = z.object({
   code_challenge: CodeChallengeSchema,
   code_challenge_method: z.literal(PKCE_METHOD),
   scope: z.string().optional(),
+  /** RFC 8707 resource indicator — MCP clients send their MCP endpoint here (ADR 457). */
+  resource: z.string().url().optional(),
 });
 export type OAuthAuthorizeQuery = z.infer<typeof OAuthAuthorizeQuerySchema>;
 
@@ -152,6 +154,8 @@ export const OAuthTokenRequestSchema = z.union([
       redirect_uri: z.string().min(1),
       client_id: z.string().min(1),
       code_verifier: CodeVerifierSchema,
+      /** RFC 8707 resource indicator (ADR 457) — the server refuses any value but its own. */
+      resource: z.string().url().optional(),
     })
     .strict(),
   z
@@ -160,6 +164,7 @@ export const OAuthTokenRequestSchema = z.union([
       refresh_token: z.string().startsWith(TOKEN_PREFIXES.oauth_refresh),
       client_id: z.string().min(1),
       scope: z.string().optional(),
+      resource: z.string().url().optional(),
     })
     .strict(),
 ]);

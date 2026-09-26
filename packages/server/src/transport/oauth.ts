@@ -238,6 +238,23 @@ function isPrivateHost(host: string): boolean {
  * only (never the demo path); custom schemes are the native-app marker the app declares;
  * no wildcard hosts, no private-host downgrade, ever.
  */
+/**
+ * RFC 8707 resource indicator (ADR 457). MCP clients (auth spec 2025-06-18 §2.8) send
+ * `resource=<their MCP endpoint>` on authorize and token so a token cannot be replayed at another
+ * server. Absent → accepted (older client shape). Present → must be exactly this team's
+ * `/mcp/:team` as the protected-resource metadata advertises it (trailing-slash tolerant).
+ */
+function resourceMatches(
+  ctx: Ctx,
+  req: IncomingMessage,
+  teamSlug: string,
+  resource: string | undefined,
+): boolean {
+  if (resource === undefined) return true;
+  const ours = metadataFor(ctx, req, teamSlug).resource.resource;
+  return resource.replace(/\/+$/, '') === ours.replace(/\/+$/, '');
+}
+
 function assertRedirectUri(uri: string): URL | null {
   let u: URL;
   try {
@@ -518,6 +535,13 @@ export async function handleOAuthRoutes(
     );
     const client = getClientOrOAuth(ctx.db, team.id, query.client_id, res);
     if (!client) return true;
+    if (!resourceMatches(ctx, req, slug, query.resource)) {
+      sendOAuthError(
+        res,
+        new MusterdError('bad_request', 'resource is not this team\u2019s MCP endpoint'),
+      );
+      return true;
+    }
     if (!registeredRedirect(client, query.redirect_uri)) {
       sendOAuthError(
         res,
@@ -756,6 +780,12 @@ export async function handleOAuthRoutes(
       return true;
     }
     const tokenReq = parsed.data;
+    // RFC 8707 §2: a resource we are not the server for is `invalid_target`. MCP clients always
+    // send it (ADR 457); a missing one is the pre-ADR client shape and still fine.
+    if (!resourceMatches(ctx, req, slug, tokenReq.resource)) {
+      sendTokenError(res, 400, 'invalid_target', 'resource is not this team\u2019s MCP endpoint');
+      return true;
+    }
     // Unknown client is 401 invalid_client on both grants (RFC 6749 §5.2) — never an oracle.
     try {
       getClient(ctx.db, team.id, tokenReq.client_id);

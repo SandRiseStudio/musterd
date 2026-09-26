@@ -209,6 +209,10 @@ apps' setup prompts call it; failing there fails the demo).
 
 ## Consequences
 
+- 2026-09-26: the token request schema was `.strict()` and refused the RFC 8707 `resource`
+  parameter every MCP client sends, so a real client's exchange 400'd after sign-in. Admitted and
+  audience-checked by [ADR 457](457-oauth-resource-indicator.md).
+
 - `@musterd/protocol` grows two prefixes + OAuth zod schemas + `rate_limited` (429) and
   `payload_too_large` (413) error codes (ADR-gated, as required — this ADR is the gate). `@musterd/server` grows one runtime dependency
   (`@modelcontextprotocol/server@2.0.0`, same pin as the adapter), three tables (migration 72),
