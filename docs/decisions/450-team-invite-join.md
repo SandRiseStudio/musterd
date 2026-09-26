@@ -261,6 +261,13 @@ client is increment 3 (below).
   multi-invite and HTTP tests above. `invite.key` resolves beside the effective config
   (`MUSTERD_CONFIG` if set, else `~/.musterd/config.json`) at 0600. Still open from this ADR:
   the `/join/<team>` page and its ingress line on ADR 451.
+- **2026-09-26 — the join page copies, it never sends** (sloane, join-page-copy.md via PR #1736).
+  The sign-in page is opened by the phone app at a URL we do not construct, so `/join/<team>`
+  cannot forward `#i=` anywhere. It shows the room code large and offers a client-only "Copy
+  invite" for the fragment value; the person types or pastes into the consent page's Invite
+  field. The "forwards it to the sign-in URL" lines in §"What this does not decide" and
+  Consequences are superseded by this note; the security posture is unchanged (the value still
+  never enters a query string or a server log).
 
 ## Observability & Evaluation
 
