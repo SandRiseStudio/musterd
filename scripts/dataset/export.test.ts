@@ -19,8 +19,10 @@ import {
   exportDataset,
   fillCard,
   histogramLines,
+  opaqueId,
   parseExportArgs,
   projectMeta,
+  projectTraceDetail,
   pseudonym,
 } from './export.ts';
 
@@ -480,5 +482,172 @@ describe('histogramLines', () => {
 describe('salt generation', () => {
   it('draw is 32 bytes so two CLI runs do not share a mapping', () => {
     expect(randomBytes(32)).not.toEqual(randomBytes(32));
+  });
+});
+
+describe('trace_events export (ADR 445 increment 3a)', () => {
+  const SESSION = 'sess-digest-RAW-9d2e';
+  const TOOL_USE = 'toolu_RAW_01ABCD';
+
+  /** A trace store built by the daemon's OWN ladder, so a column added there is a column this test
+   *  sees — a hand-written fixture schema would pass while the real one leaked. */
+  async function fixtureTraceDb(dir: string): Promise<string> {
+    const { openTraceDb } = await import('../../packages/server/src/db/traceDb.ts');
+    const path = join(dir, 'trace.db');
+    const db = openTraceDb(path);
+    const insert = db.prepare(`
+      INSERT INTO trace_events (id, team_id, seat, session_digest, seq, ts, received_at, harness,
+        kind, tool_name, tool_use_id, agent_id, parent_agent_id, duration_ms, outcome, detail,
+        content, redactions, truncated)
+      VALUES (?, 't1', 'Ada', ?, ?, ?, ?, 'claude-code', ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 0)`);
+    insert.run(
+      'e1',
+      SESSION,
+      0,
+      1000,
+      1000,
+      'PostToolUse',
+      'Bash',
+      TOOL_USE,
+      'agent-RAW-sub',
+      42,
+      'ok',
+      JSON.stringify({
+        tool_input_bytes: 120,
+        tool_response_bytes: 900,
+        // Planted: a prose key the allowlist has never heard of, a nested value under an
+        // allowlisted key, and a long string where an enum belongs.
+        note: CANARY,
+        model: { nested: CANARY },
+        reason: `${CANARY} `.repeat(10),
+      }),
+      JSON.stringify({ tool_input: `cat secret ${CANARY}`, tool_response: CANARY }),
+      2,
+    );
+    insert.run(
+      'e2',
+      SESSION,
+      1,
+      1001,
+      1001,
+      'usage',
+      null,
+      TOOL_USE,
+      null,
+      null,
+      null,
+      JSON.stringify({
+        input_tokens: 10,
+        output_tokens: 5,
+        model: 'claude-opus-5-5',
+        parser: 'claude-code@1',
+      }),
+      JSON.stringify({ reasoning: CANARY }),
+      0,
+    );
+    db.close();
+    return path;
+  }
+
+  it('exports structural columns only — no content, no raw ids, no seat names', async () => {
+    const dir = tmp();
+    const out = join(dir, 'public');
+    const result = exportDataset({
+      dbPath: fixtureDb(dir),
+      traceDbPath: await fixtureTraceDb(dir),
+      outDir: out,
+      manifestPath: writeManifest(dir),
+      authorizedBy: 'nick',
+      salt: SALT_A,
+    });
+    expect(result.counts.trace_events).toBe(2);
+    const text = readFileSync(join(out, 'trace_events.jsonl'), 'utf8');
+    expect(text).not.toContain(CANARY);
+    expect(text).not.toContain('secret');
+    expect(text).not.toMatch(/"Ada"/);
+    expect(text).not.toContain(SESSION);
+    expect(text).not.toContain(TOOL_USE);
+    expect(text).not.toContain('agent-RAW-sub');
+
+    const rows = jsonl<Record<string, unknown>>(out, 'trace_events.jsonl');
+    expect(Object.keys(rows[0]!).sort()).toEqual(
+      [
+        'agent',
+        'detail',
+        'duration_ms',
+        'harness',
+        'kind',
+        'outcome',
+        'parent_agent',
+        'seat',
+        'seq',
+        'session',
+        'team',
+        'tool_name',
+        'tool_use',
+        'ts',
+      ].sort(),
+    );
+    expect(rows[0]).toMatchObject({
+      team: 'revive',
+      seat: pseudonym('m-ada', SALT_A),
+      kind: 'PostToolUse',
+      tool_name: 'Bash',
+      duration_ms: 42,
+      detail: { tool_input_bytes: 120, tool_response_bytes: 900 },
+    });
+    // R1 ↔ R2 still join inside the release: same session, same tool_use pseudonym.
+    expect(rows[1]!['session']).toBe(rows[0]!['session']);
+    expect(rows[1]!['tool_use']).toBe(rows[0]!['tool_use']);
+    expect(rows[1]!['detail']).toEqual({
+      input_tokens: 10,
+      output_tokens: 5,
+      model: 'claude-opus-5-5',
+      parser: 'claude-code@1',
+    });
+    const release = JSON.parse(readFileSync(join(out, 'RELEASE.json'), 'utf8')) as {
+      counts: Record<string, number>;
+    };
+    expect(release.counts['trace_events']).toBe(2);
+  });
+
+  it('opaque ids are unlinkable across releases', () => {
+    expect(opaqueId('session', SESSION, SALT_A)).not.toBe(opaqueId('session', SESSION, SALT_B));
+    expect(opaqueId('session', SESSION, SALT_A)).toBe(opaqueId('session', SESSION, SALT_A));
+    expect(opaqueId('session', null, SALT_A)).toBeNull();
+  });
+
+  it('writes no trace file without --trace-db', () => {
+    const dir = tmp();
+    const out = join(dir, 'public');
+    const result = exportDataset({
+      dbPath: fixtureDb(dir),
+      outDir: out,
+      manifestPath: writeManifest(dir),
+      authorizedBy: 'nick',
+      salt: SALT_A,
+    });
+    expect(result.counts.trace_events).toBeUndefined();
+    expect(existsSync(join(out, 'trace_events.jsonl'))).toBe(false);
+  });
+
+  it('refuses the live ~/.musterd/trace.db unless --from-live', () => {
+    const base = ['--db', '/snap/musterd.db', '--out', '/tmp/out', '--authorized-by', 'nick'];
+    const live = join('/Users/x', '.musterd', 'trace.db');
+    expect(() => parseExportArgs([...base, '--trace-db', live])).toThrow(/--from-live/);
+    expect(parseExportArgs([...base, '--trace-db', live, '--from-live']).traceDbPath).toBe(live);
+    expect(parseExportArgs([...base, '--trace-db', '/snap/trace.db']).traceDbPath).toBe(
+      '/snap/trace.db',
+    );
+  });
+
+  it('projectTraceDetail keeps allowlisted scalars and drops everything else', () => {
+    expect(projectTraceDetail(null)).toBeNull();
+    expect(projectTraceDetail('not json')).toBeNull();
+    expect(projectTraceDetail(JSON.stringify({ note: 'x' }))).toBeNull();
+    expect(projectTraceDetail(JSON.stringify({ hook: 'gate', exit_code: 0, extra: 1 }))).toEqual({
+      hook: 'gate',
+      exit_code: 0,
+    });
   });
 });

@@ -167,7 +167,12 @@ export function traceEventSummary(e: TraceSessionEvent): string {
     const text = preview(e.content?.[e.kind === 'reasoning' ? 'reasoning' : 'assistant']);
     if (text) return text;
     const size = num(d[e.kind === 'reasoning' ? 'reasoning_bytes' : 'assistant_bytes']);
-    return size !== undefined ? `${size} bytes (structural)` : '';
+    const why = typeof e.content_pruned_at === 'number' ? 'content pruned' : 'structural';
+    return size !== undefined
+      ? `${size} bytes (${why})`
+      : typeof e.content_pruned_at === 'number'
+        ? '(content pruned)'
+        : '';
   }
   if (e.kind === 'unknown') {
     const type = typeof d['type'] === 'string' ? d['type'] : 'unparsed';

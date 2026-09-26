@@ -17,6 +17,7 @@ import {
   TraceEventSchema,
 } from '@musterd/protocol';
 import { resolveWorkspaceKey } from '@musterd/protocol/project';
+import { fmtBytes } from '../args.js';
 import { HttpClient } from '../client.js';
 import { resolveClaimWorkspace } from '../commands/helpers.js';
 import { isLoopbackServer } from '../host/registry.js';
@@ -323,6 +324,20 @@ export function traceDepth(
   return dir !== undefined && traceContentEnabled(binding, dir)
     ? 'structural+content'
     : 'structural';
+}
+
+/**
+ * The `traced:` line `musterd status` prints, sized when the daemon reports the store's bytes
+ * (ADR 445 increment 3a — the store grows fast, and this is where a human on the machine sees it).
+ */
+export function tracedLine(
+  depth: 'structural' | 'structural+content',
+  health: { trace_db_bytes?: number } | null | undefined,
+): string {
+  const bytes = health?.trace_db_bytes;
+  return typeof bytes === 'number' && bytes >= 0
+    ? `traced: ${depth} · trace.db ${fmtBytes(bytes)}`
+    : `traced: ${depth}`;
 }
 
 /** How long a hook may wait on the daemon before the event is dropped. The gate's own budget class. */

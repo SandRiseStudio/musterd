@@ -8,7 +8,14 @@
  * is verified by the restore drill in ADR 280 §3, against the real corpus, not a fixture.
  */
 import { describe, expect, it } from 'vitest';
-import { defaultSources, launchAgentSources, parseFreeSwapMb, planSnapshot } from './snapshot.ts';
+import {
+  defaultSources,
+  launchAgentSources,
+  parseFreeSwapMb,
+  planSnapshot,
+  TRACE_WATERMARK_KEY,
+  traceWatermarkStamp,
+} from './snapshot.ts';
 
 const stat = (sizes: Record<string, number>) => (p: string) =>
   sizes[p] === undefined ? null : { bytes: sizes[p] as number };
@@ -78,5 +85,32 @@ describe('planSnapshot', () => {
     const { items, missing } = planSnapshot(launchAgentSources('/home/x'), stat({}), () => []);
     expect(items).toEqual([]);
     expect(missing).toEqual([]);
+  });
+});
+
+describe('trace.db capture (ADR 445 increment 3a)', () => {
+  it('plans trace.db as an optional sqlite capture — a pre-ADR-445 machine still snapshots', () => {
+    const traceSrc = defaultSources('/home/x').find((s) => s.id === 'trace.db');
+    expect(traceSrc).toMatchObject({ kind: 'sqlite', path: '/home/x/.musterd/trace.db' });
+    expect(traceSrc?.optional).toBe(true);
+    const { items, missing } = planSnapshot(
+      [traceSrc!],
+      stat({ '/home/x/.musterd/trace.db': 8_396_800 }),
+      () => [],
+    );
+    expect(items.map((i) => [i.id, i.kind, i.bytes])).toEqual([['trace.db', 'sqlite', 8_396_800]]);
+    expect(missing).toEqual([]);
+  });
+
+  it('stamps the key the daemon prune reads, and never lowers it', async () => {
+    const { CONTENT_CAPTURED_THROUGH_KEY } =
+      await import('../../packages/server/src/db/traceDb.ts');
+    expect(TRACE_WATERMARK_KEY).toBe(CONTENT_CAPTURED_THROUGH_KEY);
+    const sql = traceWatermarkStamp(1_790_380_691_082);
+    expect(sql).toContain(`'${CONTENT_CAPTURED_THROUGH_KEY}', '1790380691082'`);
+    // Monotonic: the upsert keeps the larger of the held and offered values.
+    expect(sql).toMatch(/MAX\(CAST\(value AS INTEGER\), CAST\(excluded\.value AS INTEGER\)\)/);
+    expect(() => traceWatermarkStamp(Number.NaN)).toThrow();
+    expect(() => traceWatermarkStamp(-1)).toThrow();
   });
 });

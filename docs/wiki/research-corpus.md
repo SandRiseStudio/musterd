@@ -52,6 +52,14 @@ upgrades), owner ghost. No schedule and no automation yet (2026-09-05): the uplo
 service key from `/Users/nick/agents/.env`, which no launchd job carries — automating that handoff is
 a follow-up, not this lane.
 
+**`trace.db` joins the snapshot** (2026-09-25; falsify: `corpus:snapshot --dry-run` lists it). <!-- claim: other -->
+ADR 445 increment 3a. It is the one source the snapshot writes back to: after the manifest
+is on disk it stamps the live store's `content_captured_through` watermark, and the daemon's 30-day
+content prune never goes past it. So on this machine, trace content older than 30 days survives
+only in a snapshot, and never goes before one holds it. Size on 2026-09-25: 8.4 MB after about 5 hours
+of tapping (5,834 rows), which is why the prune exists. The live size is on `musterd status`'s
+`traced:` line.
+
 The [sibling corpus](#the-sibling-corpus-exploring-next) has the same disease; the rail is `pnpm dataset:exn-snapshot` (lane 01M1MBV93, 2026-09-04).
 
 ## The findings register — what has actually been concluded
@@ -94,6 +102,10 @@ first.
 - **The dataset itself.** ADR 184 decided the gate (structural fields only, no agent prose). The
   export path shipped 2026-08-19 (`pnpm dataset:export`; falsify: `ls scripts/dataset/export.ts`).
   Each public dir now includes a filled `README.md` card (falsify: `ls scripts/dataset/card.md`).
+  Since 2026-09-25 `--trace-db <snapshot trace.db>` adds `trace_events.jsonl` — ADR 445's
+  structural rows only (content, redactions and truncation are never selected), detail keys on an
+  allowlist, seats and the harness's opaque ids HMAC'd per release (falsify:
+  `grep -n TRACE_DETAIL_KEYS scripts/dataset/export.ts`).
   A HuggingFace upload of a live release has not been cut (2026-08-19; falsify: a dataset card <!-- claim: other -->
   under the Sandrise org on HF). Roadmap item `coordination-dataset`.
 - ~~**ADR 056 is still `proposed`** — the charter that eight findings, the obs-eval CI gate, and ADR

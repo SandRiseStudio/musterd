@@ -544,6 +544,8 @@ export class HttpClient {
     /** The trace store's file and ladder version (ADR 445 §3) — absent on a daemon before it. */
     trace_db?: string;
     trace_schema?: number;
+    /** The trace store's bytes on disk, file + WAL (ADR 445 increment 3a). */
+    trace_db_bytes?: number;
   }> {
     return this.request('GET', '/health');
   }

@@ -23,6 +23,11 @@
  * looks expensive is chaff. A snapshot that skips the clones and gzips the rest is small enough to
  * keep every one, forever, which is why this script does not implement retention or pruning.
  *
+ * ONE WRITE OUTSIDE THE SNAPSHOT. After capturing `~/.musterd/trace.db` (ADR 445) it stamps the
+ * live store's `content_captured_through` watermark — the highest `received_at` in the image it
+ * just wrote — so the daemon's 30-day content prune knows what an archive already holds and never
+ * destroys the only copy. Monotonic, and only after the manifest is on disk.
+ *
  * WHAT IT DOES NOT DO. It writes a portable, checksummed directory and stops. It uploads nothing:
  * where the off-machine copy lands is nick's call (ADR 280 §4), and a script that silently ships a
  * corpus containing agent prose to a remote is exactly the move ADR 184 exists to prevent. This is
@@ -72,6 +77,14 @@ export function defaultSources(home = homedir()): Source[] {
       kind: 'sqlite',
       path: join(m, 'musterd.db'),
       why: 'The coordination corpus: messages/acts, audit (incl. model attestation), lanes, seat_memory, residency, wake_leases, wake_turns, tool_call_stats, footprint.',
+    },
+    {
+      id: 'trace.db',
+      kind: 'sqlite',
+      path: join(m, 'trace.db'),
+      why: 'ADR 445 agent traces: per-call structural rows and (where trace.content is on) scrubbed content. The daemon prunes content past 30 days — on an archiving machine, only below the watermark this capture stamps.',
+      // A daemon from before ADR 445 has no trace store; that machine is still snapshottable.
+      optional: true,
     },
     {
       id: 'slot-sweep.jsonl',
@@ -263,6 +276,50 @@ export interface SnapshotEntry extends PlannedItem {
   artifact: string;
   artifactBytes: number;
   sha256: string;
+  /** trace.db only: the highest `received_at` in the captured image — every row below it is in this
+   *  snapshot, so the daemon may prune that content (ADR 445 §3). Null when the image has no rows. */
+  content_captured_through?: number | null;
+}
+
+/**
+ * The `schema_meta` key the daemon's content prune reads — `CONTENT_CAPTURED_THROUGH_KEY` in
+ * `packages/server/src/db/traceDb.ts` (the test pins that they agree; a script does not import the
+ * daemon package).
+ */
+export const TRACE_WATERMARK_KEY = 'content_captured_through';
+
+/** The watermark query, run against the CAPTURED image — never the live file, which has moved on. */
+export const TRACE_WATERMARK_QUERY = 'SELECT MAX(received_at) FROM trace_events';
+
+/**
+ * The stamp, run against the LIVE trace store once the snapshot's manifest is written. Monotonic: a
+ * snapshot restored from an older run can never pull the watermark back and un-archive rows.
+ */
+export function traceWatermarkStamp(through: number): string {
+  if (!Number.isSafeInteger(through) || through < 0) throw new Error(`bad watermark ${through}`);
+  return (
+    `INSERT INTO schema_meta (key, value) VALUES ('${TRACE_WATERMARK_KEY}', '${through}') ` +
+    `ON CONFLICT(key) DO UPDATE SET value = CAST(MAX(CAST(value AS INTEGER), ` +
+    `CAST(excluded.value AS INTEGER)) AS TEXT)`
+  );
+}
+
+function readTraceWatermark(image: string): number | null {
+  try {
+    const out = execFileSync('sqlite3', [image, TRACE_WATERMARK_QUERY], { encoding: 'utf8' });
+    const n = Number(out.trim());
+    return out.trim() === '' || !Number.isSafeInteger(n) ? null : n;
+  } catch {
+    // An image with no trace_events table (a store created, never migrated) has nothing to archive.
+    return null;
+  }
+}
+
+function stampTraceWatermark(live: string, through: number): void {
+  // `.timeout`: the daemon holds this file open and writes to it; wait out its writer, don't fail.
+  execFileSync('sqlite3', ['-cmd', '.timeout 5000', live, traceWatermarkStamp(through)], {
+    stdio: 'pipe',
+  });
 }
 
 export async function runSnapshot(
@@ -273,6 +330,8 @@ export async function runSnapshot(
   entries: SnapshotEntry[];
   rawBytes: number;
   storedBytes: number;
+  /** Set when a trace.db capture stamped (or failed to stamp) the live store's watermark. */
+  watermark?: { through: number; stamped: boolean; error?: string };
 }> {
   const { items, missing } = planSnapshot(sources, statBytes, listRootDbs);
   if (missing.length > 0) throw new Error(`required source missing: ${missing.join(', ')}`);
@@ -289,6 +348,7 @@ export async function runSnapshot(
       // it costs nothing next to the copy.
       const staged = join(dir, `${flat}.snapshot`);
       vacuumInto(item.source, staged);
+      const through = item.id === 'trace.db' ? readTraceWatermark(staged) : undefined;
       const artifact = `${flat}.db.gz`;
       await gzipTo(staged, join(dir, artifact));
       execFileSync('rm', ['-f', staged]);
@@ -297,6 +357,7 @@ export async function runSnapshot(
         artifact,
         artifactBytes: statSync(join(dir, artifact)).size,
         sha256: await sha256(join(dir, artifact)),
+        ...(through === undefined ? {} : { content_captured_through: through }),
       });
       continue;
     }
@@ -331,7 +392,25 @@ export async function runSnapshot(
     )}\n`,
   );
 
-  return { dir, entries, rawBytes, storedBytes };
+  // Only now — the artifact is gzipped, hashed and named in a written manifest — may the live store
+  // learn that its content below this point is archived. A failed stamp is not a failed snapshot:
+  // the daemon just keeps the content a while longer.
+  let watermark: { through: number; stamped: boolean; error?: string } | undefined;
+  const trace = entries.find((e) => e.id === 'trace.db');
+  if (trace && typeof trace.content_captured_through === 'number') {
+    try {
+      stampTraceWatermark(trace.source, trace.content_captured_through);
+      watermark = { through: trace.content_captured_through, stamped: true };
+    } catch (err) {
+      watermark = {
+        through: trace.content_captured_through,
+        stamped: false,
+        error: String(err),
+      };
+    }
+  }
+
+  return { dir, entries, rawBytes, storedBytes, ...(watermark ? { watermark } : {}) };
 }
 
 function mb(bytes: number): string {
@@ -383,6 +462,13 @@ async function main(): Promise<void> {
   for (const e of result.entries) {
     console.log(
       `  ${e.id.padEnd(38)} ${mb(e.bytes).padStart(9)} -> ${mb(e.artifactBytes).padStart(9)}`,
+    );
+  }
+  if (result.watermark) {
+    console.log(
+      result.watermark.stamped
+        ? `\ntrace.db content captured through ${new Date(result.watermark.through).toISOString()} — the daemon may prune content older than 30 days below it`
+        : `\nWARNING: trace.db captured, but the watermark stamp failed (${result.watermark.error}) — content will not prune until a later snapshot stamps it`,
     );
   }
   console.log(

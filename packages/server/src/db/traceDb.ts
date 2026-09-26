@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 import { type Migration, runMigrations, schemaVersion } from './migrations.js';
@@ -55,7 +55,29 @@ export const TRACE_MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    up: (db) => {
+      db.exec(`
+        -- The content lifecycle (ADR 445 increment 3a). A pruned row keeps every structural column
+        -- and says WHEN its content went, so a NULL content column reads as "pruned" or "never
+        -- captured" rather than one ambiguous absence.
+        ALTER TABLE trace_events ADD COLUMN content_pruned_at INTEGER;
+        -- The prune's scan: only rows still holding content, oldest first. Partial, so it stays the
+        -- size of the live content window, not of the whole structural history.
+        CREATE INDEX idx_trace_events_content_age ON trace_events (received_at)
+          WHERE content IS NOT NULL;
+      `);
+    },
+  },
 ];
+
+/**
+ * The `schema_meta` key `pnpm corpus:snapshot` stamps after it has captured `trace.db`: the highest
+ * `received_at` in the captured image (ADR 445 §3, "pruned unless corpus:snapshot captured it").
+ * Its presence is what makes this machine an archiving one — see {@link pruneTraceContent}.
+ */
+export const CONTENT_CAPTURED_THROUGH_KEY = 'content_captured_through';
 
 /**
  * Open (creating if needed) the trace store and bring it to the current ladder. Same pragmas and
@@ -78,4 +100,22 @@ export function openTraceDb(path: string): Database.Database {
 /** The trace ladder's applied version (0 if unmigrated) — for `/health` and the serve log. */
 export function traceSchemaVersion(db: Database.Database): number {
   return schemaVersion(db);
+}
+
+/**
+ * The trace store's size on disk — the file plus its WAL, which is where a busy tap's recent writes
+ * sit until checkpoint (ADR 445 §Consequences: "`musterd status` reports the file's size"). Undefined
+ * for `:memory:` or an unreadable path: absence, never a made-up zero.
+ */
+export function traceDbBytes(path: string): number | undefined {
+  if (path === ':memory:' || path === '') return undefined;
+  let total = 0;
+  for (const suffix of ['', '-wal']) {
+    try {
+      total += statSync(path + suffix).size;
+    } catch {
+      if (suffix === '') return undefined;
+    }
+  }
+  return total;
 }

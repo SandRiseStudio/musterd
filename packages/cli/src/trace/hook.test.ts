@@ -16,6 +16,7 @@ import {
   tapHook,
   traceContentEnabled,
   traceDepth,
+  tracedLine,
   traceTapEnabled,
   writeTraceContentMode,
 } from './hook.js';
@@ -283,6 +284,19 @@ describe('tapHook — one post per hook process', () => {
       false,
     );
     expect(posted).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('tracedLine — sized by the daemon (ADR 445 increment 3a)', () => {
+  it('appends trace.db size when /health reports it, and stays bare otherwise', () => {
+    expect(tracedLine('structural', { trace_db_bytes: 8_396_800 })).toBe(
+      'traced: structural · trace.db 8 MiB',
+    );
+    expect(tracedLine('structural+content', { trace_db_bytes: 300_000 })).toBe(
+      'traced: structural+content · trace.db 293 KiB',
+    );
+    expect(tracedLine('structural', {})).toBe('traced: structural');
+    expect(tracedLine('structural', null)).toBe('traced: structural');
   });
 });
 

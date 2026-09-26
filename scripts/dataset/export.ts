@@ -15,7 +15,15 @@
  * `card.md` (aggregates only) and copies the pinned manifest into `--out` so the folder is
  * self-describing without the git repo.
  *
+ * TRACES (ADR 445 increment 3a). With `--trace-db <snapshot trace.db>` it also writes
+ * `trace_events.jsonl`: the structural columns only (ADR 445 §3 — content never exports), detail keys
+ * on an allowlist (sizes, counts, token totals, flags), seat names HMAC'd like every other seat, and
+ * the harness's opaque ids (session digest, tool_use_id, subagent ids) HMAC'd with the same salt so
+ * a release is joinable inside itself and unlinkable to any other. The live `~/.musterd/trace.db`
+ * is refused on the same terms as the live coordination DB.
+ *
  *   pnpm dataset:export -- --db <snapshot.db> --out <dir> --authorized-by <human> \
+ *                          [--trace-db <snapshot trace.db>] \
  *                          [--manifest scripts/dataset/manifest.v1.json] [--map <private.json>]
  */
 import { createHash, createHmac, randomBytes } from 'node:crypto';
@@ -46,6 +54,73 @@ const STRUCTURAL_META_KEYS = new Set([
   'sha',
 ]);
 
+/**
+ * `trace_events.detail` keys that are structural (ADR 184 §2: names, ids, kinds, timings, counts,
+ * sizes) — every key the Claude Code / Codex / Cursor taps and the R2 parsers write, as measured on
+ * the dogfood trace store 2026-09-25. Anything else is dropped (fail closed). `model` rides as in
+ * acts' meta.
+ */
+export const TRACE_DETAIL_KEYS = new Set([
+  'hook',
+  'hook_event',
+  'exit_code',
+  'decision',
+  'raised',
+  'deaf',
+  'source',
+  'reason',
+  'stop_hook_active',
+  'tool_input_bytes',
+  'tool_response_bytes',
+  'error_bytes',
+  'prompt_bytes',
+  'assistant_bytes',
+  'reasoning_bytes',
+  'encrypted',
+  'parser',
+  'type',
+  'bytes',
+  'suppressed',
+  'downgraded',
+  'model',
+  'input_tokens',
+  'output_tokens',
+  'cache_read_tokens',
+  'cache_creation_tokens',
+  'reasoning_tokens',
+  'total_tokens',
+  'tool_uses',
+]);
+
+export function projectTraceDetail(raw: string | null): Record<string, unknown> | null {
+  if (raw === null || raw.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!TRACE_DETAIL_KEYS.has(k)) continue;
+    // Structural values are scalars. A nested object under an allowlisted key is not what the taps
+    // write, and nothing inside it was vetted — drop it rather than trust the key.
+    if (v !== null && typeof v === 'object') continue;
+    // `reason` / `source` / `type` are short enums in every writer; a long string there is prose
+    // that wandered in, not a category.
+    if (typeof v === 'string' && v.length > 64) continue;
+    out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** An opaque harness id, keyed per release: joinable inside one release, unlinkable across them. */
+export function opaqueId(prefix: string, value: string | null, salt: Buffer): string | null {
+  if (value === null || value.length === 0) return null;
+  return `${prefix}_${createHmac('sha256', salt).update(`${prefix}:${value}`).digest('hex').slice(0, 16)}`;
+}
+
 export function pseudonym(memberId: string, salt: Buffer): string {
   return `seat_${createHmac('sha256', salt).update(memberId).digest('hex').slice(0, 12)}`;
 }
@@ -57,6 +132,10 @@ function isInside(child: string, parent: string): boolean {
 
 export function isLiveDaemonDb(p: string): boolean {
   return resolve(p).replace(/\\/g, '/').endsWith('/.musterd/musterd.db');
+}
+
+export function isLiveTraceDb(p: string): boolean {
+  return resolve(p).replace(/\\/g, '/').endsWith('/.musterd/trace.db');
 }
 
 export function bucketProject(
@@ -118,11 +197,30 @@ export interface ExportOptions {
   authorizedBy: string;
   salt: Buffer;
   mapPath?: string;
+  /** A snapshot of the ADR 445 trace store; its structural rows export as `trace_events.jsonl`. */
+  traceDbPath?: string;
 }
 
 export interface ExportResult {
   outDir: string;
-  counts: { acts: number; members: number; lanes: number };
+  counts: { acts: number; members: number; lanes: number; trace_events?: number };
+}
+
+interface TraceRow {
+  team_id: string;
+  seat: string;
+  session_digest: string;
+  seq: number;
+  ts: number;
+  harness: string;
+  kind: string;
+  tool_name: string | null;
+  tool_use_id: string | null;
+  agent_id: string | null;
+  parent_agent_id: string | null;
+  duration_ms: number | null;
+  outcome: string | null;
+  detail: string | null;
 }
 
 interface MemberRow {
@@ -223,6 +321,11 @@ export function exportDataset(opts: ExportOptions): ExportResult {
          FROM messages msg JOIN teams t ON t.id = msg.team_id`,
     )
     .all() as unknown as MessageRow[];
+  const teamSlugs = new Map(
+    (
+      db.prepare('SELECT id, slug FROM teams').all() as unknown as { id: string; slug: string }[]
+    ).map((t) => [t.id, t.slug]),
+  );
   const lanesRaw = db
     .prepare(
       `SELECT l.id, t.slug AS team_slug, l.project, l.owner_seat, l.created_by, l.state,
@@ -290,8 +393,43 @@ export function exportDataset(opts: ExportOptions): ExportResult {
     };
   });
 
+  // The trace store (ADR 445 §3): structural columns ONLY. The SELECT names them — `content`,
+  // `redactions`, `truncated` and `content_pruned_at` are never read, so no later edit to the
+  // projection below can leak what the query never fetched.
+  let traceRecords: unknown[] | undefined;
+  if (opts.traceDbPath !== undefined) {
+    const tdb = new DatabaseSync(opts.traceDbPath, { readOnly: true });
+    const rows = tdb
+      .prepare(
+        `SELECT team_id, seat, session_digest, seq, ts, harness, kind, tool_name, tool_use_id,
+                agent_id, parent_agent_id, duration_ms, outcome, detail
+           FROM trace_events ORDER BY team_id, session_digest, seq`,
+      )
+      .all() as unknown as TraceRow[];
+    tdb.close();
+    traceRecords = rows.map((r) => ({
+      team: teamSlugs.get(r.team_id) ?? null,
+      seat: seatOfSalted(r.seat, names, ids, opts.salt),
+      session: opaqueId('session', r.session_digest, opts.salt),
+      seq: r.seq,
+      ts: r.ts,
+      harness: r.harness,
+      kind: r.kind,
+      tool_name: r.tool_name,
+      tool_use: opaqueId('tooluse', r.tool_use_id, opts.salt),
+      agent: opaqueId('agent', r.agent_id, opts.salt),
+      parent_agent: opaqueId('agent', r.parent_agent_id, opts.salt),
+      duration_ms: r.duration_ms,
+      outcome: r.outcome,
+      detail: projectTraceDetail(r.detail),
+    }));
+  }
+
   mkdirSync(opts.outDir, { recursive: true });
   writeJsonl(resolve(opts.outDir, 'acts.jsonl'), actRecords);
+  if (traceRecords !== undefined) {
+    writeJsonl(resolve(opts.outDir, 'trace_events.jsonl'), traceRecords);
+  }
   writeJsonl(resolve(opts.outDir, 'members.jsonl'), memberRecords);
   writeJsonl(resolve(opts.outDir, 'lanes.jsonl'), laneRecords);
 
@@ -333,6 +471,7 @@ export function exportDataset(opts: ExportOptions): ExportResult {
           acts: actRecords.length,
           members: memberRecords.length,
           lanes: laneRecords.length,
+          ...(traceRecords !== undefined ? { trace_events: traceRecords.length } : {}),
         },
         tool: 'scripts/dataset/export.ts',
         note: 'PUBLIC structural-only export (ADR 184). Prose bodies omitted. Not the private corpus snapshot.',
@@ -353,7 +492,12 @@ export function exportDataset(opts: ExportOptions): ExportResult {
 
   return {
     outDir: opts.outDir,
-    counts: { acts: actRecords.length, members: memberRecords.length, lanes: laneRecords.length },
+    counts: {
+      acts: actRecords.length,
+      members: memberRecords.length,
+      lanes: laneRecords.length,
+      ...(traceRecords !== undefined ? { trace_events: traceRecords.length } : {}),
+    },
   };
 }
 
@@ -364,6 +508,7 @@ export interface ParsedArgs {
   authorizedBy: string;
   salt: Buffer;
   mapPath?: string;
+  traceDbPath?: string;
   fromLive: boolean;
 }
 
@@ -396,6 +541,13 @@ export function parseExportArgs(argv: string[]): ParsedArgs {
         'Pass a corpus snapshot, or --from-live if you mean it.',
     );
   }
+  const traceDbPath = flagValue(argv, '--trace-db');
+  if (traceDbPath !== undefined && isLiveTraceDb(traceDbPath) && !fromLive) {
+    throw new Error(
+      'refusing the live ~/.musterd/trace.db (ADR 280: do not export from the only copy). ' +
+        'Pass the trace.db from a corpus snapshot, or --from-live if you mean it.',
+    );
+  }
   const mapPath = flagValue(argv, '--map');
   const parsed: ParsedArgs = {
     dbPath,
@@ -406,6 +558,7 @@ export function parseExportArgs(argv: string[]): ParsedArgs {
     fromLive,
   };
   if (mapPath !== undefined) parsed.mapPath = mapPath;
+  if (traceDbPath !== undefined) parsed.traceDbPath = traceDbPath;
   return parsed;
 }
 
@@ -413,7 +566,11 @@ function main(): void {
   const parsed = parseExportArgs(process.argv.slice(2));
   const result = exportDataset(parsed);
   console.log(
-    `exported ${result.counts.acts} acts, ${result.counts.members} members, ${result.counts.lanes} lanes\n${result.outDir}`,
+    `exported ${result.counts.acts} acts, ${result.counts.members} members, ${result.counts.lanes} lanes` +
+      (result.counts.trace_events !== undefined
+        ? `, ${result.counts.trace_events} trace events`
+        : '') +
+      `\n${result.outDir}`,
   );
   console.log(
     '\nThis is the PUBLIC structural-only export (ADR 184). It is still on this disk. ' +

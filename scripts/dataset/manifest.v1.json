@@ -6,7 +6,8 @@
   "includes": [
     "acts (id, team slug, act, thread, ts, allowlisted meta, HMAC seat ids)",
     "members (HMAC id, kind, role — never the seat name)",
-    "lanes (id, state, times, HMAC owner/creator, goal_id, depends_on, project with seat tokens HMAC'd — never title/detail/branch)"
+    "lanes (id, state, times, HMAC owner/creator, goal_id, depends_on, project with seat tokens HMAC'd — never title/detail/branch)",
+    "trace_events, only when --trace-db is passed (ADR 445: team slug, HMAC seat, per-release HMAC session/tool_use/agent ids, seq, ts, harness, kind, tool_name, duration_ms, outcome, detail keys on a structural allowlist — sizes, counts, token totals, flags)"
   ],
   "omits": [
     "messages.body",
@@ -14,7 +15,9 @@
     "lanes.title",
     "lanes.detail",
     "lanes.branch (seat/topic refs re-identify the HMAC; merged pr/sha already ride allowlisted meta)",
-    "meta keys not on the structural allowlist (urgent_reason, risk, chosen_approach, and any unknown key)"
+    "meta keys not on the structural allowlist (urgent_reason, risk, chosen_approach, and any unknown key)",
+    "trace_events.content, redactions, truncated, content_pruned_at (ADR 445 §3: content never exports; the query never reads them)",
+    "trace_events.detail keys not on the structural allowlist, nested values, and strings over 64 chars"
   ],
   "pseudonym": "HMAC-SHA256(member_id, per-release salt), seat_<12 hex>. Mapping is never written into the public directory. Unlinkable across releases.",
   "note": "This is the PUBLIC artifact. pnpm corpus:snapshot is the PRIVATE raw corpus and must not upload."
