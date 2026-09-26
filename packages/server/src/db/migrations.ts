@@ -1785,6 +1785,27 @@ export const MIGRATIONS: Migration[] = [
         db.exec('ALTER TABLE members ADD COLUMN sponsored_by TEXT REFERENCES members(id)');
     },
   },
+  {
+    // ADR 449 §4: the one-time connect nonce a sponsor hands to the device that will run their
+    // agent. sha256-only (SPEC A.2); single-use (`used_at`), 15-minute TTL, one live row per agent
+    // (re-issue burns the prior). In the DB, not memory like ADR 170's 60s handoff: a quarter-hour
+    // link must survive a daemon restart on the persistent demo host (ADR 451).
+    version: 74,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_connect_nonces (
+          nonce_hash  TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          sponsor_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          created_at  INTEGER NOT NULL,
+          expires_at  INTEGER NOT NULL,
+          used_at     INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_connect_nonces_member ON agent_connect_nonces(member_id);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

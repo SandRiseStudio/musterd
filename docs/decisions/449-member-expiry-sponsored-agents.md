@@ -136,6 +136,19 @@ name — never a guess (keeps ADR 056 data clean).
   `team_agent_create` + nonce handoff + tests (needs ADR 446 merged; dolly offered — handoff
   recorded on the lane); (3) sweeper + cap tuning + OAuth-TTL capping at the token endpoint.
 
+2026-09-25 — increment 2 splits into 2a (the `POST /teams/:slug/members/agents` route + the
+`agent_connect_nonces` store, migration v74) and 2b (nonce redemption at OAuth authorize + the
+ADR 446 amendment, which shares the authorize proof union with ADR 450). The `team_agent_create`
+MCP tool rides on 2a in its own PR. Choices made while building 2a, none of which change the
+Decision: (a) a sponsored mint **refuses** a removed member's name — `addMember` would revive the
+tombstone, history and all; (b) the route refuses on a **file-backed** team, whose seat files are
+the single writer (ADR 058) — member-created agents need a team whose roster lives in the daemon,
+as the demo team does; (c) §3's per-IP rate limit and the per-member capability switch move to
+increment 3 with the cap tuning — both need a protocol change (`OAUTH_RATE_LIMITS`,
+`CapabilitiesSchema`), and the per-sponsor cap already bounds an authenticated caller; (d) the
+connect link is re-issuable by the sponsor (`…/agents/:name/connect`), and a re-issue burns the
+prior link.
+
 ## Observability & Evaluation
 
 - Traces: audit verbs `member.sponsored_agent_created` and `member.revoked_cascade` — who, whom,
