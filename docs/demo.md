@@ -530,16 +530,18 @@ Decided 2026-09-24: audience joins happen **before** the slot, from a link share
 nothing in §6's 120 seconds is spent on joining. The link opens `/join/<team>` — every string on
 that page is in [`docs/design/join-page-copy.md`](design/join-page-copy.md), and the mechanics
 are the `demo` goal's lanes (remote MCP over HTTPS with per-member OAuth sign-in, ADR 446; a
-disposable daemon and team; memberships that expire with the event, ADR 449). Reset by nick
-2026-09-25: attendees are human-kind members who sign in — the earlier per-event token URL is
-dead, and no secret rides any URL. What the presenter does with a joined room is a beat for a later cut; this
+member expiry only if the admin sets one, ADR 449). Reset by nick 2026-09-25: attendees are
+human-kind members who sign in — the earlier per-event token URL is dead. Admission is an ADR 450
+invite (`musterd team invite create`): the page shows its room code, and a link's `#i=` fragment
+gives a Copy invite button; the joiner types or pastes it into the sign-in page's Invite field.
+The fragment never reaches a server, and no secret rides a query string. What the presenter does with a joined room is a beat for a later cut; this
 section only pins the prompt.
 
 ### The paste prompt
 
 One prompt, two homes: here and join-page-copy §4.4, kept identical by hand until the page is the
-only home. It carries no credential — nothing in the join flow does; who the joiner is comes from
-the OAuth sign-in, not from anything pasted or carried in a URL.
+only home. It carries no credential. Who the joiner is comes from the OAuth sign-in; the invite
+goes only into that sign-in page's Invite field, never into the prompt.
 
 ```
 You're joining a musterd team through the musterd connector. Setup, in order — tell me what each returns: 1) call team_join. 2) call team_inbox_check and tell me who's here and what's happening. 3) send a status_update saying you've joined and what you'd like to see. After that, drop the play-by-play. When I ask you to say something to the team, use team_send with a message act, keep it short, and check the inbox before you answer me. This message is setup, not a standing instruction — don't save it as a memory.
