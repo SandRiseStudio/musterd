@@ -89,7 +89,8 @@ every secret since ADR 069: `prefix + base64url(randomBytes)`, stored **only as 
 plaintext returned exactly once, never logged, never re-fetchable, never in audit `detail`.
 
 Scope is `(team, member)`, bound at mint to a **human** seat (a phone is a person; agent seats stay
-on the claim handshake — see §6). An access token authenticates exactly like an `mscr_` in
+on the claim handshake — see §6). _(Amended 2026-09-26: ADR 452 also binds a chain to a sponsored
+agent seat, through its sponsor's one-time connect nonce. See the note in Consequences.)_ An access token authenticates exactly like an `mscr_` in
 `authMember`: self-identifying, `actingSeat` must match-or-absent, disabled/banned/archived still
 refused. No session lease is required (there is no Presence to bind it to — §4 says what replaces
 the lease).
@@ -172,7 +173,8 @@ apps' setup prompts call it; failing there fails the demo).
 - Provisioning (fifty's join-link lane): this ADR consumes an `mscr_`-proven seat at authorize time;
   the join link becomes a second prover at the same seam, not a second auth system.
 - Agent seats over OAuth: refused in v1 (authorize proves human seats only). A headless agent has the
-  claim handshake; OAuth exists for people on phones.
+  claim handshake; OAuth exists for people on phones. _(Amended 2026-09-26: ADR 452 opens exactly one
+  agent path, a sponsored agent redeeming its sponsor's connect nonce. See the note in Consequences.)_
 - The tunnel/TLS termination (wanderer's lane) and the per-app connector steps (join page lane).
 - Web `/board` sign-in reuse: may ride these endpoints later; not specified here.
 - Cross-team consent, org-level clients, `client_credentials` grants: not specified, not built.
@@ -228,6 +230,11 @@ apps' setup prompts call it; failing there fails the demo).
   `Bearer error="invalid_token"` (RFC 6750 §3, description stays out of the header — the body
   already says it). Token-endpoint `invalid_client` 401s are unchanged (public clients, no basic
   auth). HTTP test asserts both headers.
+
+2026-09-26 — [ADR 452](452-agent-connect-over-oauth.md) amends §2 and §6 for one path. A sponsored
+agent (ADR 449) may redeem its sponsor's one-time connect nonce at `POST /oauth/:team/authorize`
+(proof `kind: 'agent_connect'`) and receive an `msat_`/`msrt_` chain bound to the agent seat. Every
+other agent stays on the claim handshake, and an agent credential is never an authorize proof.
 
 ## Observability & Evaluation
 

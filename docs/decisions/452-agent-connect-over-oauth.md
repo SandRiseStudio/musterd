@@ -1,6 +1,7 @@
 # 452 — Sponsor-authorized agent seats over OAuth
 
-- Status: proposed — 2026-09-26
+- Status: accepted — 2026-09-26, by nick in session (after big-body's security accept
+  `01M3E6FS59` and fifty's §5 sign-off `01M3E63MVH`)
 - Date: 2026-09-26
 - Lane: `01M3AMYC18DQ5ZXK4T570D60Q9` (goal `demo`) — ADR 449 increment 2b
 - Amends: [ADR 446](446-remote-mcp-https-oauth.md) §2 (tokens bound to a human seat) and §6 ("agent

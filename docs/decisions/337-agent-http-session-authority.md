@@ -34,6 +34,8 @@ request without making a shared Team secret an impersonation credential.
    session lease minted by the successful claim and bound to that Presence. The
    server verifies both before any route, including reads. A lease is invalidated
    on supersession, release, ban, archive, credential rotation, and expiry.
+   _(Amended 2026-09-26: an agent seat that entered through ADR 452's sponsor nonce holds an OAuth
+   chain instead of a lease. See the note in Consequences.)_
 4. Reconnection uses the seat credential to make a fresh claim and receive a
    fresh lease. An ambient touch never renews or substitutes for a lease.
 5. WebSocket authority remains connection-bound after its claim. Its occupied
@@ -51,6 +53,13 @@ request without making a shared Team secret an impersonation credential.
 - The protocol, server, CLI, MCP, specification, and security design change
   together. Existing `mskey_` HTTP callers are intentionally refused after the
   migration.
+
+- 2026-09-26 — [ADR 452](452-agent-connect-over-oauth.md) amends Decision 3 for agent seats that
+  enter over OAuth through a sponsor's one-time connect nonce (ADR 449). Their authority is the
+  `msat_`/`msrt_` chain, not a seat credential plus a lease. ADR 452 §3 maps each lease guarantee to
+  the chain's: short-lived, invalid on supersession (a new connect revokes prior chains and burns
+  unexchanged codes), on ban, archive or disable, on sponsor removal, on credential rotation, and on
+  expiry. Every other agent keeps this Decision unchanged.
 
 ## Observability & Evaluation
 
