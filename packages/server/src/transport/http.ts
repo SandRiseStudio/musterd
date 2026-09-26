@@ -106,6 +106,9 @@ import {
   WIRE_ATTESTATION_SOURCES,
   SyncTracePushRequestSchema,
   SyncTracePushResponseSchema,
+  TRACE_REPORT_DEFAULT_DAYS,
+  TRACE_REPORT_MAX_DAYS,
+  TraceReportSchema,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -357,6 +360,7 @@ import {
 } from '../store/teams.js';
 import { applyToolCalls, recordSurfaceRender } from '../store/toolCalls.js';
 import { ingestSyncedTraceRows, ingestTraceEvents, listSessionTrace } from '../store/trace.js';
+import { deriveTraceReport } from '../store/traceReport.js';
 import {
   applyTrust,
   arbitrateClaim,
@@ -5079,6 +5083,26 @@ export async function handleHttp(
       // The insight report (ADR 050/084) — one server-side projection: flow metrics, the waiting-on
       // view, declared Goals with derived status, and blocked-lane exceptions. Altitude framing is a
       // rendering concern for the surfaces; the engine computes everything once.
+      // `musterd report trace` (ADR 445 increment 4, human-gated; opened 2026-09-26). Structural
+      // columns only. ADR 128 scoping resolved HERE and handed to the derivation: an admin reads
+      // every seat, a seat reads its own — filtered, never refused, like /trace/sessions.
+      if (method === 'GET' && rest === '/report/trace') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const raw = Number(url.searchParams.get('days') ?? TRACE_REPORT_DEFAULT_DAYS);
+        const days =
+          Number.isInteger(raw) && raw >= 1 && raw <= TRACE_REPORT_MAX_DAYS
+            ? raw
+            : TRACE_REPORT_DEFAULT_DAYS;
+        const seats = resolveCapabilities(member).is_admin
+          ? listMembers(ctx.db, team.id).map((m) => m.name)
+          : [member.name];
+        return sendJson(
+          res,
+          200,
+          TraceReportSchema.parse(deriveTraceReport(ctx.db, ctx.traceDb, team.id, seats, { days })),
+        );
+      }
+
       if (method === 'GET' && rest === '/report') {
         const { team, member: _member } = authTouch(ctx, slug, req);
         return sendJson(
