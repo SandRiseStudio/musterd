@@ -496,21 +496,30 @@ export function authMember(
     );
   }
 
+  const refusal = memberStandingRefusal(member);
+  if (refusal) throw refusal;
+  return { team, member };
+}
+
+/**
+ * Whether a member may still act — the one statement, shared by `authMember` (every request) and
+ * the OAuth token endpoint (every mint and refresh, ADR 452 §4) so the two cannot drift. Returns
+ * the refusal, or null. Departed, disabled/banned/archived, and — ADR 449 §1 — past an `until`
+ * lifecycle, compared at use: no sweeper, no grace beyond skew.
+ */
+export function memberStandingRefusal(member: MemberRow, now = Date.now()): MusterdError | null {
+  if (member.left_at !== null)
+    return new MusterdError('unauthorized', `seat "${member.name}" has left the team`);
   const accountStatus = resolveAccountStatus(member);
-  if (accountStatus === 'disabled' || accountStatus === 'banned' || accountStatus === 'archived') {
-    throw new MusterdError('forbidden', `seat "${member.name}" is ${accountStatus}`);
-  }
-  // ADR 449 §2: a lifecycle that declared an end now has one, on every credential kind. The clock
-  // is compared at use — no sweeper, no grace beyond skew. A member with no `until` lifecycle is
-  // untouched; expiry is an ordinary per-member setting, not an event concept.
+  if (accountStatus === 'disabled' || accountStatus === 'banned' || accountStatus === 'archived')
+    return new MusterdError('forbidden', `seat "${member.name}" is ${accountStatus}`);
   if (
     member.lifecycle === 'until' &&
     member.lifecycle_until !== null &&
-    member.lifecycle_until < Date.now()
-  ) {
-    throw new MusterdError('forbidden', `seat "${member.name}" — membership expired`);
-  }
-  return { team, member };
+    member.lifecycle_until < now
+  )
+    return new MusterdError('forbidden', `seat "${member.name}" — membership expired`);
+  return null;
 }
 
 /** Agent HTTP proof is self-identifying and inseparable from its current Presence lease (ADR 337). */

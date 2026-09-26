@@ -6894,12 +6894,15 @@ export async function handleHttp(
             ctx.hub.remove(old.connId);
           }
           clearMemberPresence(ctx.db, revoked.id);
+          // ADR 452 §3: an agent that connected over OAuth loses its chains with its standing —
+          // revoked outright, so a later re-enable cannot revive a chain nobody re-authorized.
+          const oauthRevoked = revokeAllForMember(ctx.db, team.id, revoked.id);
           appendAudit(ctx.db, team.id, {
             actor: caller.name,
             action: 'member.revoked_cascade',
             target: revoked.name,
             result: 'allow',
-            detail: { root: target.name },
+            detail: { root: target.name, oauth_revoked: oauthRevoked },
           });
         }
         // Free the seat immediately: drop any live session (same mechanism as reclaim) so removal

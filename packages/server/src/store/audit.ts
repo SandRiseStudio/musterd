@@ -25,6 +25,9 @@ export type AuditAction =
   // ADR 450: a team invite admitted a new human at OAuth authorize / refused an invite proof.
   | 'member.invite_admitted'
   | 'member.invite_refused'
+  // ADR 452: a sponsored agent's device redeemed its sponsor's connect nonce / a nonce was refused.
+  | 'member.agent_connected'
+  | 'member.agent_connect_refused'
   | 'invite.minted'
   | 'invite.revoked'
   | 'observe.denied'
@@ -514,6 +517,8 @@ export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject> = {
   'member.agent_connect_issued': 'actor',
   'member.invite_admitted': 'actor',
   'member.invite_refused': 'actor',
+  'member.agent_connected': 'actor',
+  'member.agent_connect_refused': 'actor',
   'invite.minted': 'actor',
   'invite.revoked': 'actor',
   'observe.denied': 'actor',

@@ -49,6 +49,35 @@ describe('oauth schemas (ADR 446)', () => {
     ).toBe(false);
   });
 
+  it('agent_connect carries a nonce only — a credential in that arm is refused (ADR 452 §1)', () => {
+    const base = {
+      client_id: 'cid_1',
+      redirect_uri: 'https://app.example/cb',
+      state: 's',
+      code_challenge: CHALLENGE,
+      code_challenge_method: 'S256',
+    } as const;
+    const nonce = 'A'.repeat(43);
+    const ok = (value: string) =>
+      OAuthAuthorizeConfirmSchema.safeParse({
+        ...base,
+        proof: { kind: 'agent_connect', nonce: value },
+      }).success;
+    expect(ok(nonce)).toBe(true);
+    expect(ok(`n=${nonce}`)).toBe(true);
+    expect(ok(`https://host/join/dawn#n=${nonce}`)).toBe(true);
+    // Every musterd secret prefix is refused, even padded past the length floor.
+    for (const cred of ['mscr_', 'msac_', 'mskey_', 'msat_', 'msrt_', 'mskd_'])
+      expect(ok(cred + 'x'.repeat(60))).toBe(false);
+    expect(ok('short')).toBe(false);
+    expect(
+      OAuthAuthorizeConfirmSchema.safeParse({
+        ...base,
+        proof: { kind: 'agent_connect', nonce, credential: 'mscr_x' },
+      }).success,
+    ).toBe(false);
+  });
+
   it('PKCE entropy (RFC 7636): short verifiers and malformed challenges refused', () => {
     expect(OAuthAuthorizeQuerySchema.safeParse({ ...query, code_challenge: 'short' }).success).toBe(
       false,
