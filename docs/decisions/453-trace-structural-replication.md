@@ -77,29 +77,64 @@ and `.strict()`. A `SyncTraceRow` carries the structural columns and nothing els
 pusher also SELECTs its columns by name, as `dataset:export` does, so a content column it never
 reads cannot be sent.
 
-The hub writes the batch in one transaction into its own `trace.db`: `INSERT OR IGNORE` on `id`,
-with the origin's `seq`, `ts` and `received_at` kept verbatim, and a new column `origin_node` set
-to the pushing node (trace ladder v3; `NULL` means the row was minted here). A repeated batch is a
-no-op, so delivery is at-least-once with idempotent apply. The reply is `200 { accepted, ignored }`.
+The hub writes the admissible rows (§3) in one transaction into its own `trace.db`, with the
+origin's `seq`, `ts` and `received_at` kept verbatim, and a new column `origin_node` set to the
+pushing node (trace ladder v3; `NULL` means the row was minted here). Each row is an
+`INSERT OR IGNORE`, and a row that inserts nothing is classified by one lookup. If a row with the
+same `id` is held, it counts as **`ignored`**: a re-push, so delivery is at-least-once with
+idempotent apply. Otherwise the row hit `UNIQUE (team_id, session_digest, seq)` under a different
+`id`, and it counts as **`collided`**. That is a digest collision, never expected, and it is
+counted apart so that it cannot hide inside the re-push count. The reply is
+`200 { accepted, ignored, collided, refused: [{ id, code }] }` (§3).
 
 ### 3. Residence: a node speaks only for its own seats
 
 Every row's `seat` must resolve to a member of the team that `seat_nodes` binds to the pushing
-node. This is ADR 360's ingest rule applied to a new surface. A row naming a seat bound elsewhere
-refuses the whole batch with `403 bound_elsewhere`, in the `/sync/push` shape. A seat the hub
-cannot resolve (git lag) refuses with `409 unresolved_seat`, and the pusher retries the same batch
-next tick. The joiner's cursor does not move on either refusal.
+node. This is ADR 360's ingest rule applied to a new surface, but the refusal takes a different
+shape, and the reason is ordering. `/sync/push` refuses a whole batch because its log is a gapless
+per-origin sequence, and a hole cannot be skipped. Trace rows have no such order: §Considered (a)
+rests on exactly that. They are also judged against the binding as it stands NOW, not at their
+`ts`. A seat that recorded traces on the joiner and was later rebound (ADR 328 trust or unbind)
+leaves rows that would refuse forever. Under a whole-batch refusal, those rows would stall every
+later row from every seat on that node, with nothing but a warn line to show it (dolly's review,
+2026-09-26). So:
 
-### 4. The pusher rides the existing loop, with its own cursor
+- **Bound elsewhere → refused per row, and the batch goes on.** The row is not written. It is
+  listed in the reply's `refused: [{ id, code: 'bound_elsewhere' }]`, counted on the hub counter,
+  and counted in the joiner's warn line. The joiner's cursor advances past it like any acked row.
+  The row stays in the joiner's own `trace.db`, so nothing is lost locally. The hub simply does
+  not take a claim it cannot attribute.
+- **Unresolvable seat (git lag) → `409 unresolved_seat`, and the whole batch holds.** This refusal
+  is transient: the roster reconcile catches up, and the same batch lands on a later tick. The
+  cursor does not move.
+- **A seat bound to no node at all → `409 unbound_seat`, held like the case above.** The trace
+  surface never mints a binding. Binding is ADR 328's claim path, and a trace row is not a claim.
+  The batch waits until the seat's first real claim binds it.
+- **No audit row for any of these.** The claim path writes a `seat.bound_elsewhere` deny row into
+  `musterd.db` (`sync/claim.ts`). The trace route must not reuse that path: a refusal that repeats
+  every tick would put a row in `musterd.db` every minute, which is exactly the growth §5 rules out.
+  Refusals live in the reply, the hub counter and the joiner's log line.
 
-On an enrolled joiner, each `startSyncPush` tick (60 s) also offers unpushed trace rows: at most
-one batch of 1,000 per team per tick, and only for teams this machine has enrolled. So a
-never-enrolled machine and the hub itself do nothing. The cursor is the highest acked `rowid`,
-kept in the joiner's own `trace.db` under `schema_meta` key `sync_trace_cursor:<team_id>`: it
-describes rows of that file, so it lives there, not in `musterd.db`. It advances only past a batch
-the hub acked, as the `/sync/push` cursor does. A failed trace push is logged at warn and never
-touches the coordination push. The two cursors are independent, so a trace outage cannot wedge
-coordination sync, and a coordination refusal cannot drop trace rows.
+### 4. The pusher runs its own loop, with its own cursor
+
+`startSyncPush` is one async pass per tick, behind a `running` guard, and it awaits each team in
+turn (`sync/push.ts`). A trace POST inside that pass would couple the two channels by scheduling,
+even with separate cursors. A slow hub would delay the next team's coordination push by up to the
+trace timeout, on every tick, and a thrown trace error inside a team's `try` would skip the rest of
+that team. So the trace pusher is **its own loop**: `startTracePush`, started and stopped beside
+`startSyncPush`, on its own 60 s interval, with its own `running` flag, its own per-team
+`try/catch`, and its own `AbortSignal.timeout` on each fetch. With that, "no coupling either way"
+holds by construction, and the eval below tests it.
+
+On an enrolled joiner, each tick offers at most one batch of 1,000 unpushed rows per enrolled team.
+A never-enrolled machine and the hub itself do nothing. The cursor is the highest acked `rowid`,
+kept in the joiner's own `trace.db` under `schema_meta` key `sync_trace_cursor:<team_id>`. It
+describes rows of that file, so it lives there, not in `musterd.db`. `rowid` is sound as a cursor:
+`trace_events` is a rowid table, and nothing deletes from it (the content prune is an `UPDATE`), so
+`rowid` only grows. The cursor advances past a batch only once the hub has answered `200`,
+including past the rows that reply lists as `refused` (§3). It holds on a `409`, on any other
+error, and on a timeout. A failed pass is a `trace_push_failed` warn line with the status and the
+cursor.
 
 Rows the hub has taken stay on the joiner; this ADR adds no deletion. Content prunes locally under
 ADR 445 increment 3a's lifecycle, and structural rows keep the messages table's lifetime on both
@@ -134,8 +169,9 @@ machines.
 ## Consequences
 
 - `@musterd/protocol` gains `SyncTraceRowSchema`, `SyncTracePushRequestSchema` and
-  `SyncTracePushResponseSchema` under this ADR, plus two refusal codes on the route's error body,
-  reusing existing codes: `bound_elsewhere` and `conflict` with `reason: 'unresolved_seat'`.
+  `SyncTracePushResponseSchema` (`{ accepted, ignored, collided, refused: [{ id, code }] }`) under
+  this ADR. The batch-holding refusals reuse the existing `conflict` code, with
+  `reason: 'unresolved_seat' | 'unbound_seat'`. The per-row refusal code is `bound_elsewhere`.
 - The trace ladder moves to v3: `trace_events.origin_node TEXT` (NULL = minted here), plus an index
   on `(team_id, origin_node)` for the replication read-back.
 - `corpus:snapshot` needs no change: the hub's `trace.db` now holds joiner rows, and they are
@@ -148,19 +184,23 @@ machines.
 
 ### Increments
 
-1. This ADR (proposed), for nick's acceptance.
-2. Build: the protocol schemas, trace ladder v3, the hub route with its residence check, the
-   joiner pusher on the push tick with its `trace.db` cursor, and tests. The tests cover the
-   content-field refusal, idempotent re-push, `bound_elsewhere` refusing the batch, the cursor
-   holding on refusal, the cursor advancing on ack, a hub that never pushes, and a trace outage
-   leaving the coordination push unaffected. Then update the docs: 01/02/03 architecture and the
+1. This ADR (proposed), for acceptance by its reviewing seat (dolly declined it on 2026-09-26 with
+   four changes; §2–§4 carry them).
+2. Build: the protocol schemas, trace ladder v3, the hub route with its per-row residence check,
+   `startTracePush` with its `trace.db` cursor, and tests. The tests cover: the content-field
+   refusal; idempotent re-push (`ignored`); a digest collision under a new id (`collided`); a
+   bound-elsewhere row refused alone while its batch-mates land and the cursor advances past it;
+   `unresolved_seat` and `unbound_seat` holding the cursor; the cursor advancing on ack; a hub that
+   never pushes; no audit row written on any refusal; and a stalled `/sync/trace` leaving the
+   `/sync/push` cadence unchanged. Then update the docs: 01/02/03 architecture and the
    research-corpus wiki.
 
 ## Observability & Evaluation
 
-- **Traces:** a `musterd.trace.replicated` counter on the hub, by origin node (accepted / ignored);
-  a `trace_push_failed` warn line on the joiner, with the status and the cursor. No audit row per
-  batch, because that would put per-minute rows back into `musterd.db`.
+- **Traces:** a `musterd.trace.replicated` counter on the hub, by origin node and outcome
+  (accepted / ignored / collided / refused); on the joiner, a `trace_push_failed` warn line with the
+  status and the cursor, and a `trace_rows_refused` line with the count and the seat names. No audit
+  row per batch or per refusal, because that would put per-minute rows back into `musterd.db`.
 - **Eval:** after increment 2 on the dogfood pair, once `delta` has worked a session on
   `850e40a4499168`, run on the hub
   `SELECT origin_node IS NOT NULL AS replicated, count(*) FROM trace_events GROUP BY 1`. It must
@@ -168,6 +208,7 @@ machines.
   `json_extract(payload,'$.kind')` names as a trace. Fails if a joiner seat's session is absent on
   the hub after two ticks, or if any hub row carries non-null `content` with a non-null
   `origin_node`.
-- **Experiment:** negative tests ship with increment 2: a content-bearing row is a 400; a row
-  naming a hub-bound seat is a 403 and nothing is written; and a repeated batch is accepted with
-  `ignored = n` and no duplicates.
+- **Experiment:** negative tests ship with increment 2. A content-bearing row is a 400. A row naming
+  a hub-bound seat is refused alone: `refused` lists it, its batch-mates are written, and no audit
+  row appears. A repeated batch is accepted with `ignored = n` and no duplicates. A `/sync/trace`
+  stalled past its timeout leaves `/sync/push`'s tick-to-tick interval unchanged.
