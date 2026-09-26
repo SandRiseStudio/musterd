@@ -109,4 +109,22 @@ describe('oauth schemas (ADR 446)', () => {
         .success,
     ).toBe(false);
   });
+
+  it('registration accepts the Claude-shaped RFC 7591 body — grant_types/response_types ride along', () => {
+    // What the real Claude connector posts (and ChatGPT likewise): the RFC 7591 §2 optional
+    // members alongside the required fields. Landed code 400d this ("Unrecognized key(s)"),
+    // so no real phone app could register — fifty's #1694 verdict, 2026-09-25.
+    const claudeBody = {
+      redirect_uris: ['https://claude.ai/api/mcp/auth_callback'],
+      client_name: 'Claude',
+      token_endpoint_auth_method: 'none',
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+    } as const;
+    expect(OAuthClientRegistrationRequestSchema.safeParse(claudeBody).success).toBe(true);
+    // Tolerance is enumerated, not open: truly unknown keys still fail closed.
+    expect(
+      OAuthClientRegistrationRequestSchema.safeParse({ ...claudeBody, bogus_key: 1 }).success,
+    ).toBe(false);
+  });
 });

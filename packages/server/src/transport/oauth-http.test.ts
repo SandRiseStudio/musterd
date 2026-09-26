@@ -216,6 +216,23 @@ describe('client registration (ADR 446 §3/§5)', () => {
     expect(res.status).toBe(429);
     expect(res.json.error.code).toBe('rate_limited');
   });
+
+  it('registers a Claude-shaped RFC 7591 body — grant_types/response_types accepted, not negotiated', async () => {
+    // The real phone connectors send RFC 7591 §2 grant_types/response_types in DCR; landed
+    // code 400d them ("Unrecognized key(s)"), locking every real app out at the first step.
+    const res = await postJson('/oauth/dawn/register', {
+      redirect_uris: [REDIRECT],
+      client_name: 'Claude',
+      token_endpoint_auth_method: 'none',
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+    });
+    expect(res.status).toBe(201);
+    expect(res.json.client_id).toMatch(/^cid_/);
+    // The server issues exactly one flow regardless of what was asked for.
+    expect(res.json.grant_types).toEqual(['authorization_code', 'refresh_token']);
+    expect(res.json.response_types).toEqual(['code']);
+  });
 });
 
 describe('authorization + token (ADR 446 §3/§5)', () => {

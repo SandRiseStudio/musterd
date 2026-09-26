@@ -52,6 +52,13 @@ export const OAuthClientRegistrationRequestSchema = z
     client_uri: z.string().optional(),
     logo_uri: z.string().optional(),
     scope: z.string().optional(),
+    // RFC 7591 §2 optional members the real phone connectors send (Claude and ChatGPT
+    // include grant_types/response_types in DCR). Accepted and ignored: increment 1 issues
+    // exactly one flow (code + refresh), so there is nothing to negotiate — but 400ing a
+    // standards-shaped body would lock a real app out at the first step (2026-09-25 live
+    // exercise, fifty's #1694 verdict). Truly unknown keys still fail closed under .strict().
+    grant_types: z.array(z.string()).optional(),
+    response_types: z.array(z.string()).optional(),
   })
   .strict();
 export type OAuthClientRegistrationRequest = z.infer<typeof OAuthClientRegistrationRequestSchema>;

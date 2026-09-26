@@ -217,6 +217,12 @@ apps' setup prompts call it; failing there fails the demo).
   as new — hence the merge gate.
 - Demo-day failure modes move to operations: tunnel up, daemon reachable, clock skew (code/token TTLs
   need ±30s), per-IP rate limits behind a shared-egress cellular NAT (tune in increment 3, not 1).
+- 2026-09-25 (post-merge, fifty's #1694 verdict): the registration schema's `.strict()` 400d the
+  RFC 7591 §2 optional members `grant_types`/`response_types` that both real connectors send in
+  DCR — no real phone app could register. The schema now accepts both as optional arrays and
+  ignores them (increment 1 issues exactly one flow: code + refresh; nothing to negotiate), with
+  a protocol test on the Claude-shaped body and an HTTP test asserting 201. Truly unknown keys
+  still fail closed. Additive tolerance under this ADR's own scope, not a Decision change.
 
 ## Observability & Evaluation
 
