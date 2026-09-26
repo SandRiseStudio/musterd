@@ -6,6 +6,7 @@ import {
   SPONSORED_AGENT_CAP,
   createSponsoredAgent,
   issueAgentConnectNonce,
+  mintConnectNonce,
   redeemAgentConnectNonce,
 } from './sponsoredAgents.js';
 import { createTeam } from './teams.js';
@@ -155,5 +156,16 @@ describe('agent connect nonce (ADR 449 §4)', () => {
     const { member, nonce } = createSponsoredAgent(db, team, human, { name: 'dana-scout' });
     leaveMember(db, member.id);
     expect(redeemAgentConnectNonce(db, team.id, nonce)).toBeNull();
+  });
+});
+
+describe('mintConnectNonce', () => {
+  it('redraws a nonce that would begin with a credential prefix', () => {
+    const unlucky = Buffer.from('mscr_' + 'A'.repeat(38), 'base64url');
+    const lucky = Buffer.alloc(32, 7);
+    const draws = [unlucky, lucky];
+    const nonce = mintConnectNonce(() => draws.shift()!);
+    expect(nonce).toBe(lucky.toString('base64url'));
+    expect(unlucky.toString('base64url').startsWith('mscr_')).toBe(true);
   });
 });

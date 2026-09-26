@@ -61,6 +61,23 @@ export function isMusterdCredential(value: string): boolean {
   return Object.values(TOKEN_PREFIXES).some((prefix) => normalized.startsWith(prefix));
 }
 
+/** Any registered prefix, where a token can start: the value's start, or after a non-base64url char. */
+const CREDENTIAL_ANYWHERE = new RegExp(
+  `(?:^|[^A-Za-z0-9_-])(?:${Object.values(TOKEN_PREFIXES).join('|')})`,
+  'i',
+);
+
+/**
+ * Return whether a musterd credential appears ANYWHERE a token can start in `value` — its start,
+ * or after any character outside the base64url alphabet (`?t=`, `&k=`, a space, a slash). A pasted
+ * link can carry one in its query or fragment, where `isMusterdCredential` (a prefix test) never
+ * looks (ADR 452 §1, big-body `01M3FAF83Z`). It does not fire inside a base64url run, so a random
+ * nonce cannot trip it mid-string; nonce minting keeps its first characters off every prefix.
+ */
+export function containsMusterdCredential(value: string): boolean {
+  return CREDENTIAL_ANYWHERE.test(value);
+}
+
 /** `POST /teams/:slug/agent-key/rotate` response — the new team agent key, shown **once**. */
 export const AgentKeyMintSchema = z.object({ agent_key: z.string() });
 export type AgentKeyMint = z.infer<typeof AgentKeyMintSchema>;

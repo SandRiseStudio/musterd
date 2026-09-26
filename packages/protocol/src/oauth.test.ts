@@ -70,6 +70,10 @@ describe('oauth schemas (ADR 446)', () => {
     for (const cred of ['mscr_', 'msac_', 'mskey_', 'msat_', 'msrt_', 'mskd_'])
       expect(ok(cred + 'x'.repeat(60))).toBe(false);
     expect(ok('short')).toBe(false);
+    // A credential anywhere in a pasted link — query, fragment, or loose text — is refused too.
+    expect(ok(`https://host/join/dawn?t=mscr_synthetic#n=${nonce}`)).toBe(false);
+    expect(ok(`https://host/join/dawn#n=${nonce}&k=msac_synthetic`)).toBe(false);
+    expect(ok(`n=${nonce} msat_synthetic`)).toBe(false);
     expect(
       OAuthAuthorizeConfirmSchema.safeParse({
         ...base,

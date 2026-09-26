@@ -196,6 +196,14 @@ could be read; `invalid`: unknown, used, expired, wrong-team, or a departed agen
 on both token grants is `memberStandingRefusal`, the same function `authMember` now calls, so the
 two cannot drift.
 
+2026-09-26 — §1's credential refusal now covers the whole pasted value, not only its start
+(big-body `01M3FAF83Z`). As first landed, `isMusterdCredential` was a prefix test, and the server
+reads the nonce from after `#`. A link carrying a credential in its query (`?t=mscr_…#n=<nonce>`)
+therefore passed the schema. `containsMusterdCredential` refuses any prefix where a token can
+start: the value's start, or after any non-base64url character. So it never fires inside a nonce,
+and nonce minting redraws the ~1-in-10⁷ nonce that would begin with a prefix. Refusal happens at
+the schema, before redemption, so the real nonce survives a bad paste.
+
 ## Observability & Evaluation
 
 - **Traces:** audit rows `member.agent_connected` (sponsor → agent, client),
