@@ -415,6 +415,29 @@ async function sendWebResponse(res: ServerResponse, webRes: Response): Promise<v
 }
 
 /**
+ * The RFC 6750 + RFC 9728 §5.1 challenge for `/mcp/:team` 401s (fifty's accept note on
+ * 01M3AKN6GF): `resource_metadata` names this team's protected-resource document so a
+ * spec-following client skips the discovery guess. The host rides the request's Host header
+ * and is allowlisted to hostname characters — anything else falls back to the bare scheme,
+ * never a reflected oddity. The slug is the path the client already asked for (encoded, never
+ * logged); `params` carries e.g. ` error="invalid_token"`.
+ */
+function mcpChallenge(req: IncomingMessage, slug: string, params = ''): string {
+  // The Host header is attacker-controlled: allowlist it to hostname characters and fall back
+  // to the bare scheme rather than reflecting an oddity. The scheme rides the established
+  // originFrom helper (x-forwarded-proto, else http — the tunnel sets it; loopback is http).
+  const host = req.headers.host;
+  const proto = req.headers['x-forwarded-proto'];
+  if (typeof host !== 'string' || host === '' || !/^[A-Za-z0-9.:[\]-]+$/.test(host))
+    return `Bearer${params}`;
+  const firstProto = Array.isArray(proto) ? proto[0] : proto;
+  return (
+    `Bearer${params} resource_metadata="${originFrom(host, firstProto)}` +
+    `/.well-known/oauth-protected-resource/mcp/${encodeURIComponent(slug)}"`
+  );
+}
+
+/**
  * `POST|GET|DELETE /mcp/:team` — the connector URL. TLS-except-loopback (a bearer over
  * plaintext is a bearer leaked), bearer-authenticated per request, then handed to the SDK
  * handler whose per-request factory binds the seat. Returns true when the path belonged here.
@@ -454,7 +477,7 @@ export async function handleMcpRoute(
     res.writeHead(401, {
       'content-type': 'application/json',
       'cache-control': 'no-store',
-      'www-authenticate': 'Bearer',
+      'www-authenticate': mcpChallenge(req, slug),
     });
     res.end(JSON.stringify({ error: { code: 'unauthorized', message: 'missing bearer token' } }));
     return true;
@@ -480,7 +503,9 @@ export async function handleMcpRoute(
     res.writeHead(me.httpStatus, {
       'content-type': 'application/json',
       'cache-control': 'no-store',
-      ...(me.httpStatus === 401 ? { 'www-authenticate': 'Bearer error="invalid_token"' } : {}),
+      ...(me.httpStatus === 401
+        ? { 'www-authenticate': mcpChallenge(req, slug, ' error="invalid_token"') }
+        : {}),
     });
     res.end(JSON.stringify(me.toBody()));
     return true;

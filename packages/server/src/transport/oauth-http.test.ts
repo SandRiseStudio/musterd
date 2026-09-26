@@ -663,16 +663,17 @@ describe('/mcp/:team — the Done line (ADR 446 §7)', () => {
     expect(ghost.status).toBe(404);
   });
 
-  it('MCP 401s carry RFC 6750 WWW-Authenticate — bare Bearer when missing, invalid_token when bad', async () => {
-    // ryder's #1694 review note: the 401 named no scheme, so a standards client could not
-    // tell how to authenticate.
+  it('MCP 401 challenges name the protected-resource metadata (RFC 9728 §5.1)', async () => {
+    // fifty's accept note on 01M3AKN6GF: a bare Bearer leaves a spec-following client
+    // guessing the discovery path — resource_metadata points at this team's document.
+    const metadata = `${base}/.well-known/oauth-protected-resource/mcp/dawn`;
     const missing = await fetch(base + '/mcp/dawn', {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
     });
     expect(missing.status).toBe(401);
-    expect(missing.headers.get('www-authenticate')).toBe('Bearer');
+    expect(missing.headers.get('www-authenticate')).toBe(`Bearer resource_metadata="${metadata}"`);
     const bogus = await fetch(base + '/mcp/dawn', {
       method: 'POST',
       headers: {
@@ -683,6 +684,8 @@ describe('/mcp/:team — the Done line (ADR 446 §7)', () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} }),
     });
     expect(bogus.status).toBe(401);
-    expect(bogus.headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
+    expect(bogus.headers.get('www-authenticate')).toBe(
+      `Bearer error="invalid_token" resource_metadata="${metadata}"`,
+    );
   });
 });
