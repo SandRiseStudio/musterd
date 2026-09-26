@@ -321,6 +321,12 @@ ADR 184's publication gate; a spans backend.
   `pnpm corpus:snapshot`,
   `sqlite3 ~/.musterd/trace.db "select value from schema_meta where key='content_captured_through'"`
   is non-empty.
+- **2026-09-25 — increment 3b has a proposed channel:** [ADR 453](453-trace-structural-replication.md)
+  (proposed, lane `01M3DG52YVZ90GBGD2QJGXAX49`). Structural rows would travel joiner → hub on a
+  dedicated `POST /teams/:slug/sync/trace`, from `trace.db` into the hub's `trace.db`. It is
+  structural-only by schema, bound to the seats resident on the pushing node, and never touches
+  `sync_log` or `audit`. That would replace §3's "replicate under ADR 371's `record` kind" clause
+  and nothing else in §3. Until ADR 453 is accepted, that clause stands, and nothing replicates.
 - Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
   backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a
