@@ -1,8 +1,8 @@
 # 450 — Team invite: a stranger's OAuth sign-in admits a new human member
 
 - Status: proposed — 2026-09-25 (reshaped 2026-09-26: no event concept, per nick's steers
-  `01M3D5R783` / `01M3D66PSZ`; guess-resistance reworked after big-body's reviews `01M3DH981F`
-  and `01M3DJVZPD`)
+  `01M3D5R783` / `01M3D66PSZ`; guess-resistance reworked after big-body's reviews `01M3DH981F`,
+  `01M3DJVZPD` and `01M3DKJ0ET`)
 - Date: 2026-09-25
 - Lane: `01M3AKNF0JXY8HFN1P4HTMPWCY` (join link, goal `demo`)
 - Builds on: [ADR 446](446-remote-mcp-https-oauth.md) (remote MCP + OAuth; its §3 authorize seam
@@ -74,10 +74,17 @@ One invite has a **non-secret selector** and **two spellings of one secret**, th
   with the selector as `SEL-XXXX-XXXX`, for a person who must type instead of scan. Input is
   case-insensitive, ignores `-` and spaces, and maps `O→0`, `I/L→1`.
 
-Stored in a new table `team_invites` (`id`, `team_id`, `selector`, `secret_hash`, `code_hash`,
+Stored in a new table `team_invites` (`id`, `team_id`, `selector`, `secret_hash`, `code_mac`,
 `max_uses`, `uses`, `fail_budget`, `failures`, `expires_at`, `member_until`, `created_by`,
-`created_at`, `revoked_at`; unique `(team_id, selector)` among unrevoked rows). Both hashes are
-sha256; the plaintext secret is printed once (hard rule 5).
+`created_at`, `revoked_at`; unique `(team_id, selector)` among unrevoked rows). The plaintext
+secret is printed once (hard rule 5). The two verifiers differ on purpose (§3):
+
+- `secret_hash` = `sha256(secret)`. 160 bits of entropy make the plain hash unguessable offline,
+  the same posture as every `ms*_` credential (SPEC A.2).
+- `code_mac` = `HMAC-SHA256(k_invite, team_id ‖ selector ‖ code)`, where `k_invite` is a 256-bit
+  key the daemon generates on first use and keeps **outside the database**, at
+  `$MUSTERD_HOME/invite.key` (chmod 600), beside the config. 40 bits is enumerable offline in
+  minutes against a plain hash; keyed, a copy of the database alone verifies nothing.
 
 - `expires_at` is chosen by the minter (default 24h). `max_uses` default 100.
 - `fail_budget` default 20. **When `failures` reaches it the invite burns** (§3).
@@ -113,8 +120,8 @@ On `POST /oauth/:team/authorize` with an `invite` proof, in one SQLite transacti
 1. Normalize and split: the first 3 characters are the selector, the rest is the secret. Look up
    the team's **live** invite with that selector (unrevoked, unexpired, `uses < max_uses`,
    `failures < fail_budget`). 27+ remaining characters is a link secret, compared against
-   `secret_hash`; 8 remaining characters is a room code, compared against `code_hash`. Both
-   compares are constant-time.
+   `secret_hash`; 8 remaining characters is a room code, MACed under `k_invite` and compared
+   against `code_mac`. Both compares are constant-time.
 2. **No match:** if the selector named a live invite, increment **that invite's** `failures` and
    no other's; if it named nothing, charge nothing (there is nothing to protect, and a guesser
    learns only that a 3-character public prefix is unused). Either way append audit
@@ -147,6 +154,14 @@ budget**, which is source-independent:
   `≤ 20 / 2^40 ≈ 2·10⁻¹¹`, and a team with `k` live invites exposes `≤ k·20 / 2^40` in total.
   This holds across the invite's whole validity window, because the budget does not refill.
 - The link secret is 160 bits; the same budget applies, and no realistic budget makes it guessable.
+- **Offline, against a copy of the database** (a leaked backup, a read-only SQL foothold, a
+  `.sqlite` in a screenshot): `secret_hash` is a plain hash of 160 bits — infeasible. `code_mac`
+  is keyed, and the key is not in the database, so the 2^40 code space cannot be enumerated
+  from the dump; the attacker is back to the online path and its budget. An attacker who has the
+  database **and** `invite.key` has the daemon's home directory, i.e. `config.json` and every
+  agent key on the host — the invite is not the asset that matters at that point. Rotating
+  `invite.key` invalidates every live room code (links keep working); `team invite list` says so
+  and the presenter re-mints.
 - **Burning is per invite, so the DoS surface is one invite** — and the selector is what makes
   that true: a failure is charged to the invite the caller named, so twenty typos (or a
   distributed guesser) against `ABC-…` burn `ABC` and leave `DEF`'s link and code untouched. A
@@ -208,7 +223,15 @@ client is increment 3 (below).
   twenty typos burn every code and every link on the team (big-body `01M3DJVZPD`). The
   three-character selector costs the person one more syllable and restores the bound.
 - **A longer typed code** (e.g. 12 characters, 60 bits). Better entropy, worse on a phone keyboard
-  in a dark room; the budget makes 40 bits enough and the link path removes typing altogether.
+  in a dark room; the budget makes 40 bits enough online, the keyed MAC makes it enough offline,
+  and the link path removes typing altogether.
+- **Plain `sha256(code)`** (this ADR's third draft). A database-only attacker enumerates 2^40
+  in minutes and holds the admission credential without touching the online budget (big-body
+  `01M3DKJ0ET`). Replaced by the keyed MAC above.
+- **A memory-hard verifier (scrypt/argon2) instead of the HMAC.** Also defensible, but it only
+  slows the enumeration (2^40 × cost) rather than removing it, needs parameters tuned per host,
+  and puts CPU work on the authorize path a guesser can drive. The key-outside-the-DB posture is
+  what the rest of musterd already relies on for `config.json`; reuse it.
 - **Event teams / `teams.event_ends_at`** (this ADR's first draft and ADR 449's). Withdrawn by
   nick's steer: no event concept, expiry is per member.
 - **Showing the new member's `mscr_` after sign-in** so they can add a second client. The authorize
@@ -221,7 +244,7 @@ client is increment 3 (below).
   this ADR. No new credential prefix (the secret is typed or pasted by humans, not dispatched by
   prefix).
 - `@musterd/server`: one migration (`team_invites`), the invite store (mint / list / revoke /
-  redeem-or-charge), the second consent form, the `invite` branch in `POST /oauth/:team/authorize`,
+  redeem-or-charge), `invite.key` generation under `$MUSTERD_HOME`, the second consent form, the `invite` branch in `POST /oauth/:team/authorize`,
   and two audit verbs. Needs ADR 446 (#1694, merged c25a50d4) and ADR 449 (#1713, merged
   2026-09-26) — both landed.
 - `musterd` CLI: `team invite create|list|revoke`, admin-only, in the Figma terminal style.
@@ -244,7 +267,10 @@ client is increment 3 (below).
   `max_uses`, burned budget, and an unknown selector all return the same refusal. Twenty wrong
   room codes from twenty different `CF-Connecting-IP`s burn the invite and the twenty-first
   correct code is refused. **Multi-invite:** with two live invites, burning the first leaves the
-  second's link and code both usable, and an unknown selector charges neither. A taken name and a
+  second's link and code both usable, and an unknown selector charges neither. **Offline:** a
+  test opens the store with a fresh (different) `invite.key` and shows the same typed code is
+  refused while the same link secret still admits; `team_invites.code_mac` never equals
+  `sha256(code)`. A taken name and a
   tombstoned name are both refused without charging. An invite with `member_until` produces a
   member whose `msat_` refuses after that instant (ADR 449 §1). The secret never appears in logs,
   audit, or error bodies. `revive` behaves the same before and after.
