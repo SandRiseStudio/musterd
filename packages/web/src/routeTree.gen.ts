@@ -20,6 +20,7 @@ import { Route as ApprovalsRouteImport } from './routes/approvals'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DocsIndexRouteImport } from './routes/docs.index'
 import { Route as BlogIndexRouteImport } from './routes/blog.index'
+import { Route as JoinTeamRouteImport } from './routes/join.$team'
 import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as BlogSlugRouteImport } from './routes/blog.$slug'
 
@@ -78,6 +79,11 @@ const BlogIndexRoute = BlogIndexRouteImport.update({
   path: '/blog/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JoinTeamRoute = JoinTeamRouteImport.update({
+  id: '/join/$team',
+  path: '/join/$team',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DocsSlugRoute = DocsSlugRouteImport.update({
   id: '/docs/$slug',
   path: '/docs/$slug',
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/watch': typeof WatchRoute
   '/blog/$slug': typeof BlogSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/join/$team': typeof JoinTeamRoute
   '/blog/': typeof BlogIndexRoute
   '/docs/': typeof DocsIndexRoute
 }
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/watch': typeof WatchRoute
   '/blog/$slug': typeof BlogSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/join/$team': typeof JoinTeamRoute
   '/blog': typeof BlogIndexRoute
   '/docs': typeof DocsIndexRoute
 }
@@ -132,6 +140,7 @@ export interface FileRoutesById {
   '/watch': typeof WatchRoute
   '/blog/$slug': typeof BlogSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
+  '/join/$team': typeof JoinTeamRoute
   '/blog/': typeof BlogIndexRoute
   '/docs/': typeof DocsIndexRoute
 }
@@ -149,6 +158,7 @@ export interface FileRouteTypes {
     | '/watch'
     | '/blog/$slug'
     | '/docs/$slug'
+    | '/join/$team'
     | '/blog/'
     | '/docs/'
   fileRoutesByTo: FileRoutesByTo
@@ -164,6 +174,7 @@ export interface FileRouteTypes {
     | '/watch'
     | '/blog/$slug'
     | '/docs/$slug'
+    | '/join/$team'
     | '/blog'
     | '/docs'
   id:
@@ -179,6 +190,7 @@ export interface FileRouteTypes {
     | '/watch'
     | '/blog/$slug'
     | '/docs/$slug'
+    | '/join/$team'
     | '/blog/'
     | '/docs/'
   fileRoutesById: FileRoutesById
@@ -195,6 +207,7 @@ export interface RootRouteChildren {
   WatchRoute: typeof WatchRoute
   BlogSlugRoute: typeof BlogSlugRoute
   DocsSlugRoute: typeof DocsSlugRoute
+  JoinTeamRoute: typeof JoinTeamRoute
   BlogIndexRoute: typeof BlogIndexRoute
   DocsIndexRoute: typeof DocsIndexRoute
 }
@@ -278,6 +291,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BlogIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/join/$team': {
+      id: '/join/$team'
+      path: '/join/$team'
+      fullPath: '/join/$team'
+      preLoaderRoute: typeof JoinTeamRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/docs/$slug': {
       id: '/docs/$slug'
       path: '/docs/$slug'
@@ -307,6 +327,7 @@ const rootRouteChildren: RootRouteChildren = {
   WatchRoute: WatchRoute,
   BlogSlugRoute: BlogSlugRoute,
   DocsSlugRoute: DocsSlugRoute,
+  JoinTeamRoute: JoinTeamRoute,
   BlogIndexRoute: BlogIndexRoute,
   DocsIndexRoute: DocsIndexRoute,
 }

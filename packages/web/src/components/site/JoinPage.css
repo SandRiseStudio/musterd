@@ -1,0 +1,116 @@
+/*
+ * /join/<team> — a phone-first page. Semantic tokens only (tokens.css), never raw hex.
+ * One column, big tap targets, and the room code large enough to read at a distance.
+ */
+
+.join {
+  max-width: 40rem;
+  padding-top: var(--section-y);
+  padding-bottom: var(--section-y);
+}
+
+.join__eyebrow {
+  color: var(--accent-ink);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 0 0 0.5rem;
+}
+
+.join__title {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 6vw, 2.4rem);
+  margin: 0 0 0.75rem;
+}
+
+.join__lede {
+  font-size: 1.05rem;
+  margin: 0 0 1.5rem;
+}
+
+.join-section {
+  margin-top: 2rem;
+}
+
+.join-section h2 {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  margin: 0 0 0.6rem;
+}
+
+.join-section li {
+  margin-bottom: 0.4rem;
+}
+
+.join-muted,
+.join-small {
+  color: var(--muted);
+}
+
+.join-small {
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0;
+}
+
+.join-block {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 0.6rem;
+  background: var(--surface);
+}
+
+.join-block__label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0 0 0.4rem;
+}
+
+.join-block__row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.join-block__value {
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+
+.join-code {
+  font-size: clamp(1.6rem, 8vw, 2.6rem);
+  letter-spacing: 0.06em;
+}
+
+.join-prompt {
+  font-size: 0.85rem;
+  margin: 0 0 0.6rem;
+}
+
+.join-copy {
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.join-dl dt {
+  font-weight: 600;
+  margin-top: 0.75rem;
+}
+
+.join-dl dd {
+  margin: 0.2rem 0 0;
+}
+
+.join-foot {
+  margin-top: 2.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}

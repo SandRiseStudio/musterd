@@ -37,11 +37,17 @@ Cloudflare Tunnel matches ingress rules top to bottom, uses the path regex as a 
       - hostname: mcp-demo.example.org
         path: '^/oauth/demo/\.well-known/oauth-authorization-server$'
         service: http://127.0.0.1:4851
+      - hostname: mcp-demo.example.org
+        path: '^/join/demo$'
+        service: http://127.0.0.1:4851
+      - hostname: mcp-demo.example.org
+        path: '^/assets/[A-Za-z0-9._-]+$'
+        service: http://127.0.0.1:4851
       - service: http_status:404
 
 Replace the hostname, Tunnel UUID, and credential path with the provisioned values. If the Team slug changes, replace every literal /demo and re-review the full path set; do not replace it with a wildcard. Ingress rules do not constrain HTTP methods, so the server must enforce the MCP/OAuth methods and the edge WAF should reject other methods where supported.
 
-Allow only GET, POST, and DELETE on /mcp/demo; GET on discovery; POST on registration and token; GET and POST on authorization and revocation. The Tunnel uses Cloudflare's direct edge path: do not add a Worker that can change client-address headers. Cloudflare overwrites CF-Connecting-IP with the visitor address, while X-Forwarded-For can retain visitor-supplied values and append proxy hops ([Cloudflare HTTP headers](https://developers.cloudflare.com/fundamentals/reference/http-headers/)). Apply edge rate limits to those exact paths. Server rate limits must never trust the leftmost X-Forwarded-For; when they use client IP, use CF-Connecting-IP only for this direct Cloudflare path and bound the number and cleanup work of in-memory buckets.
+Allow only GET on /join/demo (the join page, served as the web app shell; its `#i=`/`#n=` fragment never reaches the daemon) and on /assets/ (hashed static bundle files, no API); GET, POST, and DELETE on /mcp/demo; GET on discovery; POST on registration and token; GET and POST on authorization and revocation. The Tunnel uses Cloudflare's direct edge path: do not add a Worker that can change client-address headers. Cloudflare overwrites CF-Connecting-IP with the visitor address, while X-Forwarded-For can retain visitor-supplied values and append proxy hops ([Cloudflare HTTP headers](https://developers.cloudflare.com/fundamentals/reference/http-headers/)). Apply edge rate limits to those exact paths. Server rate limits must never trust the leftmost X-Forwarded-For; when they use client IP, use CF-Connecting-IP only for this direct Cloudflare path and bound the number and cleanup work of in-memory buckets.
 
 ## One-time setup
 

@@ -123,6 +123,8 @@ Then the invite block:
 
 - Label: `Your invite`
 - The room code `SEL-XXXX-XXXX`, set large enough to read at a distance and to type from.
+- With no `#i=`, the page cannot know the room code (it is derived from the link's secret), so in
+  its place, small: `Type the room code on the screen, or from whoever invited you.`
 - If the page was opened with `#i=`: a `Copy invite` button beside it, and under it, small:
   `Copied? Paste it into the Invite field on the sign-in page. Or type the room code — either
   works.`
@@ -205,6 +207,21 @@ path above.` (brand.md §4: never imply it exists).
 
 - `Your messages stay on the team's record, under your name.`
 - `musterd connects agents. It doesn't run them. → /`
+
+### 4.9 Agent connect branch (`#n=`, ADR 452 §5)
+
+When the page is opened with `#n=<nonce>` (the one-time link `team_agent_create` returns), it shows
+this instead of §4.1–4.8:
+
+- Eyebrow: `musterd · connect an agent`
+- H1: `Connect this agent to the team`
+- Lede: `Open this link on the machine that will run the agent — Claude Code, Codex, or Cursor.`
+- Ordered list: `Add the connector URL below as a remote MCP server in the agent's app.` /
+  `When the sign-in page opens, choose "Connecting an agent?" and paste the connect code.` /
+  `Approve. The agent is on the team under the name it was created with.`
+- The §4.3 URL block, then label `Connect code` with a `Copy connect code` button (the code is
+  copied, never displayed), and small: `It works once, for 15 minutes. Paste it only into the
+  musterd sign-in page. Expired? Ask whoever created the agent for a new link.`
 
 ## 5. What the page must never do
 
