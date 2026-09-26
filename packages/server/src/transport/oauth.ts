@@ -439,11 +439,20 @@ export async function handleOAuthRoutes(
     );
     return true;
   }
-  // RFC 8414 path-inserted discovery: {issuer}/.well-known/oauth-authorization-server.
-  const asmInserted = path.match(/^\/oauth\/([^/]+)\/.well-known\/oauth-authorization-server$/);
+  // The issuer is https://host/oauth/:team, so an MCP client (auth spec 2025-06-18 §2.3.3) looks
+  // for its metadata at, in order: RFC 8414 path INSERTION
+  // (/.well-known/oauth-authorization-server/oauth/:team), OIDC path insertion
+  // (/.well-known/openid-configuration/oauth/:team), OIDC path appending
+  // (/oauth/:team/.well-known/openid-configuration). Serve all three plus the RFC 8414 appended
+  // form that older clients try. Until 2026-09-26 only the appended form existed and the Claude
+  // iOS app failed with "could not start sign in" before ever reaching the sign-in page
+  // (Rehearsal A, lane 01M3FDG1MD).
+  const asmInserted = path.match(
+    /^(?:\/.well-known\/(?:oauth-authorization-server|openid-configuration)\/oauth\/([^/]+)|\/oauth\/([^/]+)\/.well-known\/(?:oauth-authorization-server|openid-configuration))$/,
+  );
   if (method === 'GET' && asmInserted) {
     requireTlsPeer(ctx, req, 'OAuth discovery');
-    const slug = decodeURIComponent(asmInserted[1]!);
+    const slug = decodeURIComponent((asmInserted[1] ?? asmInserted[2])!);
     requireTeamRedacted(ctx.db, slug);
     sendOAuthJson(res, 200, metadataFor(ctx, req, slug).server);
     return true;

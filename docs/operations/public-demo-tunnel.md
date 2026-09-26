@@ -32,12 +32,17 @@ Cloudflare Tunnel matches ingress rules top to bottom, uses the path regex as a 
         path: '^/\.well-known/oauth-protected-resource/mcp/demo$'
         service: http://127.0.0.1:4851
       - hostname: mcp-demo.example.org
-        path: '^/\.well-known/oauth-authorization-server/demo$'
+        path: '^/\.well-known/(oauth-authorization-server|openid-configuration)/oauth/demo$'
         service: http://127.0.0.1:4851
       - hostname: mcp-demo.example.org
-        path: '^/oauth/demo/\.well-known/oauth-authorization-server$'
+        path: '^/oauth/demo/\.well-known/(oauth-authorization-server|openid-configuration)$'
+        service: http://127.0.0.1:4851
+      - hostname: mcp-demo.example.org
+        path: '^/\.well-known/oauth-authorization-server/demo$'
         service: http://127.0.0.1:4851
       - service: http_status:404
+
+The first two discovery rules are the ones a phone actually uses: the issuer is `/oauth/demo`, so an MCP client fetches RFC 8414 path-inserted `/.well-known/oauth-authorization-server/oauth/demo` first, then the two OpenID forms. Before 2026-09-26 the daemon served only the last rule's shorthand and the appended form, and the Claude iOS app failed with "could not start sign in" (Rehearsal A, lane 01M3FDG1MD). Keep all four.
 
 Replace the hostname, Tunnel UUID, and credential path with the provisioned values. If the Team slug changes, replace every literal /demo and re-review the full path set; do not replace it with a wildcard. Ingress rules do not constrain HTTP methods, so the server must enforce the MCP/OAuth methods and the edge WAF should reject other methods where supported.
 
@@ -76,6 +81,7 @@ Allow only GET, POST, and DELETE on /mcp/demo; GET on discovery; POST on registr
        cloudflared tunnel --config "$CLOUDFLARED_CONFIG" ingress validate
        cloudflared tunnel --config "$CLOUDFLARED_CONFIG" ingress rule https://mcp-demo.example.org/mcp/demo
        cloudflared tunnel --config "$CLOUDFLARED_CONFIG" ingress rule https://mcp-demo.example.org/oauth/demo/authorize
+       cloudflared tunnel --config "$CLOUDFLARED_CONFIG" ingress rule https://mcp-demo.example.org/.well-known/oauth-authorization-server/oauth/demo
        cloudflared tunnel --config "$CLOUDFLARED_CONFIG" ingress rule https://mcp-demo.example.org/health
        cloudflared tunnel --config "$CLOUDFLARED_CONFIG" ingress rule https://mcp-demo.example.org/teams
 

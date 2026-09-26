@@ -159,8 +159,16 @@ describe('OAuth discovery (ADR 446 §3)', () => {
     expect(res.json.bearer_methods_supported).toContain('header');
   });
 
-  it('serves authorization-server metadata at both the team and path-inserted variants', async () => {
+  it('serves authorization-server metadata at every discovery form an MCP client tries', async () => {
+    // Issuer is `${base}/oauth/dawn`, so RFC 8414 §3 path INSERTION is
+    // /.well-known/oauth-authorization-server/oauth/dawn — the first URL an MCP client fetches
+    // (MCP auth spec 2025-06-18 §2.3.3), then the two OIDC forms. Found live in Rehearsal A
+    // (2026-09-26): the Claude iOS app said "could not start sign in" because only the last two
+    // paths below existed — the team-slug shorthand and the path-APPENDED form.
     for (const p of [
+      '/.well-known/oauth-authorization-server/oauth/dawn',
+      '/.well-known/openid-configuration/oauth/dawn',
+      '/oauth/dawn/.well-known/openid-configuration',
       '/.well-known/oauth-authorization-server/dawn',
       '/oauth/dawn/.well-known/oauth-authorization-server',
     ]) {
