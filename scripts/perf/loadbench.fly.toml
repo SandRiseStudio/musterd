@@ -10,11 +10,12 @@
 # its own daemon, so start the tunnel first against the port the next run will bind:
 #
 #   taskset -c 1 cloudflared tunnel --url http://127.0.0.1:4851   # prints the quick-tunnel hostname
-#   cd /app && PORT=4851 REMOTE_URL=https://<that-hostname> RAMP=650 \
+#   cd /app && PORT=4851 REMOTE_URL=https://<that-hostname> RAMP=1000 DURATION=1300 \
 #     DAEMON_CPUS=0 taskset -c 2-7 node scripts/perf/demo-audience-load.mjs
 #
 # RAMP ≥ 12s per human: the edge collapses every human onto this box's one IP, so arrivals must
-# stay under the per-IP OAuth limits (register 5/min) — read arrival-burst numbers from a loopback
+# stay under the per-IP OAuth limits (register 5/min), and DURATION must exceed RAMP so every
+# arrival lands in the sample — read arrival-burst numbers from a loopback
 # run, where cf-connecting-ip is distinct per attendee. A quick tunnel is best-effort; label the
 # numbers as quick-tunnel, or run the named tunnel from docs/operations/public-demo-tunnel.md.
 #

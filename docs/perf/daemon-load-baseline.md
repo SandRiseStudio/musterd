@@ -197,11 +197,17 @@ released rail does not move it down.
 **Tunnel steady-state (2026-09-26, quick tunnel, same box, 50/50/50, 90 s measure, RAMP=650).**
 Humans loopback → cloudflared → Cloudflare edge → back; agents/viewers loopback. All-request
 p50 4 / p95 127 / p99 175 ms, daemon 5 % CPU, loop delay p99 14.6 ms — the edge round-trip adds
-no daemon cost and the latency budget is untouched. **The documented one-driver-IP caveat is
-real, not theoretical:** the edge collapsed all 50 driven humans onto the box's single IP and
-`POST /oauth/register` returned 403 (rate limit) for most arrivals even at 13 s spacing —
-6 registered, 6× 403, 1 net error. This is a harness artifact (one shared IP), not a demo
-risk: a real room presents 50 distinct IPs, and the loopback run above (distinct
-`cf-connecting-ip` per attendee) shows that arrival burst absorbed cleanly. Arrival numbers
-therefore come from loopback runs; tunnel runs measure steady-state only, as the recipe says.
-Quick-tunnel numbers — re-run through the named tunnel for launch-grade figures if wanted.
+no daemon cost — but **no human reached the daemon**, so this run measured agents and viewers
+only. `POST /oauth/register` failed for every arrival (6 attempts, 6× 403, 1 net error), and the
+90 s sample caught only the first ~7 of 50 arrivals.
+
+*Corrected 2026-09-26 (izzo, lane 01M3D4069F):* this section first attributed those 403s to the
+per-IP rate limit. That was wrong — the rate limit answers **429**, not 403. The 403 was the
+Cloudflare edge itself (`error code: 1000`): the harness sent its loopback-only
+`cf-connecting-ip` header through the real tunnel too, and Cloudflare refuses any client request
+carrying that header. Reproduce: `curl -H 'cf-connecting-ip: 198.51.100.7' https://musterd.io`
+→ 403, without the header → 200. It is a harness bug, not a demo risk (phones never send that
+header); the harness now sends the edge headers on loopback only, and refuses `DURATION ≤ RAMP`
+so a run cannot silently drop late arrivals. The 2026-09-25 re-run (RAMP=1000, DURATION=300)
+repeated both faults: 16 of 50 arrivals, 16× 403, zero humans signed in. Falsifier: a tunnel
+run on the fixed harness still returning 403 on register.

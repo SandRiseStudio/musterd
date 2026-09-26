@@ -37,9 +37,10 @@
  *   PORT=4851 REMOTE_URL=https://bench.example.org node scripts/perf/demo-audience-load.mjs
  *     # the tunnel leg: cloudflared on this box points at 127.0.0.1:4851; HUMANS go the long way
  *     # (OAuth + /mcp through the edge) while agents/viewers stay loopback. Through a real tunnel
- *     # the edge overwrites cf-connecting-ip, so every human shares the driver's ONE address —
- *     # stretch RAMP so arrivals stay under the per-IP OAuth limits (register 5/min: RAMP ≥ 12s
- *     # per human), and read the arrival-burst numbers from a loopback run instead.
+ *     # the edge writes cf-connecting-ip (and refuses a client that sends one), so every human
+ *     # shares the driver's ONE address — stretch RAMP so arrivals stay under the per-IP OAuth
+ *     # limits (register 5/min: RAMP ≥ 12s per human), set DURATION past RAMP so every arrival
+ *     # lands in the sample, and read the arrival-burst numbers from a loopback run instead.
  *   DAEMON_CPUS=0 taskset -c 1-7 node scripts/perf/demo-audience-load.mjs   # Linux: isolate the daemon
  *
  * Do not run it at audience scale on a laptop: the client side alone saturates one. It runs on a
@@ -110,6 +111,10 @@ async function serve() {
   // trustProxy is the demo daemon's posture (`--insecure-trust-proxy`, the tunnel runbook §3):
   // the TLS check and the OAuth rate-limit key read the forwarded headers, which is exactly what
   // the human rail presents. PORT pins the bind for a cloudflared origin (REMOTE_URL runs).
+  // The tunnel hostname must be on the Host allowlist, as on the demo daemon — otherwise the
+  // Host/Origin gate answers every tunneled request 403 before any route runs.
+  if (process.env.REMOTE_URL)
+    process.env.MUSTERD_ALLOWED_HOSTS = new URL(process.env.REMOTE_URL).hostname;
   const server = createServer({
     db,
     port: env('PORT', 0),
@@ -152,6 +157,10 @@ async function drive() {
   const VIEWERS = env('VIEWERS', 50);
   const DURATION = env('DURATION', 60) * 1000;
   const RAMP = env('RAMP', 20) * 1000;
+  // Arrivals are spread over RAMP from t=0 and the sample stops at DURATION, so DURATION ≤ RAMP
+  // silently drops the late arrivals from the result (2026-09-25 tunnel run: 16 of 50 humans).
+  if (DURATION <= RAMP)
+    throw new Error(`DURATION (${DURATION / 1000}s) must exceed RAMP (${RAMP / 1000}s)`);
   const BUDGET_MS = env('BUDGET_MS', 1000);
   /** `coalesced` (the page since 2026-09-25) or `every` (a roster fetch per presence frame, before). */
   const ROSTER = process.env.ROSTER ?? 'coalesced';
@@ -331,10 +340,12 @@ async function drive() {
   if (HUMAN_RAIL === 'mcp')
     ready.humans.forEach((h, i) =>
       arrive(i, ready.humans.length, async () => {
-        const edge = {
-          'x-forwarded-proto': 'https',
-          'cf-connecting-ip': `198.51.100.${(i % 200) + 1}`,
-        };
+        // Loopback only: a real edge writes these itself, and Cloudflare refuses a client request
+        // that carries CF-Connecting-IP outright (403 "error code: 1000") — so through REMOTE_URL
+        // every human would die at the edge before reaching the daemon.
+        const edge = REMOTE_URL
+          ? {}
+          : { 'x-forwarded-proto': 'https', 'cf-connecting-ip': `198.51.100.${(i % 200) + 1}` };
         const bearer = await signIn(h, edge);
         if (!bearer) return;
         let session = null;
