@@ -24,6 +24,13 @@ export interface StreamState {
   team?: string;
   /** The image digest the last launch ran — what lets `ensure` tell a deploy from a crash. */
   image?: string;
+  /**
+   * Extra flags the capture process was started with (`--args`, passed as `BROADCAST_ARGS`).
+   * The supervisor relaunches from this file, not from the shell that ran `start`, so a crash
+   * restart that omitted them came back on entrypoint defaults and said nothing. Absent on state
+   * written before the field existed — those relaunches still use the entrypoint defaults.
+   */
+  args?: string;
   /** Supervisor restart stamps (epoch ms), pruned to the flap window. */
   restarts: number[];
   /**
@@ -53,6 +60,12 @@ export interface EnsureDecision {
   state: StreamState;
   /** One human-readable line for the supervisor log. */
   note: string;
+}
+
+/** Named on a relaunch note when the stream record carries capture flags, so a crash restart
+ * cannot drop them without the log saying what it kept. */
+function broadcastArgsNote(state: StreamState): string {
+  return state.args ? ` · broadcast args kept (${state.args})` : '';
 }
 
 /** The reconcile rule, pure: actual (liveCount) vs desired, under the flap budget.
@@ -120,7 +133,7 @@ export function decideEnsure(args: {
     return {
       action: 'restart',
       state: { ...state, restarts, failures, image: recordedDigest },
-      note: `deploy detected: machine gone and the recorded image changed (${state.image.slice(7, 15)} → ${recordedDigest.slice(7, 15)}) — replacing, not charged to the flap window`,
+      note: `deploy detected: machine gone and the recorded image changed (${state.image.slice(7, 15)} → ${recordedDigest.slice(7, 15)}) — replacing, not charged to the flap window${broadcastArgsNote(state)}`,
     };
   }
   if (restarts.length >= FLAP_MAX) {
@@ -143,7 +156,7 @@ export function decideEnsure(args: {
       failures,
       ...(relaunchImage ? { image: relaunchImage } : {}),
     },
-    note: `crash detected: machine gone, no stop record — restarting (${restarts.length + 1}/${FLAP_MAX} in window)`,
+    note: `crash detected: machine gone, no stop record — restarting (${restarts.length + 1}/${FLAP_MAX} in window)${broadcastArgsNote(state)}`,
   };
 }
 

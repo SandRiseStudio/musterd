@@ -104,7 +104,9 @@ musterd stream stop      # end stream; machine self-destroys
 ```
 
 `--team <slug>` picks the team to render (defaults to `MUSTERD_TEAM`), `--app <name>` a second Fly
-app, `--args "<flags>"` passes extra flags through to the capture process.
+app, `--args "<flags>"` passes extra flags through to the capture process. Those flags are
+recorded on the stream and replayed when the supervisor relaunches after a crash; the supervisor
+does not inherit the shell that ran `start`. `stream status` prints them while the machine is live.
 
 `fly logs -a musterd-broadcast` tails the run (tailscale up → daemon health check → chromium warm →
 the ffmpeg stats line every 10s).
