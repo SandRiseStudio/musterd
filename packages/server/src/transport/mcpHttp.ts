@@ -401,7 +401,13 @@ export async function handleMcpRoute(
   const h = req.headers['authorization'];
   const bearer = h?.startsWith('Bearer ') ? h.slice('Bearer '.length).trim() : '';
   if (!bearer) {
-    res.writeHead(401, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+    // RFC 6750 §3: a 401 from a protected resource names the scheme so the client knows
+    // how to authenticate (ryder's #1694 review note — the 401 carried no header at all).
+    res.writeHead(401, {
+      'content-type': 'application/json',
+      'cache-control': 'no-store',
+      'www-authenticate': 'Bearer',
+    });
     res.end(JSON.stringify({ error: { code: 'unauthorized', message: 'missing bearer token' } }));
     return true;
   }
@@ -420,9 +426,13 @@ export async function handleMcpRoute(
     memberId = auth.member.id;
   } catch (err) {
     const me = asMusterdError(err);
+    // RFC 6750 §3: an invalid/expired/revoked bearer 401s as invalid_token. The description
+    // stays out of the header — the body already says it, and the header must not become an
+    // oracle finer than the body. Non-401s (seat mismatch 403s, etc.) ride exactly as before.
     res.writeHead(me.httpStatus, {
       'content-type': 'application/json',
       'cache-control': 'no-store',
+      ...(me.httpStatus === 401 ? { 'www-authenticate': 'Bearer error="invalid_token"' } : {}),
     });
     res.end(JSON.stringify(me.toBody()));
     return true;
