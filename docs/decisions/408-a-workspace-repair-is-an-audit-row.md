@@ -161,6 +161,12 @@ decision refuses both.
 - Not repaired by a SEAT, ever: the permission floor; the machine-wide Claude Code settings;
   Codex's common-dir hooks (which the auto-refresher owns instead, above); a v2 provisioning manifest (`musterd harness configure` is a choice of
   harness set, not drift).
+- **2026-09-25 — "named" means named when it matters.** `withinWorktreeOnly` skips the shared
+  files on every run without reading them, so every seat's session start named
+  `~/.claude/settings.json` (and the common-dir Codex copy) as "needs a human — run ." even when
+  both were already at the current epoch — a false alarm with an empty command, seen on miley's
+  start. The audit row still records every skip; the session-start line names a shared file only
+  while hook drift remains after the repair (lane 01M3DGTP4G).
 
 ## Observability & Evaluation
 
