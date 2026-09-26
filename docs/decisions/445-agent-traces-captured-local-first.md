@@ -329,6 +329,16 @@ ADR 184's publication gate; a spans backend.
   `sync_log` or `audit`. That would replace §3's "replicate under ADR 371's `record` kind" clause
   and nothing else in §3. **Accepted 2026-09-26**: that clause is superseded by ADR 453; nothing
   replicates until its increment 2 lands.
+- **2026-09-26 — increment 4 opened on nick's word; the report half landed** (lane
+  `01M3FDM0HTR4AFBSRDSHYCHP94`). `musterd report trace [--days N]` over a new
+  `GET /teams/:slug/report/trace`: the §Observability coverage eval, computable at last (R1
+  `PostToolUse` ÷ R2 `usage.tool_uses`, per harness, with how many sessions carry an R2 rail); the
+  tool mix; and tokens per lane, where each `usage` row goes to its seat's most recently claimed lane
+  open at the row's `ts`, and a row matching no lane is shown as `unattributed` rather than folded
+  in. Structural columns only; ADR 128 scoping resolved at the route (admin: every seat; else own).
+  The `/live` per-seat timeline is the second half. Follows-up: 01M3FEB12R870FRSYJH0TXD34V (it
+  waits for the current `/live` work to clear). Falsifier on the dogfood box: `musterd report trace` from an admin seat prints a non-null
+  coverage for `claude-code` and at least one lane with turns.
 - Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
   backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a

@@ -326,3 +326,54 @@ describe('GET /teams/:slug/trace/sessions/:digest (increment 2)', () => {
     expect(bad.status).toBe(400);
   });
 });
+
+describe('GET /report/trace (ADR 445 increment 4) — ADR 128 scoping', () => {
+  async function get(path: string, headers: Record<string, string>) {
+    const res = await fetch(base + path, { headers });
+    return { status: res.status, json: (await res.json()) as any };
+  }
+  it('an admin reads every seat; a seat reads only its own rows; the window is bounded', async () => {
+    await post(
+      '/teams/dawn/trace/events',
+      { events: [ev(), ev({ kind: 'usage', detail: { parser: 'claude-code@1', tool_uses: 2 } })] },
+      { authorization: `Bearer ${auth.key}`, 'x-musterd-seat': 'Ada' },
+    );
+    // nick (admin) records a row of their own too
+    await post(
+      '/teams/dawn/trace/events',
+      { events: [ev({ session_digest: 'ffffffff0000', tool_name: 'Read' })] },
+      { authorization: `Bearer ${humanCredential}` },
+    );
+    const admin = await get('/teams/dawn/report/trace?days=30', {
+      authorization: `Bearer ${humanCredential}`,
+    });
+    expect(admin.status).toBe(200);
+    expect(admin.json.window_days).toBe(30);
+    expect(admin.json.seats.sort()).toEqual(['Ada', 'nick']);
+    expect(admin.json.coverage).toEqual([
+      {
+        harness: 'claude-code',
+        sessions: 2,
+        sessions_with_r2: 1,
+        post_tool_use: 2,
+        r2_tool_uses: 2,
+        coverage: 1,
+      },
+    ]);
+    const own = await get('/teams/dawn/report/trace', {
+      authorization: `Bearer ${auth.key}`,
+      'x-musterd-seat': 'Ada',
+      'x-musterd-session-lease': auth.sessionLease,
+    });
+    expect(own.json.seats).toEqual(['Ada']);
+    expect(own.json.window_days).toBe(7);
+    expect(own.json.tool_mix).toEqual([
+      { harness: 'claude-code', tool: 'Bash', calls: 1, errors: 0, avg_duration_ms: null },
+    ]);
+    // an out-of-range window falls back to the default rather than erroring
+    const wide = await get('/teams/dawn/report/trace?days=9999', {
+      authorization: `Bearer ${humanCredential}`,
+    });
+    expect(wide.json.window_days).toBe(7);
+  });
+});

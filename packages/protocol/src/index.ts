@@ -50,6 +50,7 @@ export * from './tool-telemetry.js';
 export * from './trace.js';
 export * from './traceScrub.js';
 export * from './traceSync.js';
+export * from './traceReport.js';
 export * from './memory.js';
 export * from './integrations.js';
 export * from './governed.js';

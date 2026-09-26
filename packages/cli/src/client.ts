@@ -104,6 +104,8 @@ import {
   type Surface,
   type UpdateLane,
   type WSServerFrame,
+  type TraceReport,
+  TraceReportSchema,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
 import { z } from 'zod';
@@ -1472,6 +1474,16 @@ export class HttpClient {
     if (!parsed.success) {
       throw new CliError('trace session response did not match the protocol schema', 1);
     }
+    return parsed.data;
+  }
+
+  /** `musterd report trace` (ADR 445 increment 4) — `GET /teams/:slug/report/trace?days=N`, ADR 128 scoped server-side. */
+  async traceReport(slug: string, days?: number): Promise<TraceReport> {
+    const q = days === undefined ? '' : `?days=${encodeURIComponent(String(days))}`;
+    const json = await this.request('GET', `/teams/${slug}/report/trace${q}`);
+    const parsed = TraceReportSchema.safeParse(json);
+    if (!parsed.success)
+      throw new CliError('trace report response did not match the protocol schema', 1);
     return parsed.data;
   }
 

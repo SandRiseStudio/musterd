@@ -5,6 +5,7 @@ import type {
   GoalFlow,
   Report,
   PeerDemand,
+  TraceReport,
 } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
@@ -650,7 +651,74 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   return 0;
 }
 
+/**
+ * `musterd report trace` (ADR 445 increment 4, the human-gated views): the coverage eval the ADR
+ * defined, the tool mix, and tokens per lane — all from structural trace columns, scoped by the
+ * daemon to what this seat may read (own rows, or every seat for an admin).
+ */
+export function renderTraceReport(r: TraceReport, team: string, w: (s: string) => void): void {
+  const n = (v: number) => v.toLocaleString('en-US');
+  w(
+    `${theme.accent('trace')} — ${team} ${theme.meta(
+      `· last ${r.window_days}d · ${r.seats.length} seat${r.seats.length === 1 ? '' : 's'} readable`,
+    )}\n\n`,
+  );
+  w(
+    `${theme.accent('coverage')} ${theme.meta('(R1 PostToolUse ÷ R2 tool calls, per harness)')}:\n`,
+  );
+  if (r.coverage.length === 0) w(theme.meta('  no trace rows in the window') + '\n');
+  for (const c of r.coverage) {
+    const ratio = c.coverage === null ? theme.meta('no R2 tool calls') : pct(c.coverage);
+    w(
+      `  ${c.harness} — ${ratio} ${theme.meta(
+        `(${n(c.post_tool_use)} / ${n(c.r2_tool_uses)}) · ${c.sessions} session${c.sessions === 1 ? '' : 's'}, ${c.sessions_with_r2} with R2`,
+      )}\n`,
+    );
+  }
+  w(`\n${theme.accent('tool mix')} ${theme.meta('(top by calls)')}:\n`);
+  if (r.tool_mix.length === 0) w(theme.meta('  none') + '\n');
+  for (const t of r.tool_mix) {
+    const err =
+      t.errors > 0 ? ` · ${theme.warn(`${t.errors} error${t.errors === 1 ? '' : 's'}`)}` : '';
+    const lat = t.avg_duration_ms === null ? '' : ` · avg ${t.avg_duration_ms}ms`;
+    w(
+      `  ${t.tool} ${theme.meta(t.harness)} — ${n(t.calls)} call${t.calls === 1 ? '' : 's'}${err}${lat}\n`,
+    );
+  }
+  w(`\n${theme.accent('cost per lane')} ${theme.meta('(usage rows inside the claim window)')}:\n`);
+  if (r.lane_cost.length === 0) w(theme.meta('  no usage rows attributed to a lane') + '\n');
+  for (const l of r.lane_cost) {
+    w(
+      `  ${l.lane.slice(0, 10)} ${l.title.length > 56 ? l.title.slice(0, 55) + '…' : l.title}\n` +
+        theme.meta(
+          `    ${theme.memberName(l.seat, 'agent')} · ${l.state} · ${l.turns} turn${l.turns === 1 ? '' : 's'} · in ${n(l.input_tokens)} · out ${n(l.output_tokens)}${l.cache_read_tokens > 0 ? ` · cache ${n(l.cache_read_tokens)}` : ''}`,
+        ) +
+        '\n',
+    );
+  }
+  const u = r.unattributed;
+  if (u.turns > 0)
+    w(
+      theme.meta(
+        `  unattributed — ${u.turns} turn${u.turns === 1 ? '' : 's'} outside any lane window · in ${n(u.input_tokens)} · out ${n(u.output_tokens)}`,
+      ) + '\n',
+    );
+}
+
+async function traceReport(parsed: Parsed): Promise<number> {
+  const { team, http } = resolve(parsed.flags);
+  const daysRaw = flagStr(parsed.flags, 'days');
+  const days = daysRaw === undefined ? undefined : Number(daysRaw);
+  if (days !== undefined && (!Number.isInteger(days) || days < 1))
+    throw new CliError('usage: musterd report trace [--days N] [--json]', 2);
+  const report = await http.traceReport(team, days);
+  if (parsed.flags['json']) return (process.stdout.write(JSON.stringify(report) + '\n'), 0);
+  renderTraceReport(report, team, process.stdout.write.bind(process.stdout));
+  return 0;
+}
+
 export async function reportCommand(parsed: Parsed): Promise<number> {
+  if (parsed.positionals[0] === 'trace') return traceReport(parsed);
   if (parsed.positionals[0] === 'delivery') return deliveryReport(parsed, parsed.positionals[1]);
   if (parsed.positionals[0] === 'coordination') return coordinationReport(parsed);
   if (parsed.positionals[0] === 'residency') return residencyReport(parsed);
@@ -665,7 +733,7 @@ export async function reportCommand(parsed: Parsed): Promise<number> {
   const raw = flagStr(parsed.flags, 'altitude') ?? 'team';
   if (raw !== 'ic' && raw !== 'team' && raw !== 'exec')
     throw new CliError(
-      'usage: musterd report [delivery [<id>] | coordination | residency | tools] [--altitude ic|team|exec] [--json]',
+      'usage: musterd report [delivery [<id>] | coordination | residency | tools | trace] [--altitude ic|team|exec] [--json]',
       2,
     );
   // Read off the local sweep series, not the server projection: the finding is a machine-local
