@@ -326,7 +326,7 @@ Delivery is unchanged (at-least-once, cursor-based); **notification tiering** is
 | `POST`   | `/oauth/:team/token`                           | TLS-except-loopback, rate-limited; `authorization_code` (PKCE verifier) → `msat_`+`msrt_`; `refresh_token` → rotated pair; OAuth-style errors (`invalid_grant`, …)    |
 | `POST`   | `/oauth/:team/revoke`                          | TLS-except-loopback; RFC 7009 revocation of either token kind; unknown tokens still answer 200                                                                        |
 | `POST`/`GET`/`DELETE` | `/mcp/:team`                          | TLS-except-loopback, bearer (`msat_`); the adapter as Streamable HTTP — `team_join` (no-op when the bearer names the seat), `team_inbox_check`, `team_send`, `team_agent_create` (ADR 449 §3) |
-| `POST` | `/teams/:slug/members/agents` | a **human** member mints an agent they sponsor (ADR 449 §3): `{name, role?}` → `{member, connect_url, connect_expires_at}`; `sponsored_by` = caller, expiry inherited, ≤3 live per sponsor; no secret — a one-time `#nonce` link (sha256 at rest, 15 min) |
+| `POST` | `/teams/:slug/members/agents` | a **human** member mints an agent they sponsor (ADR 449 §3): `{name, role?}` → `{member, connect_url, connect_expires_at}`; `sponsored_by` = caller, expiry inherited, ≤3 live per sponsor; no secret — a one-time `/join/:team#n=<nonce>` link (sha256 at rest, 15 min; ADR 450 shares the page) |
 | `POST` | `/teams/:slug/members/agents/:name/connect` | the sponsor re-issues that link; the prior unused link is burned (ADR 449 §4) |
 
 Sending an Envelope still requires the sender to **hold the occupancy** of `from` (replaces token==member). All read endpoints return a **viewer-scoped projection** per the recipient's `visibility_level`.
