@@ -523,7 +523,11 @@ function liveSessionElsewhere(
   try {
     const files = enumerate(dir);
     if (!files) return undefined; // the harness cannot enumerate — the slot stays the only witness
-    const live = files.find((f) => now - f.mtime < LOCAL_SESSION_LIVE_MS && f.id !== session.id);
+    // Newest, not first. A quiet slot healed onto an arbitrary warm neighbour would attest that
+    // neighbour's model (ADR 455). The file touched most recently is the session being written.
+    const live = files
+      .filter((f) => now - f.mtime < LOCAL_SESSION_LIVE_MS && f.id !== session.id)
+      .sort((a, b) => b.mtime - a.mtime)[0];
     return live ? { path: live.path, id: live.id } : undefined;
   } catch {
     return undefined;
@@ -1044,10 +1048,16 @@ export function refreshModelObservation(
     // idle-but-open interactive session) steals the slot and stamps `ended_at`, and the long-lived
     // session never fires SessionStart again to take it back. So the tool boundary — the boundary
     // that always happens — gives the slot to the session that is actually running. `started_at`
-    // comes from the transcript's birthtime (the file appears when the session begins); the heal is
-    // scoped to ended-and-contradicted for Claude (live-beside-live co-tenancy is left to the
-    // wake guard). Cursor CLI is the exception (ADR 268): the slot often still names a live
-    // desktop session with no ended_at while cursor-agent writes a sibling .txt — heal that too.
+    // comes from the transcript's birthtime (the file appears when the session begins).
+    //
+    // A recently-touched slot is never overridden by a warm neighbour (izzo, 2026-07-29: four
+    // seconds in, the refresh read the predecessor). A quiet unended slot is the other corpse
+    // (izzo, 2026-09-24, ADR 455): SessionStart was gated or never wrote, `ended_at` is absent,
+    // and the refresh kept reading the old transcript — the roster showed opus for a session
+    // running fable. Quiet means `slotLooksLive` is false, the same 10-minute clock. Live-beside-
+    // live, both transcripts still moving, stays with the wake guard.
+    // Cursor CLI is the other exception (ADR 268): the slot often still names a live desktop
+    // session with no ended_at while cursor-agent writes a sibling .txt — heal that too.
     const priorId = session.id;
     let healedBinding = binding;
     let slot = session;
@@ -1055,7 +1065,8 @@ export function refreshModelObservation(
     // the guard above has already made it present here — and the heal below only ever replaces it
     // with another concrete path.
     let slotTranscript = session.transcript_path;
-    if (live && (session.ended_at !== undefined || session.harness === 'cursor')) {
+    const slotQuiet = !slotLooksLive(session);
+    if (live && (session.ended_at !== undefined || session.harness === 'cursor' || slotQuiet)) {
       slot = {
         harness: session.harness,
         id: live.id,
@@ -1091,13 +1102,15 @@ export function refreshModelObservation(
       session_id: slot.id,
     });
     if (!observed) {
-      // Cursor CLI transcripts have no model to parse. A healed-to-new-id observation from the
-      // previous conversation is a stopped clock — drop it (ADR 268). Claude still never-erases.
-      if (slot.harness === 'cursor' && slot.id !== priorId) {
+      // The slot just moved to a different session and that transcript has no model yet. Keeping
+      // the previous session's observation would stamp it onto the new one (ADR 268 for Cursor;
+      // ADR 455 for every harness — a missing attestation is honest, a wrong one is not). A
+      // failed re-read of the SAME session still never-erases.
+      if (slot.id !== priorId) {
         const { model_observed: _dropped, ...rest } = healedBinding;
         saveBinding(dir, { ...rest, session: slot }, { drop: { model_observed: true } });
       }
-      return undefined; // unreadable / moved format — the prior observation stands
+      return undefined; // same session and unreadable — the prior observation stands
     }
 
     saveBinding(dir, {

@@ -1014,6 +1014,131 @@ describe('musterd session (capture)', () => {
       ).toBeUndefined();
     });
 
+    it('heals an unended quiet slot to the live session and reads that transcript (ADR 455)', () => {
+      // izzo, 2026-09-24: the running session was fable; binding.session still named an opus
+      // transcript last written 45 minutes earlier, with no ended_at. The refresh ran and wrote
+      // opus, because the heal required ended_at.
+      const staleAt = Date.now() - LOCAL_SESSION_LIVE_MS - 60_000;
+      const stalePath = transcript(wsA, 'claude-opus-5-5', 'stale.jsonl');
+      utimesSync(stalePath, staleAt / 1000, staleAt / 1000);
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'old-sid',
+            transcript_path: stalePath,
+            started_at: staleAt,
+          },
+          model_observed: {
+            model: 'claude-opus-5-5',
+            harness: 'claude-code',
+            observed_at: staleAt,
+          },
+        }),
+      );
+      const livePath = transcript(wsA, 'claude-fable-5-1', 'live.jsonl');
+
+      expect(
+        refreshModelObservation(
+          wsA,
+          enumStub([{ id: 'new-sid', path: livePath, mtime: Date.now(), bytes: 10 }]),
+        ),
+      ).toBe('claude-fable-5-1');
+
+      const after = readBinding(wsA);
+      expect(after.session?.id).toBe('new-sid');
+      expect(after.session?.transcript_path).toBe(livePath);
+      expect(after.model_observed?.model).toBe('claude-fable-5-1');
+    });
+
+    it('drops the previous observation when the healed transcript has no model yet', () => {
+      const staleAt = Date.now() - LOCAL_SESSION_LIVE_MS - 60_000;
+      const stalePath = transcript(wsA, 'claude-opus-5-5', 'stale-drop.jsonl');
+      utimesSync(stalePath, staleAt / 1000, staleAt / 1000);
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'old-sid',
+            transcript_path: stalePath,
+            started_at: staleAt,
+          },
+          model_observed: {
+            model: 'claude-opus-5-5',
+            harness: 'claude-code',
+            observed_at: staleAt,
+          },
+        }),
+      );
+      const livePath = join(wsA, 'live-empty.jsonl');
+      writeFileSync(livePath, '', 'utf8');
+
+      expect(
+        refreshModelObservation(
+          wsA,
+          enumStub([{ id: 'new-sid', path: livePath, mtime: Date.now(), bytes: 0 }]),
+        ),
+      ).toBeUndefined();
+
+      const after = readBinding(wsA);
+      expect(after.session?.id).toBe('new-sid');
+      expect(after.model_observed).toBeUndefined();
+    });
+
+    it('heals a quiet slot onto the newest live session', () => {
+      const staleAt = Date.now() - LOCAL_SESSION_LIVE_MS - 60_000;
+      const stalePath = transcript(wsA, 'claude-opus-5-5', 'stale-newest.jsonl');
+      utimesSync(stalePath, staleAt / 1000, staleAt / 1000);
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'old-sid',
+            transcript_path: stalePath,
+            started_at: staleAt,
+          },
+        }),
+      );
+      const olderPath = transcript(wsA, 'claude-sonnet-5', 'older-live.jsonl');
+      const newerPath = transcript(wsA, 'claude-fable-5-1', 'newer-live.jsonl');
+
+      expect(
+        refreshModelObservation(
+          wsA,
+          enumStub([
+            { id: 'older-sid', path: olderPath, mtime: Date.now() - 60_000, bytes: 10 },
+            { id: 'newer-sid', path: newerPath, mtime: Date.now(), bytes: 10 },
+          ]),
+        ),
+      ).toBe('claude-fable-5-1');
+      expect(readBinding(wsA).session?.id).toBe('newer-sid');
+    });
+
+    it('still reads a quiet unended slot when nothing else is live', () => {
+      // An idle session is not a corpse. The transcript going quiet for ten minutes is a person
+      // reading, and there is no other file to prefer.
+      const idleAt = Date.now() - LOCAL_SESSION_LIVE_MS - 60_000;
+      const idlePath = transcript(wsA, 'claude-opus-5', 'idle.jsonl');
+      utimesSync(idlePath, idleAt / 1000, idleAt / 1000);
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'idle-sid',
+            transcript_path: idlePath,
+            started_at: idleAt,
+          },
+        }),
+      );
+
+      expect(refreshModelObservation(wsA, enumStub([]))).toBe('claude-opus-5');
+      expect(readBinding(wsA).session?.id).toBe('idle-sid');
+    });
+
     it('reads the SLOT, not a live neighbour, when the slot has not ended', () => {
       // Measured live on izzo, 2026-07-29: `model_observed` said claude-sonnet-5 four seconds into a
       // session whose transcript is claude-opus-5 end to end. The heal is gated on

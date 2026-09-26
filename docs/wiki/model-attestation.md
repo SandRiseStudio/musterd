@@ -93,3 +93,11 @@ Both silences above lived at one seam, `recordAdapterInitialization` in `package
 The surfaces with no probe (`cli`, `web`, `ios`, `slack`, `other`, `musterd`) stay silent deliberately. A declaration is the honest best they can do, and warning at a session that cannot act on the warning is how a useful signal becomes noise that gets filtered.
 
 What this does **not** fix is the gap two sections up: gptbot and wanderer land on a declaration because cursor drops a model-less observation and codex only writes one when PostToolUse carries `model`. The warning makes that visible in the affected session for the first time — it does not make the probe produce anything. Expect it to fire on exactly those seats, which is the point.
+
+## A quiet slot was attested as the current session (2026-09-24; falsify: an unended `binding.session` whose transcript is quiet past 10 minutes, with a different live transcript beside it, and `refreshModelObservation` still writes the quiet file's model) <!-- claim: defect -->
+
+Measured on izzo, claude-code, about 14:15. The running transcript's newest assistant turn was `claude-fable-5-1`. `binding.session` still named a transcript last written at 13:01 whose model was `claude-opus-5-5`, with no `ended_at`. The refresh ran at 13:46 and wrote opus, because the heal required `ended_at` before it would leave that path. The roster showed opus for a session that ran fable. [ADR 455](../decisions/455-quiet-slot-is-not-the-current-session.md).
+
+`musterd session start` writes the slot before it talks to the daemon, so a timeout alone does not skip the write. The interloper gate does: a newcomer with no turn yet is refused while the occupant looks live, and that write is not retried. A daemon wedge at SessionStart (#1688) is one way the hook never finishes. The same slot appears with the daemon healthy.
+
+Fixed the same day. A slot whose transcript has not been touched in 10 minutes, contradicted by a different live session, is healed onto the newest one and the model is read from there. A slot touched inside that window is still not overridden by a neighbour (izzo, 2026-07-29). When the heal moves the slot and the new transcript has no model yet, the previous observation is dropped. An idle session with no other live file is still read from its own transcript.
