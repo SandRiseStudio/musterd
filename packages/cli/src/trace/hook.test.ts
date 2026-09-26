@@ -125,6 +125,20 @@ describe('parseTraceHook (ADR 445 R1 — structural only)', () => {
       parseTraceHook(JSON.stringify({ sessionId: 'g1', hookEventName: 'Stop' }))!.session_id,
     ).toBe('g1');
   });
+
+  it('keeps the first of two ids Cursor joins with a newline (ADR 453 §2, the tap fix)', () => {
+    const parsed = parseTraceHook(
+      JSON.stringify({
+        conversation_id: 'c1',
+        hook_event_name: 'postToolUse',
+        tool_name: 'Read',
+        tool_use_id:
+          'call-8f3a9c1d-0000-4000-8000-000000000000-01\nfc_8f3a9c1d000040008000000000000000_1',
+      }),
+    )!;
+    expect(parsed.tool_use_id).toBe('call-8f3a9c1d-0000-4000-8000-000000000000-01');
+    expect(parsed.tool_use_id).not.toContain('\n');
+  });
 });
 
 describe('buildTraceEvent', () => {

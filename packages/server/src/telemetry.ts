@@ -52,6 +52,8 @@ interface Instruments {
   seenLatency: Histogram;
   agentTokens: Counter;
   traceIngest: Counter;
+  traceReplicated: Counter;
+  traceNormalized: Counter;
   interruptCheck: Counter;
 }
 
@@ -92,6 +94,14 @@ function ix(): Instruments {
     traceIngest: meter.createCounter('musterd.trace.ingest', {
       description:
         'Trace events accepted from the hook tap (ADR 445 R1), by harness and kind — the count the coverage eval divides by the transcript’s',
+    }),
+    traceReplicated: meter.createCounter('musterd.trace.replicated', {
+      description:
+        'Structural trace rows the hub took over /sync/trace (ADR 453), by origin node and outcome (accepted | ignored | collided | refused)',
+    }),
+    traceNormalized: meter.createCounter('musterd.trace.normalized', {
+      description:
+        'Trace fields local ingest normalized to the structural shape (ADR 453 §2 rule 3) — a non-zero rate names a tap or harness whose output drifted',
     }),
     interruptCheck: meter.createCounter('musterd.interrupt.check', {
       description:
@@ -271,6 +281,24 @@ export function recordTokenUsage(env: Envelope): void {
 /** Count trace events the daemon stored (ADR 445 §Observability). */
 export function recordTraceIngest(harness: string, kind: string, n: number): void {
   ix().traceIngest.add(n, { 'musterd.harness': harness, 'musterd.trace.kind': kind });
+}
+
+/** Count rows the hub took over `/sync/trace`, by origin node and outcome (ADR 453 §Observability). */
+export function recordTraceReplicated(
+  originNode: string,
+  outcome: 'accepted' | 'ignored' | 'collided' | 'refused',
+  n: number,
+): void {
+  if (n > 0)
+    ix().traceReplicated.add(n, {
+      'musterd.origin_node': originNode,
+      'musterd.trace.outcome': outcome,
+    });
+}
+
+/** Count fields local ingest had to normalize (ADR 453 §2 rule 3). */
+export function recordTraceNormalized(harness: string, n: number): void {
+  if (n > 0) ix().traceNormalized.add(n, { 'musterd.harness': harness });
 }
 
 export function recordInterruptCheck(result: 'silent' | 'raised'): void {

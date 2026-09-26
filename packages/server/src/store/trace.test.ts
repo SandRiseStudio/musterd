@@ -42,6 +42,7 @@ describe('trace.db (ADR 445 §3)', () => {
     expect(ingestTraceEvents(db, 't1', 'ryder', [ev(), ev({ kind: 'PreToolUse' })])).toEqual({
       accepted: 2,
       content: 0,
+      normalized: 0,
     });
     const withPart = {
       content: { tool_input: 'x', redactions: 0, truncated: false },
@@ -50,6 +51,7 @@ describe('trace.db (ADR 445 §3)', () => {
     expect(ingestTraceEvents(db, 't1', 'ryder', [ev({ kind: 'Stop', ...withPart })])).toEqual({
       accepted: 1,
       content: 0,
+      normalized: 0,
     });
     // a different session on the same team starts its own sequence
     ingestTraceEvents(db, 't1', 'ryder', [ev({ session_digest: 'ffffffff0000' })]);
@@ -74,15 +76,28 @@ describe('trace.db (ADR 445 §3)', () => {
   it('stores detail as JSON and counts by kind, optionally per seat', () => {
     const db = openTraceDb(':memory:');
     ingestTraceEvents(db, 't1', 'ryder', [
-      ev({ kind: 'HookOutcome', detail: { hook: 'gate check', exit_code: 0 }, duration_ms: 42 }),
+      ev({ kind: 'HookOutcome', detail: { hook: 'gate', exit_code: 0 }, duration_ms: 42 }),
       ev({ kind: 'PostToolUse' }),
     ]);
     ingestTraceEvents(db, 't1', 'dolly', [ev({ session_digest: '0123456789ab' })]);
     const row = listSessionTrace(db, 't1', 'abcdef012345')[0]!;
-    expect(JSON.parse(row.detail!)).toEqual({ hook: 'gate check', exit_code: 0 });
+    expect(JSON.parse(row.detail!)).toEqual({ hook: 'gate', exit_code: 0 });
+    // ADR 453 §2 rule 3: local ingest normalizes to the structural shape, never rejects — a hook
+    // name off the producer list lands as `other`, a prose key is dropped, and the count says so.
+    const odd = ingestTraceEvents(db, 't1', 'ryder', [
+      ev({
+        kind: 'HookOutcome',
+        tool_name: 'customer-project-summary',
+        detail: { hook: 'gate check', exit_code: 0, note: 'see /Users/x/.env' },
+      }),
+    ]);
+    expect(odd).toMatchObject({ accepted: 1, normalized: 3 });
+    const last = listSessionTrace(db, 't1', 'abcdef012345').at(-1)!;
+    expect(last.tool_name).toBe('other');
+    expect(JSON.parse(last.detail!)).toEqual({ hook: 'other', exit_code: 0 });
     expect(row.duration_ms).toBe(42);
     expect(countTraceEvents(db, 't1')).toEqual([
-      { kind: 'HookOutcome', count: 1 },
+      { kind: 'HookOutcome', count: 2 },
       { kind: 'PostToolUse', count: 2 },
     ]);
     expect(countTraceEvents(db, 't1', 'dolly')).toEqual([{ kind: 'PostToolUse', count: 1 }]);

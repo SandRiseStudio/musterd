@@ -60,6 +60,9 @@ only in a snapshot, and never goes before one holds it. Size on 2026-09-25: 8.4 
 of tapping (5,834 rows), which is why the prune exists. The live size is on `musterd status`'s
 `traced:` line.
 
+**A joiner's traces reach the hub** (2026-09-26; falsify: `SELECT origin_node IS NOT NULL, count(*) FROM trace_events GROUP BY 1` on the hub's trace.db once `delta` has worked a session). <!-- claim: other -->
+ADR 453: structural rows only, joiner → hub on `/sync/trace`, into the hub's `trace.db` with `origin_node`; nothing in `musterd.db`, content never crosses, ids arrive as per-machine digests. So the snapshot and the dataset now cover every seat's structural trace whichever machine it worked on. Not built: any hub → joiner trace traffic.
+
 The [sibling corpus](#the-sibling-corpus-exploring-next) has the same disease; the rail is `pnpm dataset:exn-snapshot` (lane 01M1MBV93, 2026-09-04).
 
 ## The findings register — what has actually been concluded

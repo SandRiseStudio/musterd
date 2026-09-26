@@ -202,7 +202,7 @@ describe('tailTranscript', () => {
     const marker = posted()[1]![0]!;
     expect(marker.kind).toBe('unknown');
     expect(marker.outcome).toBe('error');
-    expect(marker.detail).toMatchObject({ downgraded: true, reason: 'transcript truncated' });
+    expect(marker.detail).toMatchObject({ downgraded: true, reason: 'transcript_truncated' });
     expect(readTailCursor(dir, digest)?.downgraded).toBe(true);
     // From then on the session is structural-only: the tail refuses to read it again.
     appendFileSync(transcript, claudeLine('m2', { type: 'text', text: 'y' }));

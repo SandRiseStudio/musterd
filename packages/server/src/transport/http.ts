@@ -104,6 +104,8 @@ import {
   GovernedPolicyReadResponseSchema,
   HarnessIdSchema,
   WIRE_ATTESTATION_SOURCES,
+  SyncTracePushRequestSchema,
+  SyncTracePushResponseSchema,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -248,6 +250,7 @@ import {
   rotateNode,
   touchNode,
   unbindSeat,
+  seatBindings,
 } from '../store/nodes.js';
 import { revokeAllForMember } from '../store/oauth.js';
 import { deriveNext, deriveNextSummary } from '../store/orientation.js';
@@ -353,7 +356,7 @@ import {
   applyPolicyChange,
 } from '../store/teams.js';
 import { applyToolCalls, recordSurfaceRender } from '../store/toolCalls.js';
-import { ingestTraceEvents, listSessionTrace } from '../store/trace.js';
+import { ingestSyncedTraceRows, ingestTraceEvents, listSessionTrace } from '../store/trace.js';
 import {
   applyTrust,
   arbitrateClaim,
@@ -391,6 +394,8 @@ import {
   recordInterruptCheck,
   recordSeenLatency,
   recordTraceIngest,
+  recordTraceNormalized,
+  recordTraceReplicated,
 } from '../telemetry.js';
 import { handleMcpRoute } from './mcpHttp.js';
 import { handleOAuthRoutes } from './oauth.js';
@@ -4594,6 +4599,76 @@ export async function handleHttp(
         return sendJson(res, 200, { seat: seat.name, unbound: unbound?.node_id ?? null });
       }
 
+      // ADR 453: a joiner's structural trace rows, trace.db → trace.db. Machine credential, the
+      // same refusal shape as /sync/push. Never touches sync_log or audit; never fans out.
+      if (method === 'POST' && rest === '/sync/trace') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        touchNode(ctx.db, node.id, Date.now());
+        // The structural-only schema is the boundary (ADR 453 §2, rule 1): a content field, a
+        // credential-shaped value, prose in any field, an unlisted detail key — all 400, nothing
+        // written. The hub REJECTS; only the pusher and local ingest normalize.
+        const body = parseOrBadRequest(SyncTracePushRequestSchema, await readJson(req));
+        // Residence, per row (ADR 453 §3). The two transient cases hold the WHOLE batch (409) so
+        // the pusher retries it: a seat the roster has not caught up to, and a seat no node has
+        // claimed yet — the trace surface never mints a binding. A seat bound elsewhere refuses
+        // ONLY its row: listed in the reply, not written, and the batch goes on. No audit row for
+        // any of these — the claim path's `seat.bound_elsewhere` deny row would put a row in
+        // musterd.db every tick a batch stayed refused, which is the growth §5 rules out.
+        const admitted = [];
+        const refused: { id: string; code: 'bound_elsewhere' }[] = [];
+        const memberCache = new Map<string, { id: string; kind: string } | null>();
+        for (const row of body.rows) {
+          let member = memberCache.get(row.seat);
+          if (member === undefined) {
+            const m = getMemberByName(ctx.db, team.id, row.seat);
+            member = m ? { id: m.id, kind: m.kind } : null;
+            memberCache.set(row.seat, member);
+          }
+          if (member === null) {
+            return sendJson(res, 409, {
+              error: { code: 'conflict', message: `seat "${row.seat}" is not on this roster yet` },
+              reason: 'unresolved_seat',
+              seat: row.seat,
+            });
+          }
+          // A service seat (ADR 232) is one roster row that runs on every machine, so it binds
+          // nowhere — the same exemption the sync ingest makes. Its rows are admitted from any node.
+          if (member.kind === 'service') {
+            admitted.push(row);
+            continue;
+          }
+          const holders = seatBindings(ctx.db, member.id);
+          if (holders.length === 0) {
+            return sendJson(res, 409, {
+              error: {
+                code: 'conflict',
+                message: `seat "${row.seat}" is bound to no node yet — its first claim binds it`,
+              },
+              reason: 'unbound_seat',
+              seat: row.seat,
+            });
+          }
+          if (holders.some((h) => h.node_id === node.id)) admitted.push(row);
+          else refused.push({ id: row.id, code: 'bound_elsewhere' });
+        }
+        const counts =
+          admitted.length > 0
+            ? ingestSyncedTraceRows(ctx.traceDb, team.id, node.id, admitted)
+            : { accepted: 0, ignored: 0, collided: 0 };
+        recordTraceReplicated(node.id, 'accepted', counts.accepted);
+        recordTraceReplicated(node.id, 'ignored', counts.ignored);
+        recordTraceReplicated(node.id, 'collided', counts.collided);
+        recordTraceReplicated(node.id, 'refused', refused.length);
+        return sendJson(res, 200, SyncTracePushResponseSchema.parse({ ...counts, refused }));
+      }
+
       if (method === 'POST' && rest === '/sync/push') {
         const team = requireTeam(ctx.db, slug);
         const node = authenticateNode(ctx.db, team.id, bearer(req));
@@ -5045,9 +5120,16 @@ export async function handleHttp(
         // dropped, and the mode rides back on the response — that echo is how a tap learns the
         // policy without a second round trip (it sends content from its NEXT hook on).
         const contentMode = getPolicy(ctx.db, team.id).trace.content;
-        const { accepted } = ingestTraceEvents(ctx.traceDb, team.id, member.name, body.events, {
-          writeContent: contentMode === 'on',
-        });
+        const { accepted, normalized } = ingestTraceEvents(
+          ctx.traceDb,
+          team.id,
+          member.name,
+          body.events,
+          { writeContent: contentMode === 'on' },
+        );
+        // ADR 453 §2 rule 3: the fields local ingest had to normalize, counted — a non-zero rate
+        // names a tap or harness whose output drifted from the structural shape.
+        recordTraceNormalized(body.events[0]?.harness ?? 'unknown', normalized);
         // ADR 445 §2 R2: a tail that hit a parse failure marks the session structural-only and says
         // so with one `unknown` event carrying `detail.downgraded` — the daemon puts that on the
         // coordination ledger, where the coverage eval and a human will actually look for it.

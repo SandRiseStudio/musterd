@@ -72,6 +72,14 @@ const SIZED_FIELDS: Record<string, string> = {
 const ENUM_FIELDS: readonly string[] = ['trigger', 'source', 'reason', 'agent_type', 'matcher'];
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+/** The first non-empty line of a value a harness should have sent as one token. */
+const firstLine = (v: string | undefined): string | undefined => {
+  const line = v
+    ?.split(/\r?\n/)
+    .find((l) => l.trim().length > 0)
+    ?.trim();
+  return line ? line : undefined;
+};
 
 /**
  * Cursor's hook events, onto the Claude Code spelling the column uses (ADR 445 §2 R1). Cursor fires
@@ -215,7 +223,10 @@ export function parseTraceHook(
   if (inferred) out.harness = inferred;
   const tool = str(o['tool_name']) ?? str(o['toolName']);
   if (tool) out.tool_name = tool.slice(0, 128);
-  const toolUse = str(o['tool_use_id']) ?? str(o['toolUseId']);
+  // One id, one line. Cursor's postToolUse payloads carry two ids joined by a newline (`call-…`
+  // over `fc_…`; 104 such rows measured 2026-09-26, ADR 453 §2) — keep the first, so the R1↔R2
+  // join key survives instead of being normalized away as non-structural.
+  const toolUse = firstLine(str(o['tool_use_id']) ?? str(o['toolUseId']));
   if (toolUse) out.tool_use_id = toolUse.slice(0, 128);
   const agent = str(o['agent_id']) ?? str(o['subagent_id']);
   if (agent) out.agent_id = agent.slice(0, 128);

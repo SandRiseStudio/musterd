@@ -317,6 +317,20 @@ machines.
    `TraceStructuralDetailSchema` and the ingest normalizer land together, with the Cursor tap fix. Then update the docs: 01/02/03 architecture and the
    research-corpus wiki.
 
+- **2026-09-26 — increment 2 landed** (lane `01M3DG52YVZ90GBGD2QJGXAX49`). Built as decided, with
+  four things settled in the build: (1) the MCP tool pattern is `^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$`,
+  wider than §2's draft — server segments carry `_` and `-` in the wild (`codex_apps`,
+  `plugin_chrome-devtools-mcp_chrome-devtools`); (2) service seats (ADR 232) are admitted from any
+  node, the exemption `/sync/push` already makes, or their rows would hold forever as `unbound_seat`;
+  (3) the tail's downgrade reasons are respelled to the enum form (`transcript_truncated`,
+  `parse_failure`) so R2's `unknown` rows conform without normalization; (4) `/node/enroll` needs a
+  local node row, so a joiner that has never sent an act has nothing to push yet anyway. The
+  Cursor tap keeps the first of its two newline-joined ids. `dataset:export`'s allowlist now IS
+  `TRACE_STRUCTURAL_DETAIL_KEYS`. Falsifier on the dogfood pair, once autorefresh has run on both
+  machines and `delta` has worked a session on `850e40a4499168`: the §Observability query shows
+  `origin_node`-stamped rows on the hub, `sync_log` grows by nothing trace-shaped, and the hub's
+  `trace_push_held` / `trace_rows_refused` lines stay silent for a bound seat.
+
 ## Observability & Evaluation
 
 - **Traces:** a `musterd.trace.replicated` counter on the hub, by origin node and outcome

@@ -244,7 +244,7 @@ export async function tailTranscript(opts: {
       return false; // transient: transcript not on disk yet (SessionStart names it early)
     }
     if (size < offset) {
-      return await downgrade(opts, digest, 'transcript truncated', post);
+      return await downgrade(opts, digest, 'transcript_truncated', post);
     }
 
     const delta = readTranscriptDelta(opts.transcriptPath, offset);
@@ -257,7 +257,7 @@ export async function tailTranscript(opts: {
     } catch {
       // The parsers are tolerant by construction; a throw is a defect, and the honest reading of
       // one is "this format is beyond this parser" — the downgrade contract, not a silent retry.
-      return await downgrade(opts, digest, 'parse failure', post);
+      return await downgrade(opts, digest, 'parse_failure', post);
     }
 
     const content = traceContentEnabled(binding, opts.dir);
