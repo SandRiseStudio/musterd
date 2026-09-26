@@ -194,6 +194,14 @@ remains the viewer roster fan-out (`GET /teams/:slug` p95 ~726-772 ms), unchange
 2026-09-25 section above, so the **go/no-go ceiling stays ~75 concurrent attendees** — the
 released rail does not move it down.
 
-**Still pending:** the `REMOTE_URL` quick-tunnel steady-state run (external-ingress tunnel was
-not runnable from this session; recipe in `loadbench.fly.toml`, RAMP ≥ 12 s/human through the
-edge).
+**Tunnel steady-state (2026-09-26, quick tunnel, same box, 50/50/50, 90 s measure, RAMP=650).**
+Humans loopback → cloudflared → Cloudflare edge → back; agents/viewers loopback. All-request
+p50 4 / p95 127 / p99 175 ms, daemon 5 % CPU, loop delay p99 14.6 ms — the edge round-trip adds
+no daemon cost and the latency budget is untouched. **The documented one-driver-IP caveat is
+real, not theoretical:** the edge collapsed all 50 driven humans onto the box's single IP and
+`POST /oauth/register` returned 403 (rate limit) for most arrivals even at 13 s spacing —
+6 registered, 6× 403, 1 net error. This is a harness artifact (one shared IP), not a demo
+risk: a real room presents 50 distinct IPs, and the loopback run above (distinct
+`cf-connecting-ip` per attendee) shows that arrival burst absorbed cleanly. Arrival numbers
+therefore come from loopback runs; tunnel runs measure steady-state only, as the recipe says.
+Quick-tunnel numbers — re-run through the named tunnel for launch-grade figures if wanted.
