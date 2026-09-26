@@ -117,6 +117,32 @@ describe('selfHealWorkspace', () => {
     expect(out.line).toContain('needs a human');
   });
 
+  it('a skipped shared file is not named when no hook drift remains — it was already current', () => {
+    const d = deps({
+      refreshHooks: vi.fn(() => ({
+        code: 0,
+        files: ['/w/.claude/settings.local.json'],
+        skipped: ['/home/.claude/settings.json'],
+        refused: 0,
+      })),
+      inspect: vi
+        .fn()
+        .mockReturnValueOnce(drifted)
+        .mockReturnValueOnce({ guidance: [], hooks: [], permissions: [] }),
+    });
+    const out = selfHealWorkspace('/w', d);
+    // The report still records the skip — it is true — but the line asks nothing of a human.
+    expect(out.report?.skipped).toContainEqual({
+      class: 'hooks',
+      reason: 'outside_worktree',
+      path: '/home/.claude/settings.json',
+    });
+    expect(out.line).not.toContain('/home/.claude/settings.json');
+    expect(out.line).not.toContain('needs a human');
+    expect(out.line).not.toMatch(/run\s*\./);
+    expect(out.line).toMatch(/^musterd: repaired .*\.$/);
+  });
+
   it('a throwing refresh never escapes — the line still reports and nothing is claimed repaired', () => {
     const d = deps({
       refreshGuidance: vi.fn(() => {

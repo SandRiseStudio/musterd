@@ -131,7 +131,12 @@ function composeLine(r: WorkspaceRepairBody, declined: boolean, behind: boolean)
     r.repaired.guidance > 0 ? plural(r.repaired.guidance, 'guidance file', 'guidance files') : null,
     r.repaired.hooks > 0 ? plural(r.repaired.hooks, 'hook', 'hooks') : null,
   ].filter((s): s is string => s !== null);
-  const outside = r.skipped.filter((s) => s.reason === 'outside_worktree').map((s) => s.path ?? '');
+  // A shared file is skipped on every run, drifted or not — the refresh never looks inside it. It
+  // is the human's job only while hook drift remains after the repair; a current one is not named.
+  const outside =
+    r.remaining.hooks > 0
+      ? r.skipped.filter((s) => s.reason === 'outside_worktree').map((s) => s.path ?? '')
+      : [];
   const still: string[] = [];
   if (r.remaining.permissions > 0) still.push('the harness permission layer is still behind');
   if (outside.length > 0) {
