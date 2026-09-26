@@ -223,6 +223,11 @@ apps' setup prompts call it; failing there fails the demo).
   ignores them (increment 1 issues exactly one flow: code + refresh; nothing to negotiate), with
   a protocol test on the Claude-shaped body and an HTTP test asserting 201. Truly unknown keys
   still fail closed. Additive tolerance under this ADR's own scope, not a Decision change.
+- 2026-09-25 (same verdict round, ryder's note): `/mcp/:team` 401s carried no `WWW-Authenticate`
+  header. Missing bearer now 401s with bare `Bearer`; bad/expired/revoked bearer with
+  `Bearer error="invalid_token"` (RFC 6750 §3, description stays out of the header — the body
+  already says it). Token-endpoint `invalid_client` 401s are unchanged (public clients, no basic
+  auth). HTTP test asserts both headers.
 
 ## Observability & Evaluation
 
