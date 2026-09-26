@@ -27,6 +27,11 @@ async function post(path: string, body: unknown, bearer?: string) {
   return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
 }
 
+/** The nonce from a connect link's `#n=` fragment. */
+function nonceOf(url: string): string {
+  return new URLSearchParams(new URL(url).hash.slice(1)).get('n')!;
+}
+
 async function addHuman(name: string): Promise<string> {
   const r = await post('/teams/sponsor-t/members', { name, kind: 'human' }, nick);
   return r.json.human_credential as string;
@@ -55,13 +60,11 @@ describe('POST /teams/:slug/members/agents', () => {
     expect(r.status).toBe(201);
     expect(r.json.member.name).toBe('dana-scout');
     expect(r.json.member.kind).toBe('agent');
-    expect(r.json.connect_url).toMatch(
-      new RegExp(`^${base}/join/sponsor-t/agent#[A-Za-z0-9_-]{43}$`),
-    );
+    expect(r.json.connect_url).toMatch(new RegExp(`^${base}/join/sponsor-t#n=[A-Za-z0-9_-]{43}$`));
     expect(r.json.connect_expires_at).toBeGreaterThan(Date.now());
     expect(JSON.stringify(r.json)).not.toMatch(/ms(cr|ac|at|kd)_/);
 
-    const nonce = (r.json.connect_url as string).split('#')[1]!;
+    const nonce = nonceOf(r.json.connect_url);
     const team = requireTeam(server.db, 'sponsor-t');
     expect(redeemAgentConnectNonce(server.db, team.id, nonce)?.name).toBe('dana-scout');
   });
@@ -106,12 +109,12 @@ describe('POST /teams/:slug/members/agents/:name/connect', () => {
   it('the sponsor re-issues the link, and the old one dies', async () => {
     const dana = await addHuman('dana');
     const made = await post('/teams/sponsor-t/members/agents', { name: 'dana-scout' }, dana);
-    const oldNonce = (made.json.connect_url as string).split('#')[1]!;
+    const oldNonce = nonceOf(made.json.connect_url);
     const r = await post('/teams/sponsor-t/members/agents/dana-scout/connect', {}, dana);
     expect(r.status).toBe(200);
     const team = requireTeam(server.db, 'sponsor-t');
     expect(redeemAgentConnectNonce(server.db, team.id, oldNonce)).toBeNull();
-    const newNonce = (r.json.connect_url as string).split('#')[1]!;
+    const newNonce = nonceOf(r.json.connect_url);
     expect(redeemAgentConnectNonce(server.db, team.id, newNonce)?.name).toBe('dana-scout');
   });
 

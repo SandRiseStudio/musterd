@@ -149,6 +149,12 @@ increment 3 with the cap tuning — both need a protocol change (`OAUTH_RATE_LIM
 connect link is re-issuable by the sponsor (`…/agents/:name/connect`), and a re-issue burns the
 prior link.
 
+2026-09-26 — §4's connect link is `/join/:team#n=<nonce>`, not `/join/:team/agent#<nonce>`. ADR 450's
+invite shares one join page per team, and the fragment key dispatches (`n=` agent connect, `i=`
+human invite; fifty, `01M3DJZ78F`). Either way the nonce rides the fragment and reaches the server
+only in the sign-in POST body. The Decision's substance (single-use, hashed, 15 minutes,
+sponsor-authorized) is unchanged.
+
 ## Observability & Evaluation
 
 - Traces: audit verbs `member.sponsored_agent_created` and `member.revoked_cascade` — who, whom,

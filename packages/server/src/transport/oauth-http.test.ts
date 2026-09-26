@@ -622,7 +622,7 @@ describe('/mcp/:team — the Done line (ADR 446 §7)', () => {
     const text: string = made.json.result.content[0].text;
     expect(made.json.result.isError).toBeUndefined();
     expect(text).toContain('Created agent "nick-scout"');
-    expect(text).toMatch(/\/join\/dawn\/agent#[A-Za-z0-9_-]{43}/);
+    expect(text).toMatch(/\/join\/dawn#n=[A-Za-z0-9_-]{43}/);
     expect(text).not.toMatch(/ms(cr|ac|at|kd)_/);
     const row = server.db
       .prepare("SELECT kind, sponsored_by FROM members WHERE name = 'nick-scout'")

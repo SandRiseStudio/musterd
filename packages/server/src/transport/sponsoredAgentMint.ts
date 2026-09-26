@@ -42,9 +42,13 @@ export function mintSponsoredAgent(
   };
 }
 
-/** ADR 449 §4 / ADR 170: the nonce rides the fragment — never sent to a server, never logged. */
+/**
+ * ADR 449 §4 / ADR 170: the nonce rides the fragment — never sent to a server, never logged. One
+ * join page per team (ADR 450 shares it): the fragment key dispatches — `n=` an agent connect,
+ * `i=` a human invite.
+ */
 export function agentConnectUrl(origin: string, slug: string, nonce: string): string {
-  return `${origin}/join/${encodeURIComponent(slug)}/agent#${nonce}`;
+  return `${origin}/join/${encodeURIComponent(slug)}#n=${nonce}`;
 }
 
 /** The public origin as the client saw it — the tunnel's `x-forwarded-proto` and the Host header. */
