@@ -66,9 +66,10 @@ Allow only GET, POST, and DELETE on /mcp/demo; GET on discovery; POST on registr
 
 3. Configure the Machine's supervised daemon command to keep the bind on loopback and enable proxy trust:
 
+       MUSTERD_ALLOWED_HOSTS=mcp-demo.example.org \
        musterd serve --host 127.0.0.1 --port 4851 --insecure-trust-proxy
 
-   The proxy-trust flag makes requests from the local connector count as remote for server trust checks; it does not bind the daemon publicly. Cloudflare overwrites a visitor-supplied X-Forwarded-Proto with the protocol used at the edge, which is how the OAuth server distinguishes the HTTPS public request. A local process that can reach loopback remains trusted by the host boundary.
+   `MUSTERD_ALLOWED_HOSTS` must name the public hostname exactly. The daemon's Host/Origin gate admits only loopback, the bound host, and that list, so without it every tunneled request — OAuth registration included — is refused 403 before any route runs (found 2026-09-26 by the tunnel load bench, lane 01M3D4069F). The proxy-trust flag makes requests from the local connector count as remote for server trust checks; it does not bind the daemon publicly. Cloudflare overwrites a visitor-supplied X-Forwarded-Proto with the protocol used at the edge, which is how the OAuth server distinguishes the HTTPS public request. A local process that can reach loopback remains trusted by the host boundary.
 
 4. Validate the config in the Fly Machine image before enabling the Tunnel:
 
@@ -85,7 +86,7 @@ Allow only GET, POST, and DELETE on /mcp/demo; GET on discovery; POST on registr
 ## Start the demo
 
 1. Start the dedicated Fly Machine if it is stopped. Wait for its daemon health check and supervised cloudflared process to report healthy. Confirm the expected daemon build SHA before presenting the hostname.
-2. From an outside network, confirm the OAuth protected-resource discovery URL returns metadata, unsupported paths return 404, and an HTTP URL redirects to HTTPS. Confirm the hostname reaches the dedicated Machine only through the Tunnel.
+2. From an outside network, confirm the OAuth protected-resource discovery URL returns metadata, unsupported paths return 404, and an HTTP URL redirects to HTTPS. A 403 `request Host or Origin is not allowed` on any of these means `MUSTERD_ALLOWED_HOSTS` is missing the hostname (step 3). Confirm the hostname reaches the dedicated Machine only through the Tunnel.
 3. Complete the released general OAuth onboarding flow as an ordinary human Member. Confirm the new Member appears on the Team roster and can use the remote MCP route. Verify the Team has no event-only lifecycle state.
 4. Run the load rehearsal through this public hostname. The merged Fly benchmark did not exercise the Tunnel path. For the demo target, measure 50 remote human clients, their agents, and live viewers; record Machine size, build SHA, p95 latency, and error rate. Target p95 under one second at that load.
 

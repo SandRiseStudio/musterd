@@ -111,6 +111,10 @@ async function serve() {
   // trustProxy is the demo daemon's posture (`--insecure-trust-proxy`, the tunnel runbook §3):
   // the TLS check and the OAuth rate-limit key read the forwarded headers, which is exactly what
   // the human rail presents. PORT pins the bind for a cloudflared origin (REMOTE_URL runs).
+  // The tunnel hostname must be on the Host allowlist, as on the demo daemon — otherwise the
+  // Host/Origin gate answers every tunneled request 403 before any route runs.
+  if (process.env.REMOTE_URL)
+    process.env.MUSTERD_ALLOWED_HOSTS = new URL(process.env.REMOTE_URL).hostname;
   const server = createServer({
     db,
     port: env('PORT', 0),
