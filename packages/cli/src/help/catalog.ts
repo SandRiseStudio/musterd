@@ -371,9 +371,9 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Team & seats ───────────────────────────────────────────────────────────────────────────
   {
     name: 'team',
-    signature: '<create|add|credential|agent-key|bootstrap|remove|archive|export> …',
+    signature: '<create|add|credential|agent-key|bootstrap|invite|remove|archive|export> …',
     summary:
-      'create a team, add/remove members, manage scoped bootstrap credentials, archive a team, export the roster to git',
+      'create a team, add/remove members, manage scoped bootstrap credentials and invites, archive a team, export the roster to git',
     group: 'team',
     primary: true,
     detail:
@@ -395,6 +395,11 @@ export const CATALOG: readonly CommandEntry[] = [
       '  bootstrap cutover [--force] [--yes]\n' +
       '                               disable the legacy Team key after every held seat and enrolled host\n' +
       '                               proves scoped use; --force bypasses readiness, --yes confirmation\n' +
+      '  invite create [--uses <n>] [--fail-budget <n>] [--expires <iso|duration>] [--member-until <iso|duration>]\n' +
+      '                               mint a team invite (ADR 450): prints the room code + link value once;\n' +
+      '                               a stranger who signs in with it becomes a NEW human member\n' +
+      '  invite list                 redacted invite inventory — uses, failures/budget, state (admin)\n' +
+      '  invite revoke <id>          close one invite; members it admitted stay (admin)\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +
       '  archive <slug>  soft-archive a whole team — off status/rosters, history kept (admin; run from your Workspace)\n' +
       '  export <slug> [--to <dir>]   move the roster onto git-tracked .musterd/ files (ADR 058);\n' +
@@ -404,6 +409,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'musterd team add lin --kind human --role reviewer',
       'musterd team bootstrap mint --seat ada --expires-in 24h',
       'musterd team bootstrap cutover',
+      'musterd team invite create --expires 3h --member-until 2d',
       'musterd team agent-key            # `musterd agent` says no team agent key? start here',
     ],
   },

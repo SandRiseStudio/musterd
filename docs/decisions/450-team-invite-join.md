@@ -255,6 +255,13 @@ client is increment 3 (below).
   + tests; (3) second-client sign-in for an invite-admitted member, if rehearsal shows attendees
   want it.
 
+- **2026-09-26 — increment 2 landed** (PR #1735): the protocol `invite` proof arm, migration v75
+  `team_invites`, `store/invites.ts`, the two-form consent page, the authorize branch, admin
+  `/teams/:slug/invites`, and `musterd team invite create|list|revoke`, with the store, offline,
+  multi-invite and HTTP tests above. `invite.key` resolves beside the effective config
+  (`MUSTERD_CONFIG` if set, else `~/.musterd/config.json`) at 0600. Still open from this ADR:
+  the `/join/<team>` page and its ingress line on ADR 451.
+
 ## Observability & Evaluation
 
 - Traces: `member.invite_admitted` (`via: link|code`) and `member.invite_refused` audit rows (who,

@@ -1,7 +1,10 @@
+import { randomBytes } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
+import { __setInviteKeyForTest } from '../store/invites.js';
+import { addMember } from '../store/members.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { resetMcpHandlersForTest } from './mcpHttp.js';
 import { __oauthBucketSizeForTest, __resetOAuthBucketsForTest, isTlsPeer } from './oauth.js';
@@ -135,6 +138,7 @@ async function mcpCall(bearer: string, method: string, params: unknown, id: numb
 beforeEach(async () => {
   __resetOAuthBucketsForTest();
   resetMcpHandlersForTest();
+  __setInviteKeyForTest(randomBytes(32));
   server = createServer({ db: openDb(':memory:'), port: 0 });
   const { port } = await server.listen();
   base = `http://127.0.0.1:${port}`;
@@ -687,5 +691,196 @@ describe('/mcp/:team — the Done line (ADR 446 §7)', () => {
     expect(bogus.headers.get('www-authenticate')).toBe(
       `Bearer error="invalid_token" resource_metadata="${metadata}"`,
     );
+  });
+});
+
+describe('invite prover at authorize (ADR 450)', () => {
+  const admin = () => ({ authorization: `Bearer ${nickCred}` });
+
+  async function mint(body: Record<string, unknown> = {}) {
+    const res = await postJson('/teams/dawn/invites', body, admin());
+    expect(res.status).toBe(201);
+    return res.json as { invite: any; link_secret: string; room_code: string };
+  }
+
+  /** Authorize with an invite proof; returns the 302 (or the refusal). */
+  async function authorizeInvite(invite: string, member: string, client_id?: string) {
+    const cid = client_id ?? ((await registerClient()).json.client_id as string);
+    const authz = await postForm('/oauth/dawn/authorize', {
+      client_id: cid,
+      redirect_uri: REDIRECT,
+      state: 's1',
+      code_challenge: CHALLENGE,
+      code_challenge_method: 'S256',
+      invite,
+      member,
+    });
+    return { authz, client_id: cid };
+  }
+
+  async function tokenFor(authz: Awaited<ReturnType<typeof postForm>>, client_id: string) {
+    const code = new URL(authz.headers.get('location')!).searchParams.get('code')!;
+    return postForm('/oauth/dawn/token', {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT,
+      client_id,
+      code_verifier: VERIFIER,
+    });
+  }
+
+  it('the consent page offers both forms; mint/list/revoke are admin-only and never list the secret', async () => {
+    const reg = await registerClient();
+    const page = await get(
+      `/oauth/dawn/authorize?client_id=${reg.json.client_id}&redirect_uri=${encodeURIComponent(REDIRECT)}&state=s&code_challenge=${CHALLENGE}&code_challenge_method=S256&response_type=code`,
+    );
+    expect(page.status).toBe(200);
+    expect(page.text).toContain('name="invite"');
+    expect(page.text).toContain('name="credential"');
+
+    expect((await postJson('/teams/dawn/invites', {})).status).toBe(401);
+    const m = await mint({ max_uses: 3 });
+    expect(m.link_secret).toMatch(/^[0-9A-Z]{3}\.[A-Za-z0-9_-]+$/);
+    expect(m.room_code).toMatch(/^[0-9A-Z]{3}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    const list = await get('/teams/dawn/invites', admin());
+    expect(list.status).toBe(200);
+    expect(list.json.invites[0]).toMatchObject({ id: m.invite.id, state: 'live', max_uses: 3 });
+    const secretTail = m.link_secret.split('.')[1]!;
+    expect(list.text).not.toContain(secretTail);
+    expect(list.text).not.toContain(m.room_code.slice(4));
+    expect(JSON.stringify(audits('invite.minted'))).not.toContain(secretTail);
+
+    const del = await fetch(base + `/teams/dawn/invites/${m.invite.id}`, {
+      method: 'DELETE',
+      headers: admin(),
+    });
+    expect(del.status).toBe(200);
+    expect((await get('/teams/dawn/invites', admin())).json.invites[0].state).toBe('revoked');
+    expect(audits('invite.revoked')).toHaveLength(1);
+  });
+
+  it('a stranger with the room code becomes a NEW human member and reaches MCP; the link value works too', async () => {
+    const m = await mint({ member_until: Date.now() + 3_600_000 });
+    const { authz, client_id } = await authorizeInvite(m.room_code, 'ada');
+    expect(authz.status).toBe(302);
+    const tok = await tokenFor(authz, client_id);
+    expect(tok.status).toBe(200);
+    const inbox = await mcpCall(tok.json.access_token, 'tools/call', {
+      name: 'team_inbox_check',
+      arguments: {},
+    });
+    expect(inbox.error).toBeUndefined();
+
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const ada = server.db
+      .prepare(
+        'SELECT kind, lifecycle, lifecycle_until, sponsored_by, left_at FROM members WHERE team_id = ? AND name = ?',
+      )
+      .get(team.id, 'ada') as any;
+    expect(ada).toMatchObject({
+      kind: 'human',
+      lifecycle: 'until',
+      sponsored_by: null,
+      left_at: null,
+    });
+    expect(ada.lifecycle_until).toBeGreaterThan(Date.now());
+
+    const admitted = audits('member.invite_admitted');
+    expect(admitted).toHaveLength(1);
+    expect(admitted[0]).toMatchObject({ actor: 'ada', target: m.invite.id });
+    expect(JSON.stringify(admitted[0])).not.toContain(m.room_code.slice(4));
+    expect(JSON.stringify(admitted[0])).not.toMatch(/mscr_|msat_|msrt_/);
+
+    // The link spelling admits a second person against the same invite.
+    const second = await authorizeInvite(m.link_secret, 'bo');
+    expect(second.authz.status).toBe(302);
+    expect((await get('/teams/dawn/invites', admin())).json.invites[0].uses).toBe(2);
+  });
+
+  it('wrong code, unknown selector, revoked, exhausted and burned all return the same refusal', async () => {
+    const m = await mint({ fail_budget: 2, max_uses: 1 });
+    const sel = m.invite.selector;
+    const wrong = await authorizeInvite(`${sel}-ZZZZ-ZZZZ`, 'eve');
+    expect(wrong.authz.status).toBe(401);
+    const body1 = wrong.authz.text;
+    const unknown = await authorizeInvite(`${sel === '777' ? '778' : '777'}-ZZZZ-ZZZZ`, 'eve');
+    expect(unknown.authz.status).toBe(401);
+    expect(unknown.authz.text).toBe(body1);
+    // Second miss burns (budget 2); the right code is now refused too.
+    await authorizeInvite(`${sel}-ZZZZ-ZZZY`, 'eve');
+    const burned = await authorizeInvite(m.room_code, 'eve');
+    expect(burned.authz.status).toBe(401);
+    expect(burned.authz.text).toBe(body1);
+    const inv = (await get('/teams/dawn/invites', admin())).json.invites.find(
+      (i: any) => i.id === m.invite.id,
+    );
+    expect(inv).toMatchObject({ state: 'burned', failures: 2, uses: 0 });
+    // eve never got a row.
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    expect(
+      server.db
+        .prepare('SELECT id FROM members WHERE team_id = ? AND name = ?')
+        .get(team.id, 'eve'),
+    ).toBeUndefined();
+    const refused = audits('member.invite_refused');
+    expect(refused.length).toBeGreaterThanOrEqual(3);
+    expect(JSON.stringify(refused)).not.toContain('ZZZZ');
+  });
+
+  it('burning one invite leaves another invite’s link and code usable (multi-invite)', async () => {
+    const a = await mint({ fail_budget: 1 });
+    const b = await mint();
+    expect((await authorizeInvite(`${a.invite.selector}-ZZZZ-ZZZZ`, 'x1')).authz.status).toBe(401);
+    expect((await authorizeInvite(a.room_code, 'x1')).authz.status).toBe(401);
+    expect((await authorizeInvite(b.room_code, 'x2')).authz.status).toBe(302);
+    expect((await authorizeInvite(b.link_secret, 'x3')).authz.status).toBe(302);
+  });
+
+  it('a taken name and a tombstoned name are refused with conflict and cost the invite nothing', async () => {
+    const m = await mint();
+    // nick is live; make a tombstone by adding + removing 'gone'.
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const gone = addMember(server.db, team, { name: 'gone', kind: 'human' });
+    server.db.prepare('UPDATE members SET left_at = ? WHERE id = ?').run(Date.now(), gone.row.id);
+    for (const name of ['nick', 'gone']) {
+      const r = await authorizeInvite(m.room_code, name);
+      expect(r.authz.status).toBe(409);
+    }
+    const inv = (await get('/teams/dawn/invites', admin())).json.invites.find(
+      (i: any) => i.id === m.invite.id,
+    );
+    expect(inv).toMatchObject({ failures: 0, uses: 0, state: 'live' });
+    // The tombstone was not revived.
+    expect(
+      (server.db.prepare('SELECT left_at FROM members WHERE id = ?').get(gone.row.id) as any)
+        .left_at,
+    ).not.toBeNull();
+  });
+
+  it('an invite-admitted member whose member_until has passed is refused at the token endpoint (ADR 449 §1)', async () => {
+    const m = await mint({ member_until: Date.now() + 1_500 });
+    const { authz, client_id } = await authorizeInvite(m.room_code, 'brief');
+    expect(authz.status).toBe(302);
+    const tok = await tokenFor(authz, client_id);
+    expect(tok.status).toBe(200);
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    server.db
+      .prepare('UPDATE members SET lifecycle_until = ? WHERE team_id = ? AND name = ?')
+      .run(Date.now() - 1, team.id, 'brief');
+    const res = await fetch(base + '/mcp/dawn', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${tok.json.access_token}`,
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'team_inbox_check', arguments: {} },
+      }),
+    });
+    expect([401, 403]).toContain(res.status);
   });
 });
