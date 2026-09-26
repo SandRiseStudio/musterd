@@ -1052,6 +1052,20 @@ describe('agent seats over OAuth via the sponsor nonce (ADR 452)', () => {
     expect(pair.expires_in).toBeLessThanOrEqual(600);
   });
 
+  it('a credential riding a pasted link (query or fragment) is refused at the schema, and the nonce survives', async () => {
+    const link = await createAgent(nickCred, 'nick-scout');
+    const url = new URL(link);
+    const withQuery = `${url.origin}${url.pathname}?t=mscr_synthetic${url.hash}`;
+    const withTail = `${link}&k=msac_synthetic`;
+    for (const pasted of [withQuery, withTail]) {
+      const res = await authorizeAgent(pasted);
+      expect(res.authz.status).toBe(400);
+    }
+    expect(audits('member.agent_connect_refused')).toHaveLength(0);
+    // Refused before redemption: the real link still works.
+    expect((await authorizeAgent(link)).authz.status).toBe(302);
+  });
+
   it('a credential pasted into the agent field is refused at the schema — never an auth attempt', async () => {
     const res = await authorizeAgent(nickCred + 'x'.repeat(20));
     expect(res.authz.status).toBe(400);

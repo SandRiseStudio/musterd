@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TOKEN_PREFIXES, isMusterdCredential } from './credentials.js';
+import { TOKEN_PREFIXES, containsMusterdCredential } from './credentials.js';
 
 /**
  * OAuth 2.1 surface for remote MCP (ADR 446) — the zod vocabulary for the daemon's minimal
@@ -123,8 +123,9 @@ export const OAuthAuthorizeConfirmSchema = z
         .strict(),
       // ADR 452 §1: a sponsored agent's device redeems its sponsor's one-time connect nonce. The
       // value is the bare nonce, `n=<nonce>`, or the whole pasted link — the server extracts it.
-      // A nonce ONLY: every musterd credential prefix is refused here (ghost's condition), so no
-      // agent secret can ever ride the consent page.
+      // A nonce ONLY: a musterd credential anywhere in the value — not just at its start — is
+      // refused here (ghost's condition; big-body 01M3FAF83Z: a pasted link can carry one in its
+      // query or fragment), so no secret can ever ride the consent page.
       z
         .object({
           kind: z.literal('agent_connect'),
@@ -132,7 +133,7 @@ export const OAuthAuthorizeConfirmSchema = z
             .string()
             .min(43)
             .max(2048)
-            .refine((v) => !isMusterdCredential(v.trim()), {
+            .refine((v) => !containsMusterdCredential(v), {
               message: 'an agent connects with its connect link, never a credential',
             }),
         })

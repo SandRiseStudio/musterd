@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { isMusterdCredential } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { MusterdError } from '../errors.js';
 import { addMember, getMemberByName, hashToken } from './members.js';
@@ -40,7 +41,7 @@ export function issueAgentConnectNonce(
   sponsorId: string,
   now = Date.now(),
 ): AgentConnectNonce {
-  const nonce = randomBytes(32).toString('base64url');
+  const nonce = mintConnectNonce();
   const expires_at = now + CONNECT_NONCE_TTL_MS;
   db.transaction(() => {
     db.prepare(
@@ -53,6 +54,18 @@ export function issueAgentConnectNonce(
     ).run(hashToken(nonce), teamId, memberId, sponsorId, now, expires_at);
   })();
   return { nonce, expires_at };
+}
+
+/**
+ * 256 random bits, base64url — redrawn in the (~1e-7) case it begins with a credential prefix, so
+ * the consent page's "no credential anywhere" refusal (ADR 452 §1) can never refuse a real link.
+ * `draw` is a test seam.
+ */
+export function mintConnectNonce(draw: () => Buffer = () => randomBytes(32)): string {
+  for (;;) {
+    const nonce = draw().toString('base64url');
+    if (!isMusterdCredential(nonce)) return nonce;
+  }
 }
 
 /** Live (not left, not disabled/banned/archived) agents this sponsor has minted. */
