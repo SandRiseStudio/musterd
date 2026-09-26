@@ -72,10 +72,63 @@ refuses exactly as `/sync/push` does: one refusal for an absent, wrong-kind or r
 The body is `SyncTracePushRequestSchema`: `{ rows: SyncTraceRow[1..1000] }`, parsed at the boundary
 and `.strict()`. A `SyncTraceRow` carries the structural columns and nothing else: `id`, `seat`,
 `session_digest`, `seq`, `ts`, `received_at`, `harness`, `kind`, `tool_name`, `tool_use_id`,
-`agent_id`, `parent_agent_id`, `duration_ms`, `outcome`, and `detail` (bounded structural JSON).
-**The schema has no content field**, so a content-bearing row is a 400, never a partial write. The
-pusher also SELECTs its columns by name, as `dataset:export` does, so a content column it never
-reads cannot be sent.
+`agent_id`, `parent_agent_id`, `duration_ms`, `outcome`, and `detail`. **The schema has no content
+field**, so a content-bearing row is a 400, never a partial write. The pusher also SELECTs its
+columns by name, as `dataset:export` does, so a content column it never reads cannot be sent.
+
+**No content field is not enough on its own** (big-body's review, 2026-09-26). The local ingest
+schema that `trace_events` rows come from is loose. `TraceDetailSchema` takes any key name with a
+string value up to 256 characters (1 KiB in total), and `tool_name`, `tool_use_id`, `agent_id` and
+`parent_agent_id` are free strings up to 128 characters. So a holder of a valid `msnode_` could put
+prose or secret fragments in those fields, and a named-column SELECT would forward them. The
+channel is structural only if every field is **typed so that prose cannot fit in it**. So
+`SyncTraceRowSchema` does not reuse the ingest schemas. Its fields are typed as follows:
+
+| field | rule |
+| --- | --- |
+| `id` | ULID: `^[0-9A-HJKMNP-TV-Z]{26}$` |
+| `seat` | `^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`, and it must resolve to a team member (§3) |
+| `session_digest` | `SessionDigestSchema` (8–32 lowercase hex; the ADR 131 keyed HMAC, never a raw session id) |
+| `harness` | `HarnessIdSchema` (ADR 281: `^[a-z0-9][a-z0-9._-]{0,63}$`) |
+| `kind`, `outcome` | closed enums (`TraceEventKindSchema`, `TraceOutcomeSchema`) |
+| `tool_name` | `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`: a tool identifier (`Bash`, `mcp__musterd__team_send`), with no whitespace, quotes or slashes |
+| `tool_use_id`, `agent_id`, `parent_agent_id` | `^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`: an opaque harness id (`toolu_…`, `call_…`, hex), with no whitespace |
+| `seq`, `ts`, `received_at`, `duration_ms` | non-negative safe integers |
+| `detail` | `TraceStructuralDetailSchema`, below |
+
+`TraceStructuralDetailSchema` is **per kind** and closed. Each `kind` names the keys it may carry,
+and each key has one value type:
+
+- **count** (a non-negative safe integer): `exit_code`, the `*_bytes` sizes, the `*_tokens`
+  totals, `tool_uses`.
+- **flag** (a boolean): `raised`, `deaf`, `encrypted`, `stop_hook_active`, `suppressed`,
+  `downgraded`.
+- **token** (`^[A-Za-z0-9_.:@-]{1,64}$`, so no whitespace and no prose): `hook`, `hook_event`,
+  `decision`, `source`, `reason`, `parser`, `type`, `model`.
+
+A key outside its kind's list, or a value outside its key's type, fails the schema. The per-kind
+key lists are the set the taps and parsers write today, as measured on the dogfood `trace.db` on
+2026-09-26. They live in `@musterd/protocol` as one table, and `dataset:export`'s
+`TRACE_DETAIL_KEYS` derives from it, so the public dataset and the sync channel share one
+definition of "structural".
+
+**Enforced at three points, with a different response at each:**
+
+1. **Hub, `/sync/trace`: reject.** A batch with any non-conforming field is a 400, and nothing is
+   written. This is the boundary against a joiner that does not run musterd's pusher.
+2. **Joiner pusher: normalize before sending.** A non-conforming identifier is sent as `null`, and
+   a non-conforming `detail` key is dropped. Rows stored before this ADR, or by an older tap, reach
+   the hub reduced rather than wedging the cursor on a 400 forever.
+3. **Local ingest (`POST /teams/:slug/trace/events`): normalize the same way, never reject.** A tap
+   must not lose a row over one odd field. The row is stored with that field nulled or dropped, and
+   a `normalized: n` count goes in the ingest counter. This tightens ADR 445's local store under the
+   same definition, so the three boundaries agree.
+
+The measurement that shaped rule 3: every live value conforms except **104 Cursor `tool_use_id`s,
+each containing a newline**, with two harness ids joined together (`call-…` over `fc_…`). That is a
+Cursor-tap defect, and increment 2 fixes it at the tap by taking the first id, so Cursor rows keep
+their R1↔R2 join key instead of being nulled. Rows already stored that way are normalized to `null`
+on their way out.
 
 The hub writes the admissible rows (§3) in one transaction into its own `trace.db`, with the
 origin's `seq`, `ts` and `received_at` kept verbatim, and a new column `origin_node` set to the
@@ -168,7 +221,8 @@ machines.
 
 ## Consequences
 
-- `@musterd/protocol` gains `SyncTraceRowSchema`, `SyncTracePushRequestSchema` and
+- `@musterd/protocol` gains `TraceStructuralDetailSchema` (the per-kind key table) and the typed
+  identifier patterns. It also gains `SyncTraceRowSchema`, `SyncTracePushRequestSchema` and
   `SyncTracePushResponseSchema` (`{ accepted, ignored, collided, refused: [{ id, code }] }`) under
   this ADR. The batch-holding refusals reuse the existing `conflict` code, with
   `reason: 'unresolved_seat' | 'unbound_seat'`. The per-row refusal code is `bound_elsewhere`.
@@ -184,15 +238,20 @@ machines.
 
 ### Increments
 
-1. This ADR (proposed), for acceptance by its reviewing seat (dolly declined it on 2026-09-26 with
-   four changes; §2–§4 carry them).
+1. This ADR (proposed), for acceptance by its reviewing seat. It was declined twice on 2026-09-26
+   and amended both times. dolly's four changes are in §2–§4. big-body's structural-only finding is
+   the §2 field table and the three enforcement points.
 2. Build: the protocol schemas, trace ladder v3, the hub route with its per-row residence check,
    `startTracePush` with its `trace.db` cursor, and tests. The tests cover: the content-field
    refusal; idempotent re-push (`ignored`); a digest collision under a new id (`collided`); a
    bound-elsewhere row refused alone while its batch-mates land and the cursor advances past it;
    `unresolved_seat` and `unbound_seat` holding the cursor; the cursor advancing on ack; a hub that
    never pushes; no audit row written on any refusal; and a stalled `/sync/trace` leaving the
-   `/sync/push` cadence unchanged. Then update the docs: 01/02/03 architecture and the
+   `/sync/push` cadence unchanged. **Field-by-field negative tests** (big-body): prose and
+   secret-shaped values (`"see /Users/x/.env"`, `"mskey_…"`, a sentence with spaces, a newline) in
+   `tool_name`, each id field, each token-typed `detail` key, and an unlisted `detail` key are
+   rejected by the hub before storage, and normalized away by the pusher and by local ingest. The
+   `TraceStructuralDetailSchema` and the ingest normalizer land together, with the Cursor tap fix. Then update the docs: 01/02/03 architecture and the
    research-corpus wiki.
 
 ## Observability & Evaluation
@@ -208,7 +267,8 @@ machines.
   `json_extract(payload,'$.kind')` names as a trace. Fails if a joiner seat's session is absent on
   the hub after two ticks, or if any hub row carries non-null `content` with a non-null
   `origin_node`.
-- **Experiment:** negative tests ship with increment 2. A content-bearing row is a 400. A row naming
+- **Experiment:** negative tests ship with increment 2. A content-bearing row is a 400, and so is a
+  row carrying prose in any structural field (the §2 table, field by field). A row naming
   a hub-bound seat is refused alone: `refused` lists it, its batch-mates are written, and no audit
   row appears. A repeated batch is accepted with `ignored = n` and no duplicates. A `/sync/trace`
   stalled past its timeout leaves `/sync/push`'s tick-to-tick interval unchanged.
