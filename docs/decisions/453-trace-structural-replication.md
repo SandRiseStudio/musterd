@@ -91,8 +91,8 @@ channel is structural only if every field is **typed so that prose cannot fit in
 | `session_digest` | `SessionDigestSchema` (8–32 lowercase hex; the ADR 131 keyed HMAC, never a raw session id) |
 | `harness` | `HarnessIdSchema` (ADR 281: `^[a-z0-9][a-z0-9._-]{0,63}$`) |
 | `kind`, `outcome` | closed enums (`TraceEventKindSchema`, `TraceOutcomeSchema`) |
-| `tool_name` | `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`: a tool identifier (`Bash`, `mcp__musterd__team_send`), with no whitespace, quotes or slashes |
-| `tool_use_id`, `agent_id`, `parent_agent_id` | `^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`: an opaque harness id (`toolu_…`, `call_…`, hex), with no whitespace |
+| `tool_name` | `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`, **and** the credential detector finds nothing in it (below) |
+| `tool_use_id`, `agent_id`, `parent_agent_id` | **`^[0-9a-f]{24}$`: a keyed digest, never the harness's raw id** (below) |
 | `seq`, `ts`, `received_at`, `duration_ms` | non-negative safe integers |
 | `detail` | `TraceStructuralDetailSchema`, below |
 
@@ -103,10 +103,48 @@ and each key has one value type:
   totals, `tool_uses`.
 - **flag** (a boolean): `raised`, `deaf`, `encrypted`, `stop_hook_active`, `suppressed`,
   `downgraded`.
-- **token** (`^[A-Za-z0-9_.:@-]{1,64}$`, so no whitespace and no prose): `hook`, `hook_event`,
-  `decision`, `source`, `reason`, `parser`, `type`, `model`.
+- **enum** (a closed producer allowlist): `hook` (`gate`, `interrupt`, and each hook musterd
+  registers), `hook_event`, `decision`, `source`, `reason`, `parser` (`<harness>@<n>`, exactly the
+  versions the parsers stamp), and `type` (the transcript record types the parsers recognise). The
+  lists are the values measured on 2026-09-26 plus every value the source can emit, and they live
+  beside the producers in `@musterd/protocol`.
+- **model id** (`model` only): `^[a-z0-9][a-z0-9.-]{0,63}$`, lowercase with no underscore.
+  Every live value fits (`claude-opus-5-5`, `claude-fable-5-1`, …). No `TOKEN_PREFIXES` credential
+  can match, because every prefix contains `_` (`mskey_`, `msgr_`, `mscr_`, `msac_`, `msls_`,
+  `msnode_`, …). A test asserts that for every registered prefix, so a future prefix without an
+  underscore fails CI.
 
-A key outside its kind's list, or a value outside its key's type, fails the schema. The per-kind
+A key outside its kind's list, or a value outside its key's type, fails the schema. A new
+producer value (a new transcript `type`, a new hook) is added to its list in the same change that
+starts emitting it. Until then, local ingest and the pusher normalize it to `other`, so it arrives
+as a count, never as text.
+
+**Opaque ids cross as keyed digests** (big-body's second review). The ids exist for joining: R1 to
+R2 by `tool_use_id`, subagents by `agent_id`. Nothing needs their raw form off the machine. So the
+pusher replaces `tool_use_id`, `agent_id` and `parent_agent_id` with `HMAC-SHA256(k, id)`, truncated
+to 24 hex characters. The key is not the one behind `session_digest`: that digest is keyed by the
+team's agent key inside the tap, and the daemon holds only that key's hash (ADR 131 §5). The key is
+instead a random 32-byte secret, generated once in the joiner's `trace.db` `schema_meta`
+(`sync_trace_id_key`). It is never sent anywhere and never logged, and it is kept for the file's
+lifetime. The same id always digests the same way on that machine, so every join the hub makes
+inside a joiner's rows still holds. A 24-character hex string cannot carry a credential or prose, whatever
+the harness put in the raw id. The hub's own locally minted rows keep their raw ids. They never
+leave the hub, and joins never cross machines, because sessions don't.
+
+**A credential detector at every boundary.** `scrubCredentials` (`traceScrub.ts`, ADR 445 1b)
+already recognises every `TOKEN_PREFIXES` shape and the generic bearer/API-key shapes. It runs over
+every string field of a sync row: the hub rejects the batch if it finds anything, and local ingest
+and the pusher null the field. After the digest and enum rules, only `tool_name` is still an open
+string; the detector covers it and, as defence in depth, everything else.
+
+**The threat model, stated so the schema is judged against the right attacker.** These rules make
+the channel structural-only against **honest-but-buggy producers**: a tap that puts the wrong
+thing in a field (the Cursor newline ids are a live example), or a harness that changes a format.
+They also guarantee the corpus and the public dataset receive no content or secrets. They are
+**not** a boundary against a malicious enrolled node. A holder of a valid `msnode_` can already
+push acts with prose bodies on `/sync/push` under ADR 325's trust model, and the answer to that is
+revoking the node, not a schema. So the claim is precise: nothing an honest musterd pusher sends can
+contain content or a credential, and the hub refuses any row that could. The per-kind
 key lists are the set the taps and parsers write today, as measured on the dogfood `trace.db` on
 2026-09-26. They live in `@musterd/protocol` as one table, and `dataset:export`'s
 `TRACE_DETAIL_KEYS` derives from it, so the public dataset and the sync channel share one
@@ -247,10 +285,12 @@ machines.
    bound-elsewhere row refused alone while its batch-mates land and the cursor advances past it;
    `unresolved_seat` and `unbound_seat` holding the cursor; the cursor advancing on ack; a hub that
    never pushes; no audit row written on any refusal; and a stalled `/sync/trace` leaving the
-   `/sync/push` cadence unchanged. **Field-by-field negative tests** (big-body): prose and
-   secret-shaped values (`"see /Users/x/.env"`, `"mskey_…"`, a sentence with spaces, a newline) in
-   `tool_name`, each id field, each token-typed `detail` key, and an unlisted `detail` key are
-   rejected by the hub before storage, and normalized away by the pusher and by local ingest. The
+   `/sync/push` cadence unchanged. **Field-by-field negative tests** (big-body): for every
+   `TOKEN_PREFIXES` entry, a syntactically valid credential (`mskey_` + 43 base64url characters,
+   `msgr_…`, and so on) is placed in `tool_name`, in each id field, in `model` and in each
+   enum-typed `detail` key. The hub must reject it before storage, and the pusher and local ingest
+   must null it. The same holds for prose (a sentence, a path, a newline) and for an unlisted
+   `detail` key. A positive test shows the digest keeps the R1↔R2 join inside a joiner's rows. The
    `TraceStructuralDetailSchema` and the ingest normalizer land together, with the Cursor tap fix. Then update the docs: 01/02/03 architecture and the
    research-corpus wiki.
 
