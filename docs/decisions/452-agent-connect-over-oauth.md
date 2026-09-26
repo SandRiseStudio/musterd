@@ -75,10 +75,17 @@ On `POST /oauth/:team/authorize` with an `agent_connect` proof, in one SQLite tr
    sponsor for a new one". Unknown, used, expired, wrong-team and departed-agent all return this
    same body. No failure budget is kept. The nonce is 256 bits, lives 15 minutes, and is single-use,
    so guessing is not a threat model. ADR 446 §5's per-IP authorize bucket still applies.
-3. **Supersede:** revoke every live OAuth chain for that agent (`revokeAllForMember`, audit
-   `oauth.revoked` with `reason: 'superseded'`). An agent seat has at most one OAuth occupant, and
-   connecting a new device evicts the old one. This is the chain's equivalent of ADR 337's
-   single-active claim.
+3. **Supersede:** revoke every live OAuth chain for that agent (`revokeAllForMember`), **and**
+   burn every authorization code bound to it that has not yet been exchanged (`used_at` set, so
+   `redeemCode` refuses it as replayed). Audit `oauth.revoked` with `reason: 'superseded'` and the
+   counts of chains and codes. An agent seat has at most one OAuth occupant, and connecting a new
+   device evicts the old one. This is the chain's equivalent of ADR 337's single-active claim.
+   Both kinds of authority must go. An earlier connect's code stays exchangeable for up to 90
+   seconds, and §4's member check would still pass it, because the agent is live. Without the
+   burn it could mint a second chain after this connect (big-body `01M3DM1CQ2`). The burn, the
+   revocation, and step 4's new code share one SQLite transaction. The token endpoint's redemption
+   is its own transaction, so SQLite serializes the two. An old code exchanged first yields a chain
+   this step revokes. An old code exchanged after is refused.
 4. Issue the authorization code exactly as the other proofs do, bound to the **agent** member, and
    append `member.agent_connected` (actor = the sponsor, target = the agent, detail =
    `{client_id, client_name}`). The token flow from here is ADR 446's, unchanged.
@@ -92,7 +99,7 @@ carries each guarantee:
 | ADR 337 lease property | The OAuth chain's equivalent |
 | --- | --- |
 | short-lived | `msat_` 1h. Refresh rotates single-use, and reuse revokes the chain (ADR 446 §5). |
-| invalid on supersession | §2.3: a new connect revokes every prior chain. |
+| invalid on supersession | §2.3: a new connect revokes every prior chain and burns every unexchanged code. |
 | invalid on ban/archive/disable | `authMember` refuses the status on every use. The token endpoint refuses it too (§4). |
 | invalid on sponsor removal | ADR 449 §2's cascade disables the agent **and** revokes its chains. |
 | invalid on credential rotation | The admin rotate path already revokes all chains (ADR 446 §3). |
@@ -189,6 +196,7 @@ stays clean).
   the code at sign-in, and the agent sends a message the phone sees. Falsifiers, each a test:
   - a second redeem of the same nonce is refused;
   - a reconnect with a re-issued nonce revokes the first chain;
+  - a code issued by the first connect and exchanged **after** the second connect is refused;
   - removing the sponsor refuses the agent's next tool call **and** its next refresh;
   - an expiring sponsor's agent receives `expires_in` no later than the sponsor's end;
   - an `msac_` or `mscr_` in the `agent_connect` arm is refused at the schema.
