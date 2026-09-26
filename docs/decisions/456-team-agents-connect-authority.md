@@ -55,11 +55,20 @@ it through `POST /teams/:slug/policy`, audited as `policy.change`, as with every
 - `'any_member'`: any human member in good standing may issue a connect link for any live sponsored
   agent on the team. Agents never issue connect links.
 
-The default is the safe one on purpose, as with ADR 146's opt-in. A team that admits strangers by
-invite should leave it. A team whose members trust one another, like `revive`, turns it on. The
-server does not derive the setting from invite usage. A team that once used an invite would flip
-behaviour silently, the moment it minted one. That is a change nobody chose, and nothing
-prompts anyone to look for it.
+The default is the safe one on purpose, as with ADR 146's opt-in. Turning on `'any_member'` is an
+admin's explicit choice to accept the takeover risk. The server allows it on **any** team,
+invite-admitting ones included, and never refuses the knob on that ground. §3 and §4 are what make
+that choice survivable: every takeover is attributed, bounded by the connector's standing, and
+announced to the people it displaces.
+
+nick chose `'any_member'` for both `revive` and the public demo team (relayed by sloane
+`01M3FDYEF2`, 2026-09-26). The demo setup script (lane `01M3FCFQ8K`) sets it on the demo team, whose
+members are admitted by invite. The shipped default stays `'sponsor'` for every team that hasn't
+chosen.
+
+The server does not derive the setting from invite usage. A team that once used an invite would flip
+behaviour silently, the moment it minted one. That is a change nobody chose, and nothing prompts
+anyone to look for it.
 
 ### 3. The member who connected a device bounds the session
 
@@ -98,6 +107,10 @@ connected it loses their standing".
 - The per-member "may create agents" switch and cap tuning (ADR 449 increment 3, lane
   `01M3FAPB32`).
 - Who may **create** agents. That stays with human members, capped per sponsor (ADR 449 §3).
+- Role changes. The boundary in §3 is **standing**, not role. An admin who issued a link under
+  `'sponsor'` and is later demoted, but still in good standing, keeps any chain they connected
+  (ghost `01M3FDTQEX`). An admin who wants that session gone revokes it the ordinary way: by
+  re-issuing the agent's link, which supersedes it, or by rotating credentials.
 
 ## Considered and rejected
 
