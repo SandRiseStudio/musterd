@@ -1,4 +1,4 @@
-import type { Goal, GoalDeclareMeta, Lane } from '@musterd/protocol';
+import type { Goal, GoalDeclareMeta } from '@musterd/protocol';
 import {
   compareGoals,
   GoalDeclareMetaSchema,
@@ -6,7 +6,7 @@ import {
   GoalRetractMetaSchema,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { deriveGoalStatus, listLanes } from './lanes.js';
+import { deriveGoalStatus, laneStatesByGoal } from './lanes.js';
 
 /**
  * Declared Goals for a general team (ADR 048's seam, resolved by ADR 084): a Goal is an ordinary
@@ -99,7 +99,7 @@ function normalizeDeclaredWave(wave: number | 'later' | undefined): Wave {
  *   - each **`defer`** and each goal-scoped **`steer`** (one that names `meta.goal_id`) bumps the epoch.
  * This is the same read-side-projection posture as steer supersession and derived Goal status.
  */
-export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[] {
+export function listGoals(db: Database, teamId: string, _teamSlug: string): Goal[] {
   // Declarations (message→team+meta.goal) and the two direction-changing acts, in one ts-ordered scan.
   const rows = db
     .prepare<[string], GoalSignalRow>(
@@ -209,14 +209,8 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
     if (!prior || p.at >= prior.at) retractions.set(p.goalId, { by: p.by, at: p.at });
   }
 
-  // Derive status from lanes joined by goal_id — one lane scan, grouped in memory (not one per Goal).
-  const lanesByGoal = new Map<string, Lane[]>();
-  for (const lane of listLanes(db, teamId, teamSlug)) {
-    if (lane.goal_id === null) continue;
-    const group = lanesByGoal.get(lane.goal_id);
-    if (group) group.push(lane);
-    else lanesByGoal.set(lane.goal_id, [lane]);
-  }
+  // Derive status from lanes joined by goal_id — one narrow (goal_id, state) scan, not the board.
+  const lanesByGoal = laneStatesByGoal(db, teamId);
 
   return [...byId.values()].map((g) => ({
     id: g.id,

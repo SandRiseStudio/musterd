@@ -742,7 +742,44 @@ const TERMINAL: ReadonlySet<string> = LANE_TERMINAL_STATES;
  * so a dead thread-`resolve` (2/21 in practice) can never pin a Goal's status. Live, not a latch:
  * a new lane on a shipped Goal honestly returns it to `in-flight`.
  */
-export function deriveGoalStatus(lanes: Lane[]): 'planned' | 'in-flight' | 'shipped' {
+/**
+ * Every goal-linked lane's state, grouped by goal — the one input {@link deriveGoalStatus} reads.
+ * A narrow read on purpose (lane 01M3D4069F): hydrating the whole board (detail bodies, JSON
+ * columns) for two columns made each `GET /report` ~20 ms slower at a 1200-lane board, and every
+ * open /live viewer refetches the report on every lane act.
+ */
+export function laneStatesByGoal(db: Database, teamId: string): Map<string, Pick<Lane, 'state'>[]> {
+  const rows = db
+    .prepare<
+      [string],
+      { goal_id: string; state: LaneState }
+    >('SELECT goal_id, state FROM lanes WHERE team_id = ? AND goal_id IS NOT NULL')
+    .all(teamId);
+  const byGoal = new Map<string, Pick<Lane, 'state'>[]>();
+  for (const { goal_id, state } of rows) {
+    const group = byGoal.get(goal_id);
+    if (group) group.push({ state });
+    else byGoal.set(goal_id, [{ state }]);
+  }
+  return byGoal;
+}
+
+/** The blocked lanes, board order — the report's exception list, without hydrating the board. */
+export function listBlockedLanes(
+  db: Database,
+  teamId: string,
+): Pick<Lane, 'id' | 'title' | 'owner_seat' | 'goal_id'>[] {
+  return db
+    .prepare<
+      [string],
+      Pick<Lane, 'id' | 'title' | 'owner_seat' | 'goal_id'>
+    >(`SELECT id, title, owner_seat, goal_id FROM lanes WHERE team_id = ? AND state = 'blocked' ORDER BY created_at`)
+    .all(teamId);
+}
+
+export function deriveGoalStatus(
+  lanes: Pick<Lane, 'state'>[],
+): 'planned' | 'in-flight' | 'shipped' {
   if (lanes.length === 0) return 'planned';
   const allTerminal = lanes.every((l) => TERMINAL.has(l.state));
   const anyDone = lanes.some((l) => l.state === 'done');

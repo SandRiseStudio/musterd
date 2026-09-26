@@ -17,7 +17,7 @@ import type { Database } from 'better-sqlite3';
 import { actAnswered, openDirectedLedger } from './delivery.js';
 import { listGoals } from './goals.js';
 import { rowsToEnvelopes } from './hydrate.js';
-import { listLanes } from './lanes.js';
+import { listBlockedLanes } from './lanes.js';
 import { deriveMast } from './mast.js';
 import { getMemberByName } from './members.js';
 import { listTeamMessages, longDeferred } from './messages.js';
@@ -881,9 +881,7 @@ export function deriveReport(
   /** Presence liveness window for the family-posture snapshot (ADR 172); omitted ⇒ no posture. */
   presenceTimeoutMs?: number,
 ): Report {
-  const blocked: BlockedLane[] = listLanes(db, teamId, teamSlug)
-    .filter((l) => l.state === 'blocked')
-    .map((l) => ({ id: l.id, title: l.title, owner_seat: l.owner_seat, goal_id: l.goal_id }));
+  const blocked: BlockedLane[] = listBlockedLanes(db, teamId);
 
   return {
     team: teamSlug,

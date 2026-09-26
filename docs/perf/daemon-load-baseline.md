@@ -211,3 +211,42 @@ header); the harness now sends the edge headers on loopback only, and refuses `D
 so a run cannot silently drop late arrivals. The 2026-09-25 re-run (RAMP=1000, DURATION=300)
 repeated both faults: 16 of 50 arrivals, 16× 403, zero humans signed in. Falsifier: a tunnel
 run on the fixed harness still returning 403 on register.
+
+The first tunnel run that got every human in (2026-09-26, after the fix above and the
+`MUSTERD_ALLOWED_HOSTS` fix in #1739) also exposed a second 403: the daemon's Host/Origin gate
+refuses a Host that is not loopback, the bound host, or on `MUSTERD_ALLOWED_HOSTS`, and the demo
+runbook never set it — every phone would have been refused. Fixed in the runbook (#1739).
+
+**Sustained tunnel run (2026-09-26, quick tunnel, same box, 50/50/50, RAMP=1000, DURATION=1300,
+build 55f1ab2e).** All 50 humans signed in through the edge (register / authorize / token /
+initialize / `team_join` 50 each, 0 errors). **The daemon failed the budget:**
+
+| measure | value |
+| ------- | ----- |
+| all-request p50 / p95 / p99 | 225 ms / **10 250 ms** / 47 178 ms |
+| daemon CPU, rss | 51 %, 238 MB |
+| loop delay p99 / max | 137 / **4 698 ms** |
+| `GET /report` (viewer, 4 609 calls) p50 / p95 | 1 797 / **48 925 ms** |
+| human `/mcp` send · inbox · inbox-full p95 | 24.0 · 23.1 · 23.6 s (13× 502 at the edge) |
+| `GET /teams/:slug` (viewer, 10 760 calls) p95 | 4 118 ms |
+| errors | 85 (13× 502 human MCP, ~71× 401 on agent inbox/messages/lanes — not yet explained) |
+
+A same-length run with no humans through (the Host-gate fault) already sat at p95 5.9 s. So the
+failure is sustained load, not the tunnel — and the 90 s runs above could not see it: an agent
+opens a lane every 300 s and re-claims every 120 s, so a 90 s window holds no lane acts at all.
+
+*Root cause.* `/live` and `/board` refetch `GET /report` on **every** lane act
+(`packages/web/src/live/useReport.ts`), so each lane act costs one `deriveReport` per open viewer,
+synchronously, on the one event loop. `deriveReport` hydrated the whole lane board (detail
+bodies, JSON columns) **twice** — once for the blocked list, once inside `listGoals` for goal
+status — to read two columns: 52 ms at a 1200-lane board, so 50 viewers × one lane act ≈ 2.6 s
+of blocked loop, with every other request (phone tool calls, `/health`) queued behind it. Both
+reads are now narrow SQL (`listBlockedLanes`, `laneStatesByGoal`): **52 → 5.4 ms** per report at
+1200 lanes (7.4 ms at 2400), measured in-process on a laptop. The per-viewer fan-out itself stays
+(≈ 0.27 s of loop per lane act at 50 viewers); the roster read costs ~6–12 ms per call at 101
+members, spread over many `prepare` calls, and is the next suspect if a re-run still misses.
+
+*Corrected 2026-09-26 (izzo):* the "go/no-go ceiling ~75 concurrent attendees" above came from
+90 s runs and does not hold under sustained load — at 50 the build before this fix fails. Re-read
+the ceiling from a sustained run on the fixed build. Falsifier for the root cause: a sustained
+tunnel run on the fixed build whose loop-delay max is still multi-second.
