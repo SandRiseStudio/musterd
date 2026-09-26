@@ -501,6 +501,50 @@ describe('musterd stream', () => {
       expect(readStreamState(statePath)!.restarts).toEqual([NOW]);
     });
 
+    it('a relaunch replays recorded broadcast args and says so', async () => {
+      withImage();
+      writeStreamState(statePath, {
+        desired: 'live',
+        team: 'revive',
+        at: NOW - 60_000,
+        restarts: [],
+        args: '--duration 600',
+      });
+      let flyArgs: string[] = [];
+      expect(
+        await run(
+          ['ensure'],
+          sup({
+            launch: (args) => {
+              flyArgs = args;
+              launches += 1;
+              return { code: 0, output: '' };
+            },
+          }),
+        ),
+      ).toBe(0);
+      expect(flyArgs).toContain('BROADCAST_ARGS=--duration 600');
+      expect(out.join('')).toContain('broadcast args kept (--duration 600)');
+      expect(readStreamState(statePath)!.args).toBe('--duration 600');
+    });
+
+    it('start records --args on the stream record so a later relaunch can replay them', async () => {
+      withImage();
+      let flyArgs: string[] = [];
+      expect(
+        await run(['start', '--args', 'duration 600'], {
+          ...sup(),
+          launch: (args) => {
+            flyArgs = args;
+            launches += 1;
+            return { code: 0, output: '' };
+          },
+        }),
+      ).toBe(0);
+      expect(flyArgs).toContain('BROADCAST_ARGS=duration 600');
+      expect(readStreamState(statePath)!.args).toBe('duration 600');
+    });
+
     it('at the flap cap: stands down, asks ONCE, and never launches', async () => {
       withImage();
       writeStreamState(statePath, {

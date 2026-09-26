@@ -379,7 +379,15 @@ async function startVerb(
     a.statePath,
     once
       ? { desired: 'stopped', by: a.who(), at: a.now(), reason: '--once run', team, restarts: [] }
-      : { desired: 'live', by: a.who(), at: a.now(), team, image: digest, restarts: [] },
+      : {
+          desired: 'live',
+          by: a.who(),
+          at: a.now(),
+          team,
+          image: digest,
+          restarts: [],
+          ...(extra ? { args: extra } : {}),
+        },
   );
 
   a.out(
@@ -619,7 +627,9 @@ function statusVerb(a: { exec: Exec; app: string; out: (s: string) => void } & S
     } else if (state?.desired === 'live') {
       a.out(
         `${theme.warn('○ not live')} ${theme.meta(
-          'but desired live — a crash; the supervisor restarts it within its tick',
+          `but desired live — a crash; the supervisor restarts it within its tick${
+            state.args ? ` · broadcast args kept (${state.args})` : ''
+          }`,
         )}\n`,
       );
     } else if (state?.desired === 'stopped' && state.by) {
@@ -631,7 +641,11 @@ function statusVerb(a: { exec: Exec; app: string; out: (s: string) => void } & S
     }
     return 0;
   }
-  a.out(`${theme.ok('◉ live')} ${theme.meta(`machine ${live.join(', ')} · ${a.app}`)}\n`);
+  a.out(
+    `${theme.ok('◉ live')} ${theme.meta(
+      `machine ${live.join(', ')} · ${a.app}${state?.args ? ` · ${state.args}` : ''}`,
+    )}\n`,
+  );
   return 0;
 }
 
@@ -706,7 +720,9 @@ async function ensureVerb(
       const { digest: checkoutDigest, addr } = launchPreconditions(a);
       const digest = d.state.image ?? checkoutDigest;
       const team = d.state.team ?? process.env['MUSTERD_TEAM'] ?? 'revive';
-      const { code, output } = await a.launch(launchArgs({ app: a.app, digest, addr, team }));
+      const { code, output } = await a.launch(
+        launchArgs({ app: a.app, digest, addr, team, extra: d.state.args }),
+      );
       if (code !== 0) {
         a.err(`${theme.err('✗')} relaunch failed (fly exit ${code}) — next tick retries\n`);
         // Keep WHY, not just that it happened. `output` was already on LaunchResult and already
