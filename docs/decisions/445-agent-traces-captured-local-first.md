@@ -132,7 +132,8 @@ don't build" (§3). §7 gains a dated scope note pointing here; its text stands.
   write time — the join key (session digest + `tool_use_id`) is carried in both.
 - **Structural** columns follow ADR 184 §2's definition (names, ids, kinds, timings, counts,
   fingerprints) and replicate under ADR 371's `record` kind and export under `dataset:export` as
-  today. **Content** columns (inputs, outputs, prompts, responses, reasoning) never replicate, never
+  today _(Amended 2026-09-26: the `record`-kind replication clause is superseded by
+  [ADR 453](453-trace-structural-replication.md). See the Consequences note.)_. **Content** columns (inputs, outputs, prompts, responses, reasoning) never replicate, never
   export, and never cross the wire off-machine without ADR 184 §3 consent recorded per author. They
   are readable through the daemon by the seat that produced them and by admins (ADR 128's
   recipient-scoping applied to a seat's own trace).
@@ -326,7 +327,8 @@ ADR 184's publication gate; a spans backend.
   dedicated `POST /teams/:slug/sync/trace`, from `trace.db` into the hub's `trace.db`. It is
   structural-only by schema, bound to the seats resident on the pushing node, and never touches
   `sync_log` or `audit`. That would replace §3's "replicate under ADR 371's `record` kind" clause
-  and nothing else in §3. Until ADR 453 is accepted, that clause stands, and nothing replicates.
+  and nothing else in §3. **Accepted 2026-09-26**: that clause is superseded by ADR 453; nothing
+  replicates until its increment 2 lands.
 - Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
   backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a

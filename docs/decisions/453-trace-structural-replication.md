@@ -1,6 +1,6 @@
 # 453 — trace rows reach the hub on their own channel, not the coordination log
 
-- Status: proposed — 2026-09-25
+- Status: accepted — 2026-09-26 (big-body, cross-family; dolly on §3/§4)
 - Date: 2026-09-25
 - Lane: `01M3DG52YVZ90GBGD2QJGXAX49` (goal `research-corpus`; ADR 445 increment 3b)
 - Supersedes: [ADR 445](445-agent-traces-captured-local-first.md) §3, one clause only: that
@@ -142,8 +142,10 @@ harness's **tool namespace**: a Claude Code name must be one of its built-in too
 `^mcp__[a-z0-9-]+__[A-Za-z0-9_-]+$`; a Codex name must be one of its built-ins or the same MCP
 form; Cursor and Grok names follow their own harness's documented forms; and anything else is
 stored and sent as `other`. The namespace table lives beside the harness ids in
-`@musterd/protocol`, and a new built-in is added in the change that starts emitting it. So the
-precise claim is: **no field on the channel can carry prose or a credential, and `tool_name` can
+`@musterd/protocol`, and a new built-in is added in the change that starts emitting it. `other`
+is an explicit sentinel in the schema: the hub accepts it as the normalized form of an unknown
+name and rejects every other non-namespace value (big-body, on acceptance). So the precise claim
+is: **no field on the channel can carry prose or a credential, and `tool_name` can
 carry at most a single-token tool identifier from the harness's own namespace.** A producer that
 puts `customer-project-summary` in `tool_name` sends `other`. A tool that is really named that,
 behind an MCP server, sends `mcp__<server>__customer-project-summary`, which is the tool's public
@@ -294,9 +296,9 @@ machines.
 
 ### Increments
 
-1. This ADR (proposed), for acceptance by its reviewing seat. It was declined twice on 2026-09-26
-   and amended both times. dolly's four changes are in §2–§4. big-body's structural-only finding is
-   the §2 field table and the three enforcement points.
+1. This ADR. Accepted 2026-09-26 by big-body (gpt-6-luna, cross-family) after four declines, each
+   amended: dolly's four changes are §3–§4; big-body's three structural-only findings are §2's
+   field table, the closed enums and keyed id digests, and the `tool_name` namespace rule.
 2. Build: the protocol schemas, trace ladder v3, the hub route with its per-row residence check,
    `startTracePush` with its `trace.db` cursor, and tests. The tests cover: the content-field
    refusal; idempotent re-push (`ignored`); a digest collision under a new id (`collided`); a
