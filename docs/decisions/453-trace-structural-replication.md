@@ -91,7 +91,7 @@ channel is structural only if every field is **typed so that prose cannot fit in
 | `session_digest` | `SessionDigestSchema` (8–32 lowercase hex; the ADR 131 keyed HMAC, never a raw session id) |
 | `harness` | `HarnessIdSchema` (ADR 281: `^[a-z0-9][a-z0-9._-]{0,63}$`) |
 | `kind`, `outcome` | closed enums (`TraceEventKindSchema`, `TraceOutcomeSchema`) |
-| `tool_name` | `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`, **and** the credential detector finds nothing in it (below) |
+| `tool_name` | `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$` (one token, no whitespace), the credential detector finds nothing in it, **and** it is normalized against the harness's tool namespace (below) |
 | `tool_use_id`, `agent_id`, `parent_agent_id` | **`^[0-9a-f]{24}$`: a keyed digest, never the harness's raw id** (below) |
 | `seq`, `ts`, `received_at`, `duration_ms` | non-negative safe integers |
 | `detail` | `TraceStructuralDetailSchema`, below |
@@ -130,6 +130,24 @@ lifetime. The same id always digests the same way on that machine, so every join
 inside a joiner's rows still holds. A 24-character hex string cannot carry a credential or prose, whatever
 the harness put in the raw id. The hub's own locally minted rows keep their raw ids. They never
 leave the hub, and joins never cross machines, because sessions don't.
+
+**`tool_name` is the one field that stays a name, and the guarantee is narrowed to say so**
+(big-body's third review). A tool name cannot be a closed list: MCP tools are named by whichever
+server a seat has (`mcp__<server>__<tool>`), and Codex and Cursor name theirs freely. It is a
+**name**, which ADR 184 §2 classes as structural, and `dataset:export` has shipped it in the
+public dataset since increment 3a under that rule. This ADR does not widen that exposure, and it
+bounds it three ways. The pattern allows one token with no whitespace, so a sentence cannot pass.
+The credential detector runs on it. And the pusher and local ingest normalize it against the
+harness's **tool namespace**: a Claude Code name must be one of its built-in tools or match
+`^mcp__[a-z0-9-]+__[A-Za-z0-9_-]+$`; a Codex name must be one of its built-ins or the same MCP
+form; Cursor and Grok names follow their own harness's documented forms; and anything else is
+stored and sent as `other`. The namespace table lives beside the harness ids in
+`@musterd/protocol`, and a new built-in is added in the change that starts emitting it. So the
+precise claim is: **no field on the channel can carry prose or a credential, and `tool_name` can
+carry at most a single-token tool identifier from the harness's own namespace.** A producer that
+puts `customer-project-summary` in `tool_name` sends `other`. A tool that is really named that,
+behind an MCP server, sends `mcp__<server>__customer-project-summary`, which is the tool's public
+name and already in the dataset.
 
 **A credential detector at every boundary.** `scrubCredentials` (`traceScrub.ts`, ADR 445 1b)
 already recognises every `TOKEN_PREFIXES` shape and the generic bearer/API-key shapes. It runs over
@@ -290,7 +308,10 @@ machines.
    `msgr_…`, and so on) is placed in `tool_name`, in each id field, in `model` and in each
    enum-typed `detail` key. The hub must reject it before storage, and the pusher and local ingest
    must null it. The same holds for prose (a sentence, a path, a newline) and for an unlisted
-   `detail` key. A positive test shows the digest keeps the R1↔R2 join inside a joiner's rows. The
+   `detail` key. A positive test shows the digest keeps the R1↔R2 join inside a joiner's rows.
+   For `tool_name`: a readable non-namespace value (`customer-project-summary`, a path, a
+   sentence) normalizes to `other` at the pusher and at ingest, and the hub rejects it; every
+   Claude Code built-in and a well-formed `mcp__…__…` name pass unchanged. The
    `TraceStructuralDetailSchema` and the ingest normalizer land together, with the Cursor tap fix. Then update the docs: 01/02/03 architecture and the
    research-corpus wiki.
 
