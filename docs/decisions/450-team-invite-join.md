@@ -1,6 +1,6 @@
 # 450 — Team invite: a stranger's OAuth sign-in admits a new human member
 
-- Status: proposed — 2026-09-25 (reshaped 2026-09-26: no event concept, per nick's steers
+- Status: accepted — 2026-09-26 (big-body security accept `01M3E6FSN5`); proposed 2026-09-25 (reshaped 2026-09-26: no event concept, per nick's steers
   `01M3D5R783` / `01M3D66PSZ`; guess-resistance reworked after big-body's reviews `01M3DH981F`,
   `01M3DJVZPD` and `01M3DKJ0ET`)
 - Date: 2026-09-25
@@ -82,8 +82,9 @@ secret is printed once (hard rule 5). The two verifiers differ on purpose (§3):
 - `secret_hash` = `sha256(secret)`. 160 bits of entropy make the plain hash unguessable offline,
   the same posture as every `ms*_` credential (SPEC A.2).
 - `code_mac` = `HMAC-SHA256(k_invite, team_id ‖ selector ‖ code)`, where `k_invite` is a 256-bit
-  key the daemon generates on first use and keeps **outside the database**, at
-  `$MUSTERD_HOME/invite.key` (chmod 600), beside the config. 40 bits is enumerable offline in
+  key the daemon generates on first use and keeps **outside the database**: `invite.key` in the
+  directory of the effective config file (`MUSTERD_CONFIG` if set, else `~/.musterd/config.json`),
+  created and enforced at mode 0600 — the same resolution and posture as `config.json` itself. 40 bits is enumerable offline in
   minutes against a plain hash; keyed, a copy of the database alone verifies nothing.
 
 - `expires_at` is chosen by the minter (default 24h). `max_uses` default 100.
@@ -244,7 +245,8 @@ client is increment 3 (below).
   this ADR. No new credential prefix (the secret is typed or pasted by humans, not dispatched by
   prefix).
 - `@musterd/server`: one migration (`team_invites`), the invite store (mint / list / revoke /
-  redeem-or-charge), `invite.key` generation under `$MUSTERD_HOME`, the second consent form, the `invite` branch in `POST /oauth/:team/authorize`,
+  redeem-or-charge), `invite.key` generation beside the effective config (0600), the second
+  consent form, the `invite` branch in `POST /oauth/:team/authorize`,
   and two audit verbs. Needs ADR 446 (#1694, merged c25a50d4) and ADR 449 (#1713, merged
   2026-09-26) — both landed.
 - `musterd` CLI: `team invite create|list|revoke`, admin-only, in the Figma terminal style.
