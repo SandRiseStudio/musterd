@@ -1,7 +1,8 @@
 # 450 — Team invite: a stranger's OAuth sign-in admits a new human member
 
 - Status: proposed — 2026-09-25 (reshaped 2026-09-26: no event concept, per nick's steers
-  `01M3D5R783` / `01M3D66PSZ`; guess-resistance reworked after big-body's review `01M3DH981F`)
+  `01M3D5R783` / `01M3D66PSZ`; guess-resistance reworked after big-body's reviews `01M3DH981F`
+  and `01M3DJVZPD`)
 - Date: 2026-09-25
 - Lane: `01M3AKNF0JXY8HFN1P4HTMPWCY` (join link, goal `demo`)
 - Builds on: [ADR 446](446-remote-mcp-https-oauth.md) (remote MCP + OAuth; its §3 authorize seam
@@ -60,18 +61,23 @@ musterd team invite list                                    # id, uses/max, fail
 musterd team invite revoke <id>
 ```
 
-One invite has **two spellings of one secret**, both derived from the same `randomBytes(20)`:
+One invite has a **non-secret selector** and **two spellings of one secret**, the secret from
+`randomBytes(20)`:
 
+- **The selector** — 3 characters of Crockford base32 (`sel`), unique among the team's live
+  invites, drawn at mint. It names *which* invite a caller is trying, so a failure is charged to
+  that invite alone (§3). It is not secret: it is on the slide next to the code.
 - **The link secret** — the full 160 bits, base64url, carried in the join link and its QR
-  (`/join/<team>#i=<secret>`; the fragment never reaches a server log). This is the primary path:
-  the phone opens the link, the join page passes the secret through to the sign-in form field.
-- **The room code** — the first 40 bits, 8 characters of Crockford base32 shown as `XXXX-XXXX`,
-  for a person who must type instead of scan. Input is case-insensitive, ignores `-` and spaces,
-  and maps `O→0`, `I/L→1`.
+  (`/join/<team>#i=<sel>.<secret>`; the fragment never reaches a server log). This is the primary
+  path: the phone opens the link, the join page passes the value through to the sign-in form.
+- **The room code** — the first 40 bits of the secret, 8 characters of Crockford base32, shown
+  with the selector as `SEL-XXXX-XXXX`, for a person who must type instead of scan. Input is
+  case-insensitive, ignores `-` and spaces, and maps `O→0`, `I/L→1`.
 
-Stored in a new table `team_invites` (`id`, `team_id`, `secret_hash`, `code_hash`, `max_uses`,
-`uses`, `fail_budget`, `failures`, `expires_at`, `member_until`, `created_by`, `created_at`,
-`revoked_at`). Both hashes are sha256; the plaintext is printed once (hard rule 5).
+Stored in a new table `team_invites` (`id`, `team_id`, `selector`, `secret_hash`, `code_hash`,
+`max_uses`, `uses`, `fail_budget`, `failures`, `expires_at`, `member_until`, `created_by`,
+`created_at`, `revoked_at`; unique `(team_id, selector)` among unrevoked rows). Both hashes are
+sha256; the plaintext secret is printed once (hard rule 5).
 
 - `expires_at` is chosen by the minter (default 24h). `max_uses` default 100.
 - `fail_budget` default 20. **When `failures` reaches it the invite burns** (§3).
@@ -93,7 +99,7 @@ create one new human member at sign-in, while the invite is live.
 ```ts
 z.object({
   kind: z.literal('invite'),
-  secret: z.string().min(8).max(64),  // the link secret, or a typed room code; normalized server-side
+  secret: z.string().min(11).max(64), // `<sel>.<link secret>` or a typed `SEL-XXXX-XXXX`; normalized server-side
   name: z.string().min(1).max(64),    // the name the stranger picks; addMember rules apply
 }).strict()
 ```
@@ -104,15 +110,17 @@ the person only picks a name. "I already have a seat — `mscr_`" is the second 
 
 On `POST /oauth/:team/authorize` with an `invite` proof, in one SQLite transaction:
 
-1. Normalize the secret. 27+ characters is treated as a link secret and matched on `secret_hash`;
-   8 characters after stripping is a room code and matched on `code_hash`. Constant-time compare
-   against every **live** invite of the team (unrevoked, unexpired, `uses < max_uses`,
-   `failures < fail_budget`).
-2. **No match:** increment `failures` on **every** live invite of the team whose code length was
-   tried (a wrong room code is a guess against all live codes at once, so all of them pay), append
-   audit `member.invite_refused` (client id, kind of secret tried, never the secret), and return one
-   `unauthorized` ("that invite isn't valid for this team"). Wrong, expired, revoked, exhausted and
-   burned all return this same body.
+1. Normalize and split: the first 3 characters are the selector, the rest is the secret. Look up
+   the team's **live** invite with that selector (unrevoked, unexpired, `uses < max_uses`,
+   `failures < fail_budget`). 27+ remaining characters is a link secret, compared against
+   `secret_hash`; 8 remaining characters is a room code, compared against `code_hash`. Both
+   compares are constant-time.
+2. **No match:** if the selector named a live invite, increment **that invite's** `failures` and
+   no other's; if it named nothing, charge nothing (there is nothing to protect, and a guesser
+   learns only that a 3-character public prefix is unused). Either way append audit
+   `member.invite_refused` (client id, selector tried, kind of secret tried, never the secret) and
+   return one `unauthorized` ("that invite isn't valid for this team"). Wrong, expired, revoked,
+   exhausted, burned and unknown-selector all return this same body.
 3. The name must not exist on the team **in any state**, including a removed (tombstoned) member.
    `addMember` revives a tombstoned name (ADR 065), and a stranger must never revive someone else's
    seat. Refuse with `conflict` ("that name is taken — pick another"); this does not count as a
@@ -133,15 +141,18 @@ ADR 446 §5's authorize bucket (10/min per `CF-Connecting-IP`) stays, but it is 
 not the bound: it limits one source, and a guesser can have many. The bound is the **failure
 budget**, which is source-independent:
 
-- A team with `k` live invites, each with budget `B`, accepts at most `k·B` wrong room codes in
-  total before every code is burned, however many IPs send them. With defaults (`B` = 20) and one
-  live invite, the probability that any number of guessers hits the 40-bit code before it burns is
-  `≤ 20 / 2^40 ≈ 2·10⁻¹¹`. With ten live invites it is `≤ 200 / 2^40`. This holds across the
-  invite's whole validity window, because the budget does not refill.
+- Each invite with budget `B` accepts at most `B` wrong secrets before it burns, however many IPs
+  send them and however many other invites are live. With the default `B` = 20 the probability
+  that any number of guessers hits one invite's 40-bit code before it burns is
+  `≤ 20 / 2^40 ≈ 2·10⁻¹¹`, and a team with `k` live invites exposes `≤ k·20 / 2^40` in total.
+  This holds across the invite's whole validity window, because the budget does not refill.
 - The link secret is 160 bits; the same budget applies, and no realistic budget makes it guessable.
-- **Burning is per invite, so the DoS surface is one invite.** A hostile caller who spends the
-  budget closes that invite; the room is not locked out, and the presenter re-mints (one command,
-  a new code on the slide). There is deliberately no team-wide lockout and no per-name lockout.
+- **Burning is per invite, so the DoS surface is one invite** — and the selector is what makes
+  that true: a failure is charged to the invite the caller named, so twenty typos (or a
+  distributed guesser) against `ABC-…` burn `ABC` and leave `DEF`'s link and code untouched. A
+  hostile caller who spends the budget closes that invite; the room is not locked out, and the
+  presenter re-mints (one command, a new code on the slide). There is deliberately no team-wide
+  lockout and no per-name lockout.
 - The budget also caps how much a leaked room code is worth once revoked: nothing.
 - Failures are visible: `team invite list` shows `failures/budget`, and `member.invite_refused`
   audit rows show a guessing run as it happens.
@@ -161,13 +172,17 @@ client is increment 3 (below).
 ## What this does not decide
 
 - The join page's layout and strings (sloane `01M3AKNKQ1` / `01M3D422B6`, miley's build). It needs
-  two facts from this ADR: the link carries the secret in the fragment and the page forwards it
-  to the sign-in URL; the room code is the fallback, shown on the card, typed on the sign-in page.
+  two facts from this ADR: the link carries `<sel>.<secret>` in the fragment and the page
+  forwards it to the sign-in URL; the room code `SEL-XXXX-XXXX` is the fallback, shown on the
+  card, typed on the sign-in page.
 - Expiry, revocation cascade, sponsored agents — ADR 449.
 - The public route: [ADR 451](451-persistent-public-demo-route.md)'s ingress has no line for
   `/join/<team>`; stanley flagged it (`01M3DGHJFN`), big-body owns it. Increment 2 depends on it.
 - A per-person single-use link. Rejected for v1 (below). If it comes back, it is a third `proof`
   kind at the same seam.
+- stanley's agent connect (ADR 449 increment 2b): the same `/join/<team>` page dispatches on the
+  fragment key — `#i=` is this ADR's invite, `#n=` is an agent nonce — and its proof arm
+  `kind: 'agent_connect'` sits beside `invite` in the union. Sequenced after this ADR's PR.
 
 ## Considered and rejected
 
@@ -188,6 +203,10 @@ client is increment 3 (below).
   (big-body `01M3DH981F`). Replaced by §3.
 - **Team-wide or per-name lockout after N failures.** Turns any guesser into a denial of service
   against the whole room. The per-invite budget keeps the blast radius to one re-mintable invite.
+- **Charging every live invite on a no-match** (this ADR's second draft: match a bare code against
+  all live invites, and make them all pay for a miss). Contradicts the one-invite blast radius —
+  twenty typos burn every code and every link on the team (big-body `01M3DJVZPD`). The
+  three-character selector costs the person one more syllable and restores the bound.
 - **A longer typed code** (e.g. 12 characters, 60 bits). Better entropy, worse on a phone keyboard
   in a dark room; the budget makes 40 bits enough and the link path removes typing altogether.
 - **Event teams / `teams.event_ends_at`** (this ADR's first draft and ADR 449's). Withdrawn by
@@ -222,9 +241,10 @@ client is increment 3 (below).
   count per admission, to check the default budget of 20 against a real room. Baseline: today,
   none of them can join.
 - Experiment: negative tests that ship with increment 2: wrong secret, revoked, expired, exhausted
-  `max_uses`, and burned budget all return the same refusal. Twenty wrong room codes from twenty
-  different `CF-Connecting-IP`s burn the invite and the twenty-first correct code is refused. A
-  wrong code charges every live invite; a correct link secret does not. A taken name and a
+  `max_uses`, burned budget, and an unknown selector all return the same refusal. Twenty wrong
+  room codes from twenty different `CF-Connecting-IP`s burn the invite and the twenty-first
+  correct code is refused. **Multi-invite:** with two live invites, burning the first leaves the
+  second's link and code both usable, and an unknown selector charges neither. A taken name and a
   tombstoned name are both refused without charging. An invite with `member_until` produces a
   member whose `msat_` refuses after that instant (ADR 449 §1). The secret never appears in logs,
   audit, or error bodies. `revive` behaves the same before and after.
