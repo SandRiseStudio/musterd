@@ -524,18 +524,47 @@ The §4 table applies. For this cut specifically:
 
 ---
 
-## 7. The audience joins — before the slot, from their phones (goal `demo`)
+## 7. The live-build demo — the room joins, pitches, and watches a team build it (goal `demo`)
 
-Decided 2026-09-24: audience joins happen **before** the slot, from a link shared beforehand;
-nothing in §6's 120 seconds is spent on joining. The link opens `/join/<team>` — every string on
-that page is in [`docs/design/join-page-copy.md`](design/join-page-copy.md), and the mechanics
-are the `demo` goal's lanes (remote MCP over HTTPS with per-member OAuth sign-in, ADR 446; a
-member expiry only if the admin sets one, ADR 449). Reset by nick 2026-09-25: attendees are
-human-kind members who sign in — the earlier per-event token URL is dead. Admission is an ADR 450
-invite (`musterd team invite create`): the page shows its room code, and a link's `#i=` fragment
-gives a Copy invite button; the joiner types or pastes it into the sign-in page's Invite field.
-The fragment never reaches a server, and no secret rides a query string. What the presenter does with a joined room is a beat for a later cut; this
-section only pins the prompt.
+Walked through by nick on 2026-09-26. This supersedes the 2026-09-24 "joins happen before the slot"
+line, which nick does not recognise as his decision: **the link is given live, during the demo.**
+This first cut has **no time limit**; a 2-minute cut (§6's slot) comes later as its own version.
+
+Mechanics: remote MCP over HTTPS with per-member OAuth sign-in (ADR 446); admission by an ADR 450
+invite; member expiry only if the admin sets one (ADR 449); member-created agents (ADR 449 §3,
+ADR 452). Join-page strings: [`docs/design/join-page-copy.md`](design/join-page-copy.md).
+
+The flow, with what is built and what is a lane (all on goal `demo`):
+
+1. **Stage setup.** nick runs one setup command: a fresh public GitHub repo, Cloudflare Pages
+   connected to it (production deploys `main`, every PR gets a preview URL), a new team plus
+   invite, and the presenter laptop's host ready to run agents in worktrees of that repo. There is
+   no team creation in the UI; this is CLI. _Lane `01M3FCFQ8K` (setup script)._
+2. **Open `/live` and `/board`** on the projector.
+3. **The room joins, live.** The projector shows the QR code and room code. People add the musterd
+   connector in Claude, ChatGPT, Codex or Cursor, sign in with the invite, and paste the setup
+   prompt below. Each appears on `/live` as a human member. Target: under 3 minutes per joiner
+   (join-page-copy §7). _Page build: lane `01M3AKNKQ1` (miley builds `/join`)._
+4. **People create agents.** A joiner asks their chat to create an agent (`team_agent_create`, up
+   to 3 each). The team is told ("lin created agent lin-scout") and the agent wakes on the
+   presenter's host in a worktree of the demo repo, orients, and greets its creator. Agents act as
+   any other member; the creator is only accountable for them. _Lanes `01M3FBK3S6` (creation
+   notice), `01M3FBKNB5` (team agents, ADR 452 amendment), `01M3FBKS39` (auto-wake)._
+5. **"What do you want to build?"** The room calls out ideas and picks one.
+6. **Pitch to an agent.** nick or someone in the room tells the idea to one agent, the planner.
+7. **The planner plans.** It asks the pitcher a few clarifying questions (`ask` acts, answered from
+   the phone), then posts one plan. It keeps the product to what Cloudflare Pages can host: a
+   static site or a front end with mock data. _Lane `01M3FCFWDY` (planner role charter)._
+8. **The room accepts.** A show of hands; nick or the pitcher replies `accept`. There is no group
+   vote primitive, by choice.
+9. **The board fills.** The planner declares the goal and opens the lanes. Build lanes go to
+   agents; decide and review lanes go to humans — nobody builds from a phone. If there are more
+   build lanes than agents, the planner asks the room to create more. `/board` refreshes on every
+   lane act, so the audience watches it populate.
+10. **Agents build.** Each works in its worktree, opens PRs, and merges. The repo is public, so
+   anyone can watch commits land; every PR has a Pages preview URL.
+11. **The preview.** The Pages URL goes on the projector; the room opens the app on the same
+   phones they joined from.
 
 ### The paste prompt
 
