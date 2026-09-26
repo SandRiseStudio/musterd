@@ -1,7 +1,17 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { TraceEvent } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { openTraceDb, TRACE_MIGRATIONS, traceSchemaVersion } from '../db/traceDb.js';
-import { countTraceEvents, ingestTraceEvents, listSessionTrace } from './trace.js';
+import { openTraceDb, TRACE_MIGRATIONS, traceDbBytes, traceSchemaVersion } from '../db/traceDb.js';
+import {
+  contentCapturedThrough,
+  countTraceEvents,
+  ingestTraceEvents,
+  listSessionTrace,
+  pruneTraceContent,
+  TRACE_CONTENT_MAX_AGE_MS,
+} from './trace.js';
 
 const ev = (over: Partial<TraceEvent> = {}): TraceEvent => ({
   harness: 'claude-code',
@@ -76,5 +86,113 @@ describe('trace.db (ADR 445 §3)', () => {
       { kind: 'PostToolUse', count: 2 },
     ]);
     expect(countTraceEvents(db, 't1', 'dolly')).toEqual([{ kind: 'PostToolUse', count: 1 }]);
+  });
+});
+
+describe('content lifecycle (ADR 445 increment 3a)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const NOW = 1_790_400_000_000;
+  const part = {
+    content: { tool_input: 'ls', redactions: 0, truncated: false },
+  } as unknown as Record<string, unknown>;
+
+  /** Four content rows aged 40, 35, 10 and 1 days, plus one structural-only row aged 40 days. */
+  function seeded() {
+    const db = openTraceDb(':memory:');
+    ingestTraceEvents(
+      db,
+      't1',
+      'ryder',
+      [40, 35, 10, 1].map(() => ev(part)),
+      { writeContent: true },
+    );
+    ingestTraceEvents(db, 't1', 'ryder', [ev({ kind: 'Stop' })]);
+    const ages = [40, 35, 10, 1, 40];
+    const rows = listSessionTrace(db, 't1', 'abcdef012345');
+    const set = db.prepare('UPDATE trace_events SET received_at = ? WHERE id = ?');
+    rows.forEach((r, i) => set.run(NOW - ages[i]! * DAY, r.id));
+    return db;
+  }
+  const state = (db: ReturnType<typeof openTraceDb>) =>
+    listSessionTrace(db, 't1', 'abcdef012345').map((r) => [
+      r.content === null ? null : 'content',
+      r.content_pruned_at,
+    ]);
+
+  it('with no capture watermark, nulls content past 30 days and keeps every structural row', () => {
+    const db = seeded();
+    expect(contentCapturedThrough(db)).toBeNull();
+    expect(pruneTraceContent(db, NOW)).toEqual({
+      pruned: 2,
+      cutoff: NOW - TRACE_CONTENT_MAX_AGE_MS,
+      capturedThrough: null,
+    });
+    expect(state(db)).toEqual([
+      [null, NOW],
+      [null, NOW],
+      ['content', null],
+      ['content', null],
+      [null, null], // structural-only: never had content, so nothing to prune and no stamp
+    ]);
+    expect(listSessionTrace(db, 't1', 'abcdef012345')).toHaveLength(5);
+    // idempotent: the pruned rows are out of the partial index, a second pass finds nothing
+    expect(pruneTraceContent(db, NOW).pruned).toBe(0);
+  });
+
+  it('on an archiving machine, never prunes content above the snapshot watermark', () => {
+    const db = seeded();
+    // A snapshot captured through day -38: the -35 row is past the window but NOT archived.
+    db.prepare("INSERT INTO schema_meta (key, value) VALUES ('content_captured_through', ?)").run(
+      String(NOW - 38 * DAY),
+    );
+    const r = pruneTraceContent(db, NOW);
+    expect(r).toMatchObject({ pruned: 1, capturedThrough: NOW - 38 * DAY, cutoff: NOW - 38 * DAY });
+    expect(state(db).slice(0, 2)).toEqual([
+      [null, NOW],
+      ['content', null],
+    ]);
+    // A later snapshot moves the watermark past it; the next pass takes it — and never the -10 row.
+    db.prepare("UPDATE schema_meta SET value = ? WHERE key = 'content_captured_through'").run(
+      String(NOW - 2 * DAY),
+    );
+    expect(pruneTraceContent(db, NOW).pruned).toBe(1);
+    expect(state(db).slice(1, 4)).toEqual([
+      [null, NOW],
+      ['content', null],
+      ['content', null],
+    ]);
+  });
+
+  it('prunes in bounded batches and stops at the per-pass cap', () => {
+    const db = seeded();
+    expect(pruneTraceContent(db, NOW, { batch: 1, maxBatches: 1 }).pruned).toBe(1);
+    expect(pruneTraceContent(db, NOW, { batch: 1, maxBatches: 5 }).pruned).toBe(1);
+  });
+
+  it('the prune scan rides the partial content-age index', () => {
+    const db = seeded();
+    const plan = db
+      .prepare(
+        'EXPLAIN QUERY PLAN SELECT rowid FROM trace_events WHERE content IS NOT NULL AND received_at < ? ORDER BY received_at LIMIT ?',
+      )
+      .all(NOW, 10) as { detail: string }[];
+    expect(plan.map((p) => p.detail).join(' ')).toContain('idx_trace_events_content_age');
+  });
+});
+
+describe('traceDbBytes (ADR 445 increment 3a)', () => {
+  it('sums the file and its WAL; absent for :memory: or a missing file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'trace-bytes-'));
+    try {
+      const p = join(dir, 'trace.db');
+      expect(traceDbBytes(p)).toBeUndefined();
+      writeFileSync(p, Buffer.alloc(4096));
+      expect(traceDbBytes(p)).toBe(4096);
+      writeFileSync(p + '-wal', Buffer.alloc(100));
+      expect(traceDbBytes(p)).toBe(4196);
+      expect(traceDbBytes(':memory:')).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

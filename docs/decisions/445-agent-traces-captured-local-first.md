@@ -290,6 +290,37 @@ ADR 184's publication gate; a spans backend.
   autorefresh has run and one turn has ended: `SELECT kind, count(*) FROM trace_events WHERE kind IN
   ('reasoning','assistant_text','usage') GROUP BY 1` is non-empty, and `musterd trace show` on this
   session interleaves both rails.
+- **2026-09-25 — increment 3 split; 3a landed** (lane `01M3DG4YK81328EBF9J10SS7R1`). Before the build,
+  §6's increment 3 was measured against §3's own reason for a separate file. The dogfood hub took
+  5,834 trace rows in 5.24 h (about 26.7k a day), each with about 290 B of structural columns. As one ADR
+  371 `record` event per row, that is about 15 MB a day per node in `musterd.db` (the `sync_log`
+  payload plus the `audit` detail). The whole `sync_log` to that date was 59 MB. So replication is
+  the growth §3 moved trace.db out of the coordination store to avoid, and nick split it off
+  (2026-09-25). **3b** (lane `01M3DG52YVZ90GBGD2QJGXAX49`) replicates structural rows, and it takes a
+  new ADR before any build. The options are coalesced `record` events, or a trace-only push to the
+  hub's `trace.db` that stays out of `sync_log`/`audit`, which would supersede §3's mechanism. **3a**
+  is the local lifecycle, and it ships three decisions:
+  (1) **"Pruned unless `corpus:snapshot` captured it" means "never before a snapshot holds it."**
+  After `corpus:snapshot` captures `trace.db`, it stamps `schema_meta.content_captured_through` in
+  the live store: the highest `received_at` in the captured image. The stamp is monotonic and lands
+  only after the manifest is on disk. On a machine that carries that watermark, the daemon's hourly
+  prune nulls content only when it is both past 30 days AND strictly below the watermark. A machine
+  that never archived gets the plain 30-day bound. The prune keeps every structural column and
+  stamps `content_pruned_at` (trace ladder v2), so `trace show` can say "content pruned" rather than
+  implying content was never captured. It runs in 2,000-row transactions over a partial index; a
+  full prune of the dogfood store's 2,269 content rows took 7.8 ms.
+  (2) **`musterd status` reports the size** as `traced: … · trace.db <n> MiB`, from a new
+  `/health` field `trace_db_bytes` (file + WAL; absent for `:memory:`).
+  (3) **`dataset:export --trace-db <snapshot>`** writes `trace_events.jsonl`. It SELECTs the
+  structural columns by name (content, redactions, truncation and prune time are never read),
+  keeps detail keys on an allowlist of scalars, and HMACs seats and the harness's opaque ids
+  (session digest, `tool_use_id`, subagent ids) with the release salt. R1↔R2 still join inside one
+  release, and releases stay unlinkable to each other. The live `~/.musterd/trace.db` is refused
+  without `--from-live`, as the live coordination DB is. Falsifier on the dogfood box, once
+  autorefresh has run: `musterd status` from a traced seat prints the size, and after
+  `pnpm corpus:snapshot`,
+  `sqlite3 ~/.musterd/trace.db "select value from schema_meta where key='content_captured_through'"`
+  is non-empty.
 - Risk: the trace store grows fast. `trace.db` isolates that growth from `musterd.db`'s lock and
   backup path; the 30-day content prune bounds it; `musterd status` reports the file's size.
 - Cost: one hook round-trip per tool call already exists (ADR 150); R1 adds a payload to it and a

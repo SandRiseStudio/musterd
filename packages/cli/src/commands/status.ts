@@ -9,7 +9,7 @@ import {
   renderStatusHeader,
 } from '../render/rows.js';
 import { theme } from '../render/theme.js';
-import { traceDepth } from '../trace/hook.js';
+import { traceDepth, tracedLine } from '../trace/hook.js';
 import { cliBuild } from '../version.js';
 import { findWorkspaceDir, pendingActionSummary, resolveRead } from './helpers.js';
 import { renderMemoryLine } from './memory.js';
@@ -86,6 +86,6 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
     explicit && identity
       ? traceDepth(findBinding(), health, process.env, findWorkspaceDir() ?? undefined)
       : null;
-  if (depth) process.stdout.write('\n' + theme.meta(`traced: ${depth}`) + '\n');
+  if (depth) process.stdout.write('\n' + theme.meta(tracedLine(depth, health)) + '\n');
   return 0;
 }

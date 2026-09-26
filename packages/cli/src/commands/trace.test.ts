@@ -39,6 +39,15 @@ describe('traceEventSummary', () => {
     expect(traceEventSummary(event({ kind: 'reasoning', detail: { reasoning_bytes: 99 } }))).toBe(
       '99 bytes (structural)',
     );
+    // increment 3a: content past its window says it was pruned, not that it was never captured
+    expect(
+      traceEventSummary(
+        event({ kind: 'reasoning', detail: { reasoning_bytes: 99 }, content_pruned_at: 1 }),
+      ),
+    ).toBe('99 bytes (content pruned)');
+    expect(traceEventSummary(event({ kind: 'assistant_text', content_pruned_at: 1 }))).toBe(
+      '(content pruned)',
+    );
     expect(
       traceEventSummary(
         event({ kind: 'unknown', detail: { downgraded: true, reason: 'transcript truncated' } }),

@@ -203,8 +203,10 @@ describe('POST /teams/:slug/trace/events', () => {
 
   it('/health reports the trace ladder beside the coordination schema', async () => {
     const h = (await (await fetch(base + '/health')).json()) as Record<string, unknown>;
-    expect(h['trace_schema']).toBe(1);
+    expect(h['trace_schema']).toBe(2);
     expect(h['trace_db']).toBe(':memory:');
+    // an in-memory store has no size on disk — absence, never a made-up zero (increment 3a)
+    expect(h).not.toHaveProperty('trace_db_bytes');
   });
 
   it('writes a trace.downgraded audit row when a tail posts its downgrade marker (increment 2)', async () => {

@@ -111,7 +111,7 @@ import { z } from 'zod';
 import { checkUpgrade, isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
-import { traceSchemaVersion } from '../db/traceDb.js';
+import { traceDbBytes, traceSchemaVersion } from '../db/traceDb.js';
 import { MusterdError, SessionLeaseRefused, asMusterdError } from '../errors.js';
 import { reapOrphans } from '../footprint/reap.js';
 import { log, redactPath } from '../log.js';
@@ -1670,9 +1670,15 @@ export async function handleHttp(
         db: ctx.config.dbPath,
         schema: schemaVersion(ctx.db),
         // The trace store (ADR 445 §3) is a separate file with its own ladder; named here so a
-        // `wrong_db` diagnosis can see both halves and `musterd status` can size it later.
+        // `wrong_db` diagnosis can see both halves.
         trace_db: ctx.config.traceDbPath,
         trace_schema: traceSchemaVersion(ctx.traceDb),
+        // …and sized (increment 3a) — the store grows fast, and this is where `musterd status` reads
+        // it. Omitted for an in-memory store.
+        ...(() => {
+          const bytes = traceDbBytes(ctx.config.traceDbPath);
+          return bytes === undefined ? {} : { trace_db_bytes: bytes };
+        })(),
         connections: countLivePresences(ctx.db, ctx.config.presenceTimeoutMs),
         // Quiescence (2026-08-03 design): age of the newest audited action across live agent seats,
         // for the auto-refresher's quiet-floor — `connections` says who is ATTACHED, this says who
@@ -4993,6 +4999,7 @@ export async function handleHttp(
           content: parseStoredJson(r.content),
           redactions: r.redactions,
           truncated: r.truncated === 1,
+          content_pruned_at: r.content_pruned_at,
         }));
         return sendJson(res, 200, { events });
       }

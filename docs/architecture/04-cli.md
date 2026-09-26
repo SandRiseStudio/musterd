@@ -186,7 +186,7 @@ src/
     nudge.ts          // `inbox --waiting`: the waiting-acts banner + the acts behind it, read-only — the approval-prompt hook target (ADR 053); `musterd nudge` is the hidden pre-2026-09-03 alias
     reap.ts           // musterd reap [--yes] (ADR 242): list orphaned MCP sidecars from the daemon's footprint tick; --yes asks the daemon to kill them (re-verified server-side, audited)
     whoami.ts         // print the seat this folder resolves to: member/team/surface/source (ADR 067)
-    status.ts         // status; ends with `traced: structural` when this seat's hooks would record (ADR 445 §4)
+    status.ts         // status; ends with `traced: structural` when this seat's hooks would record (ADR 445 §4), sized `· trace.db <n> MiB` from /health's trace_db_bytes (increment 3a)
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     doorbell.ts       // `musterd doorbell` (ADR 443): your route, sink by sink, and where each part comes from; `<sink> on|off` (`os on` takes this machine's host label from the host registry); `team` — the admin's allow-list, defaults and team URLs via read-merge-write POST /policy. Humans only; no MCP tool; a URL prints masked to its host
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)

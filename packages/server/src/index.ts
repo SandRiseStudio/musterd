@@ -21,6 +21,7 @@ import { startSeedsIngest } from './seeds/ingest.js';
 import { countDiversityFlagsByTeam } from './store/mast.js';
 import { countOpenLoopsByTeam } from './store/messages.js';
 import { activePresenceBySurface, slowestInboxLagMs } from './store/metrics.js';
+import { startTraceContentPrune } from './store/trace.js';
 import { startSyncPull } from './sync/pull.js';
 import { startSyncPush } from './sync/push.js';
 import { registerRuntimeGauges, startTelemetry, telemetryEnabled } from './telemetry.js';
@@ -144,6 +145,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   let stopSync: (() => void) | null = null;
   let stopPull: (() => void) | null = null;
   let stopFootprint: (() => void) | null = null;
+  let stopTracePrune: (() => void) | null = null;
   let stopWatcher: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
   /** One shared shutdown promise, so a second signal joins the first instead of racing it. */
@@ -201,6 +203,20 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           stopSync = startSyncPush(ctx);
           stopPull = startSyncPull(ctx);
           stopFootprint = startFootprintSampler(ctx);
+          // ADR 445 increment 3a: content past its 30-day window is nulled, structural rows stay.
+          stopTracePrune = startTraceContentPrune(
+            traceDb,
+            (r) => {
+              if (r.pruned > 0)
+                log.info({
+                  msg: 'trace_content_pruned',
+                  rows: r.pruned,
+                  cutoff: r.cutoff,
+                  captured_through: r.capturedThrough,
+                });
+            },
+            (err) => log.warn({ msg: 'trace_prune_failed', err: String(err) }),
+          );
           startWatching();
           log.info({
             msg: 'listening',
@@ -246,6 +262,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
         stopSync?.();
         stopPull?.();
         stopFootprint?.();
+        stopTracePrune?.();
         stopWatcher?.();
         void stopTelemetry?.();
         // Kill the upgraded sockets FIRST — http.close() below never settles while they live.

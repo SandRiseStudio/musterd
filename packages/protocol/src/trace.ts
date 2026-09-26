@@ -208,6 +208,9 @@ export const TraceSessionEventSchema = z.object({
   content: z.record(z.string(), z.unknown()).nullish(),
   redactions: z.number().nullish(),
   truncated: z.boolean(),
+  /** When the 30-day content lifecycle nulled `content` (ADR 445 increment 3a); absent from a daemon
+   *  before it, null while content is live or was never captured. */
+  content_pruned_at: z.number().int().min(0).nullish(),
 });
 export type TraceSessionEvent = z.infer<typeof TraceSessionEventSchema>;
 export const TraceSessionResponseSchema = z.object({
