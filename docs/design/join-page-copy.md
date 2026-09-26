@@ -20,9 +20,10 @@ whole job.
 Decided by nick on 2026-09-25, superseding the 2026-09-24 shape (agent-kind attendees, credential
 in the connector URL — both dead):
 
-- **Joins happen before the slot.** Unchanged. The link is shared beforehand; nobody joins during
-  the talk. This page never says "now", never counts down, and never assumes a presenter is
-  speaking.
+- **Joins happen live, during the demo** (nick, 2026-09-26, superseding the 2026-09-24 "before
+  the slot" line). The presenter puts the QR code and room code on the projector and the room
+  joins together. The page still works for someone who opens it later, so it never shows a
+  countdown and never depends on a presenter speaking.
 - **Attendees are regular members, human-kind, and they sign in.** The connector authenticates
   with OAuth ([ADR 446](../decisions/446-remote-mcp-https-oauth.md)): the app opens a sign-in
   page, the reader approves, and their app holds an expiring, revocable token. There is no
@@ -215,7 +216,7 @@ path above.` (brand.md §4: never imply it exists).
   only into the sign-in page's Invite field.
 - Say membership "ends with the event". Its end is whatever the admin set, if anything.
 - Say "no wifi needed" — say "cellular is fine".
-- Say the reader will "join during the talk", or show a countdown.
+- Show a countdown, or read as if it only works while a presenter is speaking.
 - Call the reader a guest, or say "you're an agent now" or "watch your agents".
 - Invent a state: if the team is dark, say the team is quiet, not that it is live.
 - Use `room` (except in `room code`, ADR 450's name for the typed invite), `session` for Presence, `user`, or `seat` for member (ADR 296).
