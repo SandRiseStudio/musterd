@@ -3,6 +3,7 @@ import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { addMember, authMember } from './members.js';
 import {
+  burnUnexchangedCodes,
   issueCode,
   mintTokenPair,
   pkceChallenge,
@@ -171,5 +172,84 @@ describe('oauth store (ADR 446)', () => {
     });
     f.db.prepare('UPDATE members SET left_at = ? WHERE id = ?').run(Date.now(), f.member.id);
     expect(() => verifyAccess(f.db, f.team.id, pair.access_token)).toThrow(/gone/);
+  });
+});
+
+describe('agent chains and member standing at the token endpoint (ADR 452 §2–4)', () => {
+  const HOUR = 3600_000;
+
+  function mint(f: ReturnType<typeof freshHuman>, memberId = f.member.id) {
+    return mintTokenPair(f.db, { teamId: f.team.id, memberId, clientId: f.client_id });
+  }
+
+  it('verifyAccess admits an agent-bound chain (§3)', () => {
+    const f = freshHuman();
+    const { row: agent } = addMember(f.db, f.team, { name: 'scout', kind: 'agent' });
+    const pair = mint(f, agent.id);
+    expect(verifyAccess(f.db, f.team.id, pair.access_token).name).toBe('scout');
+  });
+
+  it('burnUnexchangedCodes refuses a code issued before a supersede (§2.3)', () => {
+    const f = freshHuman();
+    const { code } = codeFor(f.db, f);
+    expect(burnUnexchangedCodes(f.db, f.team.id, f.member.id)).toBe(1);
+    expect(() =>
+      redeemCode(f.db, {
+        teamId: f.team.id,
+        clientId: f.client_id,
+        code,
+        redirectUri: 'https://app.example/cb',
+        verifier: VERIFIER,
+      }),
+    ).toThrow(/replayed/);
+    expect(burnUnexchangedCodes(f.db, f.team.id, f.member.id)).toBe(0);
+  });
+
+  it("caps the pair at the member's lifecycle_until (§4 / ADR 449 §1)", () => {
+    const f = freshHuman();
+    const until = Date.now() + 10 * 60_000;
+    f.db
+      .prepare("UPDATE members SET lifecycle = 'until', lifecycle_until = ? WHERE id = ?")
+      .run(until, f.member.id);
+    const pair = mint(f);
+    expect(pair.expires_in).toBeLessThanOrEqual(600);
+    expect(pair.expires_in).toBeGreaterThan(590);
+    const refresh = f.db
+      .prepare("SELECT expires_at FROM oauth_tokens WHERE kind = 'refresh'")
+      .get() as { expires_at: number };
+    expect(refresh.expires_at).toBeLessThanOrEqual(until);
+  });
+
+  it('an unexpiring member keeps the full TTLs', () => {
+    const f = freshHuman();
+    expect(mint(f).expires_in).toBe(3600);
+  });
+
+  it('refresh for a member whose standing ended is refused AND revokes the chain', () => {
+    for (const end of ['disabled', 'expired', 'left'] as const) {
+      const f = freshHuman();
+      const pair = mint(f);
+      if (end === 'disabled')
+        f.db
+          .prepare("UPDATE members SET account_status = 'disabled' WHERE id = ?")
+          .run(f.member.id);
+      if (end === 'expired')
+        f.db
+          .prepare("UPDATE members SET lifecycle = 'until', lifecycle_until = ? WHERE id = ?")
+          .run(Date.now() - HOUR, f.member.id);
+      if (end === 'left')
+        f.db.prepare('UPDATE members SET left_at = ? WHERE id = ?').run(Date.now(), f.member.id);
+      expect(() =>
+        rotateRefresh(f.db, {
+          teamId: f.team.id,
+          clientId: f.client_id,
+          refreshToken: pair.refresh_token,
+        }),
+      ).toThrow(MusterdError);
+      const live = f.db
+        .prepare('SELECT COUNT(*) AS n FROM oauth_tokens WHERE revoked_at IS NULL')
+        .get() as { n: number };
+      expect(live.n, end).toBe(0);
+    }
   });
 });

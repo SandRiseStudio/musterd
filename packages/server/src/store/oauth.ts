@@ -8,7 +8,7 @@ import {
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
-import { hashToken, newSecret } from './members.js';
+import { hashToken, memberStandingRefusal, newSecret } from './members.js';
 import type { MemberRow } from './rows.js';
 
 /**
@@ -165,6 +165,31 @@ export function redeemCode(
   })();
 }
 
+/**
+ * A member's hard end, if they have one — the cap every access and refresh expiry takes
+ * (ADR 449 §1, landed by ADR 452 §4): `min(kind TTL, lifecycle_until)`. `authMember` still enforces
+ * expiry at use; the cap keeps what a client is told about its lifetime true.
+ */
+function memberEnd(db: Database, memberId: string): number | null {
+  const row = db
+    .prepare<
+      [string],
+      { lifecycle: string | null; lifecycle_until: number | null }
+    >('SELECT lifecycle, lifecycle_until FROM members WHERE id = ?')
+    .get(memberId);
+  return row?.lifecycle === 'until' && row.lifecycle_until !== null ? row.lifecycle_until : null;
+}
+
+function cappedExpiries(
+  end: number | null,
+  now: number,
+  refreshCeiling = now + OAUTH_REFRESH_TTL_S * 1000,
+): { access: number; refresh: number; expires_in: number } {
+  const access = Math.min(now + OAUTH_ACCESS_TTL_S * 1000, end ?? Infinity);
+  const refresh = Math.min(refreshCeiling, end ?? Infinity);
+  return { access, refresh, expires_in: Math.max(0, Math.floor((access - now) / 1000)) };
+}
+
 /** Mint a fresh access + refresh pair on one chain — the chain id is what reuse revokes. */
 export function mintTokenPair(
   db: Database,
@@ -174,6 +199,7 @@ export function mintTokenPair(
   const access_token = newSecret(TOKEN_PREFIXES.oauth_access);
   const refresh_token = newSecret(TOKEN_PREFIXES.oauth_refresh);
   const chain_id = ulid();
+  const exp = cappedExpiries(memberEnd(db, input.memberId), now);
   const ins = db.prepare(
     `INSERT INTO oauth_tokens
        (token_hash, kind, team_id, member_id, client_id, chain_id, scope, created_at, expires_at)
@@ -189,7 +215,7 @@ export function mintTokenPair(
       chain_id,
       input.scope ?? null,
       now,
-      now + OAUTH_ACCESS_TTL_S * 1000,
+      exp.access,
     );
     ins.run(
       hashToken(refresh_token),
@@ -200,11 +226,11 @@ export function mintTokenPair(
       chain_id,
       input.scope ?? null,
       now,
-      now + OAUTH_REFRESH_TTL_S * 1000,
+      exp.refresh,
     );
   });
   tx();
-  return { access_token, refresh_token, expires_in: OAUTH_ACCESS_TTL_S };
+  return { access_token, refresh_token, expires_in: exp.expires_in };
 }
 
 /**
@@ -223,74 +249,94 @@ export function rotateRefresh(
   // NOTE: the reuse branch writes (chain revocation) and then must THROW — a throw inside the
   // transaction would roll the revocation back, so the tx returns a verdict and the throw happens
   // outside it. Failure paths before any write throw inside freely.
-  const outcome = db.transaction((): { pair: OAuthTokenPair } | { reused: true } => {
-    const row = db
-      .prepare<
-        [string],
-        {
-          team_id: string;
-          member_id: string;
-          client_id: string;
-          chain_id: string;
-          scope: string | null;
-          expires_at: number;
-          replaced_at: number | null;
-          revoked_at: number | null;
-        }
-      >("SELECT * FROM oauth_tokens WHERE token_hash = ? AND kind = 'refresh'")
-      .get(hashToken(input.refreshToken));
-    if (!row || row.team_id !== input.teamId || row.client_id !== input.clientId)
-      throw new MusterdError('unauthorized', 'invalid refresh token');
-    if (row.revoked_at !== null)
-      throw new MusterdError('unauthorized', 'refresh token revoked — sign in again');
-    if (row.expires_at <= now)
-      throw new MusterdError('unauthorized', 'refresh token expired — sign in again');
-    if (row.replaced_at !== null) {
-      // Burned refresh presented again: stolen-refresh detection — revoke the chain. This write
-      // COMMITS (the verdict is thrown outside the tx); the legitimate holder fails closed too,
-      // which is the point — both sides re-authenticate.
-      db.prepare(
-        'UPDATE oauth_tokens SET revoked_at = ? WHERE chain_id = ? AND revoked_at IS NULL',
-      ).run(now, row.chain_id);
-      return { reused: true };
-    }
-    db.prepare('UPDATE oauth_tokens SET replaced_at = ? WHERE token_hash = ?').run(
-      now,
-      hashToken(input.refreshToken),
-    );
-    const access_token = newSecret(TOKEN_PREFIXES.oauth_access);
-    const refresh_token = newSecret(TOKEN_PREFIXES.oauth_refresh);
-    // Sliding cap: the new refresh never outlives the burned one's expiry (first-login + 30d).
-    const refreshExpires = Math.min(now + OAUTH_REFRESH_TTL_S * 1000, row.expires_at);
-    const ins = db.prepare(
-      `INSERT INTO oauth_tokens
+  const outcome = db.transaction(
+    (): { pair: OAuthTokenPair } | { reused: true } | { ended: MusterdError } => {
+      const row = db
+        .prepare<
+          [string],
+          {
+            team_id: string;
+            member_id: string;
+            client_id: string;
+            chain_id: string;
+            scope: string | null;
+            expires_at: number;
+            replaced_at: number | null;
+            revoked_at: number | null;
+          }
+        >("SELECT * FROM oauth_tokens WHERE token_hash = ? AND kind = 'refresh'")
+        .get(hashToken(input.refreshToken));
+      if (!row || row.team_id !== input.teamId || row.client_id !== input.clientId)
+        throw new MusterdError('unauthorized', 'invalid refresh token');
+      if (row.revoked_at !== null)
+        throw new MusterdError('unauthorized', 'refresh token revoked — sign in again');
+      if (row.expires_at <= now)
+        throw new MusterdError('unauthorized', 'refresh token expired — sign in again');
+      if (row.replaced_at !== null) {
+        // Burned refresh presented again: stolen-refresh detection — revoke the chain. This write
+        // COMMITS (the verdict is thrown outside the tx); the legitimate holder fails closed too,
+        // which is the point — both sides re-authenticate.
+        db.prepare(
+          'UPDATE oauth_tokens SET revoked_at = ? WHERE chain_id = ? AND revoked_at IS NULL',
+        ).run(now, row.chain_id);
+        return { reused: true };
+      }
+      // ADR 452 §4: a member who left, was disabled, or expired gets no fresh pair — and the whole
+      // chain dies with the refusal (committed: the verdict is thrown outside the tx), so a later
+      // re-enable does not quietly revive a chain nobody re-authorized.
+      const owner = db
+        .prepare<[string], MemberRow>('SELECT * FROM members WHERE id = ?')
+        .get(row.member_id);
+      const ended = owner
+        ? memberStandingRefusal(owner, now)
+        : new MusterdError('unauthorized', 'seat is gone');
+      if (ended) {
+        db.prepare(
+          'UPDATE oauth_tokens SET revoked_at = ? WHERE chain_id = ? AND revoked_at IS NULL',
+        ).run(now, row.chain_id);
+        return { ended };
+      }
+      db.prepare('UPDATE oauth_tokens SET replaced_at = ? WHERE token_hash = ?').run(
+        now,
+        hashToken(input.refreshToken),
+      );
+      const access_token = newSecret(TOKEN_PREFIXES.oauth_access);
+      const refresh_token = newSecret(TOKEN_PREFIXES.oauth_refresh);
+      // Sliding cap: the new refresh never outlives the burned one's expiry (first-login + 30d),
+      // nor the member's own end (ADR 449 §1).
+      const exp = cappedExpiries(memberEnd(db, row.member_id), now, row.expires_at);
+      const refreshExpires = exp.refresh;
+      const ins = db.prepare(
+        `INSERT INTO oauth_tokens
          (token_hash, kind, team_id, member_id, client_id, chain_id, scope, created_at, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    ins.run(
-      hashToken(access_token),
-      'access',
-      row.team_id,
-      row.member_id,
-      row.client_id,
-      row.chain_id,
-      row.scope,
-      now,
-      now + OAUTH_ACCESS_TTL_S * 1000,
-    );
-    ins.run(
-      hashToken(refresh_token),
-      'refresh',
-      row.team_id,
-      row.member_id,
-      row.client_id,
-      row.chain_id,
-      row.scope,
-      now,
-      refreshExpires,
-    );
-    return { pair: { access_token, refresh_token, expires_in: OAUTH_ACCESS_TTL_S } };
-  })();
+      );
+      ins.run(
+        hashToken(access_token),
+        'access',
+        row.team_id,
+        row.member_id,
+        row.client_id,
+        row.chain_id,
+        row.scope,
+        now,
+        exp.access,
+      );
+      ins.run(
+        hashToken(refresh_token),
+        'refresh',
+        row.team_id,
+        row.member_id,
+        row.client_id,
+        row.chain_id,
+        row.scope,
+        now,
+        refreshExpires,
+      );
+      return { pair: { access_token, refresh_token, expires_in: exp.expires_in } };
+    },
+  )();
+  if ('ended' in outcome) throw outcome.ended;
   if ('reused' in outcome)
     throw new MusterdError(
       'unauthorized',
@@ -365,9 +411,31 @@ export function revokeAllForMember(
 }
 
 /**
+ * Burn every authorization code bound to `memberId` that has not been exchanged yet (ADR 452 §2.3):
+ * `used_at` set, so `redeemCode` refuses it as replayed. With `revokeAllForMember` this is the
+ * whole of a supersede — chains AND codes — because a 90s code from an earlier connect would pass
+ * every other check (the agent is live) and mint a second chain. Returns how many it burned.
+ */
+export function burnUnexchangedCodes(
+  db: Database,
+  teamId: string,
+  memberId: string,
+  now = Date.now(),
+): number {
+  const res = db
+    .prepare<
+      [number, string, string]
+    >('UPDATE oauth_codes SET used_at = ? WHERE team_id = ? AND member_id = ? AND used_at IS NULL')
+    .run(now, teamId, memberId);
+  return Number(res.changes);
+}
+
+/**
  * Verify an `msat_` bearer for `authMember`: same seat proof as `mscr_` (hash-bound member,
  * acting-seat must match-or-absent is checked by the caller) with NO session lease. Returns the
- * live human row or throws — expired, revoked, cross-team, and departed seats all fail closed.
+ * live row or throws — expired, revoked, cross-team, and departed seats all fail closed. The row
+ * is a human, or (ADR 452 §3) an agent whose chain came from its sponsor's connect nonce — the
+ * only way an agent-bound code is ever issued.
  */
 export function verifyAccess(
   db: Database,
@@ -387,7 +455,7 @@ export function verifyAccess(
     .prepare<
       [string, string],
       MemberRow
-    >("SELECT * FROM members WHERE team_id = ? AND id = ? AND left_at IS NULL AND kind = 'human'")
+    >("SELECT * FROM members WHERE team_id = ? AND id = ? AND left_at IS NULL AND kind IN ('human', 'agent')")
     .get(teamId, row.member_id);
   if (!member) throw new MusterdError('unauthorized', 'access token names a seat that is gone');
   return member;

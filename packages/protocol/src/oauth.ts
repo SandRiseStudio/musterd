@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TOKEN_PREFIXES } from './credentials.js';
+import { TOKEN_PREFIXES, isMusterdCredential } from './credentials.js';
 
 /**
  * OAuth 2.1 surface for remote MCP (ADR 446) — the zod vocabulary for the daemon's minimal
@@ -10,8 +10,8 @@ import { TOKEN_PREFIXES } from './credentials.js';
  * `oauth_access` (`msat_`, 1h TTL) authenticates `/mcp/:team` tool calls exactly like an `mscr_`
  * in `authMember` (self-identifying, acting-seat must match-or-absent, no session lease — there
  * is no Presence to bind one to); `oauth_refresh` (`msrt_`, 30d TTL, single-use rotation, reuse
- * revokes the chain) renews the pair. Agent seats stay on the claim handshake — authorize proves
- * human seats only (ADR 446 §6).
+ * revokes the chain) renews the pair. Agent seats stay on the claim handshake, with one exception:
+ * a sponsored agent redeeming its sponsor's one-time connect nonce (ADR 452).
  */
 
 /** PKCE S256 is REQUIRED — `plain` and `none` are refused (ADR 446 §3). */
@@ -119,6 +119,22 @@ export const OAuthAuthorizeConfirmSchema = z
           kind: z.literal('invite'),
           secret: z.string().min(11).max(64),
           name: z.string().min(1).max(64),
+        })
+        .strict(),
+      // ADR 452 §1: a sponsored agent's device redeems its sponsor's one-time connect nonce. The
+      // value is the bare nonce, `n=<nonce>`, or the whole pasted link — the server extracts it.
+      // A nonce ONLY: every musterd credential prefix is refused here (ghost's condition), so no
+      // agent secret can ever ride the consent page.
+      z
+        .object({
+          kind: z.literal('agent_connect'),
+          nonce: z
+            .string()
+            .min(43)
+            .max(2048)
+            .refine((v) => !isMusterdCredential(v.trim()), {
+              message: 'an agent connects with its connect link, never a credential',
+            }),
         })
         .strict(),
     ]),

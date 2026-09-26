@@ -189,6 +189,13 @@ stays clean).
 - Follows-up: deferred — same-origin pre-fill of the consent form, if rehearsal's paste failure rate
   exceeds 1 in 5 (2026-09-26).
 
+2026-09-26 — the code landed after ADR 450 increment 2 (#1735), with the Decision unchanged. Three
+details not in it: `member.agent_connect_refused` records a reason class (`malformed`: no nonce
+could be read; `invalid`: unknown, used, expired, wrong-team, or a departed agent); the supersede's
+`oauth.revoked` row is written only when a chain or code was actually revoked; and the member check
+on both token grants is `memberStandingRefusal`, the same function `authMember` now calls, so the
+two cannot drift.
+
 ## Observability & Evaluation
 
 - **Traces:** audit rows `member.agent_connected` (sponsor → agent, client),

@@ -44,18 +44,21 @@ describe('lifecycle_until is enforced at auth (ADR 449 §2)', () => {
   });
 
   it('refuses an expired human on an OAuth msat_ bearer (ADR 446 remote MCP)', () => {
-    const { db, team, row } = teamWithExpiringHuman(Date.now() - HOUR);
+    const { db, team, row } = teamWithExpiringHuman(Date.now() + HOUR);
     const { client_id } = registerClient(db, {
       teamId: team.id,
       clientName: 'phone',
       redirectUris: ['https://claude.ai/api/mcp/auth_callback'],
     });
-    // Minted before expiry is irrelevant: the token outlives nothing — auth reads the clock.
     const { access_token } = mintTokenPair(db, {
       teamId: team.id,
       memberId: row.id,
       clientId: client_id,
     });
+    expect(authMember(db, 'acme', access_token).member.name).toBe('guest');
+    // The end moves into the past after the mint (an admin shortened it): the token's own expiry
+    // no longer protects anything — auth reads the member's clock at use.
+    db.prepare('UPDATE members SET lifecycle_until = ? WHERE id = ?').run(Date.now() - 1, row.id);
     expect(() => authMember(db, 'acme', access_token)).toThrowError(/membership expired/);
   });
 

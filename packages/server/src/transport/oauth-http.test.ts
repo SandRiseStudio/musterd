@@ -884,3 +884,177 @@ describe('invite prover at authorize (ADR 450)', () => {
     expect([401, 403]).toContain(res.status);
   });
 });
+
+describe('agent seats over OAuth via the sponsor nonce (ADR 452)', () => {
+  /** A human on `dawn` (optionally expiring) and their credential. */
+  async function human(name: string, until?: number): Promise<string> {
+    const r = await postJson('/teams/dawn/members', {
+      name,
+      kind: 'human',
+      ...(until ? { lifecycle: 'until', lifecycle_until: until } : {}),
+    });
+    return r.json.human_credential as string;
+  }
+
+  async function createAgent(sponsorCred: string, name: string): Promise<string> {
+    const r = await postJson(
+      '/teams/dawn/members/agents',
+      { name },
+      { authorization: `Bearer ${sponsorCred}` },
+    );
+    expect(r.status).toBe(201);
+    return r.json.connect_url as string;
+  }
+
+  async function reissue(sponsorCred: string, name: string): Promise<string> {
+    const r = await postJson(
+      `/teams/dawn/members/agents/${name}/connect`,
+      {},
+      { authorization: `Bearer ${sponsorCred}` },
+    );
+    return r.json.connect_url as string;
+  }
+
+  /** The browser leg with an `agent_connect` proof → the code (or the refusal). */
+  async function authorizeAgent(pasted: string) {
+    const reg = await registerClient([REDIRECT], 'Claude Code');
+    const client_id = reg.json.client_id as string;
+    const authz = await postForm('/oauth/dawn/authorize', {
+      client_id,
+      redirect_uri: REDIRECT,
+      state: 's1',
+      code_challenge: CHALLENGE,
+      code_challenge_method: 'S256',
+      agent_connect: pasted,
+    });
+    const code =
+      authz.status === 302
+        ? new URL(authz.headers.get('location')!).searchParams.get('code')
+        : null;
+    return { authz, code, client_id };
+  }
+
+  async function exchange(code: string, client_id: string) {
+    return postForm('/oauth/dawn/token', {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT,
+      client_id,
+      code_verifier: VERIFIER,
+    });
+  }
+
+  async function connect(pasted: string) {
+    const a = await authorizeAgent(pasted);
+    expect(a.authz.status).toBe(302);
+    const token = await exchange(a.code!, a.client_id);
+    expect(token.status).toBe(200);
+    return { pair: token.json, client_id: a.client_id };
+  }
+
+  async function joinedAs(bearer: string): Promise<string> {
+    const r = await mcpCall(bearer, 'tools/call', { name: 'team_join', arguments: {} }, 9);
+    return JSON.stringify(r.json?.result ?? r.json);
+  }
+
+  it('the pasted link signs the agent in: the chain is bound to the agent seat', async () => {
+    const link = await createAgent(nickCred, 'nick-scout');
+    const { pair } = await connect(link);
+    expect(await joinedAs(pair.access_token)).toContain('Already joined dawn as nick-scout');
+    const send = await mcpCall(
+      pair.access_token,
+      'tools/call',
+      { name: 'team_send', arguments: { act: 'message', body: 'hello from the agent' } },
+      2,
+    );
+    expect(JSON.stringify(send.json.result)).toContain('sent');
+    const row = audits('member.agent_connected')[0]!;
+    expect(row.actor).toBe('nick');
+    expect(row.target).toBe('nick-scout');
+    expect(JSON.stringify(audits('member.agent_connected'))).not.toContain(
+      new URL(link).hash.slice(3),
+    );
+  });
+
+  it('accepts the bare nonce and `n=<nonce>` as well as the whole link', async () => {
+    const nonce = new URLSearchParams(new URL(await createAgent(nickCred, 'a1')).hash.slice(1)).get(
+      'n',
+    )!;
+    expect((await authorizeAgent(nonce)).authz.status).toBe(302);
+    const n2 = new URLSearchParams(new URL(await createAgent(nickCred, 'a2')).hash.slice(1)).get(
+      'n',
+    )!;
+    expect((await authorizeAgent(`n=${n2}`)).authz.status).toBe(302);
+  });
+
+  it('a second redeem of the same nonce is refused, with one uniform body', async () => {
+    const link = await createAgent(nickCred, 'nick-scout');
+    await connect(link);
+    const again = await authorizeAgent(link);
+    expect(again.authz.status).toBe(401);
+    expect(again.authz.text).toContain("that connect link isn't valid");
+    expect(audits('member.agent_connect_refused')).toHaveLength(1);
+    const junk = await authorizeAgent('Z'.repeat(43));
+    expect(junk.authz.text).toBe(again.authz.text);
+  });
+
+  it('a reconnect with a re-issued nonce revokes the first chain', async () => {
+    const first = await connect(await createAgent(nickCred, 'nick-scout'));
+    expect(await joinedAs(first.pair.access_token)).toContain('nick-scout');
+    await connect(await reissue(nickCred, 'nick-scout'));
+    const stale = await mcpCall(first.pair.access_token, 'tools/list', {}, 3);
+    expect(stale.status).toBe(401);
+    expect(
+      audits('oauth.revoked').some((r) => JSON.stringify(r.detail).includes('superseded')),
+    ).toBe(true);
+  });
+
+  it('a code from the first connect, exchanged after the second connect, is refused', async () => {
+    const early = await authorizeAgent(await createAgent(nickCred, 'nick-scout'));
+    expect(early.authz.status).toBe(302);
+    await connect(await reissue(nickCred, 'nick-scout'));
+    const late = await exchange(early.code!, early.client_id);
+    expect(late.status).toBe(400);
+    expect(late.json.error).toBe('invalid_grant');
+  });
+
+  it("removing the sponsor refuses the agent's next tool call AND its next refresh", async () => {
+    const dana = await human('dana');
+    const { pair, client_id } = await connect(await createAgent(dana, 'dana-scout'));
+    expect(await joinedAs(pair.access_token)).toContain('dana-scout');
+    const removed = await postJson(
+      '/teams/dawn/members/dana/remove',
+      {},
+      { authorization: `Bearer ${nickCred}` },
+    );
+    expect(removed.status).toBe(200);
+    // §3: the cascade revokes the agent's chains outright — not only refused at use.
+    const live = server.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM oauth_tokens t JOIN members m ON m.id = t.member_id WHERE m.name = 'dana-scout' AND t.revoked_at IS NULL",
+      )
+      .get() as { n: number };
+    expect(live.n).toBe(0);
+    expect((await mcpCall(pair.access_token, 'tools/list', {}, 4)).status).not.toBe(200);
+    const refresh = await postForm('/oauth/dawn/token', {
+      grant_type: 'refresh_token',
+      refresh_token: pair.refresh_token,
+      client_id,
+    });
+    expect(refresh.status).toBe(400);
+    expect(refresh.json.error).toBe('invalid_grant');
+  });
+
+  it("an expiring sponsor's agent is told a lifetime no later than the sponsor's end", async () => {
+    const until = Date.now() + 10 * 60_000;
+    const dana = await human('dana', until);
+    const { pair } = await connect(await createAgent(dana, 'dana-scout'));
+    expect(pair.expires_in).toBeLessThanOrEqual(600);
+  });
+
+  it('a credential pasted into the agent field is refused at the schema — never an auth attempt', async () => {
+    const res = await authorizeAgent(nickCred + 'x'.repeat(20));
+    expect(res.authz.status).toBe(400);
+    expect(audits('member.agent_connect_refused')).toHaveLength(0);
+  });
+});

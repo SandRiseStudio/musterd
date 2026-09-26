@@ -15,17 +15,21 @@ import type { Ctx } from '../context.js';
 import { asMusterdError, MusterdError } from '../errors.js';
 import { appendAudit } from '../store/audit.js';
 import { checkInvite, consumeInvite } from '../store/invites.js';
-import { addMember, authMember, getMemberByName } from '../store/members.js';
+import { addMember, authMember, getMemberByName, memberStandingRefusal } from '../store/members.js';
 import {
+  burnUnexchangedCodes,
   chainMember,
   getClient,
   issueCode,
   mintTokenPair,
   redeemCode,
   registerClient,
+  revokeAllForMember,
   revokeToken,
   rotateRefresh,
 } from '../store/oauth.js';
+import type { MemberRow } from '../store/rows.js';
+import { redeemAgentConnectNonce } from '../store/sponsoredAgents.js';
 import { requireTeam } from '../store/teams.js';
 import { originFrom } from './sponsoredAgentMint.js';
 
@@ -299,8 +303,8 @@ function consentPage(input: {
   code_challenge: string;
 }): string {
   const e = escapeHtml;
-  // ADR 450 §2: two forms, one seam. Both post the same OAuth fields; the invite form posts
-  // `invite` + `member`, the seat form posts `member` + `credential`.
+  // ADR 450 §2 + ADR 452 §5: three forms, one seam. All post the same OAuth fields; the invite form
+  // posts `invite` + `member`, the seat form `member` + `credential`, the agent form `agent_connect`.
   const hidden = `<input type="hidden" name="client_id" value="${e(input.client_id)}">
 <input type="hidden" name="redirect_uri" value="${e(input.redirect_uri)}">
 <input type="hidden" name="state" value="${e(input.state)}">
@@ -325,6 +329,12 @@ ${hidden}
 <label>Seat name <input type="text" name="member" autocomplete="username"></label><br>
 <label>Credential (<code>mscr_…</code>) <input type="password" name="credential" autocomplete="current-password"></label><br>
 <button type="submit">Sign in this app as me</button>
+</form>
+<h2>Connecting an agent?</h2>
+<form method="post" action="">
+${hidden}
+<label>Paste its connect link (or the code from the link's page) <input type="text" name="agent_connect" autocomplete="off" autocapitalize="off" spellcheck="false"></label><br>
+<button type="submit">Connect this agent to ${e(input.team)}</button>
 </form></body></html>`;
 }
 
@@ -349,6 +359,7 @@ function consentFormBody(raw: string): {
   member: string;
   credential: string;
   invite: string;
+  agent_connect: string;
 } {
   const params = new URLSearchParams(raw);
   const out: Record<string, string> = {};
@@ -365,7 +376,21 @@ function consentFormBody(raw: string): {
     member: out['member'] ?? '',
     credential: out['credential'] ?? '',
     invite: out['invite'] ?? '',
+    agent_connect: out['agent_connect'] ?? '',
   };
+}
+
+/**
+ * ADR 452 §1: the connect nonce out of whatever the person pasted — the whole link
+ * (`…/join/:team#n=<nonce>`), `n=<nonce>`, or the bare nonce. Null when no 43-char base64url nonce
+ * (`randomBytes(32)`) can be read; the caller refuses that with the same body as a bad nonce.
+ */
+export function connectNonceFrom(pasted: string): string | null {
+  let v = pasted.trim();
+  const hash = v.indexOf('#');
+  if (hash >= 0) v = v.slice(hash + 1);
+  if (v.includes('=')) v = new URLSearchParams(v).get('n') ?? '';
+  return /^[A-Za-z0-9_-]{43}$/.test(v) ? v : null;
 }
 
 /**
@@ -529,15 +554,17 @@ export async function handleOAuthRoutes(
       code_challenge: flat.code_challenge,
       code_challenge_method: flat.code_challenge_method,
       ...(flat.scope ? { scope: flat.scope } : {}),
-      // The form posts flat fields; the proof rides the seam the ADR names. An `invite` field
-      // selects ADR 450's second prover; otherwise it is ADR 446's seat credential.
-      proof: flat.invite
-        ? { kind: 'invite', secret: flat.invite, name: flat.member }
-        : {
-            kind: 'credential',
-            credential: flat.credential,
-            ...(flat.member ? { member: flat.member } : {}),
-          },
+      // The form posts flat fields; the proof rides the seam the ADR names. `agent_connect`
+      // selects ADR 452's agent prover, `invite` ADR 450's; otherwise it is ADR 446's credential.
+      proof: flat.agent_connect
+        ? { kind: 'agent_connect', nonce: flat.agent_connect }
+        : flat.invite
+          ? { kind: 'invite', secret: flat.invite, name: flat.member }
+          : {
+              kind: 'credential',
+              credential: flat.credential,
+              ...(flat.member ? { member: flat.member } : {}),
+            },
     });
     const client = getClientOrOAuth(ctx.db, team.id, body.client_id, res);
     if (!client) return true;
@@ -550,7 +577,74 @@ export async function handleOAuthRoutes(
     }
     let member: ReturnType<typeof getMemberByName>;
     let admittedVia: 'link' | 'code' | null = null;
-    if (body.proof.kind === 'invite') {
+    // ADR 452 §2.3: an agent connect issues its code INSIDE the supersede transaction, so no
+    // earlier connect's code or chain can outlive this one (big-body 01M3DM1CQ2).
+    let agentCode: string | null = null;
+    if (body.proof.kind === 'agent_connect') {
+      const nonce = connectNonceFrom(body.proof.nonce);
+      const clientId = body.client_id;
+      const redirectUri = body.redirect_uri;
+      const codeChallenge = body.code_challenge;
+      const scope = body.scope;
+      const outcome = ctx.db.transaction(
+        (): { err: MusterdError } | { agent: MemberRow; code: string } => {
+          const agent = nonce ? redeemAgentConnectNonce(ctx.db, team.id, nonce) : null;
+          if (!agent) {
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'member.agent_connect_refused',
+              target: null,
+              result: 'deny',
+              detail: { client_id: clientId, reason: nonce ? 'invalid' : 'malformed' },
+            });
+            return {
+              err: new MusterdError(
+                'unauthorized',
+                "that connect link isn't valid — ask your sponsor for a new one",
+              ),
+            };
+          }
+          // One OAuth occupant per agent: every prior chain AND every unexchanged code goes.
+          const chains = revokeAllForMember(ctx.db, team.id, agent.id);
+          const codes = burnUnexchangedCodes(ctx.db, team.id, agent.id);
+          if (chains + codes > 0)
+            appendAudit(ctx.db, team.id, {
+              actor: agent.name,
+              action: 'oauth.revoked',
+              target: clientId,
+              result: 'allow',
+              detail: { reason: 'superseded', chains, codes },
+            });
+          const { code } = issueCode(ctx.db, {
+            teamId: team.id,
+            memberId: agent.id,
+            clientId,
+            redirectUri,
+            codeChallenge,
+            ...(scope ? { scope } : {}),
+          });
+          const sponsor = agent.sponsored_by
+            ? ctx.db
+                .prepare<[string], { name: string }>('SELECT name FROM members WHERE id = ?')
+                .get(agent.sponsored_by)?.name
+            : undefined;
+          appendAudit(ctx.db, team.id, {
+            actor: sponsor ?? null,
+            action: 'member.agent_connected',
+            target: agent.name,
+            result: 'allow',
+            detail: { client_id: clientId, client_name: client.client_name },
+          });
+          return { agent, code };
+        },
+      )();
+      if ('err' in outcome) {
+        sendOAuthError(res, outcome.err);
+        return true;
+      }
+      member = outcome.agent;
+      agentCode = outcome.code;
+    } else if (body.proof.kind === 'invite') {
       // ADR 450 §2: a stranger proves an admin gave them an invite, then becomes a NEW human
       // member — one transaction: check-and-charge, name refusal, addMember, consume, audit.
       const proof = body.proof;
@@ -620,14 +714,16 @@ export async function handleOAuthRoutes(
       return true;
     }
     const memberName = member.name;
-    const { code } = issueCode(ctx.db, {
-      teamId: team.id,
-      memberId: member.id,
-      clientId: body.client_id,
-      redirectUri: body.redirect_uri,
-      codeChallenge: body.code_challenge,
-      ...(body.scope ? { scope: body.scope } : {}),
-    });
+    const code =
+      agentCode ??
+      issueCode(ctx.db, {
+        teamId: team.id,
+        memberId: member.id,
+        clientId: body.client_id,
+        redirectUri: body.redirect_uri,
+        codeChallenge: body.code_challenge,
+        ...(body.scope ? { scope: body.scope } : {}),
+      }).code;
     appendAudit(ctx.db, team.id, {
       actor: memberName,
       action: 'oauth.code_issued',
@@ -676,6 +772,15 @@ export async function handleOAuthRoutes(
           redirectUri: tokenReq.redirect_uri,
           verifier: tokenReq.code_verifier,
         });
+        // ADR 452 §4: a member who left, was disabled, or expired in the 90s since authorize gets
+        // no chain (the code is already burned). Same rule as authMember, one statement of it.
+        const owner = ctx.db
+          .prepare<[string], MemberRow>('SELECT * FROM members WHERE id = ?')
+          .get(memberId);
+        const ended = owner
+          ? memberStandingRefusal(owner)
+          : new MusterdError('unauthorized', 'seat is gone');
+        if (ended) throw ended;
         const pair = mintTokenPair(ctx.db, {
           teamId: team.id,
           memberId,
