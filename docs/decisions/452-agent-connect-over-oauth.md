@@ -125,7 +125,9 @@ The consent page (GET) gains a third form beside ADR 450's two: "Connecting an a
 connect link." When the connect link is opened on the agent's device, the join page shows the team's
 `/mcp/:team` URL to add in the harness, plus the link's code to copy for sign-in. The page sends the
 nonce nowhere. The nonce reaches the server only in the authorize POST body. It never appears in a
-query string, the MCP connector URL, a harness config file, or a server log.
+query string, the MCP connector URL, a harness config file, a server log, or an edge log. The
+consent form's nonce field is `autocomplete="off"` and posts with `method="post"`, so a browser
+neither saves it nor puts it in the URL (fifty, `01M3E63MVH`, the same rule as ADR 450's `#i=`).
 
 The join page may pre-fill the consent form when both are served from the daemon's origin. Nothing
 depends on that pre-fill, because the authorize page can open in a browser that never saw the link
