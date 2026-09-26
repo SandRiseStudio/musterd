@@ -176,10 +176,24 @@ tunnel the edge collapses every driven human onto the box's one IP, so tunnel ru
 steady-state tool-call latency (arrivals stretched under the per-IP OAuth limits), and the
 arrival burst is read from loopback runs, where the per-attendee rate key is faithful.
 
-**Numbers pending.** This session validated the harness plumbing at tiny N on the `rest` rail
-(laptop-safe: 2/2/2, 8 s) and could not run the `mcp` rail or audience scale locally (the
-worktree predates #1694's `@modelcontextprotocol/server` dependency, and toolchain/Fly commands
-were approval-gated). The next loadbench run must record, per the lane's Done line: N=50 loopback
-`HUMAN_RAIL=mcp` vs the N=50 `rest` row above (the released rail's daemon cost, including the
-OAuth arrival burst), and the `REMOTE_URL` steady-state tunnel numbers (p50/p95/p99, CPU,
-loop delay) — then restate the go/no-go ceiling if the released rail moves it.
+**Numbers (2026-09-25, loadbench `performance-8x` sjc, `DAEMON_CPUS=0`, 50/50/50, 90 s, ramp
+30 s, synthetic board of 1200 lanes).** The released `mcp` rail costs the daemon *less* than the
+modelled `rest` shape, not more:
+
+| rail | all-req p50 | p95 | p99 | daemon CPU | rss | loop delay p99/max | errors |
+| ---- | ----------- | --- | --- | ---------- | --- | ------------------ | ------ |
+| `mcp` (released, OAuth arrival + tools/call) | 22 ms | 557 ms | 837 ms | 43 % | 211 MB | 81 / 754 ms | 0 |
+| `rest` (modelled A/B) | 26 ms | 614 ms | 1776 ms | 46 % | 225 MB | 92 / 764 ms | 0 |
+
+The OAuth arrival burst is absorbed cleanly at N=50 (register p95 79 ms, authorize p95 163 ms,
+token p95 109 ms, per-attendee `cf-connecting-ip` rate keys under `trustProxy`). The `rest`
+rail's worse tail comes from humans hitting `GET /lanes` (2.5 MB bodies) and `GET /teams/:slug`,
+which the MCP tool surface never fetches — the released rail replaces big-body reads with small
+`tools/call` frames. Both runs stay inside the p95 1000 ms budget; the dominant cost at N=50
+remains the viewer roster fan-out (`GET /teams/:slug` p95 ~726-772 ms), unchanged from the
+2026-09-25 section above, so the **go/no-go ceiling stays ~75 concurrent attendees** — the
+released rail does not move it down.
+
+**Still pending:** the `REMOTE_URL` quick-tunnel steady-state run (external-ingress tunnel was
+not runnable from this session; recipe in `loadbench.fly.toml`, RAMP ≥ 12 s/human through the
+edge).
