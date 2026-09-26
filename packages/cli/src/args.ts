@@ -98,11 +98,11 @@ export function flagStr(flags: Record<string, string | boolean>, name: string): 
  * keeps its bare-seconds contract.)
  */
 export function parseDurationMs(raw: string, flag: string): number {
-  const m = /^(\d+(?:\.\d+)?)(s|m|h)$/.exec(raw.trim());
+  const m = /^(\d+(?:\.\d+)?)(s|m|h|d)$/.exec(raw.trim());
   if (!m) {
-    throw new CliError(`${flag} wants a duration like 45s, 15m, or 2h (got "${raw}")`, 2);
+    throw new CliError(`${flag} wants a duration like 45s, 15m, 2h, or 3d (got "${raw}")`, 2);
   }
-  const mult = m[2] === 's' ? 1_000 : m[2] === 'm' ? 60_000 : 3_600_000;
+  const mult = m[2] === 's' ? 1_000 : m[2] === 'm' ? 60_000 : m[2] === 'h' ? 3_600_000 : 86_400_000;
   return Math.round(Number(m[1]) * mult);
 }
 

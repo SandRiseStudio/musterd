@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
@@ -132,6 +132,111 @@ describe('team policy command', () => {
       teamCommand(parseArgs(['bootstrap', 'revoke', mintBody.credential.id, '--json'])),
     );
     expect(JSON.parse(revoked.out)).toEqual({ ok: true });
+  });
+
+  it('team invite: creates (secret shown once), lists redacted, revokes — and the HMAC key lands beside the config at 0600 (ADR 450)', async () => {
+    const minted = await capture(() =>
+      teamCommand(
+        parseArgs([
+          'invite',
+          'create',
+          '--uses',
+          '5',
+          '--fail-budget',
+          '7',
+          '--expires',
+          '3h',
+          '--member-until',
+          '2d',
+          '--json',
+        ]),
+      ),
+    );
+    expect(minted.code).toBe(0);
+    const body = JSON.parse(minted.out);
+    expect(body.room_code).toMatch(/^[0-9A-Z]{3}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect(body.link_secret).toMatch(/^[0-9A-Z]{3}\.[A-Za-z0-9_-]{27}$/);
+    expect(body.room_code.slice(0, 3)).toBe(body.invite.selector);
+    expect(body.invite).toMatchObject({
+      state: 'live',
+      uses: 0,
+      max_uses: 5,
+      failures: 0,
+      fail_budget: 7,
+      created_by: 'nick',
+    });
+    expect(body.invite.expires_at).toBeGreaterThan(Date.now() + 2 * 3_600_000);
+    expect(body.invite.member_until).toBeGreaterThan(Date.now() + 47 * 3_600_000);
+
+    // The room-code verifier key is generated beside the effective config, never in the DB.
+    const keyPath = join(dir, 'invite.key');
+    expect(existsSync(keyPath)).toBe(true);
+    expect(statSync(keyPath).mode & 0o777).toBe(0o600);
+    const row = server.db
+      .prepare<
+        [],
+        { code_mac: string; secret_hash: string }
+      >('SELECT code_mac, secret_hash FROM team_invites')
+      .get()!;
+    expect(row.code_mac).not.toContain(body.room_code.replace(/-/g, '').slice(3));
+    expect(row.secret_hash).not.toContain(body.link_secret.split('.')[1]);
+
+    // Human rendering prints both spellings once, plus the id for revoke.
+    const human = await capture(() => teamCommand(parseArgs(['invite', 'create'])));
+    expect(human.code).toBe(0);
+    expect(human.out).toMatch(/room code:\s+[0-9A-Z]{3}-[0-9A-Z]{4}-[0-9A-Z]{4}/);
+    expect(human.out).toMatch(/link value:\s+[0-9A-Z]{3}\.[A-Za-z0-9_-]+/);
+    expect(human.out).toContain('shown once');
+    expect(human.out).toContain('burns after 20 wrong codes');
+
+    // list is redacted: ids, selectors, counters — no secret in any form.
+    const listed = await capture(() => teamCommand(parseArgs(['invite', 'list', '--json'])));
+    const inventory = JSON.parse(listed.out);
+    expect(inventory.invites).toHaveLength(2);
+    expect(inventory.invites.map((i: { id: string }) => i.id)).toContain(body.invite.id);
+    expect(listed.out).not.toContain(body.link_secret.split('.')[1]);
+    expect(listed.out).not.toContain(body.room_code.slice(4));
+    const listedHuman = await capture(() => teamCommand(parseArgs(['invite', 'list'])));
+    expect(listedHuman.out).toContain(
+      `${body.invite.id}  ${body.invite.selector}  live  uses 0/5  failures 0/7`,
+    );
+
+    const revoked = await capture(() =>
+      teamCommand(parseArgs(['invite', 'revoke', body.invite.id, '--json'])),
+    );
+    expect(JSON.parse(revoked.out)).toEqual({ ok: true });
+    const after = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['invite', 'list', '--json'])))).out,
+    );
+    expect(after.invites.find((i: { id: string }) => i.id === body.invite.id).state).toBe(
+      'revoked',
+    );
+    // A second revoke of the same id is a not_found from the daemon, surfaced as an error.
+    await expect(teamCommand(parseArgs(['invite', 'revoke', body.invite.id]))).rejects.toThrow(
+      /no live invite/,
+    );
+  });
+
+  it('team invite: validates its flags and usage before touching the daemon', async () => {
+    await expect(teamCommand(parseArgs(['invite', 'create', '--uses', '0']))).rejects.toThrow(
+      '--uses must be a positive integer',
+    );
+    await expect(
+      teamCommand(parseArgs(['invite', 'create', '--fail-budget', 'lots'])),
+    ).rejects.toThrow('--fail-budget must be a positive integer');
+    await expect(
+      teamCommand(parseArgs(['invite', 'create', '--expires', 'soonish'])),
+    ).rejects.toThrow(/--expires/);
+    await expect(teamCommand(parseArgs(['invite', 'revoke']))).rejects.toThrow(
+      'usage: musterd team invite revoke <invite-id>',
+    );
+    await expect(teamCommand(parseArgs(['invite', 'frobnicate']))).rejects.toThrow(
+      'usage: musterd team invite <create|list|revoke>',
+    );
+    // The daemon refuses an over-cap budget; the CLI surfaces it.
+    await expect(
+      teamCommand(parseArgs(['invite', 'create', '--fail-budget', '5000'])),
+    ).rejects.toThrow(/fail_budget/);
   });
 
   it('requires exactly one bootstrap mint scope', async () => {

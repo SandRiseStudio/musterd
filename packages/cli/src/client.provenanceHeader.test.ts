@@ -71,8 +71,9 @@ describe('parseDurationMs (the knob-flag duration shape)', () => {
     expect(parseDurationMs('45s', '--timeout')).toBe(45_000);
     expect(parseDurationMs('15m', '--cooldown')).toBe(900_000);
     expect(parseDurationMs('2h', '--cooldown')).toBe(7_200_000);
+    expect(parseDurationMs('3d', '--member-until')).toBe(259_200_000);
     expect(parseDurationMs('1.5m', '--cooldown')).toBe(90_000);
-    expect(() => parseDurationMs('30', '--cooldown')).toThrow(/like 45s, 15m, or 2h/);
-    expect(() => parseDurationMs('soon', '--cooldown')).toThrow(/like 45s, 15m, or 2h/);
+    expect(() => parseDurationMs('30', '--cooldown')).toThrow(/like 45s, 15m, 2h, or 3d/);
+    expect(() => parseDurationMs('soon', '--cooldown')).toThrow(/like 45s, 15m, 2h, or 3d/);
   });
 });
