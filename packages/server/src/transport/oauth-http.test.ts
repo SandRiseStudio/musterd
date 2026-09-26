@@ -569,7 +569,7 @@ describe('/mcp/:team — the Done line (ADR 446 §7)', () => {
 
     const list = await mcpCall(pair.access_token, 'tools/list', {}, 2);
     const names = list.json.result.tools.map((t: any) => t.name).sort();
-    expect(names).toEqual(['team_inbox_check', 'team_join', 'team_send']);
+    expect(names).toEqual(['team_agent_create', 'team_inbox_check', 'team_join', 'team_send']);
 
     const join = await mcpCall(
       pair.access_token,
@@ -604,6 +604,44 @@ describe('/mcp/:team — the Done line (ADR 446 §7)', () => {
     );
     // Our own send is excluded from our inbox (from_member != me) — the cursor proves the read.
     expect(inbox.json.result.content[0].text).toContain('cursor');
+  });
+
+  it('team_agent_create over MCP frames mints a sponsored agent and returns a connect link (ADR 449 §3)', async () => {
+    const { pair } = await signInPair(nickCred);
+    await mcpCall(pair.access_token, 'initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'phone', version: '0' },
+    });
+    const made = await mcpCall(
+      pair.access_token,
+      'tools/call',
+      { name: 'team_agent_create', arguments: { name: 'nick-scout', role: 'research' } },
+      2,
+    );
+    const text: string = made.json.result.content[0].text;
+    expect(made.json.result.isError).toBeUndefined();
+    expect(text).toContain('Created agent "nick-scout"');
+    expect(text).toMatch(/\/join\/dawn\/agent#[A-Za-z0-9_-]{43}/);
+    expect(text).not.toMatch(/ms(cr|ac|at|kd)_/);
+    const row = server.db
+      .prepare("SELECT kind, sponsored_by FROM members WHERE name = 'nick-scout'")
+      .get() as { kind: string; sponsored_by: string };
+    const dawn = getTeamBySlug(server.db, 'dawn')!;
+    const nick = server.db
+      .prepare("SELECT id FROM members WHERE team_id = ? AND name = 'nick'")
+      .get(dawn.id) as { id: string };
+    expect(row).toEqual({ kind: 'agent', sponsored_by: nick.id });
+    expect(audits('member.sponsored_agent_created')).toHaveLength(1);
+
+    const dup = await mcpCall(
+      pair.access_token,
+      'tools/call',
+      { name: 'team_agent_create', arguments: { name: 'nick-scout' } },
+      3,
+    );
+    expect(dup.json.result.isError).toBe(true);
+    expect(dup.json.result.content[0].text).toContain('already exists');
   });
 
   it('missing bearer is 401; unknown team is 404', async () => {

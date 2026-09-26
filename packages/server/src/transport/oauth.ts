@@ -26,6 +26,7 @@ import {
   rotateRefresh,
 } from '../store/oauth.js';
 import { requireTeam } from '../store/teams.js';
+import { originFrom } from './sponsoredAgentMint.js';
 
 /**
  * The OAuth 2.1 authorization server (ADR 446 §3) — the daemon is the identity provider for its
@@ -138,12 +139,9 @@ function requireTlsPeer(ctx: Ctx, req: IncomingMessage, what: string): void {
   );
 }
 
-/** The public origin as the client saw it (the tunnel's `x-forwarded-proto`, the Host header). */
-export function baseUrl(req: IncomingMessage): string {
+function baseUrl(req: IncomingMessage): string {
   const proto = req.headers['x-forwarded-proto'];
-  const first = (Array.isArray(proto) ? proto[0] : proto)?.split(',')[0]?.trim().toLowerCase();
-  const scheme = first === 'https' ? 'https' : 'http';
-  return `${scheme}://${req.headers.host ?? 'localhost'}`;
+  return originFrom(req.headers.host, Array.isArray(proto) ? proto[0] : proto);
 }
 
 function sendOAuthJson(res: ServerResponse, status: number, body: unknown): void {
