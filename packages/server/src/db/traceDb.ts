@@ -70,7 +70,33 @@ export const TRACE_MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    up: (db) => {
+      db.exec(`
+        -- Replication (ADR 453 §2): which node minted the row. NULL means this daemon did; a node
+        -- id means the hub received it over /sync/trace from that joiner. Indexed for the
+        -- replication read-back and the eval's "replicated?" split.
+        ALTER TABLE trace_events ADD COLUMN origin_node TEXT;
+        CREATE INDEX idx_trace_events_origin ON trace_events (team_id, origin_node);
+      `);
+    },
+  },
 ];
+
+/**
+ * ADR 453 §2: the joiner's per-machine key for digesting opaque harness ids on their way to the hub.
+ * A random 32-byte secret, generated once into this file's `schema_meta`, never sent or logged, and
+ * kept for the file's lifetime so one id always digests the same way here. NOT the agent key behind
+ * `session_digest` — the daemon holds only that key's hash (ADR 131 §5).
+ */
+export const SYNC_TRACE_ID_KEY = 'sync_trace_id_key';
+
+/** ADR 453 §4: the pusher's cursor per team — the highest `rowid` the hub has acked. Lives in the
+ *  trace store because it describes rows of THIS file, never in `musterd.db`. */
+export function syncTraceCursorKey(teamId: string): string {
+  return `sync_trace_cursor:${teamId}`;
+}
 
 /**
  * The `schema_meta` key `pnpm corpus:snapshot` stamps after it has captured `trace.db`: the highest

@@ -24,6 +24,7 @@ import { activePresenceBySurface, slowestInboxLagMs } from './store/metrics.js';
 import { startTraceContentPrune } from './store/trace.js';
 import { startSyncPull } from './sync/pull.js';
 import { startSyncPush } from './sync/push.js';
+import { startTracePush } from './sync/tracePush.js';
 import { registerRuntimeGauges, startTelemetry, telemetryEnabled } from './telemetry.js';
 import { handleHttp } from './transport/http.js';
 import { Hub } from './transport/hub.js';
@@ -146,6 +147,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   let stopPull: (() => void) | null = null;
   let stopFootprint: (() => void) | null = null;
   let stopTracePrune: (() => void) | null = null;
+  let stopTracePush: (() => void) | null = null;
   let stopWatcher: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
   /** One shared shutdown promise, so a second signal joins the first instead of racing it. */
@@ -202,6 +204,8 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           stopSeeds = startSeedsIngest(ctx);
           stopSync = startSyncPush(ctx);
           stopPull = startSyncPull(ctx);
+          // ADR 453 §4: its own loop, so a stalled /sync/trace never delays /sync/push.
+          stopTracePush = startTracePush(ctx);
           stopFootprint = startFootprintSampler(ctx);
           // ADR 445 increment 3a: content past its 30-day window is nulled, structural rows stay.
           stopTracePrune = startTraceContentPrune(
@@ -263,6 +267,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
         stopPull?.();
         stopFootprint?.();
         stopTracePrune?.();
+        stopTracePush?.();
         stopWatcher?.();
         void stopTelemetry?.();
         // Kill the upgraded sockets FIRST — http.close() below never settles while they live.

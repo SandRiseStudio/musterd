@@ -1,12 +1,21 @@
+import { createHmac, randomBytes } from 'node:crypto';
 import {
+  normalizeTraceDetail,
   scrubCredentials,
+  structuralToolName,
+  type SyncTraceRow,
   TRACE_CONTENT_FIELDS,
+  TRACE_ID_DIGEST_LEN,
   type TraceContent,
   type TraceEvent,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { monotonicFactory } from 'ulid';
-import { CONTENT_CAPTURED_THROUGH_KEY } from '../db/traceDb.js';
+import {
+  CONTENT_CAPTURED_THROUGH_KEY,
+  SYNC_TRACE_ID_KEY,
+  syncTraceCursorKey,
+} from '../db/traceDb.js';
 
 const ulid = monotonicFactory();
 
@@ -50,7 +59,7 @@ export function ingestTraceEvents(
   seat: string,
   events: readonly TraceEvent[],
   opts: { writeContent?: boolean } = {},
-): { accepted: number; content: number } {
+): { accepted: number; content: number; normalized: number } {
   const nextSeq = traceDb.prepare<[string, string], { next: number }>(
     'SELECT COALESCE(MAX(seq), -1) + 1 AS next FROM trace_events WHERE team_id = ? AND session_digest = ?',
   );
@@ -72,12 +81,19 @@ export function ingestTraceEvents(
     const cursors = new Map<string, number>();
     let accepted = 0;
     let withContent = 0;
+    let normalized = 0;
     for (const e of batch) {
       let seq = cursors.get(e.session_digest);
       if (seq === undefined) seq = nextSeq.get(teamId, e.session_digest)!.next;
       cursors.set(e.session_digest, seq + 1);
       const stored = opts.writeContent && e.content ? scrubStoredContent(e.content) : undefined;
       if (stored) withContent++;
+      // ADR 453 §2, rule 3: the local store holds the structural shape too, so the three
+      // boundaries (ingest, pusher, hub) agree on one definition. Normalize, never reject — a tap
+      // must not lose a row over one odd field. Ids stay raw here; they are digested on the wire.
+      const tool = structuralToolName(e.harness, e.tool_name);
+      const det = normalizeTraceDetail(e.kind, e.detail);
+      normalized += (tool.normalized ? 1 : 0) + det.normalized;
       insert.run({
         id: ulid(),
         team_id: teamId,
@@ -88,20 +104,20 @@ export function ingestTraceEvents(
         received_at: now,
         harness: e.harness,
         kind: e.kind,
-        tool_name: e.tool_name ?? null,
+        tool_name: tool.name,
         tool_use_id: e.tool_use_id ?? null,
         agent_id: e.agent_id ?? null,
         parent_agent_id: e.parent_agent_id ?? null,
         duration_ms: e.duration_ms ?? null,
         outcome: e.outcome ?? null,
-        detail: e.detail === undefined ? null : JSON.stringify(e.detail),
+        detail: det.detail === null ? null : JSON.stringify(det.detail),
         content: stored?.json ?? null,
         redactions: stored?.redactions ?? null,
         truncated: stored?.truncated ? 1 : 0,
       });
       accepted++;
     }
-    return { accepted, content: withContent };
+    return { accepted, content: withContent, normalized };
   });
   return run(events);
 }
@@ -129,6 +145,9 @@ export interface TraceEventRow {
   /** When the content lifecycle nulled `content` (migration 2); null while content is live or was
    *  never captured. */
   content_pruned_at: number | null;
+  /** The node that minted the row (migration 3, ADR 453): null = this daemon; a node id = received
+   *  over `/sync/trace` from that joiner. */
+  origin_node: string | null;
 }
 
 /** One session's events in sequence order — the read the coverage eval and `trace show` (inc 2) use. */
@@ -255,4 +274,187 @@ export function countTraceEvents(
           { kind: string; count: number }
         >('SELECT kind, COUNT(*) AS count FROM trace_events WHERE team_id = ? AND seat = ? GROUP BY kind ORDER BY kind')
         .all(teamId, seat);
+}
+
+// ── replication (ADR 453) ───────────────────────────────────────────────────────────────────────
+
+function readMeta(traceDb: Database, key: string): string | null {
+  return (
+    traceDb
+      .prepare<[string], { value: string }>('SELECT value FROM schema_meta WHERE key = ?')
+      .get(key)?.value ?? null
+  );
+}
+
+function writeMeta(traceDb: Database, key: string, value: string): void {
+  traceDb
+    .prepare(
+      'INSERT INTO schema_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    )
+    .run(key, value);
+}
+
+/**
+ * The per-machine id-digest key (ADR 453 §2), minted on first use into this file's `schema_meta`.
+ * Random, never sent, never logged; the same id digests the same way here for the file's life.
+ */
+export function syncTraceIdKey(traceDb: Database): Buffer {
+  const held = readMeta(traceDb, SYNC_TRACE_ID_KEY);
+  if (held) return Buffer.from(held, 'hex');
+  const key = randomBytes(32);
+  writeMeta(traceDb, SYNC_TRACE_ID_KEY, key.toString('hex'));
+  return key;
+}
+
+/** An opaque harness id as it crosses to the hub: `HMAC-SHA256(key, id)` cut to 24 hex characters. */
+export function digestTraceId(key: Buffer, id: string | null): string | null {
+  if (id === null || id === '') return null;
+  return createHmac('sha256', key).update(id).digest('hex').slice(0, TRACE_ID_DIGEST_LEN);
+}
+
+/** The pusher's cursor for a team: the highest `rowid` the hub has acked (0 = nothing yet). */
+export function readSyncTraceCursor(traceDb: Database, teamId: string): number {
+  const v = Number(readMeta(traceDb, syncTraceCursorKey(teamId)) ?? '0');
+  return Number.isSafeInteger(v) && v >= 0 ? v : 0;
+}
+
+export function advanceSyncTraceCursor(traceDb: Database, teamId: string, rowid: number): void {
+  writeMeta(traceDb, syncTraceCursorKey(teamId), String(rowid));
+}
+
+/**
+ * The next batch of THIS daemon's own rows after the cursor, in `rowid` order, already shaped for
+ * the wire (ADR 453 §2, rule 2): structural columns SELECTed by name (content is never read), the
+ * tool name normalized to the harness namespace, the detail normalized per kind, and the three
+ * opaque ids digested under the machine key. `rowid` is sound as a cursor: nothing deletes from
+ * `trace_events` (the content prune is an UPDATE), so it only grows. Rows with an `origin_node`
+ * are never offered — they are a joiner's, held here on a hub, and the hub forwards nothing.
+ */
+export function unpushedTraceRows(
+  traceDb: Database,
+  teamId: string,
+  after: number,
+  limit: number,
+): { rows: SyncTraceRow[]; last: number; normalized: number } {
+  const key = syncTraceIdKey(traceDb);
+  const raw = traceDb
+    .prepare<
+      [string, number, number],
+      {
+        rowid: number;
+        id: string;
+        seat: string;
+        session_digest: string;
+        seq: number;
+        ts: number;
+        received_at: number;
+        harness: string;
+        kind: SyncTraceRow['kind'];
+        tool_name: string | null;
+        tool_use_id: string | null;
+        agent_id: string | null;
+        parent_agent_id: string | null;
+        duration_ms: number | null;
+        outcome: SyncTraceRow['outcome'];
+        detail: string | null;
+      }
+    >(
+      `SELECT rowid, id, seat, session_digest, seq, ts, received_at, harness, kind, tool_name,
+              tool_use_id, agent_id, parent_agent_id, duration_ms, outcome, detail
+         FROM trace_events
+        WHERE team_id = ? AND rowid > ? AND origin_node IS NULL
+        ORDER BY rowid LIMIT ?`,
+    )
+    .all(teamId, after, limit);
+  let normalized = 0;
+  const rows: SyncTraceRow[] = raw.map((r) => {
+    const tool = structuralToolName(r.harness, r.tool_name);
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = r.detail ? (JSON.parse(r.detail) as Record<string, unknown>) : null;
+    } catch {
+      parsed = null;
+    }
+    const det = normalizeTraceDetail(r.kind, parsed);
+    normalized += (tool.normalized ? 1 : 0) + det.normalized;
+    return {
+      id: r.id,
+      seat: r.seat,
+      session_digest: r.session_digest,
+      seq: r.seq,
+      ts: r.ts,
+      received_at: r.received_at,
+      harness: r.harness,
+      kind: r.kind,
+      tool_name: tool.name,
+      tool_use_id: digestTraceId(key, r.tool_use_id),
+      agent_id: digestTraceId(key, r.agent_id),
+      parent_agent_id: digestTraceId(key, r.parent_agent_id),
+      duration_ms: r.duration_ms,
+      outcome: r.outcome,
+      detail: det.detail,
+    };
+  });
+  return { rows, last: raw.length > 0 ? raw[raw.length - 1]!.rowid : after, normalized };
+}
+
+/**
+ * The hub's write for a `/sync/trace` batch (ADR 453 §2): one transaction, `INSERT OR IGNORE` per
+ * row with the origin's `seq`/`ts`/`received_at` verbatim and `origin_node` set. A row that inserts
+ * nothing is classified by one lookup: the same `id` held → `ignored` (a re-push); otherwise it hit
+ * `UNIQUE (team, session_digest, seq)` under a different id → `collided`, counted apart so a digest
+ * collision cannot hide inside the re-push count. The residence check is the ROUTE's (it needs the
+ * coordination store); rows arrive here already admitted.
+ */
+export function ingestSyncedTraceRows(
+  traceDb: Database,
+  teamId: string,
+  originNode: string,
+  rows: readonly SyncTraceRow[],
+): { accepted: number; ignored: number; collided: number } {
+  const insert = traceDb.prepare(`
+    INSERT OR IGNORE INTO trace_events (
+      id, team_id, seat, session_digest, seq, ts, received_at, harness, kind,
+      tool_name, tool_use_id, agent_id, parent_agent_id, duration_ms, outcome, detail,
+      content, redactions, truncated, origin_node
+    ) VALUES (
+      @id, @team_id, @seat, @session_digest, @seq, @ts, @received_at, @harness, @kind,
+      @tool_name, @tool_use_id, @agent_id, @parent_agent_id, @duration_ms, @outcome, @detail,
+      NULL, NULL, 0, @origin_node
+    )
+  `);
+  const held = traceDb.prepare<[string], { one: number }>(
+    'SELECT 1 AS one FROM trace_events WHERE id = ?',
+  );
+  const run = traceDb.transaction((batch: readonly SyncTraceRow[]) => {
+    let accepted = 0;
+    let ignored = 0;
+    let collided = 0;
+    for (const r of batch) {
+      const { changes } = insert.run({
+        id: r.id,
+        team_id: teamId,
+        seat: r.seat,
+        session_digest: r.session_digest,
+        seq: r.seq,
+        ts: r.ts,
+        received_at: r.received_at,
+        harness: r.harness,
+        kind: r.kind,
+        tool_name: r.tool_name,
+        tool_use_id: r.tool_use_id,
+        agent_id: r.agent_id,
+        parent_agent_id: r.parent_agent_id,
+        duration_ms: r.duration_ms,
+        outcome: r.outcome,
+        detail: r.detail === null ? null : JSON.stringify(r.detail),
+        origin_node: originNode,
+      });
+      if (changes > 0) accepted++;
+      else if (held.get(r.id)) ignored++;
+      else collided++;
+    }
+    return { accepted, ignored, collided };
+  });
+  return run(rows);
 }

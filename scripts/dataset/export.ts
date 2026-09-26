@@ -31,6 +31,7 @@ import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { TRACE_STRUCTURAL_DETAIL_KEYS } from '@musterd/protocol';
 
 export const DEFAULT_MANIFEST_PATH = 'scripts/dataset/manifest.v1.json';
 export const PUBLIC_MANIFEST_NAME = 'manifest.v1.json';
@@ -55,42 +56,12 @@ const STRUCTURAL_META_KEYS = new Set([
 ]);
 
 /**
- * `trace_events.detail` keys that are structural (ADR 184 §2: names, ids, kinds, timings, counts,
- * sizes) — every key the Claude Code / Codex / Cursor taps and the R2 parsers write, as measured on
- * the dogfood trace store 2026-09-25. Anything else is dropped (fail closed). `model` rides as in
- * acts' meta.
+ * `trace_events.detail` keys that are structural — ONE definition, shared with the sync channel
+ * (ADR 453 §2): the per-kind table in `@musterd/protocol` is what the hub enforces on the wire and
+ * what this export allowlists, so the public dataset and replication cannot drift apart on what
+ * "structural" means. Anything outside it is dropped (fail closed).
  */
-export const TRACE_DETAIL_KEYS = new Set([
-  'hook',
-  'hook_event',
-  'exit_code',
-  'decision',
-  'raised',
-  'deaf',
-  'source',
-  'reason',
-  'stop_hook_active',
-  'tool_input_bytes',
-  'tool_response_bytes',
-  'error_bytes',
-  'prompt_bytes',
-  'assistant_bytes',
-  'reasoning_bytes',
-  'encrypted',
-  'parser',
-  'type',
-  'bytes',
-  'suppressed',
-  'downgraded',
-  'model',
-  'input_tokens',
-  'output_tokens',
-  'cache_read_tokens',
-  'cache_creation_tokens',
-  'reasoning_tokens',
-  'total_tokens',
-  'tool_uses',
-]);
+export const TRACE_DETAIL_KEYS: ReadonlySet<string> = TRACE_STRUCTURAL_DETAIL_KEYS;
 
 export function projectTraceDetail(raw: string | null): Record<string, unknown> | null {
   if (raw === null || raw.length === 0) return null;

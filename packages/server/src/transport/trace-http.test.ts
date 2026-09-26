@@ -203,7 +203,7 @@ describe('POST /teams/:slug/trace/events', () => {
 
   it('/health reports the trace ladder beside the coordination schema', async () => {
     const h = (await (await fetch(base + '/health')).json()) as Record<string, unknown>;
-    expect(h['trace_schema']).toBe(2);
+    expect(h['trace_schema']).toBe(3);
     expect(h['trace_db']).toBe(':memory:');
     // an in-memory store has no size on disk — absence, never a made-up zero (increment 3a)
     expect(h).not.toHaveProperty('trace_db_bytes');
@@ -219,7 +219,7 @@ describe('POST /teams/:slug/trace/events', () => {
             tool_name: undefined,
             tool_use_id: undefined,
             outcome: 'error',
-            detail: { parser: 'claude-code@1', downgraded: true, reason: 'transcript truncated' },
+            detail: { parser: 'claude-code@1', downgraded: true, reason: 'transcript_truncated' },
           }),
           // an ordinary unknown record is NOT a downgrade and writes no audit row
           ev({ kind: 'unknown', detail: { parser: 'claude-code@1', bytes: 12, type: 'novel' } }),
@@ -239,7 +239,7 @@ describe('POST /teams/:slug/trace/events', () => {
     expect(JSON.parse(rows[0]!.detail)).toEqual({
       harness: 'claude-code',
       session_digest: 'abcdef012345',
-      reason: 'transcript truncated',
+      reason: 'transcript_truncated',
     });
   });
 });
