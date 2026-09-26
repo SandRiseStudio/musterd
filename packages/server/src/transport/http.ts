@@ -323,6 +323,7 @@ import {
 } from '../store/seeds.js';
 import { mintSessionLease, revokeMemberSessionLeases } from '../store/session-leases.js';
 import { redeemHandoff, stageHandoff } from '../store/signinHandoff.js';
+import { createSponsoredAgent, issueAgentConnectNonce } from '../store/sponsoredAgents.js';
 import { staleLaneWarnings } from '../store/staleness.js';
 import { searchInsights } from '../store/teamMemory.js';
 import {
@@ -386,7 +387,7 @@ import {
   recordTraceIngest,
 } from '../telemetry.js';
 import { handleMcpRoute } from './mcpHttp.js';
-import { handleOAuthRoutes } from './oauth.js';
+import { baseUrl, handleOAuthRoutes } from './oauth.js';
 
 /**
  * The content-coding negotiated for this response from its request's `Accept-Encoding`, set once at
@@ -964,6 +965,17 @@ const AddMemberBody = z.object({
    *  CLI wrote first carries it and reconcile projects it. */
   hue: z.number().int().min(0).max(359).nullish(),
 });
+
+/** Body for `POST /teams/:slug/members/agents` (ADR 449 §3) — a human member mints an agent. */
+const SponsoredAgentBody = z.object({
+  name: z.string().min(1).max(64),
+  role: z.string().max(64).nullish(),
+});
+
+/** ADR 449 §4 / ADR 170: the nonce rides the fragment — never sent to a server, never logged. */
+function agentConnectUrl(req: IncomingMessage, slug: string, nonce: string): string {
+  return `${baseUrl(req)}/join/${encodeURIComponent(slug)}/agent#${nonce}`;
+}
 
 const HueBody = z.object({ hue: z.number().int().min(0).max(359) });
 
@@ -1953,6 +1965,62 @@ export async function handleHttp(
           // ADR 374 Decision 4 / lane 01M2P43WQ7: past a full wheel the colour is shared, and the
           // caller says so out loud — the name rides the response instead of a 409.
           ...(hue_shared_with !== undefined ? { hue_shared_with } : {}),
+        });
+      }
+
+      // ADR 449 §3–4: a human member creates an agent they sponsor. Any human member may — this is a
+      // narrow, audited grant, not a loosening of ADR 134's provisioning gate (which still guards
+      // `POST /members`). The response carries no secret: a one-time connect link the sponsor opens
+      // on the agent's device, redeemed at OAuth authorize (increment 2b).
+      if (method === 'POST' && rest === '/members/agents') {
+        const { team, member: sponsor } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const body = parseOrBadRequest(SponsoredAgentBody, await readJson(req));
+        // A file-backed team's seat files are the single writer (ADR 058): a db-originated seat
+        // would be double-sourced there. Member-created agents need a db-only team.
+        if (teamSpecForSlug([...new Set([...ctx.rosterRoots, ...resolveRosterRoots()])], slug))
+          throw new MusterdError(
+            'forbidden',
+            `"${slug}" keeps its roster in seat files — add an agent there (\`musterd agent\`); ` +
+              'member-created agents need a team whose roster lives in the daemon',
+          );
+        const { member, nonce, expires_at } = createSponsoredAgent(ctx.db, team, sponsor, body);
+        appendAudit(ctx.db, team.id, {
+          actor: sponsor.name,
+          action: 'member.sponsored_agent_created',
+          target: member.name,
+          result: 'allow',
+          detail: { lifecycle_until: member.lifecycle_until },
+        });
+        return sendJson(res, 201, {
+          member: toMember(member, team.slug),
+          connect_url: agentConnectUrl(req, team.slug, nonce),
+          connect_expires_at: expires_at,
+        });
+      }
+
+      // ADR 449 §4: re-issue an agent's connect link (the last one expired, or went to the wrong
+      // place). Only the sponsor may; the prior unused link dies with the re-issue.
+      const connectMatch = rest.match(/^\/members\/agents\/([^/]+)\/connect$/);
+      if (method === 'POST' && connectMatch) {
+        const { team, member: sponsor } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const agentName = decodeURIComponent(connectMatch[1]!);
+        const agent = getMemberByName(ctx.db, team.id, agentName);
+        if (!agent || agent.left_at !== null || agent.sponsored_by !== sponsor.id)
+          throw new MusterdError(
+            'not_found',
+            `you sponsor no live agent "${agentName}" in ${slug}`,
+          );
+        const { nonce, expires_at } = issueAgentConnectNonce(ctx.db, team.id, agent.id, sponsor.id);
+        appendAudit(ctx.db, team.id, {
+          actor: sponsor.name,
+          action: 'member.agent_connect_issued',
+          target: agent.name,
+          result: 'allow',
+        });
+        return sendJson(res, 200, {
+          member: agent.name,
+          connect_url: agentConnectUrl(req, team.slug, nonce),
+          connect_expires_at: expires_at,
         });
       }
 

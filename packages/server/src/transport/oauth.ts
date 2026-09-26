@@ -138,7 +138,8 @@ function requireTlsPeer(ctx: Ctx, req: IncomingMessage, what: string): void {
   );
 }
 
-function baseUrl(req: IncomingMessage): string {
+/** The public origin as the client saw it (the tunnel's `x-forwarded-proto`, the Host header). */
+export function baseUrl(req: IncomingMessage): string {
   const proto = req.headers['x-forwarded-proto'];
   const first = (Array.isArray(proto) ? proto[0] : proto)?.split(',')[0]?.trim().toLowerCase();
   const scheme = first === 'https' ? 'https' : 'http';

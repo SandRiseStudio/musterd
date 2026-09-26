@@ -54,6 +54,7 @@ src/
     seeds.ts          // shared Seed persistence + authorized lifecycle transitions; atomic retry-safe promotion to one ordinary Lane (ADR 291/311); captureRepoSeed — a document-recorded intention as a Seed, idempotent on ref, lane_id links (ADR 373 inc 2)
     teamMemory.ts     // team-memory retrieval: searchInsights over the insights_fts fold + rebuildInsightsFts (the cache property) (ADR 327)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (+ authorized_by filter, ADR 071/127)
+    sponsoredAgents.ts // member-created agents (ADR 449 §3–4): createSponsoredAgent (human-only, sponsor's expiry inherited, cap 3, removed names refused) + the hashed single-use 15-min agent connect nonce (issue/redeem)
     signinHandoff.ts  // sign-in handoff relay: stageHandoff/redeemHandoff — memory-only, single-use 60s nonces so `musterd board` hands the browser a handle, never a credential (ADR 170)
     gateAsk.ts        // Gate B (ADR 150) ask-lifecycle reads: findGateAsk (fingerprint dedup — one ask per re-attempted costly action) + gateAskHumanAnswer (human-only accept/decline release); pure reads over the ADR 147 ask-stream log
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
