@@ -206,6 +206,7 @@ describe('version-bump discipline (ADR 085)', () => {
     28: '47801df432b79884', // ADR 430 (lane 01M32FHX6J): the woken-session block says the packet IS the orientation — bodies attributed and budgeted — and team_inbox_check is a fetch follow-up, not a step
     29: 'e1daaa1f77b25315', // lane 01M32WXS59: orient step 1 says the plain inbox read IS the orientation read and already carries any act a ⚡ line named — no `ids` read on top (an `ids` read marks nothing, so ryder saw the act twice); the woken-session block says the same of the packet
     30: '2ca60432ec427933', // ADR 442 (the wall): the nudge-relay skill and the Claude Code peer label sweep leave the rendered surface; orient step 6 labels only this chat; the skill body gains "a line is only a pointer"
+    31: '1c939454225f3d42', // guidance refresh (lane 01M3F9HYV1): ADR 447 — the human stands in a member Workspace, not the team root; remote members (ADR 446), invites (ADR 450) and sponsored agents via team_agent_create (ADR 449/452)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

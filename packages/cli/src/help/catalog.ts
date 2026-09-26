@@ -424,20 +424,22 @@ export const CATALOG: readonly CommandEntry[] = [
     detail:
       'Add an agent and give it its own isolated workspace on its own branch, wired to run (ADR 065). ' +
       'One command instead of team add + workspace + wire + claim. `--harness` picks which harness to wire ' +
-      '(default claude-code; also cursor, codex) — the same adapters `musterd init` uses. Do not run ' +
+      '(default claude-code; also cursor, codex, opencode, grok) — the same adapters `musterd init` uses. Do not run ' +
       '`--here` inside a live seat’s folder.',
     examples: ['musterd agent scout --role researcher', 'musterd agent ryder --harness cursor'],
   },
   {
     name: 'human',
     signature: '<name> [--team <slug>] [--home <dir>] [--role <role>] [--rotate]',
-    summary: 'add a person AND give them the team home to stand in',
+    summary: 'add a person AND give them a member workspace to stand in',
     group: 'team',
     primary: true,
     detail:
-      'The mirror of `musterd agent`: agents stand in workspaces, the human stands in the **team ' +
-      'home** — `~/musterd/<team>` by default, holding their 0600 binding, so `musterd board`, ' +
-      '`musterd inbox --watch` and `musterd send` are simply them with nothing named and nothing pasted.' +
+      'The mirror of `musterd agent`: the person stands in a member workspace, ' +
+      '`~/musterd/<team>/<repo>/<name>` — a worktree on `human/<name>` when run inside the project ' +
+      'checkout; outside one, `--home <dir>` is required (ADR 447). It holds their 0600 binding, so ' +
+      '`musterd board`, `musterd inbox --watch` and `musterd send` are simply them with nothing named ' +
+      'and nothing pasted. The team root `~/musterd/<team>` is never bound. ' +
       'Mints the credential for a new person, reuses one this machine already holds, and offers a ' +
       're-issue (`--rotate`) when it holds none. Also sets the current team, and says so. Idempotent.',
     examples: ['musterd human nick --team acme', 'musterd human lin --home ~/work/acme'],
@@ -900,8 +902,8 @@ export const CATALOG: readonly CommandEntry[] = [
       '`--lane off` — "stop waking this seat" is `residency off`. The roster shows enrolled offline ' +
       'seats as `offline · wakeable`.',
     examples: [
-      'musterd residency on --seat scout --workspace ~/agents-scout',
-      'musterd residency on --seat scout --workspace ~/agents-scout --lane batched --budget 2',
+      'musterd residency on --seat scout --workspace ~/musterd/acme/app/scout',
+      'musterd residency on --seat scout --workspace ~/musterd/acme/app/scout --lane batched --budget 2',
       'musterd residency policy --cooldown 15m --hourly-cap 4',
       'musterd residency status',
       'musterd residency off',
