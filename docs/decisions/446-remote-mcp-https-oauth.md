@@ -101,9 +101,7 @@ Per team, all under the daemon (no third-party IdP — the team IS the identity 
 
 - `GET /.well-known/oauth-protected-resource/mcp/:team` — resource metadata: this resource, the
   authorization-server issuer, bearer schemes, `msat_` audience note.
-- `GET /.well-known/oauth-authorization-server/oauth/:team` (RFC 8414 path insertion for the
-  `/oauth/:team` issuer; the two OpenID forms and the path-appended form answer too — see the
-  2026-09-26 Consequences note) — issuer, `authorization_endpoint`,
+- `GET /.well-known/oauth-authorization-server` (+ per-team variant) — issuer, `authorization_endpoint`,
   `token_endpoint`, `registration_endpoint`, `code_challenge_methods_supported: ["S256"]`,
   `grant_types_supported: ["authorization_code", "refresh_token"]`.
 - `POST /oauth/:team/register` — RFC 7591 dynamic client registration. Stores `client_id`
