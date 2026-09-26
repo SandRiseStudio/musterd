@@ -14,6 +14,7 @@ import { listInbox } from '../store/messages.js';
 import { touchAmbientPresence } from '../store/presence.js';
 import { requireTeam } from '../store/teams.js';
 import { isTlsPeer, requireTeamRedacted } from './oauth.js';
+import { mintSponsoredAgent, originFrom } from './sponsoredAgentMint.js';
 
 /**
  * The remote-MCP rail (ADR 446 §1): the musterd adapter served as Streamable HTTP at
@@ -129,6 +130,11 @@ const TeamSendInput = z.object({
   meta: z.record(z.string(), z.unknown()).optional(),
 });
 
+const TeamAgentCreateInput = z.object({
+  name: z.string().min(1).max(64),
+  role: z.string().max(64).optional(),
+});
+
 /** One request's seat, read by the factory off the bridged request's identity headers. */
 function requestSeat(webReq: Request): { team: string; member: string } {
   const team = webReq.headers.get('x-musterd-remote-team');
@@ -145,7 +151,8 @@ function buildRemoteServer(ctx: Ctx, webReq: Request): McpServer {
     {
       instructions:
         `You are joined to the musterd team "${slug}" as ${memberName} over a phone connector. ` +
-        `Call team_join first, then team_inbox_check; send with team_send.`,
+        `Call team_join first, then team_inbox_check; send with team_send. ` +
+        `team_agent_create adds an agent you sponsor.`,
     },
   );
 
@@ -209,6 +216,47 @@ function buildRemoteServer(ctx: Ctx, webReq: Request): McpServer {
           cursor: getCursor(ctx.db, member.id),
         }),
       );
+    },
+  );
+
+  // ADR 449 §3: a human member creates an agent they sponsor — the same mint as
+  // `POST …/members/agents` (one helper, so the surfaces cannot drift). The result carries a
+  // one-time connect link and no secret: the human opens it on the device that will run the agent.
+  server.registerTool(
+    'team_agent_create',
+    {
+      description:
+        'Create an agent on this team that you sponsor. Returns a one-time connect link (15 minutes) ' +
+        'to open on the device that will run it. It expires when you do, and removing you removes it. ' +
+        'At most 3 live agents each.',
+      inputSchema: asMcpSchema(TeamAgentCreateInput, {
+        type: 'object',
+        required: ['name'],
+        properties: {
+          name: { type: 'string', description: "the agent's member name (no spaces)" },
+          role: { type: 'string', description: 'optional role, e.g. research' },
+        },
+      }),
+    },
+    async (rawArgs: unknown) => {
+      const parsed = TeamAgentCreateInput.safeParse(rawArgs ?? {});
+      if (!parsed.success) return toolError('invalid input: name | role?');
+      const sponsor = getMemberByName(ctx.db, team.id, memberName);
+      if (!sponsor) return toolError('seat is gone — sign in again');
+      try {
+        const origin = originFrom(
+          webReq.headers.get('host'),
+          webReq.headers.get('x-forwarded-proto'),
+        );
+        const minted = mintSponsoredAgent(ctx, team, sponsor, parsed.data, origin);
+        return textResult(
+          `Created agent "${minted.member.name}" on ${slug}, sponsored by you.\n` +
+            `Open this link on the device that will run it (expires in 15 minutes, works once):\n` +
+            `${minted.connect_url}`,
+        );
+      } catch (err) {
+        return toolError(asMusterdError(err).message);
+      }
     },
   );
 

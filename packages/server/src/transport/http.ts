@@ -323,7 +323,7 @@ import {
 } from '../store/seeds.js';
 import { mintSessionLease, revokeMemberSessionLeases } from '../store/session-leases.js';
 import { redeemHandoff, stageHandoff } from '../store/signinHandoff.js';
-import { createSponsoredAgent, issueAgentConnectNonce } from '../store/sponsoredAgents.js';
+import { issueAgentConnectNonce } from '../store/sponsoredAgents.js';
 import { staleLaneWarnings } from '../store/staleness.js';
 import { searchInsights } from '../store/teamMemory.js';
 import {
@@ -387,7 +387,8 @@ import {
   recordTraceIngest,
 } from '../telemetry.js';
 import { handleMcpRoute } from './mcpHttp.js';
-import { baseUrl, handleOAuthRoutes } from './oauth.js';
+import { handleOAuthRoutes } from './oauth.js';
+import { agentConnectUrl, mintSponsoredAgent, originFrom } from './sponsoredAgentMint.js';
 
 /**
  * The content-coding negotiated for this response from its request's `Accept-Encoding`, set once at
@@ -972,9 +973,9 @@ const SponsoredAgentBody = z.object({
   role: z.string().max(64).nullish(),
 });
 
-/** ADR 449 §4 / ADR 170: the nonce rides the fragment — never sent to a server, never logged. */
-function agentConnectUrl(req: IncomingMessage, slug: string, nonce: string): string {
-  return `${baseUrl(req)}/join/${encodeURIComponent(slug)}/agent#${nonce}`;
+function requestOrigin(req: IncomingMessage): string {
+  const proto = req.headers['x-forwarded-proto'];
+  return originFrom(req.headers.host, Array.isArray(proto) ? proto[0] : proto);
 }
 
 const HueBody = z.object({ hue: z.number().int().min(0).max(359) });
@@ -1975,27 +1976,8 @@ export async function handleHttp(
       if (method === 'POST' && rest === '/members/agents') {
         const { team, member: sponsor } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
         const body = parseOrBadRequest(SponsoredAgentBody, await readJson(req));
-        // A file-backed team's seat files are the single writer (ADR 058): a db-originated seat
-        // would be double-sourced there. Member-created agents need a db-only team.
-        if (teamSpecForSlug([...new Set([...ctx.rosterRoots, ...resolveRosterRoots()])], slug))
-          throw new MusterdError(
-            'forbidden',
-            `"${slug}" keeps its roster in seat files — add an agent there (\`musterd agent\`); ` +
-              'member-created agents need a team whose roster lives in the daemon',
-          );
-        const { member, nonce, expires_at } = createSponsoredAgent(ctx.db, team, sponsor, body);
-        appendAudit(ctx.db, team.id, {
-          actor: sponsor.name,
-          action: 'member.sponsored_agent_created',
-          target: member.name,
-          result: 'allow',
-          detail: { lifecycle_until: member.lifecycle_until },
-        });
-        return sendJson(res, 201, {
-          member: toMember(member, team.slug),
-          connect_url: agentConnectUrl(req, team.slug, nonce),
-          connect_expires_at: expires_at,
-        });
+        const minted = mintSponsoredAgent(ctx, team, sponsor, body, requestOrigin(req));
+        return sendJson(res, 201, { ...minted, member: toMember(minted.member, team.slug) });
       }
 
       // ADR 449 §4: re-issue an agent's connect link (the last one expired, or went to the wrong
@@ -2019,7 +2001,7 @@ export async function handleHttp(
         });
         return sendJson(res, 200, {
           member: agent.name,
-          connect_url: agentConnectUrl(req, team.slug, nonce),
+          connect_url: agentConnectUrl(requestOrigin(req), team.slug, nonce),
           connect_expires_at: expires_at,
         });
       }
