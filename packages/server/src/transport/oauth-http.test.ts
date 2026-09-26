@@ -178,6 +178,62 @@ describe('OAuth discovery (ADR 446 §3)', () => {
   });
 });
 
+describe('RFC 8707 resource indicator (ADR 457)', () => {
+  // MCP clients send resource=<MCP endpoint> on authorize and token. Until 2026-09-26 the token
+  // schema was strict, so a real client's exchange 400'd right after the human finished sign-in.
+  it('token exchange accepts resource when it names this team\u2019s MCP endpoint', async () => {
+    const reg = await registerClient();
+    const client_id = reg.json.client_id as string;
+    const authz = await postForm('/oauth/dawn/authorize', {
+      client_id,
+      redirect_uri: REDIRECT,
+      state: 's1',
+      code_challenge: CHALLENGE,
+      code_challenge_method: 'S256',
+      member: 'nick',
+      credential: nickCred,
+    });
+    expect(authz.status).toBe(302);
+    const code = new URL(authz.headers.get('location')!).searchParams.get('code')!;
+    const token = await postForm('/oauth/dawn/token', {
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: REDIRECT,
+      client_id,
+      code_verifier: VERIFIER,
+      resource: `${base}/mcp/dawn`,
+    });
+    expect(token.status).toBe(200);
+    expect(token.json.access_token).toMatch(/^msat_/);
+    const refreshed = await postForm('/oauth/dawn/token', {
+      grant_type: 'refresh_token',
+      refresh_token: token.json.refresh_token,
+      client_id,
+      resource: `${base}/mcp/dawn/`,
+    });
+    expect(refreshed.status).toBe(200);
+  });
+
+  it('a resource that is not this team\u2019s endpoint is invalid_target on token and 400 on authorize', async () => {
+    const reg = await registerClient();
+    const client_id = reg.json.client_id as string;
+    const authz = await get(
+      `/oauth/dawn/authorize?response_type=code&client_id=${client_id}&redirect_uri=${encodeURIComponent(REDIRECT)}&state=s&code_challenge=${CHALLENGE}&code_challenge_method=S256&resource=${encodeURIComponent(`${base}/mcp/other`)}`,
+    );
+    expect(authz.status).toBe(400);
+    const token = await postForm('/oauth/dawn/token', {
+      grant_type: 'authorization_code',
+      code: 'whatever',
+      redirect_uri: REDIRECT,
+      client_id,
+      code_verifier: VERIFIER,
+      resource: 'https://elsewhere.example/mcp/dawn',
+    });
+    expect(token.status).toBe(400);
+    expect(token.json.error).toBe('invalid_target');
+  });
+});
+
 describe('client registration (ADR 446 §3/§5)', () => {
   it('registers a public client and audits without secrets', async () => {
     const res = await registerClient();

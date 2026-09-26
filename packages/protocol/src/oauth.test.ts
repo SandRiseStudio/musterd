@@ -130,6 +130,48 @@ describe('oauth schemas (ADR 446)', () => {
     );
   });
 
+  it('token and authorize accept an RFC 8707 resource indicator (ADR 457)', () => {
+    // MCP auth spec 2025-06-18 §2.8: clients MUST send resource=<MCP endpoint> on both requests.
+    // The token arms were .strict() and refused it — sign-in succeeded, exchange 400'd (Rehearsal A).
+    expect(
+      OAuthTokenRequestSchema.safeParse({
+        grant_type: 'authorization_code',
+        code: 'c',
+        redirect_uri: 'https://app.example/cb',
+        client_id: 'cid_1',
+        code_verifier: 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk',
+        resource: 'https://mcp.example/mcp/dawn',
+      }).success,
+    ).toBe(true);
+    expect(
+      OAuthTokenRequestSchema.safeParse({
+        grant_type: 'refresh_token',
+        refresh_token: 'msrt_x',
+        client_id: 'cid_1',
+        resource: 'https://mcp.example/mcp/dawn',
+      }).success,
+    ).toBe(true);
+    expect(
+      OAuthTokenRequestSchema.safeParse({
+        grant_type: 'refresh_token',
+        refresh_token: 'msrt_x',
+        client_id: 'cid_1',
+        resource: 'not a url',
+      }).success,
+    ).toBe(false);
+    expect(
+      OAuthAuthorizeQuerySchema.safeParse({
+        response_type: 'code',
+        client_id: 'cid_1',
+        redirect_uri: 'https://app.example/cb',
+        state: 's',
+        code_challenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+        code_challenge_method: 'S256',
+        resource: 'https://mcp.example/mcp/dawn',
+      }).success,
+    ).toBe(true);
+  });
+
   it('registration requires redirect_uris and a named client', () => {
     expect(
       OAuthClientRegistrationRequestSchema.safeParse({
