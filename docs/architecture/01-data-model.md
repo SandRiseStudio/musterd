@@ -35,7 +35,8 @@ CREATE TABLE members (
   kind        TEXT NOT NULL CHECK (kind IN ('agent','human')),
   role        TEXT NOT NULL DEFAULT '',      -- free text, e.g. "backend"
   lifecycle   TEXT NOT NULL DEFAULT 'forever' CHECK (lifecycle IN ('forever','session','until')),
-  lifecycle_until INTEGER,                   -- epoch ms; required iff lifecycle='until'
+  lifecycle_until INTEGER,                   -- epoch ms; required iff lifecycle='until'; ENFORCED at auth since v73 (ADR 449)
+  sponsored_by TEXT REFERENCES members(id),  -- v73 (ADR 449): the member who minted this one; null = admin/local-peer mint
   availability TEXT,                         -- JSON schedule; STORED, NOT ENFORCED in v1 (roadmap)
   working_hours TEXT,                        -- recurring JSON schedule; STORED, NOT ENFORCED (ADR 206)
   token_hash  TEXT,                          -- sha256 of the member's join token (null until issued)
@@ -105,7 +106,7 @@ CREATE TABLE schema_meta (
 - **Member uniqueness is `(team_id, name)`**, not global. "Ada" can exist in two teams as two Members. This is intentional: a Member belongs to exactly one Team. Cross-team identity linking is a roadmap concern, not v1.
 - **`memberships` is folded into `members`.** The plan mentioned a separate `memberships` table; in v1 a Member belongs to exactly one Team, so membership _is_ the member row (`team_id` FK + `left_at`). If/when a Member must span Teams, split this out via ADR. (This is a deliberate, recorded simplification — if you implement, log it as ADR 001.)
 - **Presence is ephemeral but row-backed.** Rows are created on attach, refreshed by heartbeat (`last_seen_at`), and removed/expired by the presence reaper (`03-server.md`). Querying "is X online" = "does X have a presence row with `last_seen_at` within the timeout".
-- **`availability` and `lifecycle_until`** exist now but v1 does **not** enforce schedules or auto-expire `until` members at runtime (a reaper _may_ mark expired members `left_at`, but enforcement of availability windows is roadmap). Store, don't enforce. Keep the columns.
+- **`availability`** is stored, not enforced (schedule enforcement is roadmap). **`lifecycle_until` IS enforced since v73** (ADR 449): `authMember` refuses a member whose `until` lifecycle has passed, on every credential kind — expiry is an ordinary per-member setting. No reaper is load-bearing; a sweep marking expired members `left_at` remains cosmetic roster hygiene. **`sponsored_by`** (ADR 449) records which member minted this one; removing a member disables everyone their sponsorship chain reaches (`member.revoked_cascade` audit rows).
 - **`token_hash`** stores `sha256(token)`; the plaintext join token is shown once at `team add` time and never stored. The CLI/MCP present the token to authenticate as that Member.
 - **Messages are append-only.** No edits/deletes in v1. `accept`/`decline` reference the original via `thread_id`/`meta.in_reply_to`, they don't mutate it.
 - **Every message carries `(origin_node, origin_seq)`** (v47, ADR 331): the local `nodes` row for its team and a per-node gapless counter (`nodes.next_seq` holds the next value), both stamped inside `insertMessage`'s own transaction — server-derived, no wire field. `nodes` holds one self-minted row per (daemon, team), unenrolled (`credential_hash` NULL) until ADR 328's enrollment adopts it.
