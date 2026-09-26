@@ -151,3 +151,57 @@ question, because a laptop running the presentation cannot give the daemon a qui
 lane's note to the public-route lane (`01M3AKNAW6`).
 
 Falsify the fix: rerun N=50 with `ROSTER=every` on the same box and find p95 under 1 s.
+
+## 2026-09-25 — the human rail moves to the released OAuth + `/mcp` path (harness change, numbers pending)
+
+The table above modelled humans as the plain REST routes their tools call, because the remote
+`/mcp` endpoint had not landed. It has now (ADR 446, #1694: Streamable HTTP at `/mcp/:team`,
+per-seat OAuth), and the review hold on this lane is exactly that gap: benchmark evidence must
+exercise the released path, not a model of it.
+
+`demo-audience-load.mjs` now drives humans over the released rail by default (`HUMAN_RAIL=mcp`):
+the OAuth leg on arrival — dynamic client registration → authorize (PKCE) → token, the phone's
+sign-in, so the arrival burst now carries the OAuth write path — then MCP `tools/call` frames
+(`team_inbox_check` / `team_send` / `team_join`) with the `msat_` bearer per call. The child
+daemon runs `trustProxy` (the demo posture), and each loopback human presents what the Cloudflare
+edge would: `x-forwarded-proto: https` and a distinct `cf-connecting-ip`, which is also the OAuth
+rate-limit key — so the per-IP buckets behave as they would for a room of real phones.
+`HUMAN_RAIL=rest` keeps the modelled shape for A/B against the table above.
+
+The tunnel leg is `REMOTE_URL=https://<hostname>`: humans go loopback → cloudflared → the
+Cloudflare edge → back while agents/viewers stay loopback (the demo tunnel's ingress only exposes
+`/mcp` and OAuth paths — `docs/operations/public-demo-tunnel.md`). The loadbench image now carries
+`cloudflared`; the run recipe is in `loadbench.fly.toml`. Caveat recorded there: through a real
+tunnel the edge collapses every driven human onto the box's one IP, so tunnel runs measure
+steady-state tool-call latency (arrivals stretched under the per-IP OAuth limits), and the
+arrival burst is read from loopback runs, where the per-attendee rate key is faithful.
+
+**Numbers (2026-09-25, loadbench `performance-8x` sjc, `DAEMON_CPUS=0`, 50/50/50, 90 s, ramp
+30 s, synthetic board of 1200 lanes).** The released `mcp` rail costs the daemon *less* than the
+modelled `rest` shape, not more:
+
+| rail | all-req p50 | p95 | p99 | daemon CPU | rss | loop delay p99/max | errors |
+| ---- | ----------- | --- | --- | ---------- | --- | ------------------ | ------ |
+| `mcp` (released, OAuth arrival + tools/call) | 22 ms | 557 ms | 837 ms | 43 % | 211 MB | 81 / 754 ms | 0 |
+| `rest` (modelled A/B) | 26 ms | 614 ms | 1776 ms | 46 % | 225 MB | 92 / 764 ms | 0 |
+
+The OAuth arrival burst is absorbed cleanly at N=50 (register p95 79 ms, authorize p95 163 ms,
+token p95 109 ms, per-attendee `cf-connecting-ip` rate keys under `trustProxy`). The `rest`
+rail's worse tail comes from humans hitting `GET /lanes` (2.5 MB bodies) and `GET /teams/:slug`,
+which the MCP tool surface never fetches — the released rail replaces big-body reads with small
+`tools/call` frames. Both runs stay inside the p95 1000 ms budget; the dominant cost at N=50
+remains the viewer roster fan-out (`GET /teams/:slug` p95 ~726-772 ms), unchanged from the
+2026-09-25 section above, so the **go/no-go ceiling stays ~75 concurrent attendees** — the
+released rail does not move it down.
+
+**Tunnel steady-state (2026-09-26, quick tunnel, same box, 50/50/50, 90 s measure, RAMP=650).**
+Humans loopback → cloudflared → Cloudflare edge → back; agents/viewers loopback. All-request
+p50 4 / p95 127 / p99 175 ms, daemon 5 % CPU, loop delay p99 14.6 ms — the edge round-trip adds
+no daemon cost and the latency budget is untouched. **The documented one-driver-IP caveat is
+real, not theoretical:** the edge collapsed all 50 driven humans onto the box's single IP and
+`POST /oauth/register` returned 403 (rate limit) for most arrivals even at 13 s spacing —
+6 registered, 6× 403, 1 net error. This is a harness artifact (one shared IP), not a demo
+risk: a real room presents 50 distinct IPs, and the loopback run above (distinct
+`cf-connecting-ip` per attendee) shows that arrival burst absorbed cleanly. Arrival numbers
+therefore come from loopback runs; tunnel runs measure steady-state only, as the recipe says.
+Quick-tunnel numbers — re-run through the named tunnel for launch-grade figures if wanted.
