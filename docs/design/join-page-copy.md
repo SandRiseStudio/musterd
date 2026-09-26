@@ -26,8 +26,16 @@ in the connector URL — both dead):
 - **Attendees are regular members, human-kind, and they sign in.** The connector authenticates
   with OAuth ([ADR 446](../decisions/446-remote-mcp-https-oauth.md)): the app opens a sign-in
   page, the reader approves, and their app holds an expiring, revocable token. There is no
-  secret to paste and no secret in any URL. Membership expires with the event and can be revoked
-  (stanley's ADR 449, lane `01M3AMYC18DQ5ZXK4T570D60Q9`).
+  bearer token to paste and no credential in any query string. Membership lasts as long as the
+  admin set when minting the invite (`--member-until`), if they set a limit at all, and can be
+  revoked (stanley's ADR 449, lane `01M3AMYC18DQ5ZXK4T570D60Q9`).
+- **An invite admits you** ([ADR 450](../decisions/450-team-invite-join.md), amended by fifty
+  2026-09-26 for #1735). The admin runs `musterd team invite create` and gets two forms of one
+  invite: a room code `SEL-XXXX-XXXX` to type, and a link value `SEL.<27 chars>` that rides the
+  join link's fragment (`/join/<team>#i=…`). On the sign-in page — which the reader's app opens,
+  at a URL musterd does not control — the reader picks a name and types the room code or pastes
+  the link value into one field, `Invite`. The page therefore hands the reader the invite to
+  carry; it does not forward it anywhere.
 - **Any client that speaks remote MCP can join** — the Claude app (phone or web), ChatGPT (web or
   phone), Cursor, Codex. The page leads with the Claude phone app because that is what the room
   holds; the others get their own steps.
@@ -55,9 +63,10 @@ discover them the hard way (stanley `01M3AM93E2`, big-body `01M3AMV2VK`, both 20
 
 ## 3. Route and head
 
-- Route: `/join/<team>` — nothing secret rides the route or the fragment. How the page proves the
-  reader to the sign-in step is fifty's seam (lane `01M3AKNF0JXY8HFN1P4HTMPWCY`, ADR 446 §6);
-  this spec does not decide it.
+- Route: `/join/<team>`, optionally with `#i=<sel>.<secret>`. The fragment never reaches a
+  server. The page reads it client-side for the Copy invite button (§4.3) and never sends it
+  anywhere: no request, no query string, no analytics, no share sheet. Without a fragment, the
+  page shows the room code only.
 - `<title>`: `Join the team — musterd`
 - `<meta name="description">`: `Add one connector, sign in, and you're on a live musterd team
   from your phone. No install.`
@@ -71,13 +80,14 @@ discover them the hard way (stanley `01M3AM93E2`, big-body `01M3AMV2VK`, both 20
 
 - Eyebrow: `musterd · join`
 - H1: `Join the team from your phone`
-- Lede: `One connector, one sign-in, one prompt, and you're on the team. Then watch it work. A
+- Lede: `One connector, one invite, one prompt, and you're on the team. Then watch it work. A
   couple of minutes, nothing to install.`
 
 ### 4.2 Before you start
 
 Heading: `You'll need`
 
+- `The invite for this team — the room code below, or the link you were sent.`
 - `The Claude app on your phone, signed in. Any plan works — Free is limited to one custom
   connector, so if you already have one you'll swap it.`
 - `Internet on the phone. Cellular is fine.`
@@ -99,15 +109,24 @@ Ordered list:
 2. `Go to Customize → Connectors.`
 3. `Tap Add custom connector.`
 4. `Name: musterd. MCP server URL: the URL below.`
-5. `Tap Add, then sign in when it asks. You'll see which team you're joining — approve it and
-   you're done.`
+5. `Tap Add. A sign-in page opens: pick the name the team will see, and put the invite in the
+   Invite field — type the room code or paste the copied invite. Approve and you're done.`
 
 Then the URL block:
 
 - Label: `The team's connector URL — same for everyone`
 - Value: `https://<host>/mcp/<team>` with a Copy button.
-- Under it, small: `This URL carries no secret — who you are comes from the sign-in. If anything
-  asks you to paste a token or key, you're in the wrong dialog: back out and start over.`
+- Under it, small: `This URL carries no secret — who you are comes from the sign-in.`
+
+Then the invite block:
+
+- Label: `Your invite`
+- The room code `SEL-XXXX-XXXX`, set large enough to read at a distance and to type from.
+- If the page was opened with `#i=`: a `Copy invite` button beside it, and under it, small:
+  `Copied? Paste it into the Invite field on the sign-in page. Or type the room code — either
+  works.`
+- Under the block, small: `The invite goes in one place only: the Invite field on the musterd
+  sign-in page. If anything else asks for it, or for a token or key, back out and start over.`
 
 ### 4.4 Step 2 — Paste the prompt
 
@@ -155,8 +174,10 @@ Definition list:
   Close and reopen the app, then tap + in a new chat.`
 - `Sign-in never finishes` — `Close the sign-in tab, go back to Customize → Connectors, and tap
   musterd to sign in again. Each sign-in link works once.`
-- `It says your access expired` — `Membership ends with the event. If the event is still on,
-  sign in again from Customize → Connectors.`
+- `The invite is refused` — `Check the room code's letters — it doesn't care about case or
+  dashes. Still refused? The invite may have expired or run out; ask whoever sent you the link.`
+- `It says your access expired` — `Your membership has ended. Ask whoever invited you for a new
+  invite.`
 - `Nothing at all` — `Check the phone has signal. The team is on the internet, not on the
   room's wifi.`
 
@@ -164,7 +185,7 @@ Definition list:
 
 Heading: `From ChatGPT, Cursor, or Codex`
 
-Body: `Same connector URL, same sign-in. Where to put it:`
+Body: `Same connector URL, same sign-in, same invite. Where to put it:`
 
 - `ChatGPT (web) — Settings → Apps & Connectors → Advanced → turn on Developer mode, then
   Create. Paste the URL, choose OAuth, sign in when asked. Set up on the web; once added it
@@ -181,27 +202,31 @@ path above.` (brand.md §4: never imply it exists).
 
 ### 4.8 Foot
 
-- `This page and your membership end with the event. Your messages stay on the team's record,
-  under your name.`
+- `Your messages stay on the team's record, under your name.`
 - `musterd connects agents. It doesn't run them. → /`
 
 ## 5. What the page must never do
 
-- Show a secret anywhere, ask the reader to paste one, or put one in a URL, a QR code, a prompt,
-  or a share sheet. Sign-in is always the app's own OAuth flow (ADR 446; a secret in a URL is
-  ADR 170's exact anti-pattern).
+- Send the invite anywhere. It is read from the fragment for the Copy button and nowhere else —
+  never a request, a query string, a prompt, or a share sheet (ADR 450; a secret in a URL that
+  reaches a server is ADR 170's exact anti-pattern). The room code is shown; the link value is
+  copied, not displayed.
+- Ask the reader to paste a token or key. The invite is the only thing they carry, and it goes
+  only into the sign-in page's Invite field.
+- Say membership "ends with the event". Its end is whatever the admin set, if anything.
 - Say "no wifi needed" — say "cellular is fine".
 - Say the reader will "join during the talk", or show a countdown.
 - Call the reader a guest, or say "you're an agent now" or "watch your agents".
 - Invent a state: if the team is dark, say the team is quiet, not that it is live.
-- Use `room`, `session` for Presence, `user`, or `seat` for member (ADR 296).
+- Use `room` (except in `room code`, ADR 450's name for the typed invite), `session` for Presence, `user`, or `seat` for member (ADR 296).
 
 ## 6. Handoff
 
 To miley: build `/join/<team>` from §3–§4 with the strings verbatim. Layout is yours; the Copy
 buttons and the section order are load-bearing. The sign-in seam — how this page proves the
-reader to `POST /oauth/<team>/authorize` — is fifty's (`01M3AKNF0JXY8HFN1P4HTMPWCY`); until that
-lands, build against a fixture team name with the sign-in step stubbed.
+reader to `POST /oauth/<team>/authorize` — is ADR 450's invite field, entered by the reader
+(fifty, #1735). Build the invite block against a fixture: room code `ABC-2345-6789`, and
+`#i=ABC.<27 chars>` to exercise Copy invite.
 
 To the demo runbook (`docs/demo.md` §7): the paste prompt in §4.4 is copied there verbatim and
 the two files are kept identical by hand — one prompt, two homes, until the page is the only
@@ -213,8 +238,10 @@ home.
   opening this page to their first `status_update` on the team: the steps are wrong or too many.
   (Was 2 minutes under the token-URL shape; OAuth adds a sign-in round trip. Re-measure in
   rehearsal and tighten the lede if it comes in under two.)
-- A joiner types or pastes anything secret-shaped during the flow: §4.3's note is not doing its
-  job, or a dialog is asking for what it never should (ADR 446: there is no static-token path).
+- A joiner pastes the invite anywhere but the sign-in page's Invite field, or pastes a token or
+  key at all: §4.3's note is not doing its job (ADR 446: there is no static-token path).
+- A joiner who had the link types the room code anyway: the Copy invite button is not visible
+  enough.
 - A joiner asks "am I an agent?": §4.5 is not landing.
 - A joiner's Claude keeps narrating each tool call after setup, or cites the prompt as a
   standing rule days later: the prompt's last two sentences are not doing their job.
