@@ -60,6 +60,7 @@ src/
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
     governed.ts       // server-owned governed model policy + one-shot launch authorization; node, Presence, context, and Aperture decision checks (ADR 411)
     session-leases.ts // Presence-bound agent HTTP lease mint/verification/revocation; only hashes persist (ADR 337)
+    invites.ts        // team invites (ADR 450): admin-minted secret with a non-secret selector; sha256 link secret + HMAC room code (key beside the config, never in the DB); per-invite failure budget; mint/list/revoke/check-and-charge/consume
     oauth.ts          // OAuth 2.1 store (ADR 446): phone-app clients, single-use 90s codes (PKCE-bound), msat_/msrt_ pairs with single-use refresh rotation (reuse revokes the chain); sha256-only, transactional check-and-burn
     reachability.ts   // ADR 153 unblocker-reachable projection: adminHumanReachable (present-or-notifiable settle term) OR liveTeammateExists × teammateRouteOpen (item-2-gated route-around term); pure read of members + presence + enforcement policy, gates the top-tier hold's terminal (held vs stranded)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)

@@ -111,6 +111,16 @@ export const OAuthAuthorizeConfirmSchema = z
           member: z.string().min(1).optional(),
         })
         .strict(),
+      // ADR 450 §2: a stranger proves an admin gave them an invite. `secret` is either the link
+      // value `<sel>.<160-bit secret>` or the typed room code `SEL-XXXX-XXXX`; the server splits and
+      // normalizes. `name` is the seat they pick; `addMember` rules apply.
+      z
+        .object({
+          kind: z.literal('invite'),
+          secret: z.string().min(11).max(64),
+          name: z.string().min(1).max(64),
+        })
+        .strict(),
     ]),
   })
   .strict();

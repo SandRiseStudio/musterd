@@ -1806,6 +1806,35 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 450 §1: team invites — an admin-minted secret that lets a stranger's OAuth sign-in admit
+    // a NEW human member. Two verifiers on purpose: `secret_hash` is sha256 of the 160-bit link
+    // secret; `code_mac` is an HMAC (key beside the config, never in this DB) of the 40-bit typed
+    // room code, so a database dump alone cannot enumerate it. `failures`/`fail_budget` is the
+    // source-independent online guess bound (§3); `selector` scopes a failure to one invite.
+    version: 75,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS team_invites (
+          id           TEXT PRIMARY KEY,
+          team_id      TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          selector     TEXT NOT NULL,
+          secret_hash  TEXT NOT NULL,
+          code_mac     TEXT NOT NULL,
+          max_uses     INTEGER NOT NULL,
+          uses         INTEGER NOT NULL DEFAULT 0,
+          fail_budget  INTEGER NOT NULL,
+          failures     INTEGER NOT NULL DEFAULT 0,
+          expires_at   INTEGER NOT NULL,
+          member_until INTEGER,
+          created_by   TEXT NOT NULL,
+          created_at   INTEGER NOT NULL,
+          revoked_at   INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_team_invites_team ON team_invites(team_id, selector);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

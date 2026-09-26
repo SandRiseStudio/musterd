@@ -57,13 +57,99 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
   if (sub === 'credential') return teamCredential(parsed);
   if (sub === 'agent-key') return teamAgentKey(parsed);
   if (sub === 'bootstrap') return teamBootstrap(parsed);
+  if (sub === 'invite') return teamInvite(parsed);
   if (sub === 'remove') return teamRemove(parsed);
   if (sub === 'archive') return teamArchive(parsed);
   if (sub === 'export') return teamExport(parsed);
   if (sub === 'policy') return teamPolicy(parsed);
   if (sub === 'hue') return teamHue(parsed);
   throw new CliError(
-    'usage: musterd team <create|add|observe|credential|agent-key|bootstrap|remove|archive|export|policy|hue> ...',
+    'usage: musterd team <create|add|observe|credential|agent-key|bootstrap|invite|remove|archive|export|policy|hue> ...',
+    2,
+  );
+}
+
+/**
+ * `musterd team invite create|list|revoke` — ADR 450. An invite lets a stranger's OAuth sign-in
+ * admit a NEW human member. The link value and room code are printed once; `list` is redacted.
+ */
+async function teamInvite(parsed: Parsed): Promise<number> {
+  const action = parsed.positionals[1];
+  const { team, http } = resolve(parsed.flags);
+  const json = parsed.flags['json'] === true;
+  const whenFlag = (flag: string): number | undefined => {
+    const raw = flagStr(parsed.flags, flag);
+    if (!raw) return undefined;
+    const iso = Date.parse(raw);
+    if (!Number.isNaN(iso)) return iso;
+    return Date.now() + parseDurationMs(raw, `--${flag}`);
+  };
+  const intFlag = (flag: string): number | undefined => {
+    const raw = flagStr(parsed.flags, flag);
+    if (raw === undefined) return undefined;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1)
+      throw new CliError(`--${flag} must be a positive integer`, 2);
+    return n;
+  };
+
+  if (action === 'create') {
+    const minted = await http.mintInvite(team, {
+      ...(intFlag('uses') !== undefined ? { max_uses: intFlag('uses')! } : {}),
+      ...(intFlag('fail-budget') !== undefined ? { fail_budget: intFlag('fail-budget')! } : {}),
+      ...(whenFlag('expires') !== undefined ? { expires_at: whenFlag('expires')! } : {}),
+      ...(whenFlag('member-until') !== undefined
+        ? { member_until: whenFlag('member-until')! }
+        : {}),
+    });
+    if (json) {
+      process.stdout.write(JSON.stringify(minted) + '\n');
+      return 0;
+    }
+    process.stdout.write(success(`minted invite ${minted.invite.selector} for ${team}`) + '\n');
+    process.stdout.write(theme.meta('shown once — put these on the slide / join page now:') + '\n');
+    process.stdout.write(`  room code:  ${minted.room_code}\n`);
+    process.stdout.write(`  link value: ${minted.link_secret}\n`);
+    process.stdout.write(
+      theme.meta(
+        `invite id: ${minted.invite.id} · ${minted.invite.max_uses} uses · burns after ${minted.invite.fail_budget} wrong codes · expires ${new Date(minted.invite.expires_at).toISOString()}` +
+          (minted.invite.member_until
+            ? ` · members until ${new Date(minted.invite.member_until).toISOString()}`
+            : ''),
+      ) + '\n',
+    );
+    return 0;
+  }
+
+  if (action === 'list') {
+    const { invites } = await http.listInvites(team);
+    if (json) {
+      process.stdout.write(JSON.stringify({ invites }) + '\n');
+      return 0;
+    }
+    if (invites.length === 0) {
+      process.stdout.write(theme.meta(`no invites on ${team}`) + '\n');
+      return 0;
+    }
+    for (const inv of invites) {
+      process.stdout.write(
+        `${inv.id}  ${inv.selector}  ${inv.state}  uses ${inv.uses}/${inv.max_uses}  failures ${inv.failures}/${inv.fail_budget}  expires ${new Date(inv.expires_at).toISOString()}\n`,
+      );
+    }
+    return 0;
+  }
+
+  if (action === 'revoke') {
+    const id = parsed.positionals[2];
+    if (!id) throw new CliError('usage: musterd team invite revoke <invite-id>', 2);
+    const result = await http.revokeInvite(team, id);
+    if (json) process.stdout.write(JSON.stringify(result) + '\n');
+    else process.stdout.write(success(`revoked invite ${id}`) + '\n');
+    return 0;
+  }
+
+  throw new CliError(
+    'usage: musterd team invite <create|list|revoke> [--uses <n>] [--fail-budget <n>] [--expires <iso|duration>] [--member-until <iso|duration>]',
     2,
   );
 }

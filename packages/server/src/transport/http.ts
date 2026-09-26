@@ -178,6 +178,12 @@ import {
 import { rowsToEnvelopes } from '../store/hydrate.js';
 import { deriveReport } from '../store/insights.js';
 import { listInterruptCandidates } from '../store/interruptCandidates.js';
+import {
+  INVITE_DEFAULTS,
+  listInvites as listTeamInvites,
+  mintInvite as mintTeamInvite,
+  revokeInvite as revokeTeamInvite,
+} from '../store/invites.js';
 import { type LaneCloseVerdict, recordLaneClose } from '../store/laneClose.js';
 import {
   boardWarnings,
@@ -2747,6 +2753,60 @@ export async function handleHttp(
           forced: body.force,
           readiness,
         });
+      }
+
+      // ── ADR 450: team invites (admin-only). The secret is returned once at mint, never listed. ──
+      if (method === 'POST' && rest === '/invites') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const InviteBody = z
+          .object({
+            max_uses: z.number().int().min(1).optional(),
+            fail_budget: z.number().int().min(1).max(INVITE_DEFAULTS.failBudgetMax).optional(),
+            expires_at: z.number().int().positive().optional(),
+            member_until: z.number().int().positive().nullable().optional(),
+          })
+          .strict();
+        const body = parseOrBadRequest(InviteBody, await readJson(req));
+        const minted = mintTeamInvite(ctx.db, {
+          teamId: team.id,
+          createdBy: member.name,
+          ...(body.max_uses !== undefined ? { maxUses: body.max_uses } : {}),
+          ...(body.fail_budget !== undefined ? { failBudget: body.fail_budget } : {}),
+          ...(body.expires_at !== undefined ? { expiresAt: body.expires_at } : {}),
+          ...(body.member_until !== undefined ? { memberUntil: body.member_until } : {}),
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'invite.minted',
+          target: minted.invite.id,
+          result: 'allow',
+          detail: {
+            selector: minted.invite.selector,
+            max_uses: minted.invite.max_uses,
+            fail_budget: minted.invite.fail_budget,
+            expires_at: minted.invite.expires_at,
+            member_until: minted.invite.member_until,
+          },
+        });
+        return sendJson(res, 201, minted);
+      }
+      if (method === 'GET' && rest === '/invites') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(res, 200, { invites: listTeamInvites(ctx.db, team.id) });
+      }
+      const inviteMatch = rest.match(/^\/invites\/([^/]+)$/);
+      if (method === 'DELETE' && inviteMatch) {
+        const inviteId = decodeURIComponent(inviteMatch[1]!);
+        const { team, member } = authAdmin(ctx, slug, req);
+        if (!revokeTeamInvite(ctx.db, team.id, inviteId))
+          throw new MusterdError('not_found', `no live invite "${inviteId}" on ${slug}`);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'invite.revoked',
+          target: inviteId,
+          result: 'allow',
+        });
+        return sendJson(res, 200, { ok: true });
       }
 
       const bootstrapCredentialMatch = rest.match(/^\/agent-bootstrap-credentials\/([^/]+)$/);

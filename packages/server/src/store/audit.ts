@@ -22,6 +22,11 @@ export type AuditAction =
   // ADR 449 §3–4: a human member minted an agent they sponsor / re-issued its connect link.
   | 'member.sponsored_agent_created'
   | 'member.agent_connect_issued'
+  // ADR 450: a team invite admitted a new human at OAuth authorize / refused an invite proof.
+  | 'member.invite_admitted'
+  | 'member.invite_refused'
+  | 'invite.minted'
+  | 'invite.revoked'
   | 'observe.denied'
   // P3.1 (ADR 076): admin governance ops.
   | 'grant.issue'
@@ -507,6 +512,10 @@ export const AUDIT_SUBJECT: Record<AuditAction, AuditSubject> = {
   'member.revoked_cascade': 'actor',
   'member.sponsored_agent_created': 'actor',
   'member.agent_connect_issued': 'actor',
+  'member.invite_admitted': 'actor',
+  'member.invite_refused': 'actor',
+  'invite.minted': 'actor',
+  'invite.revoked': 'actor',
   'observe.denied': 'actor',
   'infra.touch.warned': 'actor',
   'grant.issue': 'actor',

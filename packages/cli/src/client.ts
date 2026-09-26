@@ -189,6 +189,22 @@ export interface HttpClientOpts {
   createClaimSocket?: (url: string) => ClaimSocket;
 }
 
+/** ADR 450: the redacted invite projection — never a hash, never the secret. */
+export interface TeamInviteSummary {
+  id: string;
+  selector: string;
+  state: 'live' | 'expired' | 'exhausted' | 'burned' | 'revoked';
+  uses: number;
+  max_uses: number;
+  failures: number;
+  fail_budget: number;
+  expires_at: number;
+  member_until: number | null;
+  created_by: string;
+  created_at: number;
+  revoked_at: number | null;
+}
+
 export interface BootstrapCredentialSummary {
   id: string;
   use: 'claim_seat' | 'claim_role' | 'host' | 'legacy';
@@ -618,6 +634,22 @@ export class HttpClient {
       'POST',
       `/teams/${encodeURIComponent(slug)}/agent-bootstrap-credentials`,
       body,
+    );
+  }
+  // ADR 450: team invites. The secret comes back once from mint and is never listed.
+  mintInvite(
+    slug: string,
+    body: { max_uses?: number; fail_budget?: number; expires_at?: number; member_until?: number },
+  ): Promise<{ invite: TeamInviteSummary; link_secret: string; room_code: string }> {
+    return this.request('POST', `/teams/${encodeURIComponent(slug)}/invites`, body);
+  }
+  listInvites(slug: string): Promise<{ invites: TeamInviteSummary[] }> {
+    return this.request('GET', `/teams/${encodeURIComponent(slug)}/invites`);
+  }
+  revokeInvite(slug: string, id: string): Promise<{ ok: true }> {
+    return this.request(
+      'DELETE',
+      `/teams/${encodeURIComponent(slug)}/invites/${encodeURIComponent(id)}`,
     );
   }
   listBootstrapCredentials(slug: string): Promise<{ credentials: BootstrapCredentialSummary[] }> {

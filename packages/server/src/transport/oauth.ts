@@ -14,7 +14,8 @@ import { isLocalPeer } from '../config.js';
 import type { Ctx } from '../context.js';
 import { asMusterdError, MusterdError } from '../errors.js';
 import { appendAudit } from '../store/audit.js';
-import { authMember, getMemberByName } from '../store/members.js';
+import { checkInvite, consumeInvite } from '../store/invites.js';
+import { addMember, authMember, getMemberByName } from '../store/members.js';
 import {
   chainMember,
   getClient,
@@ -298,18 +299,29 @@ function consentPage(input: {
   code_challenge: string;
 }): string {
   const e = escapeHtml;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in to ${e(input.team)} — musterd</title></head><body>
-<h1>${e(input.clientName)} wants to join <b>${e(input.team)}</b> as you</h1>
-<p>Signing in adds this app as your phone seat on the team. It can read the inbox and send as you until you revoke it.</p>
-<form method="post" action="">
-<input type="hidden" name="client_id" value="${e(input.client_id)}">
+  // ADR 450 §2: two forms, one seam. Both post the same OAuth fields; the invite form posts
+  // `invite` + `member`, the seat form posts `member` + `credential`.
+  const hidden = `<input type="hidden" name="client_id" value="${e(input.client_id)}">
 <input type="hidden" name="redirect_uri" value="${e(input.redirect_uri)}">
 <input type="hidden" name="state" value="${e(input.state)}">
 <input type="hidden" name="code_challenge" value="${e(input.code_challenge)}">
 <input type="hidden" name="code_challenge_method" value="S256">
-${input.scope ? `<input type="hidden" name="scope" value="${e(input.scope)}">` : ''}
+${input.scope ? `<input type="hidden" name="scope" value="${e(input.scope)}">` : ''}`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in to ${e(input.team)} — musterd</title></head><body>
+<h1>${e(input.clientName)} wants to join <b>${e(input.team)}</b></h1>
+<p>Signing in adds this app as your seat on the team. It can read the inbox and send as you until you revoke it.</p>
+<h2>I'm new — I have an invite</h2>
+<form method="post" action="">
+${hidden}
+<label>Invite (the room code, or the value from the join link) <input type="text" name="invite" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC-1234-5678"></label><br>
+<label>Pick a name <input type="text" name="member" autocomplete="off"></label><br>
+<button type="submit">Join ${e(input.team)}</button>
+</form>
+<h2>I already have a seat</h2>
+<form method="post" action="">
+${hidden}
 <label>Seat name <input type="text" name="member" autocomplete="username"></label><br>
 <label>Credential (<code>mscr_…</code>) <input type="password" name="credential" autocomplete="current-password"></label><br>
 <button type="submit">Sign in this app as me</button>
@@ -336,6 +348,7 @@ function consentFormBody(raw: string): {
   scope?: string;
   member: string;
   credential: string;
+  invite: string;
 } {
   const params = new URLSearchParams(raw);
   const out: Record<string, string> = {};
@@ -351,6 +364,7 @@ function consentFormBody(raw: string): {
     ...(out['scope'] ? { scope: out['scope'] } : {}),
     member: out['member'] ?? '',
     credential: out['credential'] ?? '',
+    invite: out['invite'] ?? '',
   };
 }
 
@@ -515,12 +529,15 @@ export async function handleOAuthRoutes(
       code_challenge: flat.code_challenge,
       code_challenge_method: flat.code_challenge_method,
       ...(flat.scope ? { scope: flat.scope } : {}),
-      // The form posts flat fields; the proof rides the seam the ADR names.
-      proof: {
-        kind: 'credential',
-        credential: flat.credential,
-        ...(flat.member ? { member: flat.member } : {}),
-      },
+      // The form posts flat fields; the proof rides the seam the ADR names. An `invite` field
+      // selects ADR 450's second prover; otherwise it is ADR 446's seat credential.
+      proof: flat.invite
+        ? { kind: 'invite', secret: flat.invite, name: flat.member }
+        : {
+            kind: 'credential',
+            credential: flat.credential,
+            ...(flat.member ? { member: flat.member } : {}),
+          },
     });
     const client = getClientOrOAuth(ctx.db, team.id, body.client_id, res);
     if (!client) return true;
@@ -531,21 +548,78 @@ export async function handleOAuthRoutes(
       );
       return true;
     }
-    // The seat proves itself with its own mscr_ — authMember is the same check the claim
-    // handshake runs (self-identifying, acting-seat must match, departed seats refused).
-    let memberName: string;
-    try {
-      const auth = authMember(ctx.db, slug, body.proof.credential, body.proof.member || undefined);
-      memberName = auth.member.name;
-    } catch (err) {
-      sendOAuthError(res, err);
-      return true;
+    let member: ReturnType<typeof getMemberByName>;
+    let admittedVia: 'link' | 'code' | null = null;
+    if (body.proof.kind === 'invite') {
+      // ADR 450 §2: a stranger proves an admin gave them an invite, then becomes a NEW human
+      // member — one transaction: check-and-charge, name refusal, addMember, consume, audit.
+      const proof = body.proof;
+      const clientId = body.client_id;
+      const teamRow = requireTeam(ctx.db, slug);
+      const outcome = ctx.db.transaction(() => {
+        const check = checkInvite(ctx.db, team.id, proof.secret);
+        if (!check.ok) {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'member.invite_refused',
+            target: check.selector,
+            result: 'deny',
+            detail: { client_id: clientId, via: check.via, charged: check.charged },
+          });
+          return { err: new MusterdError('unauthorized', "that invite isn't valid for this team") };
+        }
+        // Any row by that name — live OR tombstoned — refuses: `addMember` would revive a removed
+        // seat (ADR 065), and a stranger must never inherit someone else's history. Not charged.
+        if (getMemberByName(ctx.db, team.id, proof.name)) {
+          return { err: new MusterdError('conflict', 'that name is taken — pick another') };
+        }
+        const added = addMember(ctx.db, teamRow, {
+          name: proof.name,
+          kind: 'human',
+          ...(check.invite.member_until !== null
+            ? { lifecycle: 'until' as const, lifecycleUntil: check.invite.member_until }
+            : {}),
+        });
+        // `added.token` (the member's mscr_) is dropped here on purpose: never shown, never logged.
+        consumeInvite(ctx.db, check.invite.id);
+        appendAudit(ctx.db, team.id, {
+          actor: added.row.name,
+          action: 'member.invite_admitted',
+          target: check.invite.id,
+          result: 'allow',
+          detail: { client_id: clientId, via: check.via },
+        });
+        return { row: added.row, via: check.via };
+      })();
+      if ('err' in outcome) {
+        sendOAuthError(res, outcome.err);
+        return true;
+      }
+      member = outcome.row;
+      admittedVia = outcome.via;
+    } else {
+      // The seat proves itself with its own mscr_ — authMember is the same check the claim
+      // handshake runs (self-identifying, acting-seat must match, departed seats refused).
+      let memberName: string;
+      try {
+        const auth = authMember(
+          ctx.db,
+          slug,
+          body.proof.credential,
+          body.proof.member || undefined,
+        );
+        memberName = auth.member.name;
+      } catch (err) {
+        sendOAuthError(res, err);
+        return true;
+      }
+      member = getMemberByName(ctx.db, team.id, memberName);
     }
-    const member = getMemberByName(ctx.db, team.id, memberName);
     if (!member) {
       sendOAuthError(res, new MusterdError('unauthorized', 'seat is gone'));
       return true;
     }
+    const memberName = member.name;
     const { code } = issueCode(ctx.db, {
       teamId: team.id,
       memberId: member.id,
@@ -559,7 +633,7 @@ export async function handleOAuthRoutes(
       action: 'oauth.code_issued',
       target: body.client_id,
       result: 'allow',
-      detail: {},
+      detail: admittedVia ? { admitted_via: admittedVia } : {},
     });
     const location = `${body.redirect_uri}${body.redirect_uri.includes('?') ? '&' : '?'}code=${encodeURIComponent(code)}&state=${encodeURIComponent(body.state)}`;
     res.writeHead(302, {
