@@ -85,6 +85,31 @@ Run on the box against `/broadcast` (`spriteParity()`, both paths painted into f
 
 **One gap in the evidence, stated rather than buried:** the bench box was destroyed before capturing *where* the 1,488 beyond-rounding pixels sit. Scattered singles and one clump on a face are the same number and not the same product.
 
+## The encoder does NOT wash out the sprite cache's delta — it amplifies it, and my argument that it would was wrong (2026-09-18; falsify: flatten a direct/cached pair on black, push each through the stream's own ffmpeg settings, decode the last frame, and compare each decoded frame against the DIRECT CANVAS — if the two path errors are equal, the cache is free at the delivery layer) <!-- claim: other -->
+
+I argued on 2026-09-18 that the canvas-level fidelity bar measures something no viewer receives, because the stream is H.264 at 4500k and a lossy encoder's own quantization error is larger than a scattered 0.072%. Nick refused the flip on process grounds. **The measurement now says he was right on the merits too, and I was wrong.**
+
+Method: the matched pair `spriteParity` compares, exported as PNGs and **flattened onto opaque black first** — comparing RGB in transparent pixels is the near-zero-alpha trap above, and skipping the flatten produced a first run with deltas maxing at exactly 255, its signature. Each arm then encoded with the stream's own settings (`libx264`, `-b:v/-maxrate/-bufsize 4500k`, `yuv420p`, `-g 40`, 20 fps), held 2 s, and the **last** frame decoded — not the first, which is an I-frame and flatters the encoder. Frame 1920x940.
+
+| | px differing by >=2 | share | max |
+|---|---|---|---|
+| cache delta on the canvas | 4,346 | 0.241% | 115 |
+| the encoder's own damage | 179,650 | 9.954% | 119 |
+| cache delta **surviving** encode | 84,499 | 4.682% | 79 |
+
+**The delta survives, and its pixel count grows ~19x.** Two slightly different inputs make different encoding decisions — different macroblock modes, different quantization — so a one-step canvas difference becomes a multi-step difference in the decoded output. "The encoder is noisier than the cache" is true (its damage is 2.1x) and does **not** imply what I claimed.
+
+The decision-relevant comparison is not delta-vs-delta but **which delivered frame is further from what we intended**, with the direct canvas as ground truth:
+
+| delivery path | px >=2 from intended | PSNR |
+|---|---|---|
+| direct | 179,650 (9.954%) | 39.66 dB |
+| cached | 224,736 (12.452%) | 39.42 dB |
+
+**The cache adds +25% more >=2 error on top of the encoder, for -0.24 dB.** Small in absolute terms — below the ~0.5 dB usually treated as just-noticeable in codec comparison, and the max delta is identical at 119 — but it is not nothing, and it is emphatically not the "no viewer receives it" I asserted.
+
+**Three caveats, and the first runs in the cache's favour.** This is the LAPTOP's rasterization, whose canvas delta is 0.241% against the box's measured 0.072% — about 3x harsher — so the box's surviving error is probably smaller than -0.24 dB. It is one scene state, one bitrate, and a held frame, which is the case most favourable to the encoder. None of that rescues the claim: the direction is settled, and a delta that survives cannot be argued away by the delivery layer (2026-09-18; falsify: re-run this on the box's own rasterization and read whether the cached path's PSNR meets the direct path's — equality there would mean the surviving delta is a laptop artifact). <!-- claim: other -->
+
 ## Measure a sprite's box, do not estimate it (2026-09-17; falsify: set `SPRITE_PAD` to 200 and re-run the gate — the differences do not move) <!-- claim: other -->
 
 The spec planned to derive each sprite's bounding box from footprint geometry plus a fixed padding. `measureBounds` (in `sprite-cache.ts`) instead dry-runs the draw function against a context that tracks only the CTM and the extent of every point touched — path commands, rects, arcs, ellipses, images, and an estimate for text. It is JS-only and runs once per cache miss.
