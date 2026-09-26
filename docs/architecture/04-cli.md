@@ -19,7 +19,7 @@ The human surface. `npx`-installable, bin name `musterd`. Talks to the server ov
 src/
   bin.ts              // shebang entry; parse argv; dispatch; map errors -> exit codes
   help.ts             // re-exports the plain `HELP` string (from help/plain.ts) so guidance:check can import it; ADR 085
-  args.ts             // argv parser → { command, positionals, flags }
+  args.ts             // argv parser → { command, positionals, flags }; `--args` keeps a value that starts with `--` (quote it), every other flag still refuses one so a missing value cannot swallow the next flag
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup; saveBinding merge-guards hook-written session + model_observed and same-seat claimed seat_credential (omit = preserve), with atomic publication seam for migration recovery; capture writers pass { drop: { model_observed: true } } to clear on session-id change (ADR 268/340/350)
   machinePaths.ts     // machine-wide path resolvers; VITEST refuses unset overrides (ADR 190)
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; scoped bootstrap lifecycle, Workspace migration, and Team cutover (ADR 344/350); routine agent HTTP calls re-claim their bound seat in the same Workspace and hold its Presence through the request (ADR 339/340); forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)

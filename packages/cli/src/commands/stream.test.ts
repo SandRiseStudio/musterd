@@ -362,6 +362,22 @@ describe('musterd stream', () => {
       expect(n).toBe(1);
     });
 
+    it('start --args forwards a value that starts with -- as BROADCAST_ARGS', async () => {
+      withImage();
+      let flyArgs: string[] = [];
+      expect(
+        await run(['start', '--args', '--duration 600'], {
+          ...sup(),
+          launch: (args) => {
+            flyArgs = args;
+            launches += 1;
+            return { code: 0, output: '' };
+          },
+        }),
+      ).toBe(0);
+      expect(flyArgs).toContain('BROADCAST_ARGS=--duration 600');
+    });
+
     it('start records desired live with provenance before launching', async () => {
       withImage();
       expect(await run(['start'], sup())).toBe(0);

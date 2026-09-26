@@ -9,6 +9,18 @@ it('parses --tailscale as a boolean without consuming --aperture', () => {
   });
 });
 
+it('keeps a --args value that itself starts with --', () => {
+  expect(parseArgs(['start', '--args', '--duration 600', '--once'])).toEqual({
+    positionals: ['start'],
+    flags: { args: '--duration 600', once: true },
+    metaPairs: [],
+  });
+});
+
+it('refuses --args with nothing after it', () => {
+  expect(() => parseArgs(['start', '--args'])).toThrow(/--args needs a value/);
+});
+
 /**
  * `fmtBytes` exists because the resume hygiene bound went sub-MiB in the 2026-07-29 recalibration
  * (10 MiB → 256 KiB). Every surface that rendered it in MiB started saying "0MiB" or comparing
